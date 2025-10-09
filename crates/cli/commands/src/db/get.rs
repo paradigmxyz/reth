@@ -2,7 +2,8 @@ use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
     static_file::{
-        ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+        AccountChangesetMask, ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask,
+        ReceiptMask, TransactionMask,
     },
     RawDupSort,
 };
@@ -76,7 +77,7 @@ impl Command {
                         (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
                     }
                     StaticFileSegment::AccountChangeSets => {
-                        todo!()
+                        (table_key::<tables::AccountChangeSets>(&key)?, AccountChangesetMask::MASK)
                     }
                 };
 
@@ -120,7 +121,11 @@ impl Command {
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
                                 }
                                 StaticFileSegment::AccountChangeSets => {
-                                    todo!()
+                                    let changeset =
+                                        <<tables::AccountChangeSets as Table>::Value>::decompress(
+                                            content[0].as_slice(),
+                                        )?;
+                                    println!("{}", serde_json::to_string_pretty(&changeset)?);
                                 }
                             }
                         }
