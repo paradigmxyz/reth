@@ -4,33 +4,19 @@ use crate::{
         AccountMultiproofInput, ProofTaskKind, ProofTaskManagerHandle, StorageProofInput,
     },
     root::ParallelStateRootError,
-    stats::ParallelTrieTracker,
     StorageRootTargets,
 };
-use alloy_primitives::{
-    map::{B256Map, B256Set},
-    B256,
-};
-use alloy_rlp::{BufMut, Encodable};
+use alloy_primitives::{map::B256Set, B256};
 use dashmap::DashMap;
 use reth_execution_errors::StorageRootError;
-use reth_provider::{BlockReader, DatabaseProviderFactory, FactoryTx, ProviderError};
+use reth_provider::{BlockReader, DatabaseProviderFactory};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory,
-    node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
-    proof::StorageProof,
-    trie_cursor::TrieCursorFactory,
     updates::TrieUpdatesSorted,
-    walker::TrieWalker,
-    DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted,
-    MultiProofTargets, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, DecodedStorageMultiProof, HashedPostStateSorted, MultiProofTargets, Nibbles,
 };
-use reth_trie_common::{
-    added_removed_keys::MultiAddedRemovedKeys,
-    proof::{DecodedProofNodes, ProofRetainer},
-};
+use reth_trie_common::added_removed_keys::MultiAddedRemovedKeys;
 use std::sync::{
     mpsc::{channel, Receiver},
     Arc,
@@ -57,10 +43,12 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the storage proof task.
-    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    storage_proof_task_handle: ProofTaskManagerHandle,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
+    /// Marker to keep the Factory type parameter.
+    _phantom: std::marker::PhantomData<Factory>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
@@ -72,7 +60,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
         missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        storage_proof_task_handle: ProofTaskManagerHandle,
     ) -> Self {
         Self {
             nodes_sorted,
@@ -82,6 +70,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
             collect_branch_node_masks: false,
             multi_added_removed_keys: None,
             storage_proof_task_handle,
+            _phantom: std::marker::PhantomData,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }

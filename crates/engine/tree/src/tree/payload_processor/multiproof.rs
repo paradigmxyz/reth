@@ -12,7 +12,7 @@ use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
 use reth_metrics::Metrics;
-use reth_provider::{providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx};
+use reth_provider::{providers::ConsistentDbView, BlockReader, DatabaseProviderFactory};
 use reth_revm::state::EvmState;
 use reth_trie::{
     added_removed_keys::MultiAddedRemovedKeys, prefix_set::TriePrefixSetsMut,
@@ -354,9 +354,9 @@ pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
     /// Executor for tasks
     executor: WorkloadExecutor,
     /// Sender to the storage proof task.
-    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    storage_proof_task_handle: ProofTaskManagerHandle,
     /// Sender to the account proof task.
-    account_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    account_proof_task_handle: ProofTaskManagerHandle,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     ///
@@ -381,8 +381,8 @@ where
     fn new(
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
-        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
-        account_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        storage_proof_task_handle: ProofTaskManagerHandle,
+        account_proof_task_handle: ProofTaskManagerHandle,
         max_concurrent: usize,
     ) -> Self {
         Self {
@@ -707,7 +707,7 @@ where
     pub(super) fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
-        proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        proof_task_handle: ProofTaskManagerHandle,
         to_sparse_trie: Sender<SparseTrieUpdate>,
         max_concurrency: usize,
         chunk_size: Option<usize>,
@@ -727,7 +727,7 @@ where
             multiproof_manager: MultiproofManager::new(
                 executor,
                 metrics.clone(),
-                proof_task_handle.clone(),
+                proof_task_handle.clone(), 
                 proof_task_handle,
                 max_concurrency,
             ),
