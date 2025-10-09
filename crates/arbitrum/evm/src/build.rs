@@ -262,8 +262,14 @@ where
                 }
             }
             let mut emitter = SinkEmitter;
+            
+            use crate::retryables::DefaultRetryables;
+            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+            let db: &mut revm::database::State<D> = *db_ref;
+            let mut retryables = DefaultRetryables::new(db as *mut _, alloy_primitives::B256::ZERO);
+            
             if let Ok(mut reg) = self.predeploys.lock() {
-                let _ = reg.dispatch_with_emitter(&ctx, call_to, &calldata, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut emitter);
+                let _ = reg.dispatch_with_emitter(&ctx, call_to, &calldata, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut retryables, &mut emitter);
             }
         }
 

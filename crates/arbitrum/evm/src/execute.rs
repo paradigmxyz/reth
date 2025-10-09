@@ -186,8 +186,7 @@ impl DefaultArbOsHooks {
             gas_price_bid: gas_fee_cap,
         };
 
-        let action = state.retryables.create_retryable(params);
-
+        
         Ok(())
     }
 }
@@ -238,7 +237,7 @@ pub struct ArbTxProcessorState {
     pub poster_gas: u64,
     pub compute_hold_gas: u64,
     pub delayed_inbox: bool,
-    pub retryables: DefaultRetryables,
+    pub retryables: Option<*mut revm::database::State<()>>,
     pub network_fee_account: Address,
 }
 
@@ -251,7 +250,7 @@ impl Default for ArbTxProcessorState {
             poster_gas: 0,
             compute_hold_gas: 0,
             delayed_inbox: false,
-            retryables: DefaultRetryables::default(),
+            retryables: None,
             network_fee_account,
         }
     }

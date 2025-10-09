@@ -31,33 +31,37 @@ pub trait PredeployHandler {
     fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, value: U256, retryables: &mut dyn Retryables, emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool);
 }
 
-#[derive(Default)]
 pub struct PredeployRegistry {
     handlers: alloc::vec::Vec<alloc::boxed::Box<dyn PredeployHandler + Send + Sync>>,
-    retryables: DefaultRetryables,
 }
 
 impl PredeployRegistry {
     pub fn new() -> Self {
-        Self { handlers: alloc::vec::Vec::new(), retryables: DefaultRetryables::default() }
+        Self { 
+            handlers: alloc::vec::Vec::new(), 
+        }
+    }
+    
+    pub fn default() -> Self {
+        Self::new()
     }
 
     pub fn register(&mut self, handler: alloc::boxed::Box<dyn PredeployHandler + Send + Sync>) {
         self.handlers.push(handler);
     }
 
-    pub fn dispatch_with_emitter(&mut self, ctx: &PredeployCallContext, to: Address, input: &Bytes, gas_limit: u64, value: U256, emitter: &mut dyn LogEmitter) -> Option<(Bytes, u64, bool)> {
+    pub fn dispatch_with_emitter(&mut self, ctx: &PredeployCallContext, to: Address, input: &Bytes, gas_limit: u64, value: U256, retryables: &mut dyn Retryables, emitter: &mut dyn LogEmitter) -> Option<(Bytes, u64, bool)> {
         for h in &self.handlers {
             if h.address() == to {
-                return Some(h.call(ctx, input, gas_limit, value, &mut self.retryables, emitter));
+                return Some(h.call(ctx, input, gas_limit, value, retryables, emitter));
             }
         }
         None
     }
 
-    pub fn dispatch(&mut self, ctx: &PredeployCallContext, to: Address, input: &Bytes, gas_limit: u64, value: U256) -> Option<(Bytes, u64, bool)> {
+    pub fn dispatch(&mut self, ctx: &PredeployCallContext, to: Address, input: &Bytes, gas_limit: u64, value: U256, retryables: &mut dyn Retryables) -> Option<(Bytes, u64, bool)> {
         let mut noop = NoopEmitter;
-        self.dispatch_with_emitter(ctx, to, input, gas_limit, value, &mut noop)
+        self.dispatch_with_emitter(ctx, to, input, gas_limit, value, retryables, &mut noop)
     }
 }
 
@@ -692,7 +696,7 @@ impl PredeployHandler for ArbAddressTable {
 
 impl PredeployRegistry {
     pub fn with_addresses(arb_sys: Address, arb_retryable_tx: Address, arb_owner: Address, arb_address_table: Address) -> Self {
-        let mut reg = Self::new();
+        let mut reg = Self::default();
         reg.register(alloc::boxed::Box::new(ArbSys::new(arb_sys)));
         reg.register(alloc::boxed::Box::new(ArbRetryableTx::new(arb_retryable_tx)));
         reg.register(alloc::boxed::Box::new(ArbOwner::new(arb_owner)));
@@ -702,7 +706,7 @@ impl PredeployRegistry {
 
     pub fn with_default_addresses() -> Self {
         use arb_alloy_predeploys as pre;
-        let mut reg = Self::new();
+        let mut reg = Self::default();
         reg.register(alloc::boxed::Box::new(ArbSys::new(Address::from(pre::ARB_SYS))));
         reg.register(alloc::boxed::Box::new(ArbRetryableTx::new(Address::from(pre::ARB_RETRYABLE_TX))));
         reg.register(alloc::boxed::Box::new(ArbGasInfo::new(Address::from(pre::ARB_GAS_INFO))));

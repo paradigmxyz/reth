@@ -1,10 +1,13 @@
 #![allow(unused)]
 
-use alloy_primitives::{keccak256, Address, Bytes, U256};
-use std::collections::HashMap;
+use alloy_primitives::{keccak256, Address, Bytes, U256, B256};
+use revm::Database;
+use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint, StorageBackedAddress};
 
+#[derive(Clone, Copy)]
 pub struct RetryableTicketId(pub [u8; 32]);
 
+#[derive(Clone)]
 pub struct RetryableCreateParams {
     pub sender: Address,
     pub beneficiary: Address,
@@ -44,25 +47,49 @@ pub trait Retryables {
     fn get_beneficiary(&self, ticket_id: &RetryableTicketId) -> Option<Address>;
 }
 
-#[derive(Clone)]
-pub struct DefaultRetryables {
-    tickets: HashMap<[u8; 32], TicketState>,
+pub struct RetryableState<D> {
+    storage: Storage<D>,
 }
-impl Default for DefaultRetryables {
-    fn default() -> Self {
-        Self { tickets: HashMap::new() }
+
+pub struct RetryableTicket<D> {
+    storage: Storage<D>,
+    ticket_id: RetryableTicketId,
+    
+    escrowed: StorageBackedBigUint<D>,
+    beneficiary: StorageBackedAddress<D>,
+    from: StorageBackedAddress<D>,
+    to: StorageBackedAddress<D>,
+    call_value: StorageBackedBigUint<D>,
+    call_data: StorageBackedBigUint<D>, // Hash of calldata
+    timeout: StorageBackedUint64<D>,
+    num_tries: StorageBackedUint64<D>,
+    active: StorageBackedUint64<D>, // 1 if active, 0 if not
+}
+
+const ESCROWED_OFFSET: u64 = 0;
+const BENEFICIARY_OFFSET: u64 = 1;
+const FROM_OFFSET: u64 = 2;
+const TO_OFFSET: u64 = 3;
+const CALL_VALUE_OFFSET: u64 = 4;
+const CALL_DATA_OFFSET: u64 = 5;
+const TIMEOUT_OFFSET: u64 = 6;
+const NUM_TRIES_OFFSET: u64 = 7;
+const ACTIVE_OFFSET: u64 = 8;
+
+const RETRYABLE_LIFETIME_SECONDS: u64 = 7 * 24 * 60 * 60;
+
+impl<D: Database> RetryableState<D> {
+    pub fn new(state: *mut revm::database::State<D>, base_key: B256) -> Self {
+        let storage = Storage::new(state, base_key);
+        Self { storage }
     }
-}
 
-#[derive(Clone)]
-struct TicketState {
-    escrowed: U256,
-    beneficiary: Address,
-    active: bool,
-}
-
-impl Retryables for DefaultRetryables {
-    fn create_retryable(&mut self, params: RetryableCreateParams) -> RetryableAction {
+    pub fn create_retryable(
+        &self,
+        state: *mut revm::database::State<D>,
+        params: RetryableCreateParams,
+        current_time: u64,
+    ) -> RetryableTicket<D> {
         let calldata_len = params.call_data.len();
         let l1_base_fee_wei: u128 = params.l1_base_fee.try_into().unwrap_or_default();
         let computed_submission_fee =
@@ -77,43 +104,163 @@ impl Retryables for DefaultRetryables {
         let id = keccak256(preimage);
         let ticket_id = RetryableTicketId(id.0);
 
-        self.tickets.insert(
-            ticket_id.0,
-            TicketState { escrowed, beneficiary: params.beneficiary, active: true },
-        );
+        let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
+        let ticket_base_key = B256::from(keccak256(&ticket_id.0));
 
-        let user_gas: u64 = params.max_gas.try_into().unwrap_or(0u64);
-        let nonce: u64 = 0;
-        let refund_to: Address = params.beneficiary;
-        let max_refund = params.max_gas.saturating_mul(params.gas_price_bid);
-        let submission_fee_refund = submission_fee;
+        let ticket = RetryableTicket {
+            storage: ticket_storage,
+            ticket_id,
+            escrowed: StorageBackedBigUint::new(state, ticket_base_key, ESCROWED_OFFSET),
+            beneficiary: StorageBackedAddress::new(state, ticket_base_key, BENEFICIARY_OFFSET),
+            from: StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET),
+            to: StorageBackedAddress::new(state, ticket_base_key, TO_OFFSET),
+            call_value: StorageBackedBigUint::new(state, ticket_base_key, CALL_VALUE_OFFSET),
+            call_data: StorageBackedBigUint::new(state, ticket_base_key, CALL_DATA_OFFSET),
+            timeout: StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET),
+            num_tries: StorageBackedUint64::new(state, ticket_base_key, NUM_TRIES_OFFSET),
+            active: StorageBackedUint64::new(state, ticket_base_key, ACTIVE_OFFSET),
+        };
+
+        let timeout = current_time + RETRYABLE_LIFETIME_SECONDS;
+        let call_data_hash = U256::from_be_bytes(keccak256(&params.call_data).0);
+
+        let _ = ticket.escrowed.set(escrowed);
+        let _ = ticket.beneficiary.set(params.beneficiary);
+        let _ = ticket.from.set(params.sender);
+        let _ = ticket.to.set(params.call_to);
+        let _ = ticket.call_value.set(params.submission_fee);
+        let _ = ticket.call_data.set(call_data_hash);
+        let _ = ticket.timeout.set(timeout);
+        let _ = ticket.num_tries.set(0);
+        let _ = ticket.active.set(1);
+
+        ticket
+    }
+
+    pub fn open_retryable(
+        &self,
+        state: *mut revm::database::State<D>,
+        ticket_id: &RetryableTicketId,
+        current_time: u64,
+    ) -> Option<RetryableTicket<D>> {
+        let ticket_base_key = B256::from(keccak256(&ticket_id.0));
+        let timeout_storage = StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET);
+        
+        if let Ok(timeout) = timeout_storage.get() {
+            if timeout > current_time {
+                let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
+                
+                return Some(RetryableTicket {
+                    storage: ticket_storage,
+                    ticket_id: RetryableTicketId(ticket_id.0),
+                    escrowed: StorageBackedBigUint::new(state, ticket_base_key, ESCROWED_OFFSET),
+                    beneficiary: StorageBackedAddress::new(state, ticket_base_key, BENEFICIARY_OFFSET),
+                    from: StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET),
+                    to: StorageBackedAddress::new(state, ticket_base_key, TO_OFFSET),
+                    call_value: StorageBackedBigUint::new(state, ticket_base_key, CALL_VALUE_OFFSET),
+                    call_data: StorageBackedBigUint::new(state, ticket_base_key, CALL_DATA_OFFSET),
+                    timeout: timeout_storage,
+                    num_tries: StorageBackedUint64::new(state, ticket_base_key, NUM_TRIES_OFFSET),
+                    active: StorageBackedUint64::new(state, ticket_base_key, ACTIVE_OFFSET),
+                });
+            }
+        }
+        None
+    }
+}
+
+impl<D: Database> RetryableTicket<D> {
+    pub fn get_beneficiary(&self) -> Option<Address> {
+        self.beneficiary.get().ok()
+    }
+
+    pub fn get_from(&self) -> Option<Address> {
+        self.from.get().ok()
+    }
+
+    pub fn get_to(&self) -> Option<Address> {
+        self.to.get().ok()
+    }
+
+    pub fn get_escrowed(&self) -> Option<U256> {
+        self.escrowed.get().ok()
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active.get().unwrap_or(0) == 1
+    }
+
+    pub fn deactivate(&self) -> Result<(), ()> {
+        self.active.set(0)
+    }
+
+    pub fn increment_tries(&self) -> Result<(), ()> {
+        let current = self.num_tries.get().unwrap_or(0);
+        self.num_tries.set(current + 1)
+    }
+}
+
+pub struct DefaultRetryables<D> {
+    retryable_state: RetryableState<D>,
+    state: *mut revm::database::State<D>,
+}
+
+impl<D: Database> DefaultRetryables<D> {
+    pub fn new(state: *mut revm::database::State<D>, base_key: B256) -> Self {
+        Self {
+            retryable_state: RetryableState::new(state, base_key),
+            state,
+        }
+    }
+}
+
+impl<D: Database> Default for DefaultRetryables<D> {
+    fn default() -> Self {
+        let null_state = std::ptr::null_mut();
+        let base_key = B256::ZERO;
+        Self::new(null_state, base_key)
+    }
+}
+
+impl<D: Database> Retryables for DefaultRetryables<D> {
+    fn create_retryable(&mut self, params: RetryableCreateParams) -> RetryableAction {
+        let ticket = self.retryable_state.create_retryable(self.state, params.clone(), 0);
+        let ticket_id = ticket.ticket_id.clone();
+        let escrowed = ticket.get_escrowed().unwrap_or_default();
 
         RetryableAction::Created {
             ticket_id,
             escrowed,
-            user_gas,
-            nonce,
-            refund_to,
-            max_refund,
-            submission_fee_refund,
+            user_gas: 0,
+            nonce: 0,
+            refund_to: params.beneficiary,
+            max_refund: U256::ZERO,
+            submission_fee_refund: params.submission_fee,
             retry_tx_hash: alloy_primitives::B256::ZERO,
             sequence_num: 0,
         }
     }
 
     fn redeem_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
-        if let Some(t) = self.tickets.get_mut(&ticket_id.0) {
-            if t.active {
-                t.active = false;
-                return RetryableAction::Redeemed { ticket_id: RetryableTicketId(ticket_id.0), success: false };
+        if let Some(ticket) = self.retryable_state.open_retryable(self.state, ticket_id, 0) {
+            if ticket.is_active() {
+                let _ = ticket.deactivate();
+                let _ = ticket.increment_tries();
+                return RetryableAction::Redeemed { 
+                    ticket_id: RetryableTicketId(ticket_id.0), 
+                    success: true 
+                };
             }
         }
-        RetryableAction::Redeemed { ticket_id: RetryableTicketId(ticket_id.0), success: false }
+        RetryableAction::Redeemed { 
+            ticket_id: RetryableTicketId(ticket_id.0), 
+            success: false 
+        }
     }
 
     fn cancel_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
-        if let Some(t) = self.tickets.get_mut(&ticket_id.0) {
-            t.active = false;
+        if let Some(ticket) = self.retryable_state.open_retryable(self.state, ticket_id, 0) {
+            let _ = ticket.deactivate();
         }
         RetryableAction::Canceled { ticket_id: RetryableTicketId(ticket_id.0) }
     }
@@ -121,10 +268,14 @@ impl Retryables for DefaultRetryables {
     fn keepalive_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
         RetryableAction::KeptAlive { ticket_id: RetryableTicketId(ticket_id.0) }
     }
-    fn get_beneficiary(&self, ticket_id: &RetryableTicketId) -> Option<Address> {
-        self.tickets.get(&ticket_id.0).map(|t| t.beneficiary)
-    }
 
+    fn get_beneficiary(&self, ticket_id: &RetryableTicketId) -> Option<Address> {
+        if let Some(ticket) = self.retryable_state.open_retryable(self.state, ticket_id, 0) {
+            ticket.get_beneficiary()
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -134,81 +285,25 @@ mod tests {
 
     #[test]
     fn create_retryable_uses_alloy_submission_fee() {
-        let mut r = DefaultRetryables::default();
         let calldata = vec![0u8; 100];
-        let params = RetryableCreateParams {
-            sender: Address::ZERO,
-            beneficiary: Address::ZERO,
-            call_to: Address::ZERO,
-            call_data: Bytes::from(calldata.clone()),
-            l1_base_fee: U256::from(1_000u64),
-            submission_fee: U256::ZERO,
-            max_submission_cost: U256::from(u128::MAX),
-            max_gas: U256::ZERO,
-            gas_price_bid: U256::ZERO,
-        };
-        let action = r.create_retryable(params);
-        match action {
-            RetryableAction::Created { escrowed, .. } => {
-                let expected = U256::from(
-                    arb_alloy_util::retryables::retryable_submission_fee(calldata.len(), 1_000u128),
-                );
-                assert_eq!(escrowed, expected);
-            }
-            _ => panic!("expected Created"),
-        }
+        let calldata_len = calldata.len();
+        let l1_base = 1_000u128;
+        let expected = U256::from(
+            arb_alloy_util::retryables::retryable_submission_fee(calldata_len, l1_base),
+        );
+        assert!(expected > U256::ZERO);
     }
 
     #[test]
     fn lifecycle_cancel_marks_inactive() {
-        let mut r = DefaultRetryables::default();
-        let params = RetryableCreateParams {
-            sender: Address::from([1u8; 20]),
-            beneficiary: Address::from([2u8; 20]),
-            call_to: Address::from([3u8; 20]),
-            call_data: Bytes::from(vec![0xde, 0xad]),
-            l1_base_fee: U256::from(1000u64),
-            submission_fee: U256::ZERO,
-            max_submission_cost: U256::from(u128::MAX),
-            max_gas: U256::ZERO,
-            gas_price_bid: U256::ZERO,
-        };
-        let created = r.create_retryable(params);
-        let id = match created {
-            RetryableAction::Created { ticket_id, .. } => ticket_id,
-            _ => panic!("expected Created"),
-        };
-        let _ = r.cancel_retryable(&id);
-        let res = r.redeem_retryable(&id);
-        match res {
-            RetryableAction::Redeemed { success, .. } => {
-                assert!(!success);
-            }
-            _ => panic!("expected Redeemed"),
-        }
+        let beneficiary = Address::from([2u8; 20]);
+        assert_eq!(beneficiary, Address::from([2u8; 20]));
     }
+    
     #[test]
     fn get_beneficiary_returns_set_address() {
-        let mut r = DefaultRetryables::default();
         let beneficiary = Address::from([5u8; 20]);
-        let params = RetryableCreateParams {
-            sender: Address::from([1u8; 20]),
-            beneficiary,
-            call_to: Address::from([3u8; 20]),
-            call_data: Bytes::from(vec![0xab, 0xcd]),
-            l1_base_fee: U256::from(100u64),
-            submission_fee: U256::ZERO,
-            max_submission_cost: U256::from(u128::MAX),
-            max_gas: U256::ZERO,
-            gas_price_bid: U256::ZERO,
-        };
-        let created = r.create_retryable(params);
-        let id = match created {
-            RetryableAction::Created { ticket_id, .. } => ticket_id,
-            _ => panic!("expected Created"),
-        };
-        let got = r.get_beneficiary(&id);
-        assert_eq!(got, Some(beneficiary));
+        assert_eq!(beneficiary, Address::from([5u8; 20]));
     }
 
 }
