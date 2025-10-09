@@ -399,7 +399,6 @@ fn account_worker_loop<Tx>(
                 tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
                 let storage_proof_receivers = match queue_storage_proofs(
-                    &proof_tx,
                     &storage_proof_handle,
                     input.targets.clone(),
                     &input.prefix_sets,
@@ -657,17 +656,13 @@ where
 /// computation. This enables interleaved parallelism for better performance.
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
-fn queue_storage_proofs<Tx>(
-    _proof_tx: &ProofTaskTx<Tx>,
+fn queue_storage_proofs(
     account_proof_handle: &ProofTaskManagerHandle,
     targets: MultiProofTargets,
     prefix_sets: &TriePrefixSets,
     with_branch_node_masks: bool,
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
-) -> Result<B256Map<Receiver<StorageProofResult>>, ParallelStateRootError>
-where
-    Tx: DbTx,
-{
+) -> Result<B256Map<Receiver<StorageProofResult>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
 
