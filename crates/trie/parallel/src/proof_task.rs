@@ -330,7 +330,7 @@ fn storage_worker_loop<Tx>(
 fn account_worker_loop<Tx>(
     proof_tx: ProofTaskTx<Tx>,
     work_rx: CrossbeamReceiver<AccountWorkerJob>,
-    storage_proof_handle: ProofTaskManagerHandle,
+    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     worker_id: usize,
 ) where
     Tx: DbTx,
@@ -367,23 +367,21 @@ fn account_worker_loop<Tx>(
                 let proof_start = Instant::now();
                 let mut tracker = ParallelTrieTracker::default();
 
-                let storage_root_targets_len = StorageRootTargets::new(
-                    input
-                        .prefix_sets
-                        .account_prefix_set
-                        .iter()
-                        .map(|nibbles| B256::from_slice(&nibbles.pack())),
-                    input.prefix_sets.storage_prefix_sets.clone(),
-                )
-                .len();
+                let mut storage_prefix_sets =
+                    std::mem::take(&mut input.prefix_sets.storage_prefix_sets);
+
+                let storage_root_targets_len = StorageRootTargets::count(
+                    &input.prefix_sets.account_prefix_set,
+                    &storage_prefix_sets,
+                );
                 tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
                 let storage_proof_receivers = match queue_storage_proofs(
-                    &storage_proof_handle,
-                    input.targets.clone(),
-                    &input.prefix_sets,
+                    &storage_work_tx,
+                    &input.targets,
+                    &mut storage_prefix_sets,
                     input.collect_branch_node_masks,
-                    input.multi_added_removed_keys.clone(),
+                    input.multi_added_removed_keys.as_ref(),
                 ) {
                     Ok(receivers) => receivers,
                     Err(error) => {
@@ -521,10 +519,10 @@ where
         .with_proof_retainer(retainer)
         .with_updates(collect_branch_node_masks);
 
-    // Initialize all storage multiproofs as empty.
-    // Storage multiproofs for non empty tries will be overwritten if necessary.
+    // Initialize storage multiproofs map with pre-allocated capacity.
+    // Proofs will be inserted as they're consumed from receivers during trie walk.
     let mut collected_decoded_storages: B256Map<DecodedStorageMultiProof> =
-        targets.keys().map(|key| (*key, DecodedStorageMultiProof::empty())).collect();
+        B256Map::with_capacity_and_hasher(targets.len(), Default::default());
     let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
     let mut account_node_iter = TrieNodeIter::state_trie(
         walker,
@@ -551,9 +549,7 @@ where
                             )
                         })??;
                         let root = proof.root;
-                        if let Some(entry) = collected_decoded_storages.get_mut(&hashed_address) {
-                            *entry = proof;
-                        }
+                        collected_decoded_storages.insert(hashed_address, proof);
                         root
                     }
                     // Since we do not store all intermediate nodes in the database, there might
@@ -637,43 +633,42 @@ where
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn queue_storage_proofs(
-    account_proof_handle: &ProofTaskManagerHandle,
-    targets: MultiProofTargets,
-    prefix_sets: &TriePrefixSets,
+    storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
+    targets: &MultiProofTargets,
+    storage_prefix_sets: &mut B256Map<PrefixSet>,
     with_branch_node_masks: bool,
-    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
 ) -> Result<B256Map<Receiver<StorageProofResult>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
 
     // Queue all storage proofs to worker pool
-    for (hashed_address, target_slots) in targets {
-        let prefix_set =
-            prefix_sets.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
+    for (hashed_address, target_slots) in targets.iter() {
+        let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
 
         // Always queue a storage proof so we obtain the storage root even when no slots are
         // requested.
         let input = StorageProofInput::new(
-            hashed_address,
+            *hashed_address,
             prefix_set,
-            target_slots,
+            target_slots.clone(),
             with_branch_node_masks,
-            multi_added_removed_keys.clone(),
+            multi_added_removed_keys.cloned(),
         );
 
         let (sender, receiver) = channel();
 
         // If queuing fails, propagate error up (no fallback)
-        account_proof_handle.queue_task(ProofTaskKind::StorageProof(input, sender)).map_err(
-            |_| {
+        storage_work_tx
+            .send(StorageWorkerJob::StorageProof { input, result_sender: sender })
+            .map_err(|_| {
                 ParallelStateRootError::Other(format!(
                     "Failed to queue storage proof for {}: storage worker pool unavailable",
                     hashed_address
                 ))
-            },
-        )?;
+            })?;
 
-        storage_proof_receivers.insert(hashed_address, receiver);
+        storage_proof_receivers.insert(*hashed_address, receiver);
     }
 
     Ok(storage_proof_receivers)
@@ -724,10 +719,7 @@ impl ProofTaskManager {
             storage_worker_loop,
         )?;
 
-        // Spawn account workers with storage handle
-        // Create a separate counter for internal worker handles to avoid triggering shutdown
-        // when workers drop their handles (workers run forever until channel closes)
-        let worker_handles_counter = Arc::new(AtomicUsize::new(0));
+        // Spawn account workers with direct access to the storage worker queue.
         let spawned_account_workers = Self::spawn_worker_pool(
             &executor,
             &view,
@@ -736,13 +728,9 @@ impl ProofTaskManager {
             account_work_rx,
             WorkerType::Account,
             {
-                let task_tx = proof_task_tx.clone();
+                let storage_work_tx = storage_work_tx.clone();
                 move |proof_tx, work_rx, worker_id| {
-                    let storage_handle = ProofTaskManagerHandle::new(
-                        task_tx.clone(),
-                        worker_handles_counter.clone(),
-                    );
-                    account_worker_loop(proof_tx, work_rx, storage_handle, worker_id)
+                    account_worker_loop(proof_tx, work_rx, storage_work_tx.clone(), worker_id)
                 }
             },
         )?;
