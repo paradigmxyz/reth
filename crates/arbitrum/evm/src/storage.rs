@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 
 pub struct Storage<D> {
-    state: *mut revm::database::State<D>,
-    base_key: B256,
+    pub state: *mut revm::database::State<D>,
+    pub base_key: B256,
 }
 
 impl<D: Database> Storage<D> {

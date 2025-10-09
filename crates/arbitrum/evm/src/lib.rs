@@ -48,6 +48,13 @@ mod log_sink;
 pub mod storage;
 pub mod l1_pricing;
 pub mod l2_pricing;
+pub mod addressset;
+pub mod addresstable;
+pub mod merkleaccumulator;
+pub mod blockhash;
+pub mod features;
+pub mod programs;
+pub mod arbosstate;
 
 
 pub struct ArbEvmConfig<ChainSpec = (), N = (), R = ArbRethReceiptBuilder>
