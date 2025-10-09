@@ -2737,9 +2737,11 @@ where
         // keep track of the invalid header
         self.state.invalid_headers.insert(block.block_with_parent());
 
-        // Remove the invalid block and all its descendants from the tree immediately
-        // to prevent them from being referenced during state provider construction
+        // Remove the invalid block and all its descendants from both the tree state and
+        // canonical in-memory state immediately to prevent them from being referenced
+        // during state provider construction
         self.state.tree_state.remove_invalid_chain(block.hash());
+        self.canonical_in_memory_state.remove_invalid_block_and_descendants(block.hash());
 
         self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
             Box::new(block),

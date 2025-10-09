@@ -18,7 +18,11 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+    time::Instant,
+};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -362,6 +366,72 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                 }
             });
         }
+        self.inner.in_memory_state.update_metrics();
+    }
+
+    /// Removes an invalid block and all its descendants from the in-memory state.
+    ///
+    /// This is called when a block is marked as invalid to immediately clean up
+    /// the invalid fork from in-memory state, preventing it from being referenced
+    /// during state provider construction.
+    pub fn remove_invalid_block_and_descendants(&self, invalid_block_hash: B256) {
+        // First, collect all blocks that need to be removed using BFS
+        let mut blocks_to_remove = std::collections::HashSet::new();
+        let mut queue = VecDeque::from([invalid_block_hash]);
+
+        // Find all descendants by traversing the parent-child relationships
+        let blocks = self.inner.in_memory_state.blocks.read();
+        while let Some(hash) = queue.pop_front() {
+            // Skip if already processed
+            let is_new = blocks_to_remove.insert(hash);
+            if !is_new {
+                continue;
+            }
+
+            // Find all children of this block
+            for (child_hash, child_state) in blocks.iter() {
+                let Some(parent) = &child_state.parent else {
+                    continue;
+                };
+                if parent.hash() == hash {
+                    queue.push_back(*child_hash);
+                }
+            }
+        }
+        drop(blocks);
+
+        // Nothing to do if no blocks found
+        if blocks_to_remove.is_empty() {
+            return;
+        }
+
+        // Remove all collected blocks, acquiring locks in order: numbers then blocks
+        let mut numbers = self.inner.in_memory_state.numbers.write();
+        let mut blocks = self.inner.in_memory_state.blocks.write();
+
+        for hash in &blocks_to_remove {
+            let Some(block_state) = blocks.remove(hash) else {
+                continue;
+            };
+
+            let number = block_state.number();
+            // Remove from numbers map if this block number maps to this hash
+            if numbers.get(&number) == Some(hash) {
+                numbers.remove(&number);
+            }
+        }
+
+        // Update pending state if its parent was removed
+        self.inner.in_memory_state.pending.send_modify(|p| {
+            let Some(p) = p.as_mut() else {
+                return;
+            };
+            let parent_hash = p.block_ref().recovered_block().parent_hash();
+            if blocks_to_remove.contains(&parent_hash) {
+                p.parent = None;
+            }
+        });
+
         self.inner.in_memory_state.update_metrics();
     }
 
