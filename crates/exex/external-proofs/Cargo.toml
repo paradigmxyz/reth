@@ -19,6 +19,7 @@ alloy-primitives = { workspace = true }
 
 # reth
 reth-chainspec.workspace = true
+reth-db.workspace = true
 reth-db-api.workspace = true
 reth-evm.workspace = true
 reth-node-types.workspace = true
@@ -27,14 +28,17 @@ reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
 reth-trie.workspace = true
+reth-trie-common.workspace = true
 reth-execution-errors.workspace = true
 
 # misc
 auto_impl.workspace = true
 async-trait.workspace = true
+bytes.workspace = true
 eyre.workspace = true
 futures-util.workspace = true
 serde.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

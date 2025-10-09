@@ -168,6 +168,10 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         decode::<T>(self.inner.next_nodup())
     }
 
+    fn prev_dup(&mut self) -> PairResult<T> {
+        decode::<T>(self.inner.prev_dup())
+    }
+
     /// Returns the next `value` of a duplicate `key`.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
         self.inner

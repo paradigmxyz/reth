@@ -4,6 +4,7 @@
 mod tests {
     use crate::{
         in_memory::InMemoryExternalStorage,
+        mdbx::MdbxExternalStorage,
         storage::{
             BlockStateDiff, ExternalHashedCursor, ExternalStorage, ExternalStorageError,
             ExternalTrieCursor,
@@ -70,6 +71,7 @@ mod tests {
 
     /// Test basic storage and retrieval of earliest block number
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_earliest_block_operations<S: ExternalStorage>(
         storage: S,
@@ -91,6 +93,7 @@ mod tests {
 
     /// Test storing and retrieving trie updates
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_trie_updates_operations<S: ExternalStorage>(
         storage: S,
@@ -118,6 +121,7 @@ mod tests {
 
     /// Test cursor operations on empty trie
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_cursor_empty_trie<S: ExternalStorage>(
         storage: S,
@@ -135,6 +139,7 @@ mod tests {
 
     /// Test cursor operations with single entry
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_cursor_single_entry<S: ExternalStorage>(
         storage: S,
@@ -162,6 +167,7 @@ mod tests {
 
     /// Test cursor operations with multiple entries
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_cursor_multiple_entries<S: ExternalStorage>(
         storage: S,
@@ -202,6 +208,7 @@ mod tests {
 
     /// Test `seek_exact` with existing path
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_exact_existing_path<S: ExternalStorage>(
         storage: S,
@@ -220,6 +227,7 @@ mod tests {
 
     /// Test `seek_exact` with non-existing path
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_exact_non_existing_path<S: ExternalStorage>(
         storage: S,
@@ -238,6 +246,7 @@ mod tests {
 
     /// Test `seek_exact` with empty path
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_exact_empty_path<S: ExternalStorage>(
         storage: S,
@@ -256,6 +265,7 @@ mod tests {
 
     /// Test seek to existing path
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_to_existing_path<S: ExternalStorage>(
         storage: S,
@@ -274,6 +284,7 @@ mod tests {
 
     /// Test seek between existing nodes
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_between_existing_nodes<S: ExternalStorage>(
         storage: S,
@@ -296,6 +307,7 @@ mod tests {
 
     /// Test seek after all nodes
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_after_all_nodes<S: ExternalStorage>(
         storage: S,
@@ -315,6 +327,7 @@ mod tests {
 
     /// Test seek before all nodes
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_before_all_nodes<S: ExternalStorage>(
         storage: S,
@@ -339,6 +352,7 @@ mod tests {
 
     /// Test next without prior seek
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_next_without_prior_seek<S: ExternalStorage>(
         storage: S,
@@ -358,6 +372,7 @@ mod tests {
 
     /// Test next after seek
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_next_after_seek<S: ExternalStorage>(
         storage: S,
@@ -381,6 +396,7 @@ mod tests {
 
     /// Test next at end of trie
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_next_at_end_of_trie<S: ExternalStorage>(
         storage: S,
@@ -401,6 +417,7 @@ mod tests {
 
     /// Test multiple consecutive next calls
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_multiple_consecutive_next<S: ExternalStorage>(
         storage: S,
@@ -428,6 +445,7 @@ mod tests {
 
     /// Test current after operations
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_current_after_operations<S: ExternalStorage>(
         storage: S,
@@ -457,6 +475,7 @@ mod tests {
 
     /// Test current with no prior operations
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_current_no_prior_operations<S: ExternalStorage>(
         storage: S,
@@ -475,6 +494,7 @@ mod tests {
 
     /// Test same path with different blocks
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_same_path_different_blocks<S: ExternalStorage>(
         storage: S,
@@ -502,6 +522,7 @@ mod tests {
 
     /// Test deleted branch nodes
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_deleted_branch_nodes<S: ExternalStorage>(
         storage: S,
@@ -530,6 +551,7 @@ mod tests {
 
     /// Test account-specific cursor
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_account_specific_cursor<S: ExternalStorage>(
         storage: S,
@@ -566,6 +588,7 @@ mod tests {
 
     /// Test state trie cursor
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_state_trie_cursor<S: ExternalStorage>(
         storage: S,
@@ -597,6 +620,7 @@ mod tests {
 
     /// Test mixed account and state data
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_mixed_account_state_data<S: ExternalStorage>(
         storage: S,
@@ -637,6 +661,7 @@ mod tests {
 
     /// Test lexicographic ordering
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_lexicographic_ordering<S: ExternalStorage>(
         storage: S,
@@ -675,6 +700,7 @@ mod tests {
 
     /// Test path prefix scenarios
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_path_prefix_scenarios<S: ExternalStorage>(
         storage: S,
@@ -708,6 +734,7 @@ mod tests {
 
     /// Test complex nibble combinations
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_complex_nibble_combinations<S: ExternalStorage>(
         storage: S,
@@ -749,6 +776,7 @@ mod tests {
 
     /// Test store and retrieve single account
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_store_and_retrieve_single_account<S: ExternalStorage>(
         storage: S,
@@ -773,6 +801,7 @@ mod tests {
 
     /// Test account cursor navigation
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_account_cursor_navigation<S: ExternalStorage>(
         storage: S,
@@ -810,6 +839,7 @@ mod tests {
 
     /// Test account block versioning
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_account_block_versioning<S: ExternalStorage>(
         storage: S,
@@ -839,6 +869,7 @@ mod tests {
 
     /// Test store and retrieve storage
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_store_and_retrieve_storage<S: ExternalStorage>(
         storage: S,
@@ -868,6 +899,7 @@ mod tests {
 
     /// Test storage cursor navigation
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_storage_cursor_navigation<S: ExternalStorage>(
         storage: S,
@@ -899,6 +931,7 @@ mod tests {
 
     /// Test storage account isolation
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_storage_account_isolation<S: ExternalStorage>(
         storage: S,
@@ -933,6 +966,7 @@ mod tests {
 
     /// Test storage block versioning
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_storage_block_versioning<S: ExternalStorage>(
         storage: S,
@@ -963,6 +997,7 @@ mod tests {
 
     /// Test storage zero value deletion
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_storage_zero_value_deletion<S: ExternalStorage>(
         storage: S,
@@ -993,6 +1028,7 @@ mod tests {
 
     /// Test that zero values are skipped during iteration
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_storage_cursor_skips_zero_values<S: ExternalStorage>(
         storage: S,
@@ -1045,6 +1081,7 @@ mod tests {
 
     /// Test empty cursors
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_empty_cursors<S: ExternalStorage>(
         storage: S,
@@ -1064,6 +1101,7 @@ mod tests {
 
     /// Test cursor boundary conditions
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_cursor_boundary_conditions<S: ExternalStorage>(
         storage: S,
@@ -1092,6 +1130,7 @@ mod tests {
 
     /// Test large batch operations
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_large_batch_operations<S: ExternalStorage>(
         storage: S,

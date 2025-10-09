@@ -22,6 +22,8 @@ use crate::{
 mod backfill;
 mod in_memory;
 mod live;
+mod mdbx;
+mod models;
 mod proof;
 mod provider;
 mod storage;
