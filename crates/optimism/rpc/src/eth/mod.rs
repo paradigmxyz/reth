@@ -23,8 +23,8 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
-    BuildStateRx, ExecutionPayloadBaseV1, FlashBlockBuildInfo, FlashBlockCompleteSequenceRx,
-    FlashBlockService, PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
+    ExecutionPayloadBaseV1, FlashBlockBuildInfo, FlashBlockCompleteSequenceRx, FlashBlockService,
+    InProgressFlashBlockRx, PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -49,11 +49,11 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::sync::watch;
+use tokio::{sync::watch, time};
 use tracing::info;
 
 /// Maximum duration to wait for a fresh flashblock when one is being built.
-const MAX_WAIT_DURATION: Duration = Duration::from_millis(50);
+const MAX_FLASHBLOCK_WAIT_DURATION: Duration = Duration::from_millis(50);
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
@@ -87,7 +87,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         min_suggested_priority_fee: U256,
         pending_block_rx: Option<PendingBlockRx<N::Primitives>>,
         flashblock_rx: Option<FlashBlockCompleteSequenceRx>,
-        build_state_rx: Option<BuildStateRx>,
+        in_progress_rx: Option<InProgressFlashBlockRx>,
     ) -> Self {
         let inner = Arc::new(OpEthApiInner {
             eth_api,
@@ -95,7 +95,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
             min_suggested_priority_fee,
             pending_block_rx,
             flashblock_rx,
-            build_state_rx,
+            in_progress_rx,
         });
         Self { inner }
     }
@@ -121,7 +121,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
 
     /// Returns information about the flashblock currently being built, if any.
     fn flashblock_build_info(&self) -> Option<FlashBlockBuildInfo> {
-        self.inner.build_state_rx.as_ref().and_then(|rx| *rx.borrow())
+        self.inner.in_progress_rx.as_ref().and_then(|rx| *rx.borrow())
     }
 
     /// Extracts pending block if it matches the expected parent hash.
@@ -155,8 +155,8 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
             // Wait only for relevant flashblocks: matching parent and next in sequence
             if build_info.parent_hash == parent_hash && is_next_index {
                 let mut rx_clone = rx.clone();
-                // Wait up to 50ms for a new flashblock to arrive
-                let _ = tokio::time::timeout(MAX_WAIT_DURATION, rx_clone.changed()).await;
+                // Wait up to MAX_FLASHBLOCK_WAIT_DURATION for a new flashblock to arrive
+                let _ = time::timeout(MAX_FLASHBLOCK_WAIT_DURATION, rx_clone.changed()).await;
             }
         }
 
@@ -369,7 +369,7 @@ pub struct OpEthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// If set, then it provides sequences of flashblock built.
     flashblock_rx: Option<FlashBlockCompleteSequenceRx>,
     /// Receiver that signals when a flashblock is being built
-    build_state_rx: Option<BuildStateRx>,
+    in_progress_rx: Option<InProgressFlashBlockRx>,
 }
 
 impl<N: RpcNodeCore, Rpc: RpcConvert> fmt::Debug for OpEthApiInner<N, Rpc> {
@@ -505,7 +505,7 @@ where
             None
         };
 
-        let (pending_block_rx, flashblock_rx, build_state_rx) =
+        let (pending_block_rx, flashblock_rx, in_progress_rx) =
             if let Some(ws_url) = flashblocks_url {
                 info!(target: "reth:cli", %ws_url, "Launching flashblocks service");
 
@@ -519,11 +519,11 @@ where
                 );
 
                 let flashblock_rx = service.subscribe_block_sequence();
-                let build_state_rx = service.subscribe_build_state();
+                let in_progress_rx = service.subscribe_in_progress();
 
                 ctx.components.task_executor().spawn(Box::pin(service.run(tx)));
 
-                (Some(pending_rx), Some(flashblock_rx), Some(build_state_rx))
+                (Some(pending_rx), Some(flashblock_rx), Some(in_progress_rx))
             } else {
                 (None, None, None)
             };
@@ -536,7 +536,7 @@ where
             U256::from(min_suggested_priority_fee),
             pending_block_rx,
             flashblock_rx,
-            build_state_rx,
+            in_progress_rx,
         ))
     }
 }

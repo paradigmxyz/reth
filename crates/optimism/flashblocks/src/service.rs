@@ -1,7 +1,7 @@
 use crate::{
     sequence::FlashBlockPendingSequence,
     worker::{BuildArgs, FlashBlockBuilder},
-    BuildStateRx, ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx,
+    ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx, InProgressFlashBlockRx,
     PendingFlashBlock,
 };
 use alloy_eips::eip2718::WithEncoded;
@@ -53,7 +53,7 @@ pub struct FlashBlockService<
     /// executions within the same block.
     cached_state: Option<(B256, CachedReads)>,
     /// Signals when a block build is in progress
-    build_state_tx: watch::Sender<Option<FlashBlockBuildInfo>>,
+    in_progress_tx: watch::Sender<Option<FlashBlockBuildInfo>>,
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
     /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
@@ -91,7 +91,7 @@ where
 {
     /// Constructs a new `FlashBlockService` that receives [`FlashBlock`]s from `rx` stream.
     pub fn new(rx: S, evm_config: EvmConfig, provider: Provider, spawner: TaskExecutor) -> Self {
-        let (build_state_tx, _) = watch::channel(None);
+        let (in_progress_tx, _) = watch::channel(None);
         Self {
             rx,
             current: None,
@@ -102,7 +102,7 @@ where
             spawner,
             job: None,
             cached_state: None,
-            build_state_tx,
+            in_progress_tx,
             metrics: FlashBlockServiceMetrics::default(),
             compute_state_root: false,
         }
@@ -120,8 +120,8 @@ where
     }
 
     /// Returns a receiver that signals when a flashblock is being built.
-    pub fn subscribe_build_state(&self) -> BuildStateRx {
-        self.build_state_tx.subscribe()
+    pub fn subscribe_in_progress(&self) -> InProgressFlashBlockRx {
+        self.in_progress_tx.subscribe()
     }
 
     /// Drives the services and sends new blocks to the receiver
@@ -244,7 +244,7 @@ where
             // reset job
             this.job.take();
             // No build in progress
-            let _ = this.build_state_tx.send(None);
+            let _ = this.in_progress_tx.send(None);
 
             if let Some((now, result)) = result {
                 match result {
@@ -326,7 +326,7 @@ where
                     block_number: args.base.block_number,
                 };
                 // Signal that a flashblock build has started with build metadata
-                let _ = this.build_state_tx.send(Some(fb_info));
+                let _ = this.in_progress_tx.send(Some(fb_info));
                 let (tx, rx) = oneshot::channel();
                 let builder = this.builder.clone();
 
