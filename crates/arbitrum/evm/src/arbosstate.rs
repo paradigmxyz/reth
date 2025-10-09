@@ -113,10 +113,13 @@ impl<D: Database> ArbosState<D> {
             .map_err(|_| "Failed to set version")?;
         
         let l1_pricing_sto = backing_storage.open_sub_storage(L1_PRICING_SUBSPACE);
-        L1PricingState::<D>::initialize(&l1_pricing_sto);
+        let initial_l1_base_fee = U256::from(100_000_000_000u64); // 100 Gwei
+        let rewards_recipient = Address::ZERO; // Will be set later
+        L1PricingState::<D>::initialize(&l1_pricing_sto, rewards_recipient, initial_l1_base_fee);
         
         let l2_pricing_sto = backing_storage.open_sub_storage(L2_PRICING_SUBSPACE);
-        L2PricingState::<D>::initialize(&l2_pricing_sto);
+        let initial_l2_base_fee = U256::from(100_000_000u64); // 0.1 Gwei
+        L2PricingState::<D>::initialize(&l2_pricing_sto, initial_l2_base_fee);
         
         AddressSet::<D>::initialize(&backing_storage.open_sub_storage(CHAIN_OWNER_SUBSPACE))
             .map_err(|_| "Failed to initialize chain owners")?;
