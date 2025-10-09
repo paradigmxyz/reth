@@ -513,7 +513,7 @@ pub struct HashedAccountsSorted {
 impl HashedAccountsSorted {
     /// Returns a sorted iterator over updated accounts (Some) and destroyed accounts (None).
     pub fn accounts_sorted(&self) -> impl Iterator<Item = (B256, Option<Account>)> + '_ {
-        self.accounts.iter().cloned()
+        self.accounts.iter().copied()
     }
 }
 
