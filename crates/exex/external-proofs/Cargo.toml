@@ -31,3 +31,4 @@ async-trait.workspace = true
 eyre.workspace = true
 futures-util.workspace = true
 serde.workspace = true
+thiserror.workspace = true

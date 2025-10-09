@@ -3750,6 +3750,7 @@ dependencies = [
  "reth-provider",
  "reth-trie",
  "serde",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
