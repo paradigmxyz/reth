@@ -382,7 +382,7 @@ impl ExecutionCache {
     pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
         // Insert bytecodes
         for (code_hash, bytecode) in &state_updates.contracts {
-            self.code_cache.insert(*code_hash, Some(Bytecode(bytecode.clone())));
+            self.code_cache.insert(*code_hash, Some(Bytecode(bytecode.to_owned())));
         }
 
         for (addr, account) in &state_updates.state {
