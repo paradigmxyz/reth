@@ -274,8 +274,6 @@ impl<N: NodePrimitives> TreeState<N> {
             }
         }
 
-        self.prune_persisted_trie_updates();
-
         // The only block that should remain at the `finalized` number now, is the finalized
         // block, if it exists.
         //
@@ -340,6 +338,9 @@ impl<N: NodePrimitives> TreeState<N> {
         // * fetch the number of the finalized hash, removing any sidechains that are __below__ the
         // finalized block
         self.remove_canonical_until(upper_bound.number, last_persisted_hash);
+
+        // Always prune persisted trie updates to prevent unbounded memory growth during sync.
+        self.prune_persisted_trie_updates();
 
         // Now, we have removed canonical blocks (assuming the upper bound is above the finalized
         // block) and only have sidechains below the finalized block.
