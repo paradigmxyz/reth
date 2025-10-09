@@ -666,9 +666,9 @@ Debug:
           Determines which type of invalid block hook to install
 
           Example: `witness,prestate`
-
-          [default: witness]
           [possible values: witness, pre-state, opcode]
+
+          Note: Disabled by default. Specify this flag to enable hooks.
 
       --debug.healthy-node-rpc-url <URL>
           The RPC URL of a healthy node to use for comparing invalid block hook results against.
