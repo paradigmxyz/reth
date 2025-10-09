@@ -235,12 +235,15 @@ pub(crate) struct CachedPrecompileMetrics {
 }
 
 impl CachedPrecompileMetrics {
-    /// Creates a new instance of [`CachedPrecompileMetrics`] with the given address.
+    /// Creates a new instance of [`CachedPrecompileMetrics`] with the given address and name.
     ///
     /// Adds address as an `address` label padded with zeros to at least two hex symbols, prefixed
-    /// by `0x`.
-    pub(crate) fn new_with_address(address: Address) -> Self {
-        Self::new_with_labels(&[("address", format!("0x{address:02x}"))])
+    /// by `0x`, and the precompile name as a `name` label.
+    pub(crate) fn new_with_address_and_name(address: Address, name: &str) -> Self {
+        Self::new_with_labels(&[
+            ("address", format!("0x{address:02x}")),
+            ("name", name.to_string()),
+        ])
     }
 }
 

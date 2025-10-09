@@ -14,7 +14,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
-use alloy_evm::Evm;
+use alloy_evm::{precompiles::Precompile, Evm};
 use alloy_primitives::B256;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
@@ -663,7 +663,12 @@ where
                 let metrics = self
                     .precompile_cache_metrics
                     .entry(*address)
-                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
+                    .or_insert_with(|| {
+                        CachedPrecompileMetrics::new_with_address_and_name(
+                            *address,
+                            precompile.precompile_id().name(),
+                        )
+                    })
                     .clone();
                 CachedPrecompile::wrap(
                     precompile,
