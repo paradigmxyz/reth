@@ -400,6 +400,14 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
     }
+
+    fn get_account_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
+        Ok(None)
+    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> StateRootProvider for NoopProvider<C, N> {

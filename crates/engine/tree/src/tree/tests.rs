@@ -56,6 +56,7 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
         let sealed = block.seal_slow();
+
         sealed.try_recover().map_err(|e| reth_payload_primitives::NewPayloadError::Other(e.into()))
     }
 }
@@ -1704,5 +1705,307 @@ mod payload_execution_tests {
             .into(),
             sidecar: ExecutionPayloadSidecar::none(),
         }
+    }
+}
+
+/// Test suite for the refactored `on_forkchoice_updated` helper methods
+#[cfg(test)]
+mod forkchoice_updated_tests {
+    use super::*;
+    use alloy_primitives::Address;
+
+    /// Test that validates the forkchoice state pre-validation logic
+    #[tokio::test]
+    async fn test_validate_forkchoice_state() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec);
+
+        // Test 1: Zero head block hash should return early with invalid state
+        let zero_state = ForkchoiceState {
+            head_block_hash: B256::ZERO,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let result = test_harness.tree.validate_forkchoice_state(zero_state).unwrap();
+        assert!(result.is_some(), "Zero head block hash should return early");
+        let outcome = result.unwrap();
+        // For invalid state, we expect an error response
+        assert!(matches!(outcome, OnForkChoiceUpdated { .. }));
+
+        // Test 2: Valid state with backfill active should return syncing
+        test_harness.tree.backfill_sync_state = BackfillSyncState::Active;
+        let valid_state = ForkchoiceState {
+            head_block_hash: B256::random(),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let result = test_harness.tree.validate_forkchoice_state(valid_state).unwrap();
+        assert!(result.is_some(), "Backfill active should return early");
+        let outcome = result.unwrap();
+        // We need to await the outcome to check the payload status
+        let fcu_result = outcome.await.unwrap();
+        assert!(fcu_result.payload_status.is_syncing());
+
+        // Test 3: Valid state with idle backfill should continue processing
+        test_harness.tree.backfill_sync_state = BackfillSyncState::Idle;
+        let valid_state = ForkchoiceState {
+            head_block_hash: B256::random(),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let result = test_harness.tree.validate_forkchoice_state(valid_state).unwrap();
+        assert!(result.is_none(), "Valid state should continue processing");
+    }
+
+    /// Test that verifies canonical head handling
+    #[tokio::test]
+    async fn test_handle_canonical_head() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec);
+
+        // Create test blocks
+        let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+        test_harness = test_harness.with_blocks(blocks);
+
+        let canonical_head = test_harness.tree.state.tree_state.canonical_block_hash();
+
+        // Test 1: Head is already canonical, no payload attributes
+        let state = ForkchoiceState {
+            head_block_hash: canonical_head,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let result = test_harness
+            .tree
+            .handle_canonical_head(state, &None, EngineApiMessageVersion::default())
+            .unwrap();
+        assert!(result.is_some(), "Should return outcome for canonical head");
+        let outcome = result.unwrap();
+        let fcu_result = outcome.outcome.await.unwrap();
+        assert!(fcu_result.payload_status.is_valid());
+
+        // Test 2: Head is not canonical - should return None to continue processing
+        let non_canonical_state = ForkchoiceState {
+            head_block_hash: B256::random(),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let result = test_harness
+            .tree
+            .handle_canonical_head(non_canonical_state, &None, EngineApiMessageVersion::default())
+            .unwrap();
+        assert!(result.is_none(), "Non-canonical head should return None");
+    }
+
+    /// Test that verifies chain update application
+    #[tokio::test]
+    async fn test_apply_chain_update() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec);
+
+        // Create a chain of blocks
+        let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..5).collect();
+        test_harness = test_harness.with_blocks(blocks.clone());
+
+        let new_head = blocks[2].recovered_block().hash();
+
+        // Test 1: Apply chain update to a new head
+        let state = ForkchoiceState {
+            head_block_hash: new_head,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let result = test_harness
+            .tree
+            .apply_chain_update(state, &None, EngineApiMessageVersion::default())
+            .unwrap();
+        assert!(result.is_some(), "Should apply chain update for new head");
+        let outcome = result.unwrap();
+        let fcu_result = outcome.outcome.await.unwrap();
+        assert!(fcu_result.payload_status.is_valid());
+
+        // Test 2: Try to apply chain update to missing block
+        let missing_state = ForkchoiceState {
+            head_block_hash: B256::random(),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let result = test_harness
+            .tree
+            .apply_chain_update(missing_state, &None, EngineApiMessageVersion::default())
+            .unwrap();
+        assert!(result.is_none(), "Missing block should return None");
+    }
+
+    /// Test that verifies missing block handling
+    #[tokio::test]
+    async fn test_handle_missing_block() {
+        let chain_spec = MAINNET.clone();
+        let test_harness = TestHarness::new(chain_spec);
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::random(),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let result = test_harness.tree.handle_missing_block(state).unwrap();
+
+        // Should return syncing status with download event
+        let fcu_result = result.outcome.await.unwrap();
+        assert!(fcu_result.payload_status.is_syncing());
+        assert!(result.event.is_some());
+
+        if let Some(TreeEvent::Download(download_request)) = result.event {
+            match download_request {
+                DownloadRequest::BlockSet(block_set) => {
+                    assert_eq!(block_set.len(), 1);
+                }
+                _ => panic!("Expected single block download request"),
+            }
+        }
+    }
+
+    /// Test the complete `on_forkchoice_updated` flow with all helper methods
+    #[tokio::test]
+    async fn test_on_forkchoice_updated_integration() {
+        reth_tracing::init_test_tracing();
+
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec);
+
+        // Create test blocks
+        let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+        test_harness = test_harness.with_blocks(blocks.clone());
+
+        let canonical_head = test_harness.tree.state.tree_state.canonical_block_hash();
+
+        // Test Case 1: FCU to existing canonical head
+        let state = ForkchoiceState {
+            head_block_hash: canonical_head,
+            safe_block_hash: canonical_head,
+            finalized_block_hash: canonical_head,
+        };
+
+        let result = test_harness
+            .tree
+            .on_forkchoice_updated(state, None, EngineApiMessageVersion::default())
+            .unwrap();
+        let fcu_result = result.outcome.await.unwrap();
+        assert!(fcu_result.payload_status.is_valid());
+
+        // Test Case 2: FCU to missing block
+        let missing_state = ForkchoiceState {
+            head_block_hash: B256::random(),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let result = test_harness
+            .tree
+            .on_forkchoice_updated(missing_state, None, EngineApiMessageVersion::default())
+            .unwrap();
+        let fcu_result = result.outcome.await.unwrap();
+        assert!(fcu_result.payload_status.is_syncing());
+        assert!(result.event.is_some(), "Should trigger download event for missing block");
+
+        // Test Case 3: FCU during backfill sync
+        test_harness.tree.backfill_sync_state = BackfillSyncState::Active;
+        let state = ForkchoiceState {
+            head_block_hash: canonical_head,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let result = test_harness
+            .tree
+            .on_forkchoice_updated(state, None, EngineApiMessageVersion::default())
+            .unwrap();
+        let fcu_result = result.outcome.await.unwrap();
+        assert!(fcu_result.payload_status.is_syncing(), "Should return syncing during backfill");
+    }
+
+    /// Test metrics recording in forkchoice updated
+    #[tokio::test]
+    async fn test_record_forkchoice_metrics() {
+        let chain_spec = MAINNET.clone();
+        let test_harness = TestHarness::new(chain_spec);
+
+        // Get initial metrics state by checking if metrics are recorded
+        // We can't directly get counter values, but we can verify the methods are called
+
+        // Test without attributes
+        let attrs_none = None;
+        test_harness.tree.record_forkchoice_metrics(&attrs_none);
+
+        // Test with attributes
+        let attrs_some = Some(alloy_rpc_types_engine::PayloadAttributes {
+            timestamp: 1000,
+            prev_randao: B256::random(),
+            suggested_fee_recipient: Address::random(),
+            withdrawals: None,
+            parent_beacon_block_root: None,
+        });
+        test_harness.tree.record_forkchoice_metrics(&attrs_some);
+
+        // We can't directly verify counter values since they're private metrics
+        // But we can verify the methods don't panic and execute successfully
+    }
+
+    /// Test edge case: FCU with invalid ancestor
+    #[tokio::test]
+    async fn test_fcu_with_invalid_ancestor() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec);
+
+        // Mark a block as invalid
+        let invalid_block_hash = B256::random();
+        test_harness.tree.state.invalid_headers.insert(BlockWithParent {
+            block: NumHash::new(1, invalid_block_hash),
+            parent: B256::ZERO,
+        });
+
+        // Test FCU that points to a descendant of the invalid block
+        // This is a bit tricky to test directly, but we can verify the check_invalid_ancestor
+        // method
+        let result = test_harness.tree.check_invalid_ancestor(invalid_block_hash).unwrap();
+        assert!(result.is_some(), "Should detect invalid ancestor");
+    }
+
+    /// Test `OpStack` specific behavior with canonical head
+    #[tokio::test]
+    async fn test_opstack_canonical_head_behavior() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec);
+
+        // Set engine kind to OpStack
+        test_harness.tree.engine_kind = EngineApiKind::OpStack;
+
+        // Create test blocks
+        let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+        test_harness = test_harness.with_blocks(blocks);
+
+        let canonical_head = test_harness.tree.state.tree_state.canonical_block_hash();
+
+        // For OpStack, even if head is already canonical, we should still process payload
+        // attributes
+        let state = ForkchoiceState {
+            head_block_hash: canonical_head,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let result = test_harness
+            .tree
+            .handle_canonical_head(state, &None, EngineApiMessageVersion::default())
+            .unwrap();
+        assert!(result.is_some(), "OpStack should handle canonical head");
     }
 }
