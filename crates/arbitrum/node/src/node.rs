@@ -290,6 +290,7 @@ where
             suggested_fee_recipient = %next_env.suggested_fee_recipient,
             "follower: next_env suggested_fee_recipient after build_next_env"
         );
+        next_env.suggested_fee_recipient = poster;
         next_env.delayed_messages_read = delayed_messages_read;
         next_env.l1_block_number = l1_block_number;
 
