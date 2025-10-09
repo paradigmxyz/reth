@@ -286,12 +286,12 @@ where
 {
     let mut last_header_number = match block_numbers.start_bound() {
         Bound::Included(&number) => number,
-        Bound::Excluded(&number) => number.saturating_sub(1),
+        Bound::Excluded(&number) => number.saturating_add(1),
         Bound::Unbounded => 0,
     };
     let target = match block_numbers.end_bound() {
         Bound::Included(&number) => Some(number),
-        Bound::Excluded(&number) => Some(number.saturating_add(1)),
+        Bound::Excluded(&number) => Some(number.saturating_sub(1)),
         Bound::Unbounded => None,
     };
 
