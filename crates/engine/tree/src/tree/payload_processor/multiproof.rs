@@ -727,7 +727,7 @@ where
             multiproof_manager: MultiproofManager::new(
                 executor,
                 metrics.clone(),
-                proof_task_handle.clone(), 
+                proof_task_handle.clone(),
                 proof_task_handle,
                 max_concurrency,
             ),
