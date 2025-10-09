@@ -198,6 +198,41 @@ where
             let _ = res;
         }
 
+        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable) {
+            use alloy_consensus::Transaction as _;
+            let tx_hash = tx.tx().trie_hash();
+            let block_env = alloy_evm::Evm::block(self.evm());
+            let block_timestamp = u64::try_from(block_env.timestamp).unwrap_or(0);
+            
+            let mut state = core::mem::take(&mut self.tx_state);
+            let result = {
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let db: &mut revm::database::State<D> = *db_ref;
+                DefaultArbOsHooks::execute_submit_retryable(
+                    db,
+                    &mut state,
+                    tx.tx(),
+                    tx_hash,
+                    block_basefee,
+                    block_timestamp,
+                )
+            };
+            self.tx_state = state;
+            
+            if result.is_err() {
+                return Err(BlockExecutionError::other("SubmitRetryable execution failed"));
+            }
+        }
+
+        if is_deposit {
+            let deposit_value = tx.tx().value();
+            if !deposit_value.is_zero() {
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let db: &mut revm::database::State<D> = *db_ref;
+                DefaultArbOsHooks::mint_balance(db, sender, deposit_value);
+            }
+        }
+
         let mut used_pre_nonce = None;
         let mut maybe_predeploy_result: Option<(revm::context::result::ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>, u64)> = None;
         let to_addr = match tx.tx().kind() {
