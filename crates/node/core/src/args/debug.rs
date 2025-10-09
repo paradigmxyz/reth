@@ -9,7 +9,7 @@ use std::{collections::HashSet, ffi::OsStr, fmt, path::PathBuf, str::FromStr};
 use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
 
 /// Parameters for debugging purposes
-#[derive(Debug, Clone, Args, PartialEq, Eq)]
+#[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[command(next_help_heading = "Debug")]
 pub struct DebugArgs {
     /// Flag indicating whether the node should be terminated after the pipeline sync.
@@ -100,26 +100,6 @@ pub struct DebugArgs {
     /// Example: `nodename:secret@host:port`
     #[arg(long = "ethstats", help_heading = "Debug")]
     pub ethstats: Option<String>,
-}
-
-impl Default for DebugArgs {
-    fn default() -> Self {
-        Self {
-            terminate: false,
-            tip: None,
-            max_block: None,
-            etherscan: None,
-            rpc_consensus_url: None,
-            skip_fcu: None,
-            skip_new_payload: None,
-            reorg_frequency: None,
-            reorg_depth: None,
-            engine_api_store: None,
-            invalid_block_hook: None,
-            healthy_node_rpc_url: None,
-            ethstats: None,
-        }
-    }
 }
 
 /// Describes the invalid block hooks that should be installed.
