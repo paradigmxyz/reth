@@ -1,17 +1,17 @@
 //! Traits for external storage for trie nodes.
 
-#![allow(dead_code, unreachable_pub)]
 use alloy_primitives::{map::HashMap, B256, U256};
 use async_trait::async_trait;
 use auto_impl::auto_impl;
 use reth_primitives_traits::Account;
 use reth_trie::{updates::TrieUpdates, BranchNodeCompact, HashedPostState, Nibbles};
 use std::fmt::Debug;
+use thiserror::Error;
 
 /// Error type for storage operations
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Error)]
 pub enum ExternalStorageError {
-    /// Catch-all for other errors.
+    // TODO: add more errors once we know what they are
     #[error("Other error: {0}")]
     Other(eyre::Error),
 }
