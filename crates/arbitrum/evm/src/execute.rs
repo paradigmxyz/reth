@@ -186,6 +186,11 @@ impl DefaultArbOsHooks {
             gas_price_bid: gas_fee_cap,
         };
 
+        use crate::retryables::{RetryableState, DefaultRetryables};
+        use alloy_primitives::B256;
+        
+        let retryable_state = RetryableState::new(state_db as *mut _, B256::ZERO);
+        let _ticket = retryable_state.create_retryable(state_db as *mut _, params, block_timestamp);
         
         Ok(())
     }
