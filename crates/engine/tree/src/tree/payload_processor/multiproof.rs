@@ -353,9 +353,10 @@ pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
     pending: VecDeque<PendingMultiproofTask<Factory>>,
     /// Executor for tasks
     executor: WorkloadExecutor,
-    /// Sender to the storage proof task.
+    /// Handle to the proof task manager used for creating ParallelProof instances for storage
+    /// proofs.
     storage_proof_task_handle: ProofTaskManagerHandle,
-    /// Sender to the account proof task.
+    /// Handle to the proof task manager used for account multiproofs.
     account_proof_task_handle: ProofTaskManagerHandle,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
@@ -480,7 +481,7 @@ where
                 config.state_sorted,
                 config.prefix_sets,
                 missed_leaves_storage_roots,
-                storage_proof_task_handle.clone(),
+                storage_proof_task_handle,
             )
             .with_branch_node_masks(true)
             .with_multi_added_removed_keys(Some(multi_added_removed_keys))
