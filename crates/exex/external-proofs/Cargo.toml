@@ -38,11 +38,7 @@ tracing.workspace = true
 
 # dev dependencies
 [dev-dependencies]
-tokio = { workspace = true, features = [
-    "test-util",
-    "rt-multi-thread",
-    "macros",
-] }
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread", "macros"] }
 test-case.workspace = true
 futures.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
