@@ -303,6 +303,27 @@ where
                     let state: &mut revm::database::State<D> = *db_ref;
 
                     let (arbos_addr, l1_slot) = header::arbos_l1_block_number_slot();
+                    
+                    if !state.bundle_state.state.contains_key(&arbos_addr) {
+                        use revm_state::AccountInfo;
+                        let info = match state.basic(arbos_addr) {
+                            Ok(Some(account_info)) => Some(account_info),
+                            _ => Some(AccountInfo {
+                                balance: alloy_primitives::U256::ZERO,
+                                nonce: 0,
+                                code_hash: alloy_primitives::keccak256([]),
+                                code: None,
+                            }),
+                        };
+                        let acc = BundleAccount {
+                            info,
+                            storage: HashMap::default(),
+                            original_info: None,
+                            status: AccountStatus::Changed,
+                        };
+                        state.bundle_state.state.insert(arbos_addr, acc);
+                    }
+                    
                     let l1_slot_u256 = alloy_primitives::U256::from_be_bytes(l1_slot.0);
                     let present = alloy_primitives::U256::from(l1_bn);
 
@@ -311,19 +332,6 @@ where
                             l1_slot_u256,
                             EvmStorageSlot { present_value: present, ..Default::default() }.into(),
                         );
-                    } else {
-                        let mut storage = HashMap::default();
-                        storage.insert(
-                            l1_slot_u256,
-                            EvmStorageSlot { present_value: present, ..Default::default() }.into(),
-                        );
-                        let acc = BundleAccount {
-                            info: None,
-                            storage,
-                            original_info: Default::default(),
-                            status: AccountStatus::Changed,
-                        };
-                        state.bundle_state.state.insert(arbos_addr, acc);
                     }
                 }
             }
