@@ -50,4 +50,5 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-trie/test-utils",
     "reth-db/test-utils",
+    "reth-chainspec/test-utils",
 ]
