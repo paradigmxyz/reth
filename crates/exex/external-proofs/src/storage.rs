@@ -1,16 +1,18 @@
-//! Traits for external storage for trie nodes.
+#![allow(dead_code)]
 
+//! Traits for external storage for trie nodes.
 use alloy_primitives::{map::HashMap, B256, U256};
-use async_trait::async_trait;
-use auto_impl::auto_impl;
 use reth_primitives_traits::Account;
 use reth_trie::{updates::TrieUpdates, BranchNodeCompact, HashedPostState, Nibbles};
+
+use async_trait::async_trait;
+use auto_impl::auto_impl;
 use std::fmt::Debug;
 use thiserror::Error;
 
 /// Error type for storage operations
 #[derive(Debug, Error)]
-pub enum ExternalStorageError {
+pub(crate) enum ExternalStorageError {
     // TODO: add more errors once we know what they are
     /// Other error
     #[error("Other error: {0}")]
@@ -18,10 +20,10 @@ pub enum ExternalStorageError {
 }
 
 /// Result type for storage operations
-pub type ExternalStorageResult<T> = Result<T, ExternalStorageError>;
+pub(crate) type ExternalStorageResult<T> = Result<T, ExternalStorageError>;
 
 /// Seeks and iterates over trie nodes in the database by path (lexicographical order)
-pub trait ExternalTrieCursor: Send + Sync {
+pub(crate) trait ExternalTrieCursor: Send + Sync {
     /// Seek to an exact path, otherwise return None if not found.
     fn seek_exact(
         &mut self,
@@ -43,7 +45,7 @@ pub trait ExternalTrieCursor: Send + Sync {
 }
 
 /// Seeks and iterates over hashed entries in the database by key.
-pub trait ExternalHashedCursor: Send + Sync {
+pub(crate) trait ExternalHashedCursor: Send + Sync {
     /// Value returned by the cursor.
     type Value: std::fmt::Debug;
 
@@ -57,7 +59,7 @@ pub trait ExternalHashedCursor: Send + Sync {
 
 /// Diff of trie updates and post state for a block.
 #[derive(Debug, Clone)]
-pub struct BlockStateDiff {
+pub(crate) struct BlockStateDiff {
     /// Trie updates for branch nodes
     pub trie_updates: TrieUpdates,
     /// Post state for leaf nodes (accounts and storage)
@@ -70,7 +72,7 @@ pub struct BlockStateDiff {
 /// are not stored to reduce write amplification. This matches Reth's non-historical trie storage.
 #[async_trait]
 #[auto_impl(Arc)]
-pub trait ExternalStorage: Send + Sync + Debug {
+pub(crate) trait ExternalStorage: Send + Sync + Debug {
     /// Cursor for iterating over trie branches.
     type TrieCursor: ExternalTrieCursor;
 

@@ -25,9 +25,10 @@
 #![allow(dead_code, unreachable_pub)]
 
 use alloy_primitives::{map::HashMap, B256, U256};
-use async_trait::async_trait;
 use reth_primitives_traits::Account;
 use reth_trie::{updates::TrieUpdates, BranchNodeCompact, HashedPostState, Nibbles};
+
+use async_trait::async_trait;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::RwLock;
 

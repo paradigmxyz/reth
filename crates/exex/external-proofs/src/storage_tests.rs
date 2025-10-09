@@ -12,6 +12,7 @@ mod tests {
     use alloy_primitives::{B256, U256};
     use reth_primitives_traits::Account;
     use reth_trie::{updates::TrieUpdates, BranchNodeCompact, HashedPostState, Nibbles, TrieMask};
+
     use std::sync::Arc;
     use test_case::test_case;
 

@@ -1,4 +1,5 @@
 use std::{collections::HashMap, time::Instant};
+use tracing::info;
 
 use alloy_primitives::B256;
 use reth_db_api::{
@@ -9,7 +10,6 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles};
-use tracing::info;
 
 use super::storage::ExternalStorage;
 
