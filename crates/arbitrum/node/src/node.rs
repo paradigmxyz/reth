@@ -267,6 +267,12 @@ where
 
         let mut attrs2 = attrs.clone();
         attrs2.prev_randao = sealed_parent.mix_hash().unwrap_or_default();
+        reth_tracing::tracing::info!(
+            target: "arb-reth::follower",
+            suggested_fee_recipient = %attrs2.suggested_fee_recipient,
+            poster = %poster,
+            "follower: attrs2 suggested_fee_recipient before build_next_env"
+        );
         let mut next_env = <reth_arbitrum_evm::ArbEvmConfig<
             ChainSpec,
             reth_arbitrum_primitives::ArbPrimitives,
@@ -279,6 +285,11 @@ where
             evm_config.chain_spec().as_ref(),
         )
         .map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
+        reth_tracing::tracing::info!(
+            target: "arb-reth::follower",
+            suggested_fee_recipient = %next_env.suggested_fee_recipient,
+            "follower: next_env suggested_fee_recipient after build_next_env"
+        );
         next_env.delayed_messages_read = delayed_messages_read;
         next_env.l1_block_number = l1_block_number;
 

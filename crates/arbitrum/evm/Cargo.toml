@@ -33,6 +33,7 @@ reth-storage-api = { path = "../../storage/storage-api", default-features = fals
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-storage-errors.workspace = true
+reth-tracing.workspace = true
 
 reth-payload-primitives = { path = "../../payload/primitives", default-features = false, features = ["std"] }
 reth-payload-builder = { path = "../../payload/builder" }
