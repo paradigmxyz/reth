@@ -110,9 +110,9 @@ enum StorageWorkerJob {
 ///
 /// # Architecture
 ///
-/// This manager handles three distinct execution paths:
+/// This manager operates two distinct worker pools for parallel trie operations:
 ///
-/// **Worker Pools** (for all trie operations):
+/// **Worker Pools**:
 ///    - Pre-spawned workers with dedicated long-lived transactions
 ///    - **Storage pool**: Handles `StorageProof` and `BlindedStorageNode` requests
 ///    - **Account pool**: Handles `AccountMultiproof` and `BlindedAccountNode` requests, delegates
