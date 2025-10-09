@@ -1823,21 +1823,52 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
-        // Write account changes
-        tracing::trace!("Writing account changes");
-        let mut account_changeset_cursor =
-            self.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?;
+        // Write account changes to static files
+        tracing::trace!("Writing account changes to static files");
 
-        for (block_index, mut account_block_reverts) in reverts.accounts.into_iter().enumerate() {
-            let block_number = first_block + block_index as BlockNumber;
-            // Sort accounts by address.
-            account_block_reverts.par_sort_by_key(|a| a.0);
+        // Try to get a writer for AccountChangeSets static file
+        if let Ok(mut writer) =
+            self.static_file_provider.get_writer(first_block, StaticFileSegment::AccountChangeSets)
+        {
+            // Write to static files
+            tracing::trace!("Writing storage changes to static file");
+            for (block_index, mut account_block_reverts) in reverts.accounts.into_iter().enumerate()
+            {
+                let block_number = first_block + block_index as BlockNumber;
+                // Sort accounts by address.
+                account_block_reverts.par_sort_by_key(|a| a.0);
 
-            for (address, info) in account_block_reverts {
-                account_changeset_cursor.append_dup(
-                    block_number,
-                    AccountBeforeTx { address, info: info.map(Into::into) },
-                )?;
+                // Convert to AccountBeforeTx format
+                let changesets: Vec<AccountBeforeTx> = account_block_reverts
+                    .into_iter()
+                    .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                    .collect();
+
+                // Increment block and append changesets
+                writer.increment_block(block_number)?;
+                writer.append_account_changeset(changesets)?;
+            }
+
+            // Commit the static file changes
+            writer.commit()?;
+        } else {
+            // Fallback to database if static file writer is not available
+            tracing::trace!("Static file writer not available, falling back to database");
+            let mut account_changeset_cursor =
+                self.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?;
+
+            for (block_index, mut account_block_reverts) in reverts.accounts.into_iter().enumerate()
+            {
+                let block_number = first_block + block_index as BlockNumber;
+                // Sort accounts by address.
+                account_block_reverts.par_sort_by_key(|a| a.0);
+
+                for (address, info) in account_block_reverts {
+                    account_changeset_cursor.append_dup(
+                        block_number,
+                        AccountBeforeTx { address, info: info.map(Into::into) },
+                    )?;
+                }
             }
         }
 

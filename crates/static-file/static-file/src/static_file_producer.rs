@@ -234,8 +234,7 @@ where
                     finalized_block_number,
                 )
             }),
-            // StaticFile account changesets only if they're not pruned according to the user
-            // configuration
+            // StaticFile account changesets
             account_changesets: if self.prune_modes.account_history.is_none() {
                 finalized_block_numbers.account_change_sets.and_then(|finalized_block_number| {
                     self.get_static_file_target(
