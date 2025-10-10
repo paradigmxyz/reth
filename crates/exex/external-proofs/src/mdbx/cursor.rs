@@ -14,7 +14,7 @@ use reth_trie::{BranchNodeCompact, Nibbles, StoredNibbles};
 use super::tables;
 use crate::mdbx::{HashedStorageSubKey, StorageBranchSubKey};
 use crate::{
-    mdbx::MaybeDeleted,
+    mdbx::VersionedValue,
     storage::{
         OpProofsHashedCursor, OpProofsStorageError, OpProofsStorageResult, OpProofsTrieCursor,
     },
@@ -32,7 +32,7 @@ pub struct BlockNumberVersionedCursor<T: Table + DupSort, Cursor> {
 
 impl<
         V,
-        T: Table<Value = MaybeDeleted<V>> + DupSort<SubKey = u64>,
+        T: Table<Value = VersionedValue<V>> + DupSort<SubKey = u64>,
         Cursor: DbCursorRO<T> + DbDupCursorRO<T>,
     > BlockNumberVersionedCursor<T, Cursor>
 {
@@ -44,59 +44,96 @@ impl<
         &mut self,
         target_path: T::Key,
     ) -> OpProofsStorageResult<Option<(T::Key, T::Value)>> {
-        // Position cursor at key after the requested version
-        self.cursor
-            .seek_by_key_subkey(target_path, self.max_block_number)
+        // Try to position cursor at or after max_block_number
+        // If found, the cursor is positioned at a value with block_number >= max_block_number
+        let seek_result = self
+            .cursor
+            .seek_by_key_subkey(target_path.clone(), self.max_block_number)
             .map_err(|e| OpProofsStorageError::Other(e.into()))?;
 
-        // Seek to the previous dup value to find the latest value, or None if no values exist at this height
-        let prev = self.cursor.prev_dup().map_err(|e| OpProofsStorageError::Other(e.into()))?;
+        if seek_result.is_some() {
+            // Found a value >= max_block_number, go back one to get the latest value <= max_block_number
+            return self.cursor.prev_dup().map_err(|e| OpProofsStorageError::Other(e.into()));
+        }
 
-        return Ok(prev);
+        // No value >= max_block_number exists
+        // This means all values for this key have block_number < max_block_number
+        // So we want the last (highest block_number) value for this key
+
+        // First check if the key exists at all
+        if self
+            .cursor
+            .seek_exact(target_path.clone())
+            .map_err(|e| OpProofsStorageError::Other(e.into()))?
+            .is_none()
+        {
+            // Key doesn't exist
+            return Ok(None);
+        }
+
+        // Key exists, find the last dup entry (which will have the highest block_number < max_block_number)
+        let mut last = None;
+        while let Some(kv) =
+            self.cursor.next_dup().map_err(|e| OpProofsStorageError::Other(e.into()))?
+        {
+            last = Some(kv);
+        }
+
+        // If last is None, it means there's only one entry (the one from seek_exact)
+        if last.is_none() {
+            // Go back to get that first entry
+            self.cursor.seek_exact(target_path).map_err(|e| OpProofsStorageError::Other(e.into()))
+        } else {
+            Ok(last)
+        }
     }
 
     fn get_next_key_value(
         &mut self,
         target_path: T::Key,
     ) -> OpProofsStorageResult<Option<(T::Key, V)>> {
-        let mut target_path = target_path;
+        // Seek to the next key >= target_path
+        let Some((mut key, _)) =
+            self.cursor.seek(target_path).map_err(|e| OpProofsStorageError::Other(e.into()))?
+        else {
+            // No keys >= target_path exist
+            return Ok(None);
+        };
+
         loop {
-            // seek to the next key
+            // Now get the latest value for this key that's <= max_block_number
+            let latest = self
+                .get_latest_key_value(key.clone())
+                .map_err(|e| OpProofsStorageError::Other(e.into()))?;
+
+            if let Some((latest_key, latest_value)) = latest {
+                // if non-deleted, return the latest value (extract from VersionedValue)
+                if let Some(latest_value) = latest_value.value.0 {
+                    return Ok(Some((latest_key, latest_value)));
+                }
+                // Value was deleted, continue to next key
+            }
+
+            // No valid value for this key, or value was deleted - move to next key
+            // Re-position cursor at current key first (get_latest_key_value may have moved it)
             if self
                 .cursor
-                .seek_by_key_subkey(target_path, u64::MAX)
+                .seek_exact(key.clone())
                 .map_err(|e| OpProofsStorageError::Other(e.into()))?
                 .is_none()
             {
-                // there are no keys after this key
+                // Key disappeared, shouldn't happen
                 return Ok(None);
-            };
-
-            let Some((key, _)) =
-                self.cursor.current().map_err(|e| OpProofsStorageError::Other(e.into()))?
-            else {
-                // there are no keys after this key
-                return Ok(None);
-            };
-
-            let Some((latest_key, latest_value)) = self
-                .get_latest_key_value(key.clone())
-                .map_err(|e| OpProofsStorageError::Other(e.into()))?
-            else {
-                // end of trie
-                return Ok(None);
-            };
-
-            // ensure latest_value is not the same key (should never happen)
-            assert_ne!(&latest_key, &key, "latest_value is the same key");
-
-            // if non-deleted, return the latest value
-            if let Some(latest_value) = latest_value.0 {
-                return Ok(Some((latest_key, latest_value)));
             }
 
-            // if the node was deleted, continue to the next key
-            target_path = latest_key;
+            // Now get the next distinct key
+            let Some((next_key, _)) =
+                self.cursor.next_no_dup().map_err(|e| OpProofsStorageError::Other(e.into()))?
+            else {
+                // No more keys
+                return Ok(None);
+            };
+            key = next_key;
         }
     }
 }
@@ -113,7 +150,7 @@ impl<
         target_path: Nibbles,
     ) -> OpProofsStorageResult<Option<(Nibbles, BranchNodeCompact)>> {
         Ok(self.get_latest_key_value(StoredNibbles(target_path))?.and_then(|entry| {
-            if let Some(val) = entry.1 .0
+            if let Some(val) = entry.1.value.0
                 && entry.0 .0 == target_path
             {
                 Some((entry.0 .0, val))
@@ -131,11 +168,19 @@ impl<
     }
 
     fn next(&mut self) -> OpProofsStorageResult<Option<(Nibbles, BranchNodeCompact)>> {
-        let Some(current) = self.current()? else {
+        if self.current()?.is_none() {
             return self.seek(Nibbles::default());
+        }
+
+        // Move to next distinct key first (skip past current key)
+        let Some((next_key, _)) =
+            self.cursor.next_no_dup().map_err(|e| OpProofsStorageError::Other(e.into()))?
+        else {
+            return Ok(None);
         };
 
-        Ok(self.get_next_key_value(StoredNibbles(current))?.map(|entry| (entry.0 .0, entry.1)))
+        // Now find the latest valid value for that key
+        Ok(self.get_next_key_value(next_key)?.map(|entry| (entry.0 .0, entry.1)))
     }
 
     fn current(&mut self) -> OpProofsStorageResult<Option<Nibbles>> {
@@ -156,7 +201,7 @@ pub struct MdbxOpProofsStorageTrieCursor<T: Table + DupSort, Cursor> {
 
 impl<
         V,
-        T: Table<Value = MaybeDeleted<V>> + DupSort<SubKey = u64>,
+        T: Table<Value = VersionedValue<V>> + DupSort<SubKey = u64>,
         Cursor: DbCursorRO<T> + DbDupCursorRO<T>,
     > MdbxOpProofsStorageTrieCursor<T, Cursor>
 {
@@ -180,7 +225,7 @@ impl<
         let subkey = StorageBranchSubKey::new(self.hashed_address, StoredNibbles(target_path));
 
         Ok(self.cursor.get_latest_key_value(subkey.clone())?.and_then(|entry| {
-            if let Some(val) = entry.1 .0
+            if let Some(val) = entry.1.value.0
                 && entry.0 == subkey
             {
                 Some((entry.0.path.0.clone(), val))
@@ -197,19 +242,30 @@ impl<
         let subkey = StorageBranchSubKey::new(self.hashed_address, StoredNibbles(target_path));
 
         Ok(self.cursor.get_next_key_value(subkey)?.and_then(|(subkey, value)| {
-            (subkey.hashed_address == subkey.hashed_address).then(|| (subkey.path.0.clone(), value))
+            (subkey.hashed_address == self.hashed_address).then(|| (subkey.path.0.clone(), value))
         }))
     }
 
     fn next(&mut self) -> OpProofsStorageResult<Option<(Nibbles, BranchNodeCompact)>> {
-        let Some(current) = self.current()? else {
+        if self.current()?.is_none() {
             return self.seek(Nibbles::default());
+        }
+
+        // Move to next distinct key first (skip past current key)
+        let Some((next_key, _)) =
+            self.cursor.cursor.next_no_dup().map_err(|e| OpProofsStorageError::Other(e.into()))?
+        else {
+            return Ok(None);
         };
 
-        let subkey = StorageBranchSubKey::new(self.hashed_address, StoredNibbles(current));
+        // Check if still in same address
+        if next_key.hashed_address != self.hashed_address {
+            return Ok(None);
+        }
 
-        Ok(self.cursor.get_next_key_value(subkey)?.and_then(|(subkey, value)| {
-            (subkey.hashed_address == subkey.hashed_address).then(|| (subkey.path.0.clone(), value))
+        // Now find the latest valid value for that key
+        Ok(self.cursor.get_next_key_value(next_key.clone())?.and_then(|(subkey, value)| {
+            (subkey.hashed_address == self.hashed_address).then(|| (subkey.path.0.clone(), value))
         }))
     }
 
@@ -251,23 +307,23 @@ impl<
     type Value = Account;
 
     fn seek(&mut self, target_path: B256) -> OpProofsStorageResult<Option<(B256, Account)>> {
-        Ok(self.cursor.get_latest_key_value(target_path)?.and_then(|entry| {
-            if let Some(val) = entry.1 .0
-                && entry.0 == target_path
-            {
-                Some((entry.0, val))
-            } else {
-                None
-            }
-        }))
+        // Find first entry >= target_path (get_next_key_value returns non-deleted values)
+        Ok(self.cursor.get_next_key_value(target_path)?)
     }
 
     fn next(&mut self) -> OpProofsStorageResult<Option<(B256, Account)>> {
-        let Some((current, _)) = self.cursor.cursor.current()? else {
+        if self.cursor.cursor.current()?.is_none() {
             return self.seek(B256::default());
+        }
+
+        // Move to next distinct key first (skip past current key)
+        let Some((next_key, _)) =
+            self.cursor.cursor.next_no_dup().map_err(|e| OpProofsStorageError::Other(e.into()))?
+        else {
+            return Ok(None);
         };
 
-        Ok(self.cursor.get_next_key_value(current)?)
+        Ok(self.cursor.get_next_key_value(next_key)?)
     }
 }
 
@@ -305,26 +361,35 @@ impl<
             hashed_storage_key: target_path,
         };
 
-        Ok(self.cursor.get_latest_key_value(subkey.clone())?.and_then(
-            |(key, maybe_deleted_val)| {
-                if let Some(val) = maybe_deleted_val.0
-                    && key == subkey
-                {
-                    Some((key.hashed_storage_key, U256::from_be_slice(val.as_slice())))
-                } else {
-                    None
-                }
-            },
-        ))
+        // Find first entry >= target_path for this address (get_next_key_value returns non-deleted values)
+        Ok(self.cursor.get_next_key_value(subkey)?.and_then(|(key, val)| {
+            if key.hashed_address == self.hashed_address {
+                Some((key.hashed_storage_key, U256::from_be_slice(val.as_slice())))
+            } else {
+                None
+            }
+        }))
     }
 
     fn next(&mut self) -> OpProofsStorageResult<Option<(B256, U256)>> {
-        let Some((current, _)) = self.cursor.cursor.current()? else {
+        if self.cursor.cursor.current()?.is_none() {
             return self.seek(B256::default());
+        }
+
+        // Move to next distinct key first (skip past current key)
+        let Some((next_key, _)) =
+            self.cursor.cursor.next_no_dup().map_err(|e| OpProofsStorageError::Other(e.into()))?
+        else {
+            return Ok(None);
         };
 
-        Ok(self.cursor.get_next_key_value(current)?.and_then(|(subkey, value)| {
-            (subkey.hashed_address == subkey.hashed_address)
+        // Check if still in same address
+        if next_key.hashed_address != self.hashed_address {
+            return Ok(None);
+        }
+
+        Ok(self.cursor.get_next_key_value(next_key)?.and_then(|(subkey, value)| {
+            (subkey.hashed_address == self.hashed_address)
                 .then(|| (subkey.hashed_storage_key, U256::from_be_slice(value.as_slice())))
         }))
     }

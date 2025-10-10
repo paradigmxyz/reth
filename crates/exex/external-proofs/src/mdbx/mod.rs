@@ -20,7 +20,7 @@ use reth_db::{
     ClientVersion, DatabaseEnv, DatabaseError,
 };
 use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     transaction::{DbTx, DbTxMut},
 };
@@ -28,7 +28,7 @@ use reth_primitives_traits::Account;
 use reth_trie::{BranchNodeCompact, Nibbles};
 use std::path::Path;
 
-pub use codec::{BlockNumberHash, MaybeDeleted};
+pub use codec::{BlockNumberHash, MaybeDeleted, VersionedValue};
 pub use cursor::{BlockNumberVersionedCursor, MdbxOpProofsStorageTrieCursor};
 pub use models::{HashedStorageSubKey, MetadataKey, StorageBranchSubKey};
 pub use tables::Tables as ExternalTables;
@@ -130,15 +130,23 @@ impl<TX: DbTx, DB: Database<TX = TX>> OpProofsStorage for MdbxOpProofsStorage<DB
 
         let tx = self.db.tx_mut()?;
 
-        // Store branches using DupSort (key=path, subkey=block_number, value=branch)
+        // Store branches using DupSort (key=path, value=VersionedValue with block_number)
         {
             let mut cursor = tx.cursor_dup_write::<tables::ExternalAccountBranches>()?;
 
             for (path, branch) in &updates {
                 let key: reth_trie_common::StoredNibbles = path.clone().into();
-                let value = codec::MaybeDeleted::from(branch.clone());
-                // For DupSort tables, the subkey is encoded as part of the value by MDBX
-                // We just use upsert which handles the (key, value) pair
+
+                // For DupSort tables, we need to delete existing entry before inserting
+                // because upsert appends rather than updates
+                if let Some(existing) = cursor.seek_by_key_subkey(key.clone(), block_number)? {
+                    if existing.block_number == block_number {
+                        cursor.delete_current()?;
+                    }
+                }
+
+                let maybe_deleted = codec::MaybeDeleted::from(branch.clone());
+                let value = codec::VersionedValue::new(block_number, maybe_deleted);
                 cursor.upsert(key, &value)?;
             }
         }
@@ -178,7 +186,7 @@ impl<TX: DbTx, DB: Database<TX = TX>> OpProofsStorage for MdbxOpProofsStorage<DB
 
         let tx = self.db.tx_mut()?;
 
-        // Store branches using DupSort (key=(address, path), subkey=block_number, value=branch)
+        // Store branches using DupSort (key=(address, path), value=VersionedValue with block_number)
         {
             let mut cursor = tx.cursor_dup_write::<tables::ExternalStorageBranches>()?;
 
@@ -187,7 +195,16 @@ impl<TX: DbTx, DB: Database<TX = TX>> OpProofsStorage for MdbxOpProofsStorage<DB
                     hashed_address,
                     reth_trie_common::StoredNibbles(path.clone()),
                 );
-                let value = codec::MaybeDeleted::from(branch.clone());
+
+                // For DupSort tables, delete existing entry before inserting
+                if let Some(existing) = cursor.seek_by_key_subkey(key.clone(), block_number)? {
+                    if existing.block_number == block_number {
+                        cursor.delete_current()?;
+                    }
+                }
+
+                let maybe_deleted = codec::MaybeDeleted::from(branch.clone());
+                let value = codec::VersionedValue::new(block_number, maybe_deleted);
                 cursor.upsert(key, &value)?;
             }
         }
@@ -229,12 +246,20 @@ impl<TX: DbTx, DB: Database<TX = TX>> OpProofsStorage for MdbxOpProofsStorage<DB
 
         let tx = self.db.tx_mut()?;
 
-        // Store accounts using DupSort (key=hashed_address, subkey=block_number, value=account)
+        // Store accounts using DupSort (key=hashed_address, value=VersionedValue with block_number)
         {
             let mut cursor = tx.cursor_dup_write::<tables::ExternalHashedAccounts>()?;
 
             for (address, account) in &accounts {
-                let value = codec::MaybeDeleted::from(account.clone());
+                // For DupSort tables, delete existing entry before inserting
+                if let Some(existing) = cursor.seek_by_key_subkey(*address, block_number)? {
+                    if existing.block_number == block_number {
+                        cursor.delete_current()?;
+                    }
+                }
+
+                let maybe_deleted = codec::MaybeDeleted::from(account.clone());
+                let value = codec::VersionedValue::new(block_number, maybe_deleted);
                 cursor.upsert(*address, &value)?;
             }
         }
@@ -272,15 +297,29 @@ impl<TX: DbTx, DB: Database<TX = TX>> OpProofsStorage for MdbxOpProofsStorage<DB
 
         let tx = self.db.tx_mut()?;
 
-        // Store storage values using DupSort (key=(address, storage_key), subkey=block_number, value=U256 as B256)
+        // Store storage values using DupSort (key=(address, storage_key), value=VersionedValue with block_number)
         {
             let mut cursor = tx.cursor_dup_write::<tables::ExternalHashedStorages>()?;
 
             for (storage_key, value) in &storages {
                 let key = models::HashedStorageSubKey::new(hashed_address, *storage_key);
+
+                // For DupSort tables, delete existing entry before inserting
+                if let Some(existing) = cursor.seek_by_key_subkey(key.clone(), block_number)? {
+                    if existing.block_number == block_number {
+                        cursor.delete_current()?;
+                    }
+                }
+
                 // Convert U256 to B256 for storage
-                let value_b256 = B256::from(value.to_be_bytes());
-                let value = codec::MaybeDeleted::from(Some(value_b256));
+                // Zero values are treated as deletions in Ethereum
+                let maybe_deleted = if value.is_zero() {
+                    codec::MaybeDeleted::from(None)
+                } else {
+                    let value_b256 = B256::from(value.to_be_bytes());
+                    codec::MaybeDeleted::from(Some(value_b256))
+                };
+                let value = codec::VersionedValue::new(block_number, maybe_deleted);
                 cursor.upsert(key, &value)?;
             }
         }

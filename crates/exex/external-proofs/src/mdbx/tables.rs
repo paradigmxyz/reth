@@ -3,8 +3,8 @@
 //! This module defines all database tables used to store external proofs data.
 //! Each table is completely independent from Reth's main database tables.
 
-use super::{codec::BlockNumberHash, models::MetadataKey};
-use crate::{mdbx::MaybeDeleted, models::IntegerList};
+use super::{codec::BlockNumberHash, codec::VersionedValue, models::MetadataKey};
+use crate::models::IntegerList;
 use alloy_primitives::B256;
 use reth_db_api::table::{DupSort, Table};
 use reth_trie_common::StoredNibbles;
@@ -17,7 +17,7 @@ use reth_trie_common::StoredNibbles;
 ///
 /// Key: path (StoredNibbles)
 /// SubKey: block_number (u64)
-/// Value: MaybeDeleted<BranchNodeCompact> (empty bytes = deleted, non-empty = present)
+/// Value: VersionedValue<BranchNodeCompact> (contains block_number + MaybeDeleted value)
 ///
 /// This structure allows efficient iteration by path, with block versioning as secondary sort
 #[derive(Debug, Clone)]
@@ -28,7 +28,7 @@ impl Table for ExternalAccountBranches {
     const DUPSORT: bool = true;
 
     type Key = StoredNibbles;
-    type Value = MaybeDeleted<reth_trie::BranchNodeCompact>;
+    type Value = VersionedValue<reth_trie::BranchNodeCompact>;
 }
 
 impl DupSort for ExternalAccountBranches {
@@ -39,7 +39,7 @@ impl DupSort for ExternalAccountBranches {
 ///
 /// Key: (hashed_address, path)
 /// SubKey: block_number (u64)
-/// Value: MaybeDeleted<BranchNodeCompact> (empty bytes = deleted, non-empty = present)
+/// Value: VersionedValue<BranchNodeCompact> (contains block_number + MaybeDeleted value)
 ///
 /// This structure allows efficient iteration by address and path, with block versioning
 #[derive(Debug, Clone)]
@@ -50,7 +50,7 @@ impl Table for ExternalStorageBranches {
     const DUPSORT: bool = true;
 
     type Key = super::models::StorageBranchSubKey;
-    type Value = MaybeDeleted<reth_trie::BranchNodeCompact>;
+    type Value = VersionedValue<reth_trie::BranchNodeCompact>;
 }
 
 impl DupSort for ExternalStorageBranches {
@@ -61,7 +61,7 @@ impl DupSort for ExternalStorageBranches {
 ///
 /// Key: hashed_address (B256)
 /// SubKey: block_number (u64)
-/// Value: MaybeDeleted<Account> (empty bytes = deleted, non-empty = present)
+/// Value: VersionedValue<Account> (contains block_number + MaybeDeleted value)
 ///
 /// This structure allows efficient iteration by address, with block versioning as secondary sort
 #[derive(Debug, Clone)]
@@ -72,7 +72,7 @@ impl Table for ExternalHashedAccounts {
     const DUPSORT: bool = true;
 
     type Key = B256;
-    type Value = MaybeDeleted<reth_primitives_traits::Account>;
+    type Value = VersionedValue<reth_primitives_traits::Account>;
 }
 
 impl DupSort for ExternalHashedAccounts {
@@ -83,7 +83,7 @@ impl DupSort for ExternalHashedAccounts {
 ///
 /// Key: (hashed_address, storage_key) - HashedStorageSubKey
 /// SubKey: block_number (u64)
-/// Value: StorageEntry (zero values are NOT stored)
+/// Value: VersionedValue<B256> (contains block_number + MaybeDeleted value, zero values NOT stored)
 ///
 /// This structure allows efficient iteration by address and storage_key, with block versioning
 #[derive(Debug, Clone)]
@@ -94,7 +94,7 @@ impl Table for ExternalHashedStorages {
     const DUPSORT: bool = true;
 
     type Key = super::models::HashedStorageSubKey;
-    type Value = MaybeDeleted<B256>;
+    type Value = VersionedValue<B256>;
 }
 
 impl DupSort for ExternalHashedStorages {

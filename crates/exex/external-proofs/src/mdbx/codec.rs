@@ -3,7 +3,7 @@
 //! This module provides compression/decompression implementations for types that
 //! don't have built-in support, particularly `Option<T>` for tracking deletions.
 
-use bytes::BufMut;
+use bytes::{Buf, BufMut};
 use reth_db_api::table::{Compress, Decompress};
 use serde::{Deserialize, Serialize};
 
@@ -55,6 +55,50 @@ impl<T: Decompress> Decompress for MaybeDeleted<T> {
             let inner = T::decompress(value)?;
             Ok(MaybeDeleted(Some(inner)))
         }
+    }
+}
+
+/// Versioned value wrapper for DupSort tables
+///
+/// For DupSort tables in MDBX, the Value type must contain the SubKey as a field.
+/// This wrapper combines a block_number (the SubKey) with the actual value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionedValue<T> {
+    /// Block number (SubKey for DupSort)
+    pub block_number: u64,
+    /// The actual value (may be deleted)
+    pub value: MaybeDeleted<T>,
+}
+
+impl<T> VersionedValue<T> {
+    /// Create a new versioned value
+    pub const fn new(block_number: u64, value: MaybeDeleted<T>) -> Self {
+        Self { block_number, value }
+    }
+}
+
+impl<T: Compress> Compress for VersionedValue<T> {
+    type Compressed = Vec<u8>;
+
+    fn compress_to_buf<B: BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
+        // Encode block number first (8 bytes, big-endian)
+        buf.put_u64(self.block_number);
+        // Then encode the value
+        self.value.compress_to_buf(buf);
+    }
+}
+
+impl<T: Decompress> Decompress for VersionedValue<T> {
+    fn decompress(value: &[u8]) -> Result<Self, reth_db_api::DatabaseError> {
+        if value.len() < 8 {
+            return Err(reth_db_api::DatabaseError::Decode);
+        }
+
+        let mut buf = &value[..];
+        let block_number = buf.get_u64();
+        let value = MaybeDeleted::<T>::decompress(&value[8..])?;
+
+        Ok(Self { block_number, value })
     }
 }
 
