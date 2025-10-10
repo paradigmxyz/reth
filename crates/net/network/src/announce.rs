@@ -128,20 +128,14 @@ mod tests {
         // Should always return Pending
         with_context(|cx| {
             assert!(matches!(
-                <ProofOfStakeBlockAnnounce as BlockAnnounce<MockBlock>>::poll(
-                    &mut announcer,
-                    cx
-                ),
+                <ProofOfStakeBlockAnnounce as BlockAnnounce<MockBlock>>::poll(&mut announcer, cx),
                 Poll::Pending
             ));
         });
 
         with_context(|cx| {
             assert!(matches!(
-                <ProofOfStakeBlockAnnounce as BlockAnnounce<MockBlock>>::poll(
-                    &mut announcer,
-                    cx
-                ),
+                <ProofOfStakeBlockAnnounce as BlockAnnounce<MockBlock>>::poll(&mut announcer, cx),
                 Poll::Pending
             ));
         });

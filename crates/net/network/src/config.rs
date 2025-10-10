@@ -1,6 +1,7 @@
 //! Network config support
 
 use crate::{
+    announce::BlockAnnounce,
     error::NetworkError,
     import::{BlockImport, ProofOfStakeBlockImport},
     transactions::TransactionsManagerConfig,
@@ -73,6 +74,14 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub fork_filter: ForkFilter,
     /// The block importer type.
     pub block_import: Box<dyn BlockImport<N::NewBlockPayload>>,
+    /// The block announcer type.
+    ///
+    /// This is the symmetric counterpart to `block_import`. While `block_import` handles
+    /// incoming blocks from peers, `block_announce` handles outgoing block announcements.
+    ///
+    /// For Proof-of-Stake chains, this should remain `None` as block propagation over devp2p
+    /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
+    pub block_announce: Option<Box<dyn BlockAnnounce<N::NewBlockPayload>>>,
     /// The default mode of the network.
     pub network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
@@ -217,6 +226,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     tx_gossip_disabled: bool,
     /// The block importer type
     block_import: Option<Box<dyn BlockImport<N::NewBlockPayload>>>,
+    /// The block announcer type
+    block_announce: Option<Box<dyn BlockAnnounce<N::NewBlockPayload>>>,
     /// How to instantiate transactions manager.
     transactions_manager_config: TransactionsManagerConfig,
     /// The NAT resolver for external IP
@@ -263,6 +274,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             head: None,
             tx_gossip_disabled: false,
             block_import: None,
+            block_announce: None,
             transactions_manager_config: Default::default(),
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
@@ -563,6 +575,18 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Sets the block announce type.
+    ///
+    /// For Proof-of-Stake chains, this should remain unset as block propagation over devp2p
+    /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
+    pub fn block_announce(
+        mut self,
+        block_announce: Box<dyn BlockAnnounce<N::NewBlockPayload>>,
+    ) -> Self {
+        self.block_announce = Some(block_announce);
+        self
+    }
+
     /// Convenience function for creating a [`NetworkConfig`] with a noop provider that does
     /// nothing.
     pub fn build_with_noop_provider<ChainSpec>(
@@ -616,6 +640,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             head,
             tx_gossip_disabled,
             block_import,
+            block_announce,
             transactions_manager_config,
             nat,
             handshake,
@@ -676,6 +701,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             sessions_config: sessions_config.unwrap_or_default(),
             chain_id,
             block_import: block_import.unwrap_or_else(|| Box::<ProofOfStakeBlockImport>::default()),
+            block_announce,
             network_mode,
             executor: executor.unwrap_or_else(|| Box::<TokioTaskExecutor>::default()),
             status,
