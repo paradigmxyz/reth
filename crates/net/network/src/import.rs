@@ -83,7 +83,7 @@ pub enum BlockImportError {
 
 /// An implementation of `BlockImport` used in Proof-of-Stake consensus that does nothing.
 ///
-/// Block propagation over devp2p is invalid in PoS: [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
+/// Block propagation over devp2p is invalid in `PoS`: [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct ProofOfStakeBlockImport;

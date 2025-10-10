@@ -93,7 +93,7 @@ pub enum BlockAnnounceRequest<B = NewBlock> {
 
 /// A no-op implementation of [`BlockAnnounce`] used in Proof-of-Stake consensus.
 ///
-/// Block propagation over devp2p is invalid in PoS: [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
+/// Block propagation over devp2p is invalid in `PoS`: [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct ProofOfStakeBlockAnnounce;
@@ -149,7 +149,7 @@ mod tests {
         f(&mut cx)
     }
 
-    /// Mock BlockAnnounce implementation for testing
+    /// Mock `BlockAnnounce` implementation for testing
     #[derive(Debug)]
     struct MockBlockAnnounce {
         blocks: VecDeque<(MockBlock, B256)>,
@@ -211,7 +211,7 @@ mod tests {
         // Add a block
         let block = MockBlock { number: 1, hash: B256::random() };
         let hash = block.hash;
-        announcer.add_block(block.clone(), hash);
+        announcer.add_block(block, hash);
 
         // Should now return the block
         with_context(|cx| match announcer.poll(cx) {
@@ -276,7 +276,7 @@ mod tests {
         let hash = B256::random();
 
         let event = BlockAnnounceRequest::Announce {
-            block: block.clone(),
+            block,
             hash,
             strategy: PropagationStrategy::FullBlock,
         };
