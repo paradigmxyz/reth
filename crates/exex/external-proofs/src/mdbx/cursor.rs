@@ -17,7 +17,7 @@ use reth_primitives_traits::Account;
 use reth_trie::{BranchNodeCompact, Nibbles, StoredNibbles};
 
 use super::{codec, models, tables};
-use crate::mdbx::StorageBranchSubKey;
+use crate::mdbx::{HashedStorageSubKey, StorageBranchSubKey};
 use crate::{
     mdbx::MaybeDeleted,
     storage::{
@@ -28,7 +28,8 @@ use crate::{
 /// Cursor over account trie branches
 ///
 /// Uses streaming merge: iterates through sorted data once, merging versions as encountered.
-pub struct MdbxTrieCursor<Cursor> {
+pub struct BlockNumberVersionedCursor<T: Table + DupSort, Cursor> {
+    _table: PhantomData<T>,
     cursor: Cursor,
     max_block_number: u64,
 }
@@ -37,10 +38,10 @@ impl<
         V,
         T: Table<Value = MaybeDeleted<V>> + DupSort<SubKey = u64>,
         Cursor: DbCursorRO<T> + DbDupCursorRO<T>,
-    > MdbxTrieCursor<Cursor>
+    > BlockNumberVersionedCursor<T, Cursor>
 {
     pub(crate) fn new(cursor: Cursor, max_block_number: u64) -> Self {
-        Self { cursor, max_block_number }
+        Self { cursor, max_block_number, _table: PhantomData }
     }
 
     fn get_latest_key_value(
@@ -109,7 +110,7 @@ impl<
             + DbDupCursorRO<tables::ExternalAccountBranches>
             + Send
             + Sync,
-    > ExternalTrieCursor for MdbxTrieCursor<Cursor>
+    > ExternalTrieCursor for BlockNumberVersionedCursor<tables::ExternalAccountBranches, Cursor>
 {
     fn seek_exact(
         &mut self,
@@ -152,17 +153,17 @@ impl<
 
 pub struct MdbxStorageTrieCursor<T: Table + DupSort, Cursor> {
     hashed_address: B256,
-    cursor: MdbxTrieCursor<Cursor>,
+    cursor: BlockNumberVersionedCursor<T, Cursor>,
 }
 
 impl<
         V,
         T: Table<Value = MaybeDeleted<V>> + DupSort<SubKey = u64>,
         Cursor: DbCursorRO<T> + DbDupCursorRO<T>,
-    > MdbxStorageTrieCursor<Cursor>
+    > MdbxStorageTrieCursor<T, Cursor>
 {
     pub(crate) fn new(cursor: Cursor, hashed_address: B256, max_block_number: u64) -> Self {
-        Self { hashed_address, cursor: MdbxTrieCursor::new(cursor, max_block_number) }
+        Self { hashed_address, cursor: BlockNumberVersionedCursor::new(cursor, max_block_number) }
     }
 }
 
@@ -171,7 +172,7 @@ impl<
             + DbDupCursorRO<tables::ExternalStorageBranches>
             + Send
             + Sync,
-    > ExternalTrieCursor for MdbxStorageTrieCursor<Cursor>
+    > ExternalTrieCursor for MdbxStorageTrieCursor<tables::ExternalStorageBranches, Cursor>
 {
     fn seek_exact(
         &mut self,
@@ -220,5 +221,108 @@ impl<
             .current()
             .map_err(|e| ExternalStorageError::Other(e.into()))?
             .map(|entry| entry.0.path.0))
+    }
+}
+
+pub struct MdbxAccountCursor<Cursor> {
+    cursor: BlockNumberVersionedCursor<tables::ExternalHashedAccounts, Cursor>,
+}
+
+impl<
+        Cursor: DbCursorRO<tables::ExternalHashedAccounts>
+            + DbDupCursorRO<tables::ExternalHashedAccounts>
+            + Send
+            + Sync,
+    > MdbxAccountCursor<Cursor>
+{
+    pub(crate) fn new(cursor: Cursor, block_number: u64) -> Self {
+        Self { cursor: BlockNumberVersionedCursor::new(cursor, block_number) }
+    }
+}
+
+impl<
+        Cursor: DbCursorRO<tables::ExternalHashedAccounts>
+            + DbDupCursorRO<tables::ExternalHashedAccounts>
+            + Send
+            + Sync,
+    > ExternalHashedCursor for MdbxAccountCursor<Cursor>
+{
+    type Value = Account;
+
+    fn seek(&mut self, target_path: B256) -> ExternalStorageResult<Option<(B256, Account)>> {
+        Ok(self.cursor.get_latest_key_value(target_path)?.and_then(|entry| {
+            if let Some(val) = entry.1 .0
+                && entry.0 == target_path
+            {
+                Some((entry.0, val))
+            } else {
+                None
+            }
+        }))
+    }
+
+    fn next(&mut self) -> ExternalStorageResult<Option<(B256, Account)>> {
+        let Some((current, _)) = self.cursor.cursor.current()? else {
+            return self.seek(B256::default());
+        };
+
+        Ok(self.cursor.get_next_key_value(current)?)
+    }
+}
+
+pub struct MdbxStorageCursor<Cursor> {
+    cursor: BlockNumberVersionedCursor<tables::ExternalHashedStorages, Cursor>,
+    hashed_address: B256,
+}
+
+impl<
+        Cursor: DbCursorRO<tables::ExternalHashedStorages>
+            + DbDupCursorRO<tables::ExternalHashedStorages>
+            + Send
+            + Sync,
+    > MdbxStorageCursor<Cursor>
+{
+    pub(crate) fn new(cursor: Cursor, block_number: u64, hashed_address: B256) -> Self {
+        Self { cursor: BlockNumberVersionedCursor::new(cursor, block_number), hashed_address }
+    }
+}
+
+impl<
+        Cursor: DbCursorRO<tables::ExternalHashedStorages>
+            + DbDupCursorRO<tables::ExternalHashedStorages>
+            + Send
+            + Sync,
+    > ExternalHashedCursor for MdbxStorageCursor<Cursor>
+{
+    type Value = U256;
+
+    fn seek(&mut self, target_path: B256) -> ExternalStorageResult<Option<(B256, U256)>> {
+        let subkey = HashedStorageSubKey {
+            hashed_address: self.hashed_address,
+            hashed_storage_key: target_path,
+        };
+
+        Ok(self.cursor.get_latest_key_value(subkey.clone())?.and_then(
+            |(key, maybe_deleted_val)| {
+                if let Some(val) = maybe_deleted_val.0
+                    && key == subkey
+                {
+                    Some((key.hashed_storage_key, U256::from_be_slice(val.as_slice())))
+                } else {
+                    None
+                }
+            },
+        ))
+    }
+
+    fn next(&mut self) -> ExternalStorageResult<Option<(B256, U256)>> {
+        let Some((current, _)) = self.cursor.cursor.current()? else {
+            return self.seek(B256::default());
+        };
+
+        Ok(self.cursor.get_next_key_value(current)?.and_then(|(subkey, value)| {
+            (subkey.hashed_address == subkey.hashed_address)
+                .then(|| (subkey.hashed_storage_key, U256::from_be_slice(value.as_slice())))
+        }))
     }
 }

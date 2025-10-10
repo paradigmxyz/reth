@@ -75,7 +75,10 @@ pub struct BlockStateDiff {
 #[auto_impl(Arc)]
 pub trait ExternalStorage: Send + Sync + Debug {
     /// Cursor for iterating over trie branches.
-    type TrieCursor: ExternalTrieCursor;
+    type StorageTrieCursor: ExternalTrieCursor;
+
+    /// Cursor for iterating over account trie branches.
+    type AccountTrieCursor: ExternalTrieCursor;
 
     /// Cursor for iterating over storage leaves.
     type StorageCursor: ExternalHashedCursor<Value = U256>;
@@ -124,11 +127,17 @@ pub trait ExternalStorage: Send + Sync + Debug {
     async fn get_latest_block_number(&self) -> ExternalStorageResult<Option<(u64, B256)>>;
 
     /// Get a trie cursor for the storage backend
-    fn trie_cursor(
+    fn storage_trie_cursor(
         &self,
-        hashed_address: Option<B256>,
+        hashed_address: B256,
         max_block_number: u64,
-    ) -> ExternalStorageResult<Self::TrieCursor>;
+    ) -> ExternalStorageResult<Self::StorageTrieCursor>;
+
+    /// Get a trie cursor for the account backend
+    fn account_trie_cursor(
+        &self,
+        max_block_number: u64,
+    ) -> ExternalStorageResult<Self::AccountTrieCursor>;
 
     /// Get a storage cursor for the storage backend
     fn storage_hashed_cursor(

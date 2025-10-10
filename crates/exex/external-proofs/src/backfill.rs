@@ -508,7 +508,7 @@ mod tests {
         job.backfill_accounts_trie().await.unwrap();
 
         // Verify data was stored
-        let mut trie_cursor = storage.trie_cursor(None, 100).unwrap();
+        let mut trie_cursor = storage.account_trie_cursor(100).unwrap();
         let mut count = 0;
         while let Some((path, _node)) = trie_cursor.next().unwrap() {
             assert_eq!(path, nodes[count].0 .0);
@@ -566,7 +566,7 @@ mod tests {
         job.backfill_storages_trie().await.unwrap();
 
         // Verify data was stored for addr1
-        let mut trie_cursor = storage.trie_cursor(Some(addr1), 100).unwrap();
+        let mut trie_cursor = storage.storage_trie_cursor(addr1, 100).unwrap();
         let mut found = vec![];
         while let Some((path, _node)) = trie_cursor.next().unwrap() {
             found.push(path);
@@ -576,7 +576,7 @@ mod tests {
         assert_eq!(found[1], nodes[1].1.nibbles.0);
 
         // Verify data was stored for addr2
-        let mut trie_cursor = storage.trie_cursor(Some(addr2), 100).unwrap();
+        let mut trie_cursor = storage.storage_trie_cursor(addr2, 100).unwrap();
         let mut found = vec![];
         while let Some((path, _node)) = trie_cursor.next().unwrap() {
             found.push(path);
@@ -660,10 +660,10 @@ mod tests {
         let mut storage_cursor = storage.storage_hashed_cursor(addr, 100).unwrap();
         assert!(storage_cursor.next().unwrap().is_some());
 
-        let mut trie_cursor = storage.trie_cursor(None, 100).unwrap();
+        let mut trie_cursor = storage.account_trie_cursor(100).unwrap();
         assert!(trie_cursor.next().unwrap().is_some());
 
-        let mut storage_trie_cursor = storage.trie_cursor(Some(addr), 100).unwrap();
+        let mut storage_trie_cursor = storage.storage_trie_cursor(addr, 100).unwrap();
         assert!(storage_trie_cursor.next().unwrap().is_some());
     }
 

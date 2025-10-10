@@ -321,7 +321,8 @@ impl ExternalHashedCursor for InMemoryAccountCursor {
 
 #[async_trait]
 impl ExternalStorage for InMemoryExternalStorage {
-    type TrieCursor = InMemoryTrieCursor;
+    type StorageTrieCursor = InMemoryTrieCursor;
+    type AccountTrieCursor = InMemoryTrieCursor;
     type StorageCursor = InMemoryStorageCursor;
     type AccountHashedCursor = InMemoryAccountCursor;
 
@@ -400,9 +401,9 @@ impl ExternalStorage for InMemoryExternalStorage {
         }
     }
 
-    fn trie_cursor(
+    fn storage_trie_cursor(
         &self,
-        hashed_address: Option<B256>,
+        hashed_address: B256,
         max_block_number: u64,
     ) -> ExternalStorageResult<Self::TrieCursor> {
         // For synchronous methods, we need to try_read() and handle potential blocking
@@ -411,6 +412,17 @@ impl ExternalStorage for InMemoryExternalStorage {
             .try_read()
             .map_err(|_| ExternalStorageError::Other(eyre::eyre!("Failed to acquire read lock")))?;
         Ok(InMemoryTrieCursor::new(&inner, hashed_address, max_block_number))
+    }
+
+    fn account_trie_cursor(
+        &self,
+        max_block_number: u64,
+    ) -> ExternalStorageResult<Self::AccountTrieCursor> {
+        let inner = self
+            .inner
+            .try_read()
+            .map_err(|_| ExternalStorageError::Other(eyre::eyre!("Failed to acquire read lock")))?;
+        Ok(InMemoryTrieCursor::new(&inner, None, max_block_number))
     }
 
     fn storage_hashed_cursor(

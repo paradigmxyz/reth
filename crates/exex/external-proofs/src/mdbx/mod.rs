@@ -10,6 +10,7 @@ mod models;
 mod tables;
 
 use crate::{
+    mdbx::cursor::{MdbxAccountCursor, MdbxStorageCursor},
     models::{BlockNumberHashedAddress, IntegerList},
     storage::{
         BlockStateDiff, ExternalHashedCursor, ExternalStorage, ExternalStorageError,
@@ -20,7 +21,7 @@ use alloy_primitives::map::HashMap;
 use alloy_primitives::{B256, U256};
 use reth_db::{
     mdbx::{init_db_for, DatabaseArguments},
-    ClientVersion, DatabaseEnv,
+    ClientVersion, DatabaseEnv, DatabaseError,
 };
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -37,23 +38,27 @@ use std::{
 };
 
 pub use codec::{BlockNumberHash, MaybeDeleted};
-pub use cursor::{MdbxStorageTrieCursor, MdbxTrieCursor};
+pub use cursor::{BlockNumberVersionedCursor, MdbxStorageTrieCursor};
 pub use models::{HashedStorageSubKey, MetadataKey, StorageBranchSubKey};
 pub use tables::Tables as ExternalTables;
+
+impl From<DatabaseError> for ExternalStorageError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Other(error.into())
+    }
+}
 
 /// MDBX-backed implementation of ExternalStorage
 ///
 /// **IMPORTANT**: This uses a COMPLETELY SEPARATE database from Reth's main DB.
 /// By default, it creates a database in `<datadir>/external-proofs/`.
 #[derive(Debug, Clone)]
-pub struct MdbxExternalStorage {
+pub struct MdbxExternalStorage<DB> {
     /// Database environment (separate from main Reth DB)
-    db: Arc<DatabaseEnv>,
-    /// Path to the external storage database
-    path: PathBuf,
+    db: DB,
 }
 
-impl MdbxExternalStorage {
+impl MdbxExternalStorage<DatabaseEnv> {
     /// Open or create external storage database at the specified path
     ///
     /// # Arguments
@@ -69,7 +74,20 @@ impl MdbxExternalStorage {
     /// let storage_path = datadir.join("external-proofs");
     /// let storage = MdbxExternalStorage::new(storage_path).unwrap();
     /// ```
-    pub fn new(path: impl AsRef<Path>) -> ExternalStorageResult<Self> {
+    pub fn new(db: DatabaseEnv) -> ExternalStorageResult<Self> {
+        Ok(Self { db })
+    }
+
+    /// Get database for testing (creates in temp directory)
+    #[cfg(test)]
+    pub fn new_test() -> ExternalStorageResult<Self> {
+        let temp_dir = tempfile::tempdir().map_err(|e| {
+            ExternalStorageError::Other(eyre::eyre!("Failed to create temp dir: {}", e))
+        })?;
+        Self::new_from_path(temp_dir.path())
+    }
+
+    pub fn new_from_path(path: impl AsRef<Path>) -> ExternalStorageResult<Self> {
         let path = path.as_ref().to_path_buf();
 
         // Create a NEW database with our external tables
@@ -83,45 +101,29 @@ impl MdbxExternalStorage {
                 e
             ))
         })?;
-
         tracing::info!(
             path = %path.display(),
             tables = tables::Tables::ALL.len(),
             "Initialized external storage MDBX database"
         );
 
-        Ok(Self { db: Arc::new(db), path })
-    }
-
-    /// Get the path to the external storage database
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// Create storage using Reth's datadir as base
-    ///
-    /// This creates the database at `<datadir>/external-proofs/`
-    pub fn from_datadir(datadir: impl AsRef<Path>) -> ExternalStorageResult<Self> {
-        let external_path = datadir.as_ref().join("external-proofs");
-        Self::new(external_path)
-    }
-
-    /// Get database for testing (creates in temp directory)
-    #[cfg(test)]
-    pub fn new_test() -> ExternalStorageResult<Self> {
-        let temp_dir = tempfile::tempdir().map_err(|e| {
-            ExternalStorageError::Other(eyre::eyre!("Failed to create temp dir: {}", e))
-        })?;
-        Self::new(temp_dir.path())
+        Self::new(db)
     }
 }
 
 // Implement ExternalStorage trait - will be filled in phases 4-6
 #[async_trait::async_trait]
-impl ExternalStorage for MdbxExternalStorage {
-    type TrieCursor = MdbxTrieCursor<tables::ExternalAccountBranches, Cursor>;
-    type AccountHashedCursor = MdbxAccountHashedCursor;
-    type StorageCursor = MdbxStorageCursor;
+impl<TX: DbTx, DB: Database<TX = TX>> ExternalStorage for MdbxExternalStorage<DB> {
+    type AccountTrieCursor = BlockNumberVersionedCursor<
+        tables::ExternalAccountBranches,
+        TX::DupCursor<tables::ExternalAccountBranches>,
+    >;
+    type StorageTrieCursor = MdbxStorageTrieCursor<
+        tables::ExternalStorageBranches,
+        TX::DupCursor<tables::ExternalStorageBranches>,
+    >;
+    type AccountHashedCursor = MdbxAccountCursor<TX::DupCursor<tables::ExternalHashedAccounts>>;
+    type StorageCursor = MdbxStorageCursor<TX::DupCursor<tables::ExternalHashedStorages>>;
 
     async fn store_account_branches(
         &self,
@@ -131,48 +133,41 @@ impl ExternalStorage for MdbxExternalStorage {
         // Sort updates by path for MDBX append operation
         updates.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        let tx = self.db.tx_mut().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let tx = self.db.tx_mut()?;
 
         // Store branches using DupSort (key=path, subkey=block_number, value=branch)
         {
-            let mut cursor = tx
-                .cursor_dup_write::<tables::ExternalAccountBranches>()
-                .map_err(|e| ExternalStorageError::Other(e.into()))?;
+            let mut cursor = tx.cursor_dup_write::<tables::ExternalAccountBranches>()?;
 
             for (path, branch) in &updates {
                 let key: reth_trie_common::StoredNibbles = path.clone().into();
                 let value = codec::MaybeDeleted::from(branch.clone());
                 // For DupSort tables, the subkey is encoded as part of the value by MDBX
                 // We just use upsert which handles the (key, value) pair
-                cursor.upsert(key, &value).map_err(|e| ExternalStorageError::Other(e.into()))?;
+                cursor.upsert(key, &value)?;
             }
         }
 
         // Update index
         {
-            let mut cursor = tx
-                .cursor_write::<tables::ExternalAccountBranchesIndex>()
-                .map_err(|e| ExternalStorageError::Other(e.into()))?;
+            let mut cursor = tx.cursor_write::<tables::ExternalAccountBranchesIndex>()?;
 
             for (path, _) in updates {
                 let key: reth_trie_common::StoredNibbles = path.into();
 
                 // Get existing list or create new
-                let mut list = cursor
-                    .seek_exact(key.clone())
-                    .map_err(|e| ExternalStorageError::Other(e.into()))?
-                    .map(|(_, list)| list)
-                    .unwrap_or_default();
+                let mut list =
+                    cursor.seek_exact(key.clone())?.map(|(_, list)| list).unwrap_or_default();
 
                 // Add block number to list (using inner RoaringTreemap)
                 list.0.insert(block_number);
 
                 // Update the index
-                cursor.upsert(key, &list).map_err(|e| ExternalStorageError::Other(e.into()))?;
+                cursor.upsert(key, &list)?;
             }
         }
 
-        tx.commit().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        tx.commit()?;
 
         Ok(())
     }
@@ -186,48 +181,10 @@ impl ExternalStorage for MdbxExternalStorage {
         // Sort items by path for MDBX append operation
         items.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        let tx = self.db.tx_mut().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let tx = self.db.tx_mut()?;
 
-        // Store branches
-        {
-            let mut cursor = tx
-                .cursor_dup_write::<tables::ExternalStorageBranches>()
-                .map_err(|e| ExternalStorageError::Other(e.into()))?;
-
-            for (path, branch) in &items {
-                let key = BlockNumberHashedAddress::new(block_number, hashed_address);
-                let subkey = StoredNibblesSubKey(path.clone().into());
-                let value = codec::MaybeDeleted::from(branch.clone());
-                // Use upsert instead of append_dup since we can't guarantee global ordering
-                cursor.upsert(key, &value).map_err(|e| ExternalStorageError::Other(e.into()))?;
-            }
-        }
-
-        // Update index
-        {
-            let mut cursor = tx
-                .cursor_dup_write::<tables::ExternalStorageBranchesIndex>()
-                .map_err(|e| ExternalStorageError::Other(e.into()))?;
-
-            for (path, _) in items {
-                let key = hashed_address; // Index key is just the hashed address
-                let subkey = StoredNibblesSubKey(path.into());
-
-                // Get existing list or create new
-                let mut list = cursor
-                    .seek_by_key_subkey(key, subkey)
-                    .map_err(|e| ExternalStorageError::Other(e.into()))?
-                    .unwrap_or_default();
-
-                // Add block number to list (using inner RoaringTreemap)
-                list.0.insert(block_number);
-
-                // Update the index using upsert (not append_dup since we're updating existing entries)
-                cursor.upsert(key, &list).map_err(|e| ExternalStorageError::Other(e.into()))?;
-            }
-        }
-
-        tx.commit().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        todo!("Implement store_storage_branches");
+        tx.commit()?;
 
         Ok(())
     }
@@ -240,45 +197,10 @@ impl ExternalStorage for MdbxExternalStorage {
         // Sort accounts by address for MDBX append operation
         accounts.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        let tx = self.db.tx_mut().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let tx = self.db.tx_mut()?;
 
-        // Store accounts
-        {
-            let mut cursor = tx
-                .cursor_write::<tables::ExternalHashedAccounts>()
-                .map_err(|e| ExternalStorageError::Other(e.into()))?;
-
-            for (address, account) in &accounts {
-                let key = BlockNumberHashedAddress::new(block_number, *address);
-                let value = codec::MaybeDeleted::from(account.clone());
-                // Use upsert instead of append since we can't guarantee global ordering
-                cursor.upsert(key, &value).map_err(|e| ExternalStorageError::Other(e.into()))?;
-            }
-        }
-
-        // Update index
-        {
-            let mut cursor = tx
-                .cursor_write::<tables::ExternalHashedAccountsIndex>()
-                .map_err(|e| ExternalStorageError::Other(e.into()))?;
-
-            for (address, _) in accounts {
-                // Get existing list or create new
-                let mut list = cursor
-                    .seek_exact(address)
-                    .map_err(|e| ExternalStorageError::Other(e.into()))?
-                    .map(|(_, list)| list)
-                    .unwrap_or_default();
-
-                // Add block number to list (using inner RoaringTreemap)
-                list.0.insert(block_number);
-
-                // Update the index
-                cursor.upsert(address, &list).map_err(|e| ExternalStorageError::Other(e.into()))?;
-            }
-        }
-
-        tx.commit().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        todo!("Implement store_hashed_accounts");
+        tx.commit()?;
 
         Ok(())
     }
@@ -292,49 +214,11 @@ impl ExternalStorage for MdbxExternalStorage {
         // Sort storages by storage key for MDBX append operation
         storages.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        let tx = self.db.tx_mut().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let tx = self.db.tx_mut()?;
 
-        // Store storage values
-        {
-            let mut cursor = tx
-                .cursor_dup_write::<tables::ExternalHashedStorages>()
-                .map_err(|e| ExternalStorageError::Other(e.into()))?;
+        todo!("Implement store_hashed_storages");
 
-            for (storage_key, value) in &storages {
-                let key = BlockNumberHashedAddress::new(block_number, hashed_address);
-                let storage_entry = StorageEntry { key: *storage_key, value: *value };
-                // Use upsert instead of append_dup since we can't guarantee global ordering
-                cursor
-                    .upsert(key, &storage_entry)
-                    .map_err(|e| ExternalStorageError::Other(e.into()))?;
-            }
-        }
-
-        // Update index
-        {
-            let mut cursor = tx
-                .cursor_dup_write::<tables::ExternalHashedStoragesIndex>()
-                .map_err(|e| ExternalStorageError::Other(e.into()))?;
-
-            for (storage_key, _) in storages {
-                let key = hashed_address;
-                let subkey = storage_key;
-
-                // Get existing list or create new
-                let mut list = cursor
-                    .seek_by_key_subkey(key, subkey)
-                    .map_err(|e| ExternalStorageError::Other(e.into()))?
-                    .unwrap_or_default();
-
-                // Add block number to list (using inner RoaringTreemap)
-                list.0.insert(block_number);
-
-                // Update the index using upsert (not append_dup since we're updating existing entries)
-                cursor.upsert(key, &list).map_err(|e| ExternalStorageError::Other(e.into()))?;
-            }
-        }
-
-        tx.commit().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        tx.commit()?;
 
         Ok(())
     }
@@ -389,55 +273,60 @@ impl ExternalStorage for MdbxExternalStorage {
 
         // Update block metadata
         {
-            let tx = self.db.tx_mut().map_err(|e| ExternalStorageError::Other(e.into()))?;
+            let tx = self.db.tx_mut()?;
 
-            let mut cursor = tx
-                .cursor_write::<tables::ExternalBlockMetadata>()
-                .map_err(|e| ExternalStorageError::Other(e.into()))?;
+            let mut cursor = tx.cursor_write::<tables::ExternalBlockMetadata>()?;
 
             // Update latest block
             let latest_value = codec::BlockNumberHash(block_number, block_hash);
-            cursor
-                .upsert(models::MetadataKey::LatestBlock, &latest_value)
-                .map_err(|e| ExternalStorageError::Other(e.into()))?;
+            cursor.upsert(models::MetadataKey::LatestBlock, &latest_value)?;
 
             // Set earliest block if not set
-            if cursor
-                .seek_exact(models::MetadataKey::EarliestBlock)
-                .map_err(|e| ExternalStorageError::Other(e.into()))?
-                .is_none()
-            {
+            if cursor.seek_exact(models::MetadataKey::EarliestBlock)?.is_none() {
                 let earliest_value = codec::BlockNumberHash(block_number, block_hash);
-                cursor
-                    .insert(models::MetadataKey::EarliestBlock, &earliest_value)
-                    .map_err(|e| ExternalStorageError::Other(e.into()))?;
+                cursor.insert(models::MetadataKey::EarliestBlock, &earliest_value)?;
             }
 
-            tx.commit().map_err(|e| ExternalStorageError::Other(e.into()))?;
+            tx.commit()?;
         }
 
         Ok(())
     }
 
-    fn trie_cursor(
+    fn storage_trie_cursor(
         &self,
-        hashed_address: Option<B256>,
+        hashed_address: B256,
         max_block_number: u64,
-    ) -> ExternalStorageResult<Self::TrieCursor> {
-        // Create a lazy cursor that queries MDBX on-demand
-        if let Some(hashed_address) = hashed_address {
-            Ok(MdbxStorageTrieCursor::new(Arc::clone(&self.db), hashed_address, max_block_number))
-        } else {
-            Ok(MdbxTrieCursor::new(Arc::clone(&self.db), max_block_number))
-        }
+    ) -> ExternalStorageResult<Self::StorageTrieCursor> {
+        let txn = self.db.tx()?;
+        Ok(MdbxStorageTrieCursor::new(
+            txn.cursor_dup_read::<tables::ExternalStorageBranches>()?,
+            hashed_address,
+            max_block_number,
+        ))
+    }
+
+    fn account_trie_cursor(
+        &self,
+        max_block_number: u64,
+    ) -> ExternalStorageResult<Self::AccountTrieCursor> {
+        let txn = self.db.tx()?;
+        Ok(BlockNumberVersionedCursor::new(
+            txn.cursor_dup_read::<tables::ExternalAccountBranches>()?,
+            max_block_number,
+        ))
     }
 
     fn account_hashed_cursor(
         &self,
         max_block_number: u64,
     ) -> ExternalStorageResult<Self::AccountHashedCursor> {
+        let txn = self.db.tx()?;
         // Create a lazy cursor that queries MDBX on-demand
-        Ok(MdbxAccountHashedCursor::new(Arc::clone(&self.db), max_block_number))
+        Ok(MdbxAccountCursor::new(
+            txn.cursor_dup_read::<tables::ExternalHashedAccounts>()?,
+            max_block_number,
+        ))
     }
 
     fn storage_hashed_cursor(
@@ -445,35 +334,34 @@ impl ExternalStorage for MdbxExternalStorage {
         hashed_address: B256,
         max_block_number: u64,
     ) -> ExternalStorageResult<Self::StorageCursor> {
+        let txn = self.db.tx()?;
         // Create a lazy cursor that queries MDBX on-demand
-        Ok(MdbxStorageCursor::new(Arc::clone(&self.db), hashed_address, max_block_number))
+        Ok(MdbxStorageCursor::new(
+            txn.cursor_dup_read::<tables::ExternalHashedStorages>()?,
+            max_block_number,
+            hashed_address,
+        ))
     }
 
     async fn get_earliest_block_number(&self) -> ExternalStorageResult<Option<(u64, B256)>> {
-        let tx = self.db.tx().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let tx = self.db.tx()?;
 
-        let mut cursor = tx
-            .cursor_read::<tables::ExternalBlockMetadata>()
-            .map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let mut cursor = tx.cursor_read::<tables::ExternalBlockMetadata>()?;
 
         let result = cursor
-            .seek_exact(models::MetadataKey::EarliestBlock)
-            .map_err(|e| ExternalStorageError::Other(e.into()))?
+            .seek_exact(models::MetadataKey::EarliestBlock)?
             .map(|(_, hash)| hash.into_components());
 
         Ok(result)
     }
 
     async fn get_latest_block_number(&self) -> ExternalStorageResult<Option<(u64, B256)>> {
-        let tx = self.db.tx().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let tx = self.db.tx()?;
 
-        let mut cursor = tx
-            .cursor_read::<tables::ExternalBlockMetadata>()
-            .map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let mut cursor = tx.cursor_read::<tables::ExternalBlockMetadata>()?;
 
         let result = cursor
-            .seek_exact(models::MetadataKey::LatestBlock)
-            .map_err(|e| ExternalStorageError::Other(e.into()))?
+            .seek_exact(models::MetadataKey::LatestBlock)?
             .map(|(_, hash)| hash.into_components());
 
         Ok(result)
@@ -495,7 +383,7 @@ impl ExternalStorage for MdbxExternalStorage {
         // Prune all data before new_earliest_block_number
         // This removes old historical data to save space
 
-        let tx = self.db.tx_mut().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let tx = self.db.tx_mut()?;
 
         // Delete entries with block_number < new_earliest_block_number from all tables
         // Note: We keep block 0 as the new base state, which we'll update with the diff
@@ -509,20 +397,16 @@ impl ExternalStorage for MdbxExternalStorage {
         // 4. Update index tables accordingly
 
         // Update metadata
-        let mut cursor = tx
-            .cursor_write::<tables::ExternalBlockMetadata>()
-            .map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let mut cursor = tx.cursor_write::<tables::ExternalBlockMetadata>()?;
 
         // Note: We need the block hash, but diff doesn't have it
         // For now, use zero hash - this should be fixed in the trait design
         let hash = B256::ZERO;
 
         let value = codec::BlockNumberHash::new(new_earliest_block_number, hash);
-        cursor
-            .upsert(models::MetadataKey::EarliestBlock, &value)
-            .map_err(|e| ExternalStorageError::Other(e.into()))?;
+        cursor.upsert(models::MetadataKey::EarliestBlock, &value)?;
 
-        tx.commit().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -536,7 +420,7 @@ impl ExternalStorage for MdbxExternalStorage {
         // 2. Add the new blocks from blocks_to_add
         // 3. Update LatestBlock metadata
 
-        let tx = self.db.tx_mut().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let tx = self.db.tx_mut()?;
 
         // TODO: Implement actual reorg handling
         // For MVP, we'll just update the metadata
@@ -547,7 +431,7 @@ impl ExternalStorage for MdbxExternalStorage {
         // 4. Update index tables accordingly
 
         // For now, just commit empty transaction
-        tx.commit().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -556,18 +440,14 @@ impl ExternalStorage for MdbxExternalStorage {
         block_number: u64,
         hash: B256,
     ) -> ExternalStorageResult<()> {
-        let tx = self.db.tx_mut().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let tx = self.db.tx_mut()?;
 
-        let mut cursor = tx
-            .cursor_write::<tables::ExternalBlockMetadata>()
-            .map_err(|e| ExternalStorageError::Other(e.into()))?;
+        let mut cursor = tx.cursor_write::<tables::ExternalBlockMetadata>()?;
 
         let value = codec::BlockNumberHash::new(block_number, hash);
-        cursor
-            .upsert(models::MetadataKey::EarliestBlock, &value)
-            .map_err(|e| ExternalStorageError::Other(e.into()))?;
+        cursor.upsert(models::MetadataKey::EarliestBlock, &value)?;
 
-        tx.commit().map_err(|e| ExternalStorageError::Other(e.into()))?;
+        tx.commit()?;
         Ok(())
     }
 }

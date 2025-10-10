@@ -126,7 +126,7 @@ mod tests {
     async fn test_cursor_empty_trie<S: ExternalStorage>(
         storage: S,
     ) -> Result<(), ExternalStorageError> {
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
 
         // All operations should return None on empty trie
         assert!(cursor.seek_exact(Nibbles::default())?.is_none());
@@ -150,7 +150,7 @@ mod tests {
         // Store single entry
         storage.store_account_branches(50, vec![(path, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
 
         // Test seek_exact
         let result = cursor.seek_exact(path)?.unwrap();
@@ -185,7 +185,7 @@ mod tests {
             storage.store_account_branches(50, vec![(*path, Some(branch.clone()))]).await?;
         }
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
 
         // Test that we can iterate through all entries
         let mut found_paths = Vec::new();
@@ -218,7 +218,7 @@ mod tests {
 
         storage.store_account_branches(50, vec![(path, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         let result = cursor.seek_exact(path)?.unwrap();
         assert_eq!(result.0, path);
 
@@ -237,7 +237,7 @@ mod tests {
 
         storage.store_account_branches(50, vec![(path, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         let non_existing = nibbles_from(vec![4, 5, 6]);
         assert!(cursor.seek_exact(non_existing)?.is_none());
 
@@ -256,7 +256,7 @@ mod tests {
 
         storage.store_account_branches(50, vec![(path, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         let result = cursor.seek_exact(Nibbles::default())?.unwrap();
         assert_eq!(result.0, Nibbles::default());
 
@@ -275,7 +275,7 @@ mod tests {
 
         storage.store_account_branches(50, vec![(path, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         let result = cursor.seek(path)?.unwrap();
         assert_eq!(result.0, path);
 
@@ -296,7 +296,7 @@ mod tests {
         storage.store_account_branches(50, vec![(path1, Some(branch.clone()))]).await?;
         storage.store_account_branches(50, vec![(path2, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         // Seek to path between 1 and 3, should return path 3
         let seek_path = nibbles_from(vec![2]);
         let result = cursor.seek(seek_path)?.unwrap();
@@ -317,7 +317,7 @@ mod tests {
 
         storage.store_account_branches(50, vec![(path, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         // Seek to path after all nodes
         let seek_path = nibbles_from(vec![9]);
         assert!(cursor.seek(seek_path)?.is_none());
@@ -337,7 +337,7 @@ mod tests {
 
         storage.store_account_branches(50, vec![(path, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         // Seek to path before all nodes, should return first node
         let seek_path = nibbles_from(vec![1]);
         let result = cursor.seek(seek_path)?.unwrap();
@@ -362,7 +362,7 @@ mod tests {
 
         storage.store_account_branches(50, vec![(path, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         // next() without prior seek should start from beginning
         let result = cursor.next()?.unwrap();
         assert_eq!(result.0, path);
@@ -384,7 +384,7 @@ mod tests {
         storage.store_account_branches(50, vec![(path1, Some(branch.clone()))]).await?;
         storage.store_account_branches(50, vec![(path2, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         cursor.seek(path1)?;
 
         // next() should return second node
@@ -406,7 +406,7 @@ mod tests {
 
         storage.store_account_branches(50, vec![(path, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         cursor.seek(path)?;
 
         // next() at end should return None
@@ -429,7 +429,7 @@ mod tests {
             storage.store_account_branches(50, vec![(*path, Some(branch.clone()))]).await?;
         }
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
 
         // Iterate through all with consecutive next() calls
         for expected_path in &paths {
@@ -457,7 +457,7 @@ mod tests {
         storage.store_account_branches(50, vec![(path1, Some(branch.clone()))]).await?;
         storage.store_account_branches(50, vec![(path2, Some(branch.clone()))]).await?;
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
 
         // Current should be None initially
         assert!(cursor.current()?.is_none());
@@ -480,7 +480,7 @@ mod tests {
     async fn test_current_no_prior_operations<S: ExternalStorage>(
         storage: S,
     ) -> Result<(), ExternalStorageError> {
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
 
         // Current should be None when no operations performed
         assert!(cursor.current()?.is_none());
@@ -508,12 +508,12 @@ mod tests {
         storage.store_account_branches(100, vec![(path, Some(branch2.clone()))]).await?;
 
         // Cursor with max_block_number=75 should see only block 50 data
-        let mut cursor75 = storage.trie_cursor(None, 75)?;
+        let mut cursor75 = storage.account_trie_cursor(75)?;
         let result75 = cursor75.seek_exact(path)?.unwrap();
         assert_eq!(result75.0, path);
 
         // Cursor with max_block_number=150 should see block 100 data (latest)
-        let mut cursor150 = storage.trie_cursor(None, 150)?;
+        let mut cursor150 = storage.account_trie_cursor(150)?;
         let result150 = cursor150.seek_exact(path)?.unwrap();
         assert_eq!(result150.0, path);
 
@@ -535,11 +535,11 @@ mod tests {
         storage.store_account_branches(100, vec![(path, None)]).await?;
 
         // Cursor before deletion should see the node
-        let mut cursor75 = storage.trie_cursor(None, 75)?;
+        let mut cursor75 = storage.account_trie_cursor(75)?;
         assert!(cursor75.seek_exact(path)?.is_some());
 
         // Cursor after deletion should not see the node
-        let mut cursor150 = storage.trie_cursor(None, 150)?;
+        let mut cursor150 = storage.account_trie_cursor(150)?;
         assert!(cursor150.seek_exact(path)?.is_none());
 
         Ok(())
@@ -566,17 +566,17 @@ mod tests {
         storage.store_storage_branches(50, addr2, vec![(path, Some(branch.clone()))]).await?;
 
         // Cursor for addr1 should only see addr1 data
-        let mut cursor1 = storage.trie_cursor(Some(addr1), 100)?;
+        let mut cursor1 = storage.storage_trie_cursor(addr1, 100)?;
         let result1 = cursor1.seek_exact(path)?.unwrap();
         assert_eq!(result1.0, path);
 
         // Cursor for addr2 should only see addr2 data
-        let mut cursor2 = storage.trie_cursor(Some(addr2), 100)?;
+        let mut cursor2 = storage.storage_trie_cursor(addr2, 100)?;
         let result2 = cursor2.seek_exact(path)?.unwrap();
         assert_eq!(result2.0, path);
 
         // Cursor for addr1 should not see addr2 data when iterating
-        let mut cursor1_iter = storage.trie_cursor(Some(addr1), 100)?;
+        let mut cursor1_iter = storage.storage_trie_cursor(addr1, 100)?;
         let mut found_count = 0;
         while cursor1_iter.next()?.is_some() {
             found_count += 1;
@@ -602,12 +602,12 @@ mod tests {
         storage.store_account_branches(50, vec![(path, Some(branch.clone()))]).await?;
 
         // State trie cursor (None address) should only see state trie data
-        let mut state_cursor = storage.trie_cursor(None, 100)?;
+        let mut state_cursor = storage.account_trie_cursor(100)?;
         let result = state_cursor.seek_exact(path)?.unwrap();
         assert_eq!(result.0, path);
 
         // Verify state cursor doesn't see account data when iterating
-        let mut state_cursor_iter = storage.trie_cursor(None, 100)?;
+        let mut state_cursor_iter = storage.account_trie_cursor(100)?;
         let mut found_count = 0;
         while state_cursor_iter.next()?.is_some() {
             found_count += 1;
@@ -635,7 +635,7 @@ mod tests {
         storage.store_account_branches(50, vec![(path2, Some(branch.clone()))]).await?;
 
         // Account cursor should only see account data
-        let mut account_cursor = storage.trie_cursor(Some(addr), 100)?;
+        let mut account_cursor = storage.storage_trie_cursor(addr, 100)?;
         let mut account_paths = Vec::new();
         while let Some((path, _)) = account_cursor.next()? {
             account_paths.push(path);
@@ -644,7 +644,7 @@ mod tests {
         assert_eq!(account_paths[0], path1);
 
         // State cursor should only see state data
-        let mut state_cursor = storage.trie_cursor(None, 100)?;
+        let mut state_cursor = storage.account_trie_cursor(100)?;
         let mut state_paths = Vec::new();
         while let Some((path, _)) = state_cursor.next()? {
             state_paths.push(path);
@@ -679,7 +679,7 @@ mod tests {
             storage.store_account_branches(50, vec![(*path, Some(branch.clone()))]).await?;
         }
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         let mut found_paths = Vec::new();
         while let Some((path, _)) = cursor.next()? {
             found_paths.push(path);
@@ -716,7 +716,7 @@ mod tests {
             storage.store_account_branches(50, vec![(*path, Some(branch.clone()))]).await?;
         }
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
 
         // Seek to prefix should find exact match
         let result = cursor.seek_exact(paths[0])?.unwrap();
@@ -753,7 +753,7 @@ mod tests {
             storage.store_account_branches(50, vec![(*path, Some(branch.clone()))]).await?;
         }
 
-        let mut cursor = storage.trie_cursor(None, 100)?;
+        let mut cursor = storage.account_trie_cursor(100)?;
         let mut found_paths = Vec::new();
         while let Some((path, _)) = cursor.next()? {
             found_paths.push(path);
