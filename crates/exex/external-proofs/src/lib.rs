@@ -8,9 +8,9 @@ use reth_provider::StateReader;
 use reth_exex::{ExExContext, ExExEvent};
 
 pub mod in_memory;
+mod storage;
 #[cfg(test)]
 mod storage_tests;
-mod storage;
 
 /// Saves and serves trie nodes to make proofs faster. This handles the process of
 /// saving the current state, new blocks as they're added, and serving proof RPCs
