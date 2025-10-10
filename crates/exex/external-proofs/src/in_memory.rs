@@ -386,7 +386,7 @@ impl OpProofsHashedCursor for InMemoryAccountCursor {
 }
 
 #[async_trait]
-impl OpProofsStorage for InMemoryExternalStorage {
+impl OpProofsStorage for InMemoryProofsStorage {
     type StorageTrieCursor = InMemoryTrieCursor;
     type AccountTrieCursor = InMemoryTrieCursor;
     type StorageCursor = InMemoryStorageCursor;
@@ -471,23 +471,23 @@ impl OpProofsStorage for InMemoryExternalStorage {
         &self,
         hashed_address: B256,
         max_block_number: u64,
-    ) -> OpProofsStorageResult<Self::TrieCursor> {
+    ) -> OpProofsStorageResult<Self::StorageTrieCursor> {
         // For synchronous methods, we need to try_read() and handle potential blocking
         let inner = self
             .inner
             .try_read()
             .map_err(|_| OpProofsStorageError::Other(eyre::eyre!("Failed to acquire read lock")))?;
-        Ok(InMemoryTrieCursor::new(&inner, hashed_address, max_block_number))
+        Ok(InMemoryTrieCursor::new(&inner, Some(hashed_address), max_block_number))
     }
 
     fn account_trie_cursor(
         &self,
         max_block_number: u64,
-    ) -> ExternalStorageResult<Self::AccountTrieCursor> {
+    ) -> OpProofsStorageResult<Self::AccountTrieCursor> {
         let inner = self
             .inner
             .try_read()
-            .map_err(|_| ExternalStorageError::Other(eyre::eyre!("Failed to acquire read lock")))?;
+            .map_err(|_| OpProofsStorageError::Other(eyre::eyre!("Failed to acquire read lock")))?;
         Ok(InMemoryTrieCursor::new(&inner, None, max_block_number))
     }
 

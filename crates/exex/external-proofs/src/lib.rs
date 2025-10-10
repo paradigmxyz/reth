@@ -1,18 +1,26 @@
 //! OP Proofs ExEx - processes blocks and tracks state changes
 
-use crate::{backfill::BackfillJob, in_memory::InMemoryProofsStorage};
+use crate::{
+    backfill::BackfillJob, in_memory::InMemoryProofsStorage, live::LiveTrieCollector,
+    storage::OpProofsStorage,
+};
 use futures_util::TryStreamExt;
 use reth_chainspec::ChainInfo;
-use reth_exex::{ExExContext, ExExEvent};
+use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_node_types::NodeTypes;
-use reth_provider::{BlockNumReader, DBProvider, DatabaseProviderFactory};
+use reth_primitives_traits::AlloyBlockHeader;
+use reth_provider::{
+    BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory, TransactionVariant,
+};
 use std::sync::Arc;
+use tracing::info;
 
 pub mod backfill;
 pub mod in_memory;
 pub mod live;
 pub mod mdbx;
+pub mod models;
 pub mod proof;
 pub mod provider;
 pub mod storage;
@@ -51,7 +59,7 @@ where
         let ChainInfo { best_number, best_hash } = self.ctx.provider().chain_info()?;
         BackfillJob::new(self.storage.clone(), &db_tx).run(best_number, best_hash).await?;
 
-        let collector = LiveTrieCollector::<Node, Arc<InMemoryExternalStorage>>::new(
+        let collector = LiveTrieCollector::<Node, Arc<InMemoryProofsStorage>>::new(
             self.ctx.evm_config().clone(),
             self.ctx.provider().clone(),
             self.storage.clone(),

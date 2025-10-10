@@ -4,7 +4,7 @@
 mod tests {
     use crate::{
         in_memory::InMemoryProofsStorage,
-        mdbx::MdbxExternalStorage,
+        mdbx::MdbxOpProofsStorage,
         storage::{
             BlockStateDiff, OpProofsHashedCursor, OpProofsStorage, OpProofsStorageError,
             OpProofsTrieCursor,
@@ -72,7 +72,7 @@ mod tests {
 
     /// Test basic storage and retrieval of earliest block number
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_earliest_block_operations<S: OpProofsStorage>(
         storage: S,
@@ -94,7 +94,7 @@ mod tests {
 
     /// Test storing and retrieving trie updates
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_trie_updates_operations<S: OpProofsStorage>(
         storage: S,
@@ -122,11 +122,11 @@ mod tests {
 
     /// Test cursor operations on empty trie
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_cursor_empty_trie<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let mut cursor = storage.account_trie_cursor(100)?;
 
         // All operations should return None on empty trie
@@ -140,7 +140,7 @@ mod tests {
 
     /// Test cursor operations with single entry
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_cursor_single_entry<S: OpProofsStorage>(
         storage: S,
@@ -168,7 +168,7 @@ mod tests {
 
     /// Test cursor operations with multiple entries
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_cursor_multiple_entries<S: OpProofsStorage>(
         storage: S,
@@ -209,7 +209,7 @@ mod tests {
 
     /// Test `seek_exact` with existing path
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_exact_existing_path<S: OpProofsStorage>(
         storage: S,
@@ -228,7 +228,7 @@ mod tests {
 
     /// Test `seek_exact` with non-existing path
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_exact_non_existing_path<S: OpProofsStorage>(
         storage: S,
@@ -247,7 +247,7 @@ mod tests {
 
     /// Test `seek_exact` with empty path
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_exact_empty_path<S: OpProofsStorage>(
         storage: S,
@@ -266,7 +266,7 @@ mod tests {
 
     /// Test seek to existing path
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_to_existing_path<S: OpProofsStorage>(
         storage: S,
@@ -285,7 +285,7 @@ mod tests {
 
     /// Test seek between existing nodes
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_between_existing_nodes<S: OpProofsStorage>(
         storage: S,
@@ -308,7 +308,7 @@ mod tests {
 
     /// Test seek after all nodes
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_after_all_nodes<S: OpProofsStorage>(
         storage: S,
@@ -328,7 +328,7 @@ mod tests {
 
     /// Test seek before all nodes
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_seek_before_all_nodes<S: OpProofsStorage>(
         storage: S,
@@ -353,7 +353,7 @@ mod tests {
 
     /// Test next without prior seek
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_next_without_prior_seek<S: OpProofsStorage>(
         storage: S,
@@ -373,7 +373,7 @@ mod tests {
 
     /// Test next after seek
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_next_after_seek<S: OpProofsStorage>(
         storage: S,
@@ -397,7 +397,7 @@ mod tests {
 
     /// Test next at end of trie
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_next_at_end_of_trie<S: OpProofsStorage>(
         storage: S,
@@ -418,7 +418,7 @@ mod tests {
 
     /// Test multiple consecutive next calls
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_multiple_consecutive_next<S: OpProofsStorage>(
         storage: S,
@@ -446,7 +446,7 @@ mod tests {
 
     /// Test current after operations
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_current_after_operations<S: OpProofsStorage>(
         storage: S,
@@ -476,11 +476,11 @@ mod tests {
 
     /// Test current with no prior operations
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_current_no_prior_operations<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let mut cursor = storage.account_trie_cursor(100)?;
 
         // Current should be None when no operations performed
@@ -495,7 +495,7 @@ mod tests {
 
     /// Test same path with different blocks
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_same_path_different_blocks<S: OpProofsStorage>(
         storage: S,
@@ -523,7 +523,7 @@ mod tests {
 
     /// Test deleted branch nodes
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_deleted_branch_nodes<S: OpProofsStorage>(
         storage: S,
@@ -552,7 +552,7 @@ mod tests {
 
     /// Test account-specific cursor
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_account_specific_cursor<S: OpProofsStorage>(
         storage: S,
@@ -589,7 +589,7 @@ mod tests {
 
     /// Test state trie cursor
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_state_trie_cursor<S: OpProofsStorage>(
         storage: S,
@@ -621,7 +621,7 @@ mod tests {
 
     /// Test mixed account and state data
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_mixed_account_state_data<S: OpProofsStorage>(
         storage: S,
@@ -662,7 +662,7 @@ mod tests {
 
     /// Test lexicographic ordering
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_lexicographic_ordering<S: OpProofsStorage>(
         storage: S,
@@ -701,7 +701,7 @@ mod tests {
 
     /// Test path prefix scenarios
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_path_prefix_scenarios<S: OpProofsStorage>(
         storage: S,
@@ -735,7 +735,7 @@ mod tests {
 
     /// Test complex nibble combinations
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_complex_nibble_combinations<S: OpProofsStorage>(
         storage: S,
@@ -777,7 +777,7 @@ mod tests {
 
     /// Test store and retrieve single account
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_store_and_retrieve_single_account<S: OpProofsStorage>(
         storage: S,
@@ -802,7 +802,7 @@ mod tests {
 
     /// Test account cursor navigation
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_account_cursor_navigation<S: OpProofsStorage>(
         storage: S,
@@ -840,7 +840,7 @@ mod tests {
 
     /// Test account block versioning
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_account_block_versioning<S: OpProofsStorage>(
         storage: S,
@@ -870,7 +870,7 @@ mod tests {
 
     /// Test store and retrieve storage
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_store_and_retrieve_storage<S: OpProofsStorage>(
         storage: S,
@@ -900,7 +900,7 @@ mod tests {
 
     /// Test storage cursor navigation
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_storage_cursor_navigation<S: OpProofsStorage>(
         storage: S,
@@ -932,7 +932,7 @@ mod tests {
 
     /// Test storage account isolation
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_storage_account_isolation<S: OpProofsStorage>(
         storage: S,
@@ -967,7 +967,7 @@ mod tests {
 
     /// Test storage block versioning
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_storage_block_versioning<S: OpProofsStorage>(
         storage: S,
@@ -998,7 +998,7 @@ mod tests {
 
     /// Test storage zero value deletion
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_storage_zero_value_deletion<S: OpProofsStorage>(
         storage: S,
@@ -1029,7 +1029,7 @@ mod tests {
 
     /// Test that zero values are skipped during iteration
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_storage_cursor_skips_zero_values<S: OpProofsStorage>(
         storage: S,
@@ -1082,7 +1082,7 @@ mod tests {
 
     /// Test empty cursors
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_empty_cursors<S: OpProofsStorage>(
         storage: S,
@@ -1102,7 +1102,7 @@ mod tests {
 
     /// Test cursor boundary conditions
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_cursor_boundary_conditions<S: OpProofsStorage>(
         storage: S,
@@ -1131,7 +1131,7 @@ mod tests {
 
     /// Test large batch operations
     #[test_case(InMemoryProofsStorage::new(); "InMemory")]
-    #[test_case(MdbxExternalStorage::new_test().unwrap(); "MDBX")]
+    #[test_case(MdbxOpProofsStorage::new_test().unwrap(); "MDBX")]
     #[tokio::test]
     async fn test_large_batch_operations<S: OpProofsStorage>(
         storage: S,
@@ -1324,7 +1324,7 @@ mod tests {
         storage.store_trie_updates(block_number, block_state_diff).await?;
 
         // ========== Verify Account Branch Nodes ==========
-        let mut account_trie_cursor = storage.trie_cursor(None, block_number + 10)?;
+        let mut account_trie_cursor = storage.account_trie_cursor(block_number + 10)?;
 
         // Should find the added branches
         let result1 = account_trie_cursor.seek_exact(account_path1)?;
@@ -1341,7 +1341,7 @@ mod tests {
 
         // ========== Verify Storage Branch Nodes ==========
         let mut storage_trie_cursor =
-            storage.trie_cursor(Some(hashed_address), block_number + 10)?;
+            storage.storage_trie_cursor(hashed_address, block_number + 10)?;
 
         let storage_result1 = storage_trie_cursor.seek_exact(storage_path1)?;
         assert!(storage_result1.is_some(), "Storage branch node 1 should be found");
@@ -1487,14 +1487,14 @@ mod tests {
 
         // ========== Verify initial state exists ==========
         // Verify block 50 data exists
-        let mut cursor_initial = storage.trie_cursor(None, 75)?;
+        let mut cursor_initial = storage.account_trie_cursor(75)?;
         assert!(
             cursor_initial.seek_exact(initial_branch_path)?.is_some(),
             "Initial branch should exist before replace"
         );
 
         // Verify block 101 old data exists
-        let mut cursor_old = storage.trie_cursor(None, 150)?;
+        let mut cursor_old = storage.account_trie_cursor(150)?;
         assert!(
             cursor_old.seek_exact(old_branch_path)?.is_some(),
             "Old branch at block 101 should exist before replace"
@@ -1563,13 +1563,13 @@ mod tests {
         storage.replace_updates(100, blocks_to_add).await?;
 
         // ========== Verify that data up to block 100 still exists ==========
-        let mut cursor_50 = storage.trie_cursor(None, 75)?;
+        let mut cursor_50 = storage.account_trie_cursor(75)?;
         assert!(
             cursor_50.seek_exact(initial_branch_path)?.is_some(),
             "Block 50 branch should still exist after replace"
         );
 
-        let mut cursor_100 = storage.trie_cursor(None, 100)?;
+        let mut cursor_100 = storage.account_trie_cursor(100)?;
         assert!(
             cursor_100.seek_exact(common_branch_path)?.is_some(),
             "Block 100 branch should still exist after replace"
@@ -1585,7 +1585,7 @@ mod tests {
         );
 
         // ========== Verify that old data after block 100 is gone ==========
-        let mut cursor_old_gone = storage.trie_cursor(None, 150)?;
+        let mut cursor_old_gone = storage.account_trie_cursor(150)?;
         assert!(
             cursor_old_gone.seek_exact(old_branch_path)?.is_none(),
             "Old branch at block 101 should be removed after replace"
@@ -1601,13 +1601,13 @@ mod tests {
         // ========== Verify new data is properly accessible via cursors ==========
 
         // Verify new account branch nodes
-        let mut trie_cursor = storage.trie_cursor(None, 150)?;
+        let mut trie_cursor = storage.account_trie_cursor(150)?;
         let branch_result = trie_cursor.seek_exact(new_branch_path)?;
         assert!(branch_result.is_some(), "New account branch should be accessible via cursor");
         assert_eq!(branch_result.unwrap().0, new_branch_path);
 
         // Verify new storage branch nodes
-        let mut storage_trie_cursor = storage.trie_cursor(Some(storage_hashed_addr), 150)?;
+        let mut storage_trie_cursor = storage.storage_trie_cursor(storage_hashed_addr, 150)?;
         let storage_branch_result = storage_trie_cursor.seek_exact(storage_branch_path)?;
         assert!(
             storage_branch_result.is_some(),
@@ -1632,7 +1632,7 @@ mod tests {
         assert_eq!(storage_result.as_ref().unwrap().1, new_storage_value);
 
         // Verify block 102 data
-        let mut trie_cursor_102 = storage.trie_cursor(None, 150)?;
+        let mut trie_cursor_102 = storage.account_trie_cursor(150)?;
         let branch_result_102 = trie_cursor_102.seek_exact(block_102_branch_path)?;
         assert!(branch_result_102.is_some(), "Block 102 branch should be accessible");
         assert_eq!(branch_result_102.unwrap().0, block_102_branch_path);

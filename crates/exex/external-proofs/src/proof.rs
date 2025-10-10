@@ -82,13 +82,13 @@ impl<Storage: OpProofsStorage> OpProofsTrieCursorFactory<Storage> {
 }
 
 impl<Storage: OpProofsStorage> TrieCursorFactory for OpProofsTrieCursorFactory<Storage> {
-    type AccountTrieCursor = OpProofsTrieCursor<Storage::TrieCursor>;
-    type StorageTrieCursor = OpProofsTrieCursor<Storage::TrieCursor>;
+    type AccountTrieCursor = OpProofsTrieCursor<Storage::AccountTrieCursor>;
+    type StorageTrieCursor = OpProofsTrieCursor<Storage::StorageTrieCursor>;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
         Ok(OpProofsTrieCursor::new(
             self.storage
-                .trie_cursor(None, self.block_number)
+                .account_trie_cursor(self.block_number)
                 .map_err(Into::<DatabaseError>::into)?,
         ))
     }
@@ -99,7 +99,7 @@ impl<Storage: OpProofsStorage> TrieCursorFactory for OpProofsTrieCursorFactory<S
     ) -> Result<Self::StorageTrieCursor, DatabaseError> {
         Ok(OpProofsTrieCursor::new(
             self.storage
-                .trie_cursor(Some(hashed_address), self.block_number)
+                .storage_trie_cursor(hashed_address, self.block_number)
                 .map_err(Into::<DatabaseError>::into)?,
         ))
     }
