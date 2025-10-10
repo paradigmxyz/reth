@@ -478,6 +478,29 @@ impl AsRef<Self> for TrieUpdatesSorted {
     }
 }
 
+impl From<TrieUpdatesSorted> for TrieUpdates {
+    fn from(sorted: TrieUpdatesSorted) -> Self {
+        let mut account_nodes = HashMap::default();
+        let mut removed_nodes = HashSet::default();
+
+        for (nibbles, node) in sorted.account_nodes {
+            if let Some(node) = node {
+                account_nodes.insert(nibbles, node);
+            } else {
+                removed_nodes.insert(nibbles);
+            }
+        }
+
+        let storage_tries = sorted
+            .storage_tries
+            .into_iter()
+            .map(|(address, storage)| (address, storage.into()))
+            .collect();
+
+        Self { account_nodes, removed_nodes, storage_tries }
+    }
+}
+
 /// Sorted storage trie updates reference used for serializing to file.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
@@ -540,6 +563,23 @@ fn exclude_empty_from_pair<V>(
     iter: impl IntoIterator<Item = (Nibbles, V)>,
 ) -> impl Iterator<Item = (Nibbles, V)> {
     iter.into_iter().filter(|(n, _)| !n.is_empty())
+}
+
+impl From<StorageTrieUpdatesSorted> for StorageTrieUpdates {
+    fn from(sorted: StorageTrieUpdatesSorted) -> Self {
+        let mut storage_nodes = HashMap::default();
+        let mut removed_nodes = HashSet::default();
+
+        for (nibbles, node) in sorted.storage_nodes {
+            if let Some(node) = node {
+                storage_nodes.insert(nibbles, node);
+            } else {
+                removed_nodes.insert(nibbles);
+            }
+        }
+
+        Self { is_deleted: sorted.is_deleted, storage_nodes, removed_nodes }
+    }
 }
 
 #[cfg(test)]
