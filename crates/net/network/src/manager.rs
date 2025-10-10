@@ -16,15 +16,13 @@
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the `RLPx` session.
 
 use crate::{
+    announce::{BlockAnnounce, BlockAnnounceEvent},
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
     discovery::Discovery,
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
-    import::{
-        BlockAnnounce, BlockAnnounceEvent, BlockImport, BlockImportEvent, BlockImportOutcome,
-        BlockValidation, NewBlockEvent,
-    },
+    import::{BlockImport, BlockImportEvent, BlockImportOutcome, BlockValidation, NewBlockEvent},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
@@ -204,7 +202,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     /// Sets the [`BlockAnnounce`] implementation for announcing blocks to the network.
     ///
-    /// This is primarily useful for Proof-of-Work chains or custom block production scenarios.
     /// For Proof-of-Stake chains, this should remain unset as block propagation over devp2p
     /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
     pub fn with_block_announce(
@@ -217,7 +214,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     /// Sets the [`BlockAnnounce`] implementation for announcing blocks to the network.
     ///
-    /// This is primarily useful for Proof-of-Work chains or custom block production scenarios.
     /// For Proof-of-Stake chains, this should remain unset as block propagation over devp2p
     /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
     pub fn set_block_announce(&mut self, announcer: Box<dyn BlockAnnounce<N::NewBlockPayload>>) {

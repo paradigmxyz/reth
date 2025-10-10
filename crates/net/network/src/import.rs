@@ -83,7 +83,7 @@ pub enum BlockImportError {
 
 /// An implementation of `BlockImport` used in Proof-of-Stake consensus that does nothing.
 ///
-/// Block propagation over devp2p is invalid in POS: [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
+/// Block propagation over devp2p is invalid in PoS: [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct ProofOfStakeBlockImport;
@@ -92,51 +92,6 @@ impl<B> BlockImport<B> for ProofOfStakeBlockImport {
     fn on_new_block(&mut self, _peer_id: PeerId, _incoming_block: NewBlockEvent<B>) {}
 
     fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockImportEvent<B>> {
-        Poll::Pending
-    }
-}
-
-/// Abstraction over block announcement to the network.
-///
-/// This trait provides the symmetric counterpart to [`BlockImport`]. While `BlockImport` handles
-/// incoming blocks from peers, `BlockAnnounce` handles outgoing block announcements to peers.
-///
-/// This is primarily useful for:
-/// - Proof-of-Work chains where the execution layer mines blocks
-/// - Development/testing scenarios with custom block production
-/// - Sidechains or Layer 2 solutions that sequence blocks at the execution layer
-///
-/// For Proof-of-Stake chains (post-merge Ethereum), this should remain unused as block
-/// propagation over devp2p is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
-pub trait BlockAnnounce<B = NewBlock>: std::fmt::Debug + Send + Sync {
-    /// Poll for blocks that need to be announced to peers.
-    ///
-    /// This is called by the [`NetworkManager`](crate::NetworkManager) to check if there are any
-    /// blocks ready to be announced to the network.
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BlockAnnounceEvent<B>>;
-}
-
-/// Event from block announce polling.
-#[derive(Debug)]
-pub enum BlockAnnounceEvent<B = NewBlock> {
-    /// Block ready to announce to peers
-    Announce {
-        /// The block to announce
-        block: B,
-        /// Hash of the block
-        hash: alloy_primitives::B256,
-    },
-}
-
-/// A no-op implementation of [`BlockAnnounce`] used in Proof-of-Stake consensus.
-///
-/// Block propagation over devp2p is invalid in PoS: [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
-#[derive(Debug, Default)]
-#[non_exhaustive]
-pub struct ProofOfStakeBlockAnnounce;
-
-impl<B> BlockAnnounce<B> for ProofOfStakeBlockAnnounce {
-    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockAnnounceEvent<B>> {
         Poll::Pending
     }
 }

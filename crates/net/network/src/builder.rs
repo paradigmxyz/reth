@@ -133,7 +133,7 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
     /// # Example
     ///
     /// ```ignore
-    /// use reth_network::{NetworkManager, BlockAnnounce};
+    /// use reth_network::{NetworkManager, announce::BlockAnnounce};
     ///
     /// // Custom block announcer for PoW or similar chains
     /// let block_announcer = Box::new(MyBlockAnnouncer::new());
@@ -145,7 +145,7 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
     /// ```
     pub fn block_announce(
         mut self,
-        announcer: Box<dyn crate::import::BlockAnnounce<N::NewBlockPayload>>,
+        announcer: Box<dyn crate::announce::BlockAnnounce<N::NewBlockPayload>>,
     ) -> Self {
         self.network.set_block_announce(announcer);
         self
