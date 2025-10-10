@@ -5,7 +5,7 @@ use std::sync::{
 };
 
 /// Metrics for blinded node fetching by proof workers.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ProofTaskMetrics {
     /// The actual metrics for blinded nodes.
     pub task_metrics: ProofTaskTrieMetrics,
@@ -17,18 +17,6 @@ pub struct ProofTaskMetrics {
     pub account_nodes: Arc<AtomicU64>,
     /// Count of blinded storage node requests (lock-free).
     pub storage_nodes: Arc<AtomicU64>,
-}
-
-impl Default for ProofTaskMetrics {
-    fn default() -> Self {
-        Self {
-            task_metrics: ProofTaskTrieMetrics::default(),
-            storage_proofs: Arc::new(AtomicU64::new(0)),
-            account_proofs: Arc::new(AtomicU64::new(0)),
-            account_nodes: Arc::new(AtomicU64::new(0)),
-            storage_nodes: Arc::new(AtomicU64::new(0)),
-        }
-    }
 }
 
 impl ProofTaskMetrics {
