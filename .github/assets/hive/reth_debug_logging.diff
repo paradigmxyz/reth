@@ -1,5 +1,5 @@
 diff --git a/clients/reth/reth.sh b/clients/reth/reth.sh
-index 00000000..11111111 100644
+index 1b4910a..758596f 100644
 --- a/clients/reth/reth.sh
 +++ b/clients/reth/reth.sh
 @@ -170,4 +170,4 @@ FLAGS="$FLAGS --nat none"
