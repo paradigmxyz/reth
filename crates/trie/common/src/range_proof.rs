@@ -1,11 +1,11 @@
 //! Range proof verification for snap sync protocol
 
 use crate::Nibbles;
+use alloc::{collections::{BTreeMap, VecDeque}, vec::Vec};
 use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::Decodable;
 use alloy_trie::{nodes::TrieNode, EMPTY_ROOT_HASH};
 use reth_primitives_traits::Account;
-use std::collections::{HashMap, VecDeque};
 
 /// Trait for encoding values into the trie
 trait TrieEncodable {
@@ -49,7 +49,7 @@ impl RangeProofResult {
 
 /// Parsed range proof - maps node hashes to encoded node data
 struct RangeProof {
-    node_refs: HashMap<B256, Bytes>,
+    node_refs: BTreeMap<B256, Bytes>,
 }
 
 impl RangeProof {
@@ -158,15 +158,15 @@ fn process_proof_nodes(
                             let cmp_r = right_bound.cmp_prefix(&child_path);
 
                             // Skip if strictly inside bounds (left < path < right)
-                            if !matches!(cmp_l, std::cmp::Ordering::Less) ||
-                                !matches!(cmp_r, std::cmp::Ordering::Greater)
+                            if !matches!(cmp_l, core::cmp::Ordering::Less) ||
+                                !matches!(cmp_r, core::cmp::Ordering::Greater)
                             {
                                 stack.push_back((child_path, child_node));
                             }
 
                             // Count right references (same logic as visit_child_node)
-                            let is_right_reference = matches!(cmp_l, std::cmp::Ordering::Less) &&
-                                matches!(cmp_r, std::cmp::Ordering::Less);
+                            let is_right_reference = matches!(cmp_l, core::cmp::Ordering::Less) &&
+                                matches!(cmp_r, core::cmp::Ordering::Less);
                             if is_right_reference {
                                 num_right_references += 1;
                             }
@@ -229,7 +229,7 @@ fn visit_child_node(
 
     // Skip nodes strictly inside bounds (left < path < right)
     // These are part of the data range, not boundaries
-    if matches!(cmp_l, std::cmp::Ordering::Less) && matches!(cmp_r, std::cmp::Ordering::Greater) {
+    if matches!(cmp_l, core::cmp::Ordering::Less) && matches!(cmp_r, core::cmp::Ordering::Greater) {
         return Ok(0);
     }
 
@@ -240,7 +240,7 @@ fn visit_child_node(
             // Handle proof of absence: if first_key is beyond this subtree,
             // the entire subtree is outside our range
             if !first_key.is_some_and(|fk| {
-                matches!(fk.cmp_prefix(&partial_path), std::cmp::Ordering::Greater)
+                matches!(fk.cmp_prefix(&partial_path), core::cmp::Ordering::Greater)
             }) {
                 // Extend path for leaf nodes
                 if let TrieNode::Leaf(leaf) = &node {
@@ -254,8 +254,8 @@ fn visit_child_node(
         None => {
             // Node not in proof
             // If it's on a boundary, this is an error (proof incomplete)
-            if matches!(cmp_l, std::cmp::Ordering::Equal) ||
-                matches!(cmp_r, std::cmp::Ordering::Equal)
+            if matches!(cmp_l, core::cmp::Ordering::Equal) ||
+                matches!(cmp_r, core::cmp::Ordering::Equal)
             {
                 return Err(alloy_rlp::Error::Custom("proof node missing"));
             }
@@ -266,19 +266,19 @@ fn visit_child_node(
 
     // Count right references: both comparisons show path is to the right
     let is_right_reference =
-        matches!(cmp_l, std::cmp::Ordering::Less) && matches!(cmp_r, std::cmp::Ordering::Less);
+        matches!(cmp_l, core::cmp::Ordering::Less) && matches!(cmp_r, core::cmp::Ordering::Less);
 
     Ok(if is_right_reference { 1 } else { 0 })
 }
 
 /// Extension methods for Nibbles comparison
 trait NibblesComparison {
-    fn cmp_prefix(&self, other: &Nibbles) -> std::cmp::Ordering;
+    fn cmp_prefix(&self, other: &Nibbles) -> core::cmp::Ordering;
     fn extend_with_prefix(&self, prefix: &Nibbles) -> Nibbles;
 }
 
 impl NibblesComparison for Nibbles {
-    fn cmp_prefix(&self, other: &Nibbles) -> std::cmp::Ordering {
+    fn cmp_prefix(&self, other: &Nibbles) -> core::cmp::Ordering {
         // Prefix-aware comparison:
         // - If one is a prefix of the other, they're Equal
         // - Otherwise, lexicographic comparison
@@ -287,7 +287,7 @@ impl NibblesComparison for Nibbles {
         // Compare the common prefix
         for i in 0..min_len {
             match self.get(i).cmp(&other.get(i)) {
-                std::cmp::Ordering::Equal => {}
+                core::cmp::Ordering::Equal => {}
                 other_ordering => return other_ordering,
             }
         }
@@ -295,7 +295,7 @@ impl NibblesComparison for Nibbles {
         // All common nibbles are equal
         // If lengths are equal, sequences are equal
         // If one is shorter, treat as Equal (prefix match)
-        std::cmp::Ordering::Equal
+        core::cmp::Ordering::Equal
     }
 
     fn extend_with_prefix(&self, prefix: &Nibbles) -> Nibbles {
