@@ -9,7 +9,7 @@ mod tests {
             ExternalTrieCursor,
         },
     };
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::{map::HashMap, B256, U256};
     use reth_primitives_traits::Account;
     use reth_trie::{updates::TrieUpdates, BranchNodeCompact, HashedPostState, Nibbles, TrieMask};
     use std::sync::Arc;
@@ -1373,6 +1373,252 @@ mod tests {
             "Should have 3 accounts (including deleted)"
         );
         assert_eq!(fetched_diff.post_state.storages.len(), 1, "Should have 1 storage entry");
+
+        Ok(())
+    }
+
+    /// Test that `replace_updates` properly applies hashed/trie storage updates to the DB
+    ///
+    /// This test verifies the bug fix where `replace_updates` was only storing trie_updates
+    /// and post_states directly without populating the internal data structures
+    /// (hashed_accounts, hashed_storages, account_branches, storage_branches).
+    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[tokio::test]
+    async fn test_replace_updates_applies_all_updates<S: ExternalStorage>(
+        storage: S,
+    ) -> Result<(), ExternalStorageError> {
+        use reth_trie::{updates::StorageTrieUpdates, HashedStorage};
+
+        // ========== Setup: Store initial state at blocks 50, 100, 101 ==========
+        let initial_account_addr = B256::repeat_byte(0x10);
+        let initial_account = create_test_account_with_values(1, 1000, 0xAA);
+
+        let initial_storage_addr = B256::repeat_byte(0x20);
+        let initial_storage_slot = B256::repeat_byte(0x01);
+        let initial_storage_value = U256::from(100);
+
+        let initial_branch_path = nibbles_from(vec![1, 2, 3]);
+        let initial_branch = create_test_branch();
+
+        // Store initial data at block 50
+        let mut initial_trie_updates_50 = TrieUpdates::default();
+        initial_trie_updates_50.account_nodes.insert(initial_branch_path, initial_branch.clone());
+
+        let mut initial_post_state_50 = HashedPostState::default();
+        initial_post_state_50.accounts.insert(initial_account_addr, Some(initial_account));
+
+        let initial_diff_50 = BlockStateDiff {
+            trie_updates: initial_trie_updates_50,
+            post_state: initial_post_state_50,
+        };
+        storage.store_trie_updates(50, initial_diff_50).await?;
+
+        // Store data at block 100 (common block)
+        let mut initial_trie_updates_100 = TrieUpdates::default();
+        let common_branch_path = nibbles_from(vec![4, 5, 6]);
+        initial_trie_updates_100.account_nodes.insert(common_branch_path, initial_branch.clone());
+
+        let mut initial_post_state_100 = HashedPostState::default();
+        let mut initial_storage_100 = HashedStorage::new(false);
+        initial_storage_100.storage.insert(initial_storage_slot, initial_storage_value);
+        initial_post_state_100.storages.insert(initial_storage_addr, initial_storage_100);
+
+        let initial_diff_100 = BlockStateDiff {
+            trie_updates: initial_trie_updates_100,
+            post_state: initial_post_state_100,
+        };
+        storage.store_trie_updates(100, initial_diff_100).await?;
+
+        // Store data at block 101 (will be replaced)
+        let mut initial_trie_updates_101 = TrieUpdates::default();
+        let old_branch_path = nibbles_from(vec![7, 8, 9]);
+        initial_trie_updates_101.account_nodes.insert(old_branch_path, initial_branch.clone());
+
+        let mut initial_post_state_101 = HashedPostState::default();
+        let old_account_addr = B256::repeat_byte(0x30);
+        let old_account = create_test_account_with_values(99, 9999, 0xFF);
+        initial_post_state_101.accounts.insert(old_account_addr, Some(old_account));
+
+        let initial_diff_101 = BlockStateDiff {
+            trie_updates: initial_trie_updates_101,
+            post_state: initial_post_state_101,
+        };
+        storage.store_trie_updates(101, initial_diff_101).await?;
+
+        // ========== Verify initial state exists ==========
+        // Verify block 50 data exists
+        let mut cursor_initial = storage.trie_cursor(None, 75)?;
+        assert!(
+            cursor_initial.seek_exact(initial_branch_path)?.is_some(),
+            "Initial branch should exist before replace"
+        );
+
+        // Verify block 101 old data exists
+        let mut cursor_old = storage.trie_cursor(None, 150)?;
+        assert!(
+            cursor_old.seek_exact(old_branch_path)?.is_some(),
+            "Old branch at block 101 should exist before replace"
+        );
+
+        let mut account_cursor_old = storage.account_hashed_cursor(150)?;
+        assert!(
+            account_cursor_old.seek(old_account_addr)?.is_some(),
+            "Old account at block 101 should exist before replace"
+        );
+
+        // ========== Call replace_updates to replace blocks after 100 ==========
+        let mut blocks_to_add: HashMap<u64, BlockStateDiff> = HashMap::default();
+
+        // New data for block 101
+        let new_account_addr = B256::repeat_byte(0x40);
+        let new_account = create_test_account_with_values(5, 5000, 0xCC);
+
+        let new_storage_addr = B256::repeat_byte(0x50);
+        let new_storage_slot = B256::repeat_byte(0x02);
+        let new_storage_value = U256::from(999);
+
+        let new_branch_path = nibbles_from(vec![10, 11, 12]);
+        let new_branch = create_test_branch_variant();
+
+        let storage_branch_path = nibbles_from(vec![5, 5]);
+        let storage_hashed_addr = B256::repeat_byte(0x60);
+
+        let mut new_trie_updates = TrieUpdates::default();
+        new_trie_updates.account_nodes.insert(new_branch_path, new_branch.clone());
+
+        // Add storage trie updates
+        let mut storage_trie = StorageTrieUpdates::default();
+        storage_trie.storage_nodes.insert(storage_branch_path, new_branch.clone());
+        new_trie_updates.insert_storage_updates(storage_hashed_addr, storage_trie);
+
+        let mut new_post_state = HashedPostState::default();
+        new_post_state.accounts.insert(new_account_addr, Some(new_account));
+
+        let mut new_storage = HashedStorage::new(false);
+        new_storage.storage.insert(new_storage_slot, new_storage_value);
+        new_post_state.storages.insert(new_storage_addr, new_storage);
+
+        blocks_to_add.insert(
+            101,
+            BlockStateDiff { trie_updates: new_trie_updates, post_state: new_post_state },
+        );
+
+        // New data for block 102
+        let block_102_account_addr = B256::repeat_byte(0x70);
+        let block_102_account = create_test_account_with_values(10, 10000, 0xDD);
+
+        let mut trie_updates_102 = TrieUpdates::default();
+        let block_102_branch_path = nibbles_from(vec![15, 14, 13]);
+        trie_updates_102.account_nodes.insert(block_102_branch_path, new_branch.clone());
+
+        let mut post_state_102 = HashedPostState::default();
+        post_state_102.accounts.insert(block_102_account_addr, Some(block_102_account));
+
+        blocks_to_add.insert(
+            102,
+            BlockStateDiff { trie_updates: trie_updates_102, post_state: post_state_102 },
+        );
+
+        // Execute replace_updates
+        storage.replace_updates(100, blocks_to_add).await?;
+
+        // ========== Verify that data up to block 100 still exists ==========
+        let mut cursor_50 = storage.trie_cursor(None, 75)?;
+        assert!(
+            cursor_50.seek_exact(initial_branch_path)?.is_some(),
+            "Block 50 branch should still exist after replace"
+        );
+
+        let mut cursor_100 = storage.trie_cursor(None, 100)?;
+        assert!(
+            cursor_100.seek_exact(common_branch_path)?.is_some(),
+            "Block 100 branch should still exist after replace"
+        );
+
+        let mut storage_cursor_100 = storage.storage_hashed_cursor(initial_storage_addr, 100)?;
+        let result_100 = storage_cursor_100.seek(initial_storage_slot)?;
+        assert!(result_100.is_some(), "Block 100 storage should still exist after replace");
+        assert_eq!(
+            result_100.unwrap().1,
+            initial_storage_value,
+            "Block 100 storage value should be unchanged"
+        );
+
+        // ========== Verify that old data after block 100 is gone ==========
+        let mut cursor_old_gone = storage.trie_cursor(None, 150)?;
+        assert!(
+            cursor_old_gone.seek_exact(old_branch_path)?.is_none(),
+            "Old branch at block 101 should be removed after replace"
+        );
+
+        let mut account_cursor_old_gone = storage.account_hashed_cursor(150)?;
+        let old_acc_result = account_cursor_old_gone.seek(old_account_addr)?;
+        assert!(
+            old_acc_result.is_none() || old_acc_result.unwrap().0 != old_account_addr,
+            "Old account at block 101 should be removed after replace"
+        );
+
+        // ========== Verify new data is properly accessible via cursors ==========
+
+        // Verify new account branch nodes
+        let mut trie_cursor = storage.trie_cursor(None, 150)?;
+        let branch_result = trie_cursor.seek_exact(new_branch_path)?;
+        assert!(branch_result.is_some(), "New account branch should be accessible via cursor");
+        assert_eq!(branch_result.unwrap().0, new_branch_path);
+
+        // Verify new storage branch nodes
+        let mut storage_trie_cursor = storage.trie_cursor(Some(storage_hashed_addr), 150)?;
+        let storage_branch_result = storage_trie_cursor.seek_exact(storage_branch_path)?;
+        assert!(
+            storage_branch_result.is_some(),
+            "New storage branch should be accessible via cursor"
+        );
+        assert_eq!(storage_branch_result.unwrap().0, storage_branch_path);
+
+        // Verify new hashed accounts
+        let mut account_cursor = storage.account_hashed_cursor(150)?;
+        let account_result = account_cursor.seek(new_account_addr)?;
+        assert!(account_result.is_some(), "New account should be accessible via cursor");
+        assert_eq!(account_result.as_ref().unwrap().0, new_account_addr);
+        assert_eq!(account_result.as_ref().unwrap().1.nonce, new_account.nonce);
+        assert_eq!(account_result.as_ref().unwrap().1.balance, new_account.balance);
+        assert_eq!(account_result.as_ref().unwrap().1.bytecode_hash, new_account.bytecode_hash);
+
+        // Verify new hashed storages
+        let mut storage_cursor = storage.storage_hashed_cursor(new_storage_addr, 150)?;
+        let storage_result = storage_cursor.seek(new_storage_slot)?;
+        assert!(storage_result.is_some(), "New storage should be accessible via cursor");
+        assert_eq!(storage_result.as_ref().unwrap().0, new_storage_slot);
+        assert_eq!(storage_result.as_ref().unwrap().1, new_storage_value);
+
+        // Verify block 102 data
+        let mut trie_cursor_102 = storage.trie_cursor(None, 150)?;
+        let branch_result_102 = trie_cursor_102.seek_exact(block_102_branch_path)?;
+        assert!(branch_result_102.is_some(), "Block 102 branch should be accessible");
+        assert_eq!(branch_result_102.unwrap().0, block_102_branch_path);
+
+        let mut account_cursor_102 = storage.account_hashed_cursor(150)?;
+        let account_result_102 = account_cursor_102.seek(block_102_account_addr)?;
+        assert!(account_result_102.is_some(), "Block 102 account should be accessible");
+        assert_eq!(account_result_102.as_ref().unwrap().0, block_102_account_addr);
+        assert_eq!(account_result_102.as_ref().unwrap().1.nonce, block_102_account.nonce);
+
+        // Verify fetch_trie_updates returns the new data
+        let fetched_101 = storage.fetch_trie_updates(101).await?;
+        assert_eq!(
+            fetched_101.trie_updates.account_nodes_ref().len(),
+            1,
+            "Should have 1 account branch node at block 101"
+        );
+        assert!(
+            fetched_101.trie_updates.account_nodes_ref().contains_key(&new_branch_path),
+            "New branch path should be in trie_updates"
+        );
+        assert_eq!(fetched_101.post_state.accounts.len(), 1, "Should have 1 account at block 101");
+        assert!(
+            fetched_101.post_state.accounts.contains_key(&new_account_addr),
+            "New account should be in post_state"
+        );
 
         Ok(())
     }
