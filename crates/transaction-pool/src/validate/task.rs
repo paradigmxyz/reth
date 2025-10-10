@@ -204,7 +204,8 @@ where
                 let to_validation_task = self.to_validation_task.clone();
                 let validator = self.validator.clone();
                 let fut = Box::pin(async move {
-                    let validation_result = validator.validate_transaction(origin, transaction).await;
+                    let validation_result =
+                        validator.validate_transaction(origin, transaction).await;
                     let _ = tx.send(validation_result);
                 });
                 let to_validation_task = to_validation_task.lock().await;
