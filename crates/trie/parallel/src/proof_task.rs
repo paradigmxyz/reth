@@ -1029,7 +1029,19 @@ impl Drop for ProofTaskManagerHandle {
     fn drop(&mut self) {
         // Decrement the number of active handles.
         // When the last handle is dropped, the channels are dropped and workers shut down.
-        self.active_handles.fetch_sub(1, Ordering::SeqCst);
+        // atomically grab the current handle count and decrement it for Drop.
+        let previous_handles = self.active_handles.fetch_sub(1, Ordering::SeqCst);
+
+        debug_assert_ne!(
+            previous_handles, 0,
+            "active_handles underflow in ProofTaskManagerHandle::drop"
+        );
+
+        #[cfg(feature = "metrics")]
+        if previous_handles == 1 {
+            // Flush metrics before exit.
+            self.metrics.record();
+        }
     }
 }
 
