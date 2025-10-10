@@ -1,7 +1,7 @@
 //! Network config support
 
 use crate::{
-    announce::BlockAnnounce,
+    announce::{BlockAnnounce, ProofOfStakeBlockAnnounce},
     error::NetworkError,
     import::{BlockImport, ProofOfStakeBlockImport},
     transactions::TransactionsManagerConfig,
@@ -702,7 +702,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             chain_id,
             block_import: block_import.unwrap_or_else(|| Box::<ProofOfStakeBlockImport>::default()),
             block_announce: block_announce
-                .unwrap_or_else(|| Box::<crate::announce::ProofOfStakeBlockAnnounce>::default()),
+                .unwrap_or_else(|| Box::<ProofOfStakeBlockAnnounce>::default()),
             network_mode,
             executor: executor.unwrap_or_else(|| Box::<TokioTaskExecutor>::default()),
             status,
