@@ -4,6 +4,18 @@ use alloy_primitives::B256;
 use reth_eth_wire::NewBlock;
 use std::task::{Context, Poll};
 
+/// Strategy for how to propagate blocks to peers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PropagationStrategy {
+    /// Announce full block to √n peers (fast propagation to subset)
+    FullBlock,
+    /// Announce hash to all peers (network-wide awareness)
+    HashOnly,
+    /// Standard Pre-Merge Ethereum: full block to √n + hash to all
+    #[default]
+    Both,
+}
+
 /// Abstraction over block announcement to the network.
 ///
 /// This trait provides the symmetric counterpart to [`BlockImport`](crate::import::BlockImport).
@@ -22,18 +34,20 @@ pub trait BlockAnnounce<B = NewBlock>: std::fmt::Debug + Send + Sync {
     ///
     /// This is called by the [`NetworkManager`](crate::NetworkManager) to check if there are any
     /// blocks ready to be announced to the network.
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BlockAnnounceEvent<B>>;
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BlockAnnounceRequest<B>>;
 }
 
-/// Event from block announce polling.
+/// Request from block announce polling.
 #[derive(Debug)]
-pub enum BlockAnnounceEvent<B = NewBlock> {
+pub enum BlockAnnounceRequest<B = NewBlock> {
     /// Block ready to announce to peers
     Announce {
         /// The block to announce
         block: B,
         /// Hash of the block
         hash: B256,
+        /// How to propagate this block
+        strategy: PropagationStrategy,
     },
 }
 
@@ -45,7 +59,7 @@ pub enum BlockAnnounceEvent<B = NewBlock> {
 pub struct ProofOfStakeBlockAnnounce;
 
 impl<B> BlockAnnounce<B> for ProofOfStakeBlockAnnounce {
-    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockAnnounceEvent<B>> {
+    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockAnnounceRequest<B>> {
         Poll::Pending
     }
 }
@@ -112,9 +126,13 @@ mod tests {
     }
 
     impl BlockAnnounce<MockBlock> for MockBlockAnnounce {
-        fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockAnnounceEvent<MockBlock>> {
+        fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockAnnounceRequest<MockBlock>> {
             if let Some((block, hash)) = self.blocks.pop_front() {
-                Poll::Ready(BlockAnnounceEvent::Announce { block, hash })
+                Poll::Ready(BlockAnnounceRequest::Announce {
+                    block,
+                    hash,
+                    strategy: PropagationStrategy::Both,
+                })
             } else {
                 Poll::Pending
             }
@@ -157,9 +175,10 @@ mod tests {
 
         // Should now return the block
         with_context(|cx| match announcer.poll(cx) {
-            Poll::Ready(BlockAnnounceEvent::Announce { block: b, hash: h }) => {
+            Poll::Ready(BlockAnnounceRequest::Announce { block: b, hash: h, strategy }) => {
                 assert_eq!(b.number, 1);
                 assert_eq!(h, hash);
+                assert_eq!(strategy, PropagationStrategy::Both);
             }
             Poll::Pending => panic!("Expected Ready, got Pending"),
         });
@@ -185,21 +204,21 @@ mod tests {
 
         // Poll should return blocks in FIFO order
         with_context(|cx| match announcer.poll(cx) {
-            Poll::Ready(BlockAnnounceEvent::Announce { block, .. }) => {
+            Poll::Ready(BlockAnnounceRequest::Announce { block, .. }) => {
                 assert_eq!(block.number, 1);
             }
             Poll::Pending => panic!("Expected Ready"),
         });
 
         with_context(|cx| match announcer.poll(cx) {
-            Poll::Ready(BlockAnnounceEvent::Announce { block, .. }) => {
+            Poll::Ready(BlockAnnounceRequest::Announce { block, .. }) => {
                 assert_eq!(block.number, 2);
             }
             Poll::Pending => panic!("Expected Ready"),
         });
 
         with_context(|cx| match announcer.poll(cx) {
-            Poll::Ready(BlockAnnounceEvent::Announce { block, .. }) => {
+            Poll::Ready(BlockAnnounceRequest::Announce { block, .. }) => {
                 assert_eq!(block.number, 3);
             }
             Poll::Pending => panic!("Expected Ready"),
@@ -216,12 +235,17 @@ mod tests {
         let block = MockBlock { number: 42, hash: B256::random() };
         let hash = B256::random();
 
-        let event = BlockAnnounceEvent::Announce { block: block.clone(), hash };
+        let event = BlockAnnounceRequest::Announce {
+            block: block.clone(),
+            hash,
+            strategy: PropagationStrategy::FullBlock,
+        };
 
         match event {
-            BlockAnnounceEvent::Announce { block: b, hash: h } => {
+            BlockAnnounceRequest::Announce { block: b, hash: h, strategy } => {
                 assert_eq!(b.number, 42);
                 assert_eq!(h, hash);
+                assert_eq!(strategy, PropagationStrategy::FullBlock);
             }
         }
     }

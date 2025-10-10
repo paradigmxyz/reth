@@ -16,7 +16,7 @@
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the `RLPx` session.
 
 use crate::{
-    announce::{BlockAnnounce, BlockAnnounceEvent},
+    announce::{BlockAnnounce, BlockAnnounceRequest},
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
     discovery::Discovery,
@@ -67,7 +67,7 @@ use std::{
 };
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 // TODO: Inlined diagram due to a bug in aquamarine library, should become an include when it's
@@ -119,7 +119,7 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     ///
     /// For Proof-of-Stake chains, this should remain `None` as block propagation over devp2p
     /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
-    block_announce: Option<Box<dyn BlockAnnounce<N::NewBlockPayload>>>,
+    block_announce: Box<dyn BlockAnnounce<N::NewBlockPayload>>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// Sender half to send events to the
@@ -217,7 +217,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// For Proof-of-Stake chains, this should remain unset as block propagation over devp2p
     /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
     pub fn set_block_announce(&mut self, announcer: Box<dyn BlockAnnounce<N::NewBlockPayload>>) {
-        self.block_announce = Some(announcer);
+        self.block_announce = announcer;
     }
 
     /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
@@ -612,14 +612,28 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     }
 
     /// Invoked when a block is ready to be announced to peers
-    fn on_block_announce_event(&mut self, event: BlockAnnounceEvent<N::NewBlockPayload>) {
+    fn on_block_announce_request(&mut self, event: BlockAnnounceRequest<N::NewBlockPayload>) {
+        use crate::announce::PropagationStrategy;
+
         match event {
-            BlockAnnounceEvent::Announce { block, hash } => {
+            BlockAnnounceRequest::Announce { block, hash, strategy } => {
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
-                // announce the block to √n peers
-                self.swarm.state_mut().announce_new_block(msg.clone());
-                // announce the block hash to all peers
-                self.swarm.state_mut().announce_new_block_hash(msg);
+
+                match strategy {
+                    PropagationStrategy::FullBlock => {
+                        // Announce full block to √n peers
+                        self.swarm.state_mut().announce_new_block(msg);
+                    }
+                    PropagationStrategy::HashOnly => {
+                        // Announce hash to all peers
+                        self.swarm.state_mut().announce_new_block_hash(msg);
+                    }
+                    PropagationStrategy::Both => {
+                        // Standard: full block to √n + hash to all
+                        self.swarm.state_mut().announce_new_block(msg.clone());
+                        self.swarm.state_mut().announce_new_block_hash(msg);
+                    }
+                }
             }
         }
     }
@@ -694,13 +708,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 self.swarm.state_mut().discovery_mut().add_listener(tx);
             }
             NetworkHandleMessage::AnnounceBlock(block, hash) => {
-                if self.handle.mode().is_stake() {
-                    // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
-                    warn!(target: "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
-                    return
-                }
-                let msg = NewBlockMessage { hash, block: Arc::new(block) };
-                self.swarm.state_mut().announce_new_block(msg);
+                use crate::announce::PropagationStrategy;
+                self.on_block_announce_request(BlockAnnounceRequest::Announce {
+                    block,
+                    hash,
+                    strategy: PropagationStrategy::Both,
+                });
             }
             NetworkHandleMessage::EthRequest { peer_id, request } => {
                 self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::EthRequest(request))
@@ -1140,24 +1153,14 @@ impl<N: NetworkPrimitives> Future for NetworkManager<N> {
 
         let this = self.get_mut();
 
-        // poll new block imports (expected to be a noop for POS)
-        while let Poll::Ready(outcome) = this.block_import.poll(cx) {
-            this.on_block_import_result(outcome);
-        }
-
-        // poll new block announcements (expected to be a noop for POS)
-        // Only poll if block_announce is configured and not in PoS mode
+        // Skip block imports and announcements for POS chains
         if !this.handle.mode().is_stake() {
-            if let Some(announcer) = &mut this.block_announce {
-                // Collect events first to avoid borrow checker issues
-                let mut events = Vec::new();
-                while let Poll::Ready(event) = announcer.poll(cx) {
-                    events.push(event);
-                }
-                // Process collected events
-                for event in events {
-                    this.on_block_announce_event(event);
-                }
+            while let Poll::Ready(outcome) = this.block_import.poll(cx) {
+                this.on_block_import_result(outcome);
+            }
+
+            while let Poll::Ready(outcome) = this.block_announce.poll(cx) {
+                this.on_block_announce_request(outcome);
             }
         }
 

@@ -79,9 +79,9 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// This is the symmetric counterpart to `block_import`. While `block_import` handles
     /// incoming blocks from peers, `block_announce` handles outgoing block announcements.
     ///
-    /// For Proof-of-Stake chains, this should remain `None` as block propagation over devp2p
-    /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
-    pub block_announce: Option<Box<dyn BlockAnnounce<N::NewBlockPayload>>>,
+    /// For Proof-of-Stake chains, this defaults to a no-op implementation as block propagation
+    /// over devp2p is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
+    pub block_announce: Box<dyn BlockAnnounce<N::NewBlockPayload>>,
     /// The default mode of the network.
     pub network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
@@ -701,7 +701,8 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             sessions_config: sessions_config.unwrap_or_default(),
             chain_id,
             block_import: block_import.unwrap_or_else(|| Box::<ProofOfStakeBlockImport>::default()),
-            block_announce,
+            block_announce: block_announce
+                .unwrap_or_else(|| Box::<crate::announce::ProofOfStakeBlockAnnounce>::default()),
             network_mode,
             executor: executor.unwrap_or_else(|| Box::<TokioTaskExecutor>::default()),
             status,
