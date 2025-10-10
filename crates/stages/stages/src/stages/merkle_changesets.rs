@@ -40,10 +40,12 @@ impl MerkleChangeSets {
     /// Returns the range of blocks which are already computed. Will return an empty range if none
     /// have been computed.
     fn computed_range(checkpoint: Option<StageCheckpoint>) -> Range<BlockNumber> {
-        let CheckpointBlockRange { from, to } = checkpoint
+        let to = checkpoint.map(|chk| chk.block_number).unwrap_or_default();
+        let from = checkpoint
             .map(|chk| chk.merkle_changesets_stage_checkpoint().unwrap_or_default())
             .unwrap_or_default()
-            .block_range;
+            .block_range
+            .to;
         from..to + 1
     }
 
@@ -73,10 +75,13 @@ impl MerkleChangeSets {
         // Calculate the fallback start position based on retention blocks
         let retention_based_start = merkle_checkpoint.saturating_sub(self.retention_blocks);
 
-        // Use minimum of finalized_block and retention_based_start if finalized_block exists,
-        // otherwise just use retention_based_start
+        // If the finalized block was way in the past then we don't want to generate changesets for
+        // all of those past blocks; we only care about the recent history.
+        //
+        // Use maximum of finalized_block and retention_based_start if finalized_block exists,
+        // otherwise just use retention_based_start.
         let mut target_start = finalized_block
-            .map(|finalized| finalized.saturating_add(1).min(retention_based_start))
+            .map(|finalized| finalized.saturating_add(1).max(retention_based_start))
             .unwrap_or(retention_based_start);
 
         // We cannot revert the genesis block; target_start must be >0
@@ -295,13 +300,13 @@ where
         // ------------------------------> Block #
         //    |------computed-----|
         //              |-----target-----|
-        //                    |--actual--|
+        //                        |--actual--|
         //
         // However, if the target start is less than the previously computed start, we don't want to
         // do this, as it would leave a gap of data at `target_range.start..=computed_range.start`.
         //
         // ------------------------------> Block #
-        //           |---computed---|
+        //         |---computed---|
         //      |-------target-------|
         //      |-------actual-------|
         //
@@ -315,19 +320,15 @@ where
             return Ok(ExecOutput::done(input.checkpoint.unwrap_or_default()));
         }
 
-        // Determine if we need to clear all changesets or just from target_start onwards
-        if target_range.start >= computed_range.start {
+        // If our target range is a continuation of the already computed range then we can keep the
+        // already computed data.
+        if target_range.start == computed_range.end {
             // Clear from target_start onwards to ensure no stale data exists
             provider.clear_trie_changesets_from(target_range.start)?;
-
             computed_range.end = target_range.end;
-            if computed_range.start == 0 {
-                computed_range.start = target_range.start;
-            }
         } else {
-            // If the target start is less than the previously computed start, then the target range
-            // overlaps entirely with the previously computed one. We therefore need to clear out
-            // the previously computed data, so as not to conflict.
+            // If our target range is not a continuation of the already computed range then we
+            // simply clear the computed data, to make sure there's no gaps or conflicts.
             provider.clear_trie_changesets()?;
             computed_range = target_range.clone();
         }
