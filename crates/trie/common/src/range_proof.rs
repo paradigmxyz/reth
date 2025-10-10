@@ -772,7 +772,7 @@ mod tests {
     /// This simulates the common scenario where we're verifying a range within a larger trie
     ///
     /// This test uses 26 accounts, verifying range [7..=17] (11 accounts)
-    /// The proof shows there is more data beyond the range (has_more = true)
+    /// The proof shows there is more data beyond the range (`has_more` = true)
     #[test]
     fn test_verify_range_regular_case() {
         // State root from trie with 26 accounts
@@ -853,7 +853,7 @@ mod tests {
     }
 
     /// Test verifying a full leafset without proof nodes
-    /// Covered by: test_full_trie_no_proof, test_account_range_large_trie
+    /// Covered by: `test_full_trie_no_proof`, `test_account_range_large_trie`
     #[test]
     fn test_verify_range_full_leafset() {
         // Build a trie with 50 accounts
