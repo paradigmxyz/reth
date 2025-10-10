@@ -4,7 +4,7 @@ use std::sync::{
     Arc,
 };
 
-/// Metrics for blinded node fetching for the duration of the proof task manager.
+/// Metrics for blinded node fetching by proof workers.
 #[derive(Clone, Debug)]
 pub struct ProofTaskMetrics {
     /// The actual metrics for blinded nodes.

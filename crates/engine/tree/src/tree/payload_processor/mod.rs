@@ -167,8 +167,7 @@ where
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
     ///
-    /// Returns an error with the original transactions iterator if the proof task manager fails to
-    /// initialize.
+    /// Returns an error with the original transactions iterator if proof worker spawning fails.
     #[allow(clippy::type_complexity)]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
