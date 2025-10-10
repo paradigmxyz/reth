@@ -109,7 +109,7 @@ pub struct EngineArgs {
     #[arg(long = "engine.allow-unwind-canonical-header", default_value = "false")]
     pub allow_unwind_canonical_header: bool,
 
-    /// Configure the number of storage proof worker threads.
+    /// Configure the number of storage proof workers in the Tokio blocking pool.
     /// If not specified, defaults to 2x available parallelism, clamped between 2 and 64.
     #[arg(long = "engine.storage-worker-count")]
     pub storage_worker_count: Option<usize>,
