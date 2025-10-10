@@ -499,7 +499,11 @@ impl TreeConfig {
 
     /// Setter for the number of storage proof worker threads.
     pub const fn with_storage_worker_count(mut self, storage_worker_count: usize) -> Self {
-        self.storage_worker_count = storage_worker_count.max(MIN_WORKER_COUNT);
+        self.storage_worker_count = if storage_worker_count > MIN_WORKER_COUNT {
+            storage_worker_count
+        } else {
+            MIN_WORKER_COUNT
+        };
         self
     }
 
@@ -510,7 +514,11 @@ impl TreeConfig {
 
     /// Setter for the number of account proof worker threads.
     pub const fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
-        self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
+        self.account_worker_count = if account_worker_count > MIN_WORKER_COUNT {
+            account_worker_count
+        } else {
+            MIN_WORKER_COUNT
+        };
         self
     }
 }
