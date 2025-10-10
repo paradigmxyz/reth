@@ -1213,11 +1213,11 @@ mod tests {
     ///
     /// This test verifies that all data stored via `store_trie_updates` can be read back
     /// through the cursor APIs.
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_store_trie_updates_comprehensive<S: ExternalStorage>(
+    async fn test_store_trie_updates_comprehensive<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         use reth_trie::{updates::StorageTrieUpdates, HashedStorage};
 
         let block_number = 100;
@@ -1382,11 +1382,11 @@ mod tests {
     /// This test verifies the bug fix where `replace_updates` was only storing `trie_updates`
     /// and `post_states` directly without populating the internal data structures
     /// (`hashed_accounts`, `hashed_storages`, `account_branches`, `storage_branches`).
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_replace_updates_applies_all_updates<S: ExternalStorage>(
+    async fn test_replace_updates_applies_all_updates<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         use reth_trie::{updates::StorageTrieUpdates, HashedStorage};
 
         // ========== Setup: Store initial state at blocks 50, 100, 101 ==========
