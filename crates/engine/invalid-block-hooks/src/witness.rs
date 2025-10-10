@@ -169,11 +169,11 @@ fn generate(
     })
 }
 
-#[derive(Debug)]
 /// Hook for generating execution witnesses when invalid blocks are detected.
 ///
 /// This hook captures the execution state and generates witness data that can be used
 /// for debugging and analysis of invalid block execution.
+#[derive(Debug)]
 pub struct InvalidBlockWitnessHook<P, E> {
     /// The provider to read the historical state and do the EVM execution.
     provider: P,
