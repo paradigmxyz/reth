@@ -121,6 +121,10 @@ extern crate alloc;
 pub mod constants;
 pub use constants::gas_units::{format_gas, format_gas_throughput};
 
+/// DupSort value trait for database tables
+pub mod dupsort;
+pub use dupsort::DupSortValue;
+
 /// Minimal account
 pub mod account;
 pub use account::{Account, Bytecode};

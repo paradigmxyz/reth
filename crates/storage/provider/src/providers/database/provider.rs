@@ -33,7 +33,7 @@ use rayon::slice::ParallelSliceMut;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{upsert_dup, DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
@@ -1845,14 +1845,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
             for entry in storage {
                 tracing::trace!(?address, ?entry.key, "Updating plain state storage");
-                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    storages_cursor.delete_current()?;
-                }
-
                 if !entry.value.is_zero() {
-                    storages_cursor.upsert(address, &entry)?;
+                    upsert_dup(&mut storages_cursor, address, &entry)?;
+                } else {
+                    // Delete the entry if value is zero
+                    if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? &&
+                        db_entry.key == entry.key
+                    {
+                        storages_cursor.delete_current()?;
+                    }
                 }
             }
         }
@@ -1882,15 +1883,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
             for (hashed_slot, value) in storage.storage_slots_sorted() {
                 let entry = StorageEntry { key: hashed_slot, value };
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
-                }
-
                 if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                    upsert_dup(&mut hashed_storage_cursor, *hashed_address, &entry)?;
+                } else {
+                    // Delete the entry if value is zero
+                    if let Some(db_entry) =
+                        hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                        db_entry.key == entry.key
+                    {
+                        hashed_storage_cursor.delete_current()?;
+                    }
                 }
             }
         }
@@ -1967,19 +1969,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // revert storages
             for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                 let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
-                // delete previous value
-                // TODO: This does not use dupsort features
-                if plain_storage_cursor
-                    .seek_by_key_subkey(*address, *storage_key)?
-                    .filter(|s| s.key == *storage_key)
-                    .is_some()
-                {
-                    plain_storage_cursor.delete_current()?
-                }
-
                 // insert value if needed
                 if !old_storage_value.is_zero() {
-                    plain_storage_cursor.upsert(*address, &storage_entry)?;
+                    upsert_dup(&mut plain_storage_cursor, *address, &storage_entry)?;
+                } else {
+                    // delete if value is zero
+                    if plain_storage_cursor
+                        .seek_by_key_subkey(*address, *storage_key)?
+                        .filter(|s| s.key == *storage_key)
+                        .is_some()
+                    {
+                        plain_storage_cursor.delete_current()?
+                    }
                 }
             }
         }
@@ -2066,19 +2067,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // revert storages
             for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                 let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
-                // delete previous value
-                // TODO: This does not use dupsort features
-                if plain_storage_cursor
-                    .seek_by_key_subkey(*address, *storage_key)?
-                    .filter(|s| s.key == *storage_key)
-                    .is_some()
-                {
-                    plain_storage_cursor.delete_current()?
-                }
-
                 // insert value if needed
                 if !old_storage_value.is_zero() {
-                    plain_storage_cursor.upsert(*address, &storage_entry)?;
+                    upsert_dup(&mut plain_storage_cursor, *address, &storage_entry)?;
+                } else {
+                    // delete if value is zero
+                    if plain_storage_cursor
+                        .seek_by_key_subkey(*address, *storage_key)?
+                        .filter(|s| s.key == *storage_key)
+                        .is_some()
+                    {
+                        plain_storage_cursor.delete_current()?
+                    }
                 }
             }
         }
@@ -2282,16 +2282,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         for (hashed_address, key, value) in hashed_storages.into_iter().rev() {
             hashed_storage_keys.entry(hashed_address).or_default().insert(key);
 
-            if hashed_storage
-                .seek_by_key_subkey(hashed_address, key)?
-                .filter(|entry| entry.key == key)
-                .is_some()
-            {
-                hashed_storage.delete_current()?;
-            }
-
             if !value.is_zero() {
-                hashed_storage.upsert(hashed_address, &StorageEntry { key, value })?;
+                upsert_dup(&mut hashed_storage, hashed_address, &StorageEntry { key, value })?;
+            } else {
+                // Delete if value is zero
+                if hashed_storage
+                    .seek_by_key_subkey(hashed_address, key)?
+                    .filter(|entry| entry.key == key)
+                    .is_some()
+                {
+                    hashed_storage.delete_current()?;
+                }
             }
         }
         Ok(hashed_storage_keys)
@@ -2334,16 +2335,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         // just remove it);
         hashed_storages.into_iter().try_for_each(|(hashed_address, storage)| {
             storage.into_iter().try_for_each(|(key, value)| -> ProviderResult<()> {
-                if hashed_storage_cursor
-                    .seek_by_key_subkey(hashed_address, key)?
-                    .filter(|entry| entry.key == key)
-                    .is_some()
-                {
-                    hashed_storage_cursor.delete_current()?;
-                }
-
                 if !value.is_zero() {
-                    hashed_storage_cursor.upsert(hashed_address, &StorageEntry { key, value })?;
+                    upsert_dup(&mut hashed_storage_cursor, hashed_address, &StorageEntry { key, value })?;
+                } else {
+                    // Delete if value is zero
+                    if hashed_storage_cursor
+                        .seek_by_key_subkey(hashed_address, key)?
+                        .filter(|entry| entry.key == key)
+                        .is_some()
+                    {
+                        hashed_storage_cursor.delete_current()?;
+                    }
                 }
                 Ok(())
             })

@@ -157,6 +157,11 @@ macro_rules! tables {
             $(
                 impl DupSort for $name {
                     type SubKey = $subkey;
+
+                    fn subkey_from_value(value: &Self::Value) -> &Self::SubKey {
+                        use reth_primitives_traits::DupSortValue;
+                        value.subkey()
+                    }
                 }
             )?
         )*

@@ -9,7 +9,7 @@ use proptest::{prelude::ProptestConfig, proptest};
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
 use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::{upsert_dup, DbCursorRO, DbCursorRW, DbDupCursorRO},
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives_traits::{Account, StorageEntry};
@@ -69,12 +69,12 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
     // 1. Some state transition happens, update the hashed storage to the new value
     let modified_key = B256::from_str(modified).unwrap();
     let value = U256::from(1);
-    if hashed_storage_cursor.seek_by_key_subkey(hashed_address, modified_key).unwrap().is_some() {
-        hashed_storage_cursor.delete_current().unwrap();
-    }
-    hashed_storage_cursor
-        .upsert(hashed_address, &StorageEntry { key: modified_key, value })
-        .unwrap();
+    upsert_dup(
+        &mut hashed_storage_cursor,
+        hashed_address,
+        &StorageEntry { key: modified_key, value },
+    )
+    .unwrap();
 
     // 2. Calculate full merkle root
     let loader = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address);
@@ -372,15 +372,12 @@ fn account_and_storage_trie() {
         Account { nonce: 0, balance: U256::from(2).mul(ether), bytecode_hash: Some(code_hash) };
     hashed_account_cursor.upsert(key3, &account3).unwrap();
     for (hashed_slot, value) in storage {
-        if hashed_storage_cursor
-            .seek_by_key_subkey(key3, hashed_slot)
-            .unwrap()
-            .filter(|e| e.key == hashed_slot)
-            .is_some()
-        {
-            hashed_storage_cursor.delete_current().unwrap();
-        }
-        hashed_storage_cursor.upsert(key3, &StorageEntry { key: hashed_slot, value }).unwrap();
+        upsert_dup(
+            &mut hashed_storage_cursor,
+            key3,
+            &StorageEntry { key: hashed_slot, value },
+        )
+        .unwrap();
     }
     let account3_storage_root = StorageRoot::from_tx(tx.tx_ref(), address3).root().unwrap();
     hash_builder

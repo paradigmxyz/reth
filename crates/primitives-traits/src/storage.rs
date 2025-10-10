@@ -1,3 +1,4 @@
+use crate::DupSortValue;
 use alloy_primitives::{B256, U256};
 
 /// Account storage entry.
@@ -45,5 +46,11 @@ impl reth_codecs::Compact for StorageEntry {
         let key = B256::from_slice(&buf[..32]);
         let (value, out) = U256::from_compact(&buf[32..], len - 32);
         (Self { key, value }, out)
+    }
+}
+
+impl DupSortValue<B256> for StorageEntry {
+    fn subkey(&self) -> &B256 {
+        &self.key
     }
 }

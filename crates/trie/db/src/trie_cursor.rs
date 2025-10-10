@@ -1,6 +1,6 @@
 use alloy_primitives::B256;
 use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{upsert_dup, DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     tables,
     transaction::DbTx,
     DatabaseError,
@@ -137,22 +137,24 @@ where
         for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
             num_entries += 1;
             let nibbles = StoredNibblesSubKey(*nibbles);
-            // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .filter(|e| e.nibbles == nibbles)
-                .is_some()
-            {
-                self.cursor.delete_current()?;
-            }
-
-            // There is an updated version of this node, insert new entry.
+            
             if let Some(node) = maybe_updated {
-                self.cursor.upsert(
+                // There is an updated version of this node, insert new entry.
+                upsert_dup(
+                    &mut self.cursor,
                     self.hashed_address,
                     &StorageTrieEntry { nibbles, node: node.clone() },
                 )?;
+            } else {
+                // Delete the old entry if it exists.
+                if self
+                    .cursor
+                    .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
+                    .filter(|e| e.nibbles == nibbles)
+                    .is_some()
+                {
+                    self.cursor.delete_current()?;
+                }
             }
         }
 

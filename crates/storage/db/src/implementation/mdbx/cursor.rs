@@ -237,11 +237,9 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     ///
-    /// For a DUPSORT table, `upsert` will not actually update-or-insert. If the key already exists,
-    /// it will append the value to the subkey, even if the subkeys are the same. So if you want
-    /// to properly upsert, you'll need to `seek_exact` & `delete_current` if the key+subkey was
-    /// found, before calling `upsert`.
+    /// `upsert` is not supported for DUPSORT tables.
     fn upsert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
+        debug_assert!(!T::DUPSORT);
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
         self.execute_with_operation_metric(

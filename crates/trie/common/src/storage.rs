@@ -1,4 +1,5 @@
 use super::{BranchNodeCompact, StoredNibblesSubKey};
+use reth_primitives_traits::DupSortValue;
 
 /// Account storage trie node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -29,5 +30,11 @@ impl reth_codecs::Compact for StorageTrieEntry {
         let (node, buf) = BranchNodeCompact::from_compact(buf, len - 65);
         let this = Self { nibbles, node };
         (this, buf)
+    }
+}
+
+impl DupSortValue<StoredNibblesSubKey> for StorageTrieEntry {
+    fn subkey(&self) -> &StoredNibblesSubKey {
+        &self.nibbles
     }
 }

@@ -1,7 +1,7 @@
 use alloy_primitives::{hex, B256};
 use clap::Parser;
 use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::{upsert_dup, DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -168,8 +168,8 @@ fn verify_and_repair<N: ProviderNodeTypes>(
             None,
         );
         let nibbles_a = StoredNibblesSubKey(Nibbles::from_nibbles([0x4, 0xf, 0x8, 0x8, 0x0, 0x7]));
-        let entry_a = StorageTrieEntry { nibbles: nibbles_a.clone(), node: node_a };
-        storage_trie_cursor.upsert(account, &entry_a)?;
+        let entry_a = StorageTrieEntry { nibbles: nibbles_a, node: node_a };
+        upsert_dup(&mut storage_trie_cursor, account, &entry_a)?;
     }
 
     {
@@ -244,7 +244,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(
                 // Wrong/missing storage node value, upsert it
                 let nibbles = StoredNibblesSubKey(path);
                 let entry = StorageTrieEntry { nibbles, node };
-                storage_trie_cursor.upsert(account, &entry)?;
+                upsert_dup(&mut storage_trie_cursor, account, &entry)?;
             }
             Output::Progress(path) => {
                 if last_progress_time.elapsed() > PROGRESS_PERIOD {

@@ -39,6 +39,10 @@ impl<T: DupSort> Table for RawDupSort<T> {
 
 impl<T: DupSort> DupSort for RawDupSort<T> {
     type SubKey = RawKey<T::SubKey>;
+
+    fn subkey_from_value(_value: &Self::Value) -> &Self::SubKey {
+        unimplemented!("subkey_from_value cannot be used with RawDupSort tables")
+    }
 }
 
 /// Raw table key.

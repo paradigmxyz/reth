@@ -122,6 +122,9 @@ pub trait DupSort: Table {
     ///
     /// Upstream docs: <https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48>
     type SubKey: Key;
+
+    /// Extracts the subkey from a value.
+    fn subkey_from_value(value: &Self::Value) -> &Self::SubKey;
 }
 
 /// Allows duplicating tables across databases

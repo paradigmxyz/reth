@@ -103,6 +103,8 @@ pub trait DbDupCursorRO<T: DupSort> {
 pub trait DbCursorRW<T: Table> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
+    ///
+    /// `upsert` is not supported for DUPSORT tables.
     fn upsert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
 
     /// Database operation that will insert a row at a given key. If the key is already
@@ -360,4 +362,29 @@ impl<T: DupSort, CURSOR: DbDupCursorRO<T>> Iterator for DupWalker<'_, T, CURSOR>
         }
         self.cursor.next_dup().transpose()
     }
+}
+
+/// Implements an upsert-style operation for key/subkey pairs in a DUPSORT table.
+///
+/// The standard `upsert` method is not supported for DUPSORT tables. This function provides that
+/// support by manually seeking to the key+subkey, deleting any existing value, then performing an
+/// insert.
+pub fn upsert_dup<Table, Cursor>(
+    cursor: &mut Cursor,
+    key: Table::Key,
+    value: &Table::Value,
+) -> Result<(), DatabaseError>
+where
+    Table: DupSort,
+    Cursor: DbDupCursorRO<Table> + DbCursorRW<Table>,
+{
+    let subkey = Table::subkey_from_value(value).clone();
+    if cursor
+        .seek_by_key_subkey(key.clone(), subkey.clone())?
+        .filter(|v| Table::subkey_from_value(v) == &subkey)
+        .is_some()
+    {
+        cursor.delete_current()?;
+    }
+    cursor.insert(key, value)
 }

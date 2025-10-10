@@ -1,5 +1,5 @@
 use alloy_primitives::Address;
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, DupSortValue};
 
 /// Account as it is saved in the database.
 ///
@@ -43,5 +43,11 @@ impl reth_codecs::Compact for AccountBeforeTx {
         });
 
         (Self { address, info }, buf)
+    }
+}
+
+impl DupSortValue<Address> for AccountBeforeTx {
+    fn subkey(&self) -> &Address {
+        &self.address
     }
 }
