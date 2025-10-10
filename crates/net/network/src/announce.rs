@@ -70,6 +70,18 @@ pub enum PropagationStrategy {
 /// // NetworkManager will poll and announce it automatically!
 /// ```
 pub trait BlockAnnounce<B = NewBlock>: std::fmt::Debug + Send + Sync {
+
+    /// Invoked for a received block announcement from the peer.
+    ///
+    /// For a `NewBlock` message:
+    /// > When a `NewBlock` announcement message is received from a peer, the client first verifies
+    /// > the basic header validity of the block, checking whether the proof-of-work value is valid.
+    ///
+    /// For a `NewBlockHashes` message, hash announcement should be processed accordingly.
+    ///
+    /// The results are expected to be returned via [`BlockImport::poll`].
+    fn on_announced_block(&mut self, block: B);
+
     /// Poll for blocks that need to be announced to peers.
     ///
     /// This is called by the [`NetworkManager`](crate::NetworkManager) to check if there are any
@@ -99,6 +111,7 @@ pub enum BlockAnnounceRequest<B = NewBlock> {
 pub struct ProofOfStakeBlockAnnounce;
 
 impl<B> BlockAnnounce<B> for ProofOfStakeBlockAnnounce {
+    fn on_announced_block(&mut self, _block: B) {}
     fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockAnnounceRequest<B>> {
         Poll::Pending
     }
@@ -166,6 +179,7 @@ mod tests {
     }
 
     impl BlockAnnounce<MockBlock> for MockBlockAnnounce {
+        fn on_announced_block(&mut self, _block: MockBlock) {}
         fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockAnnounceRequest<MockBlock>> {
             if let Some((block, hash)) = self.blocks.pop_front() {
                 Poll::Ready(BlockAnnounceRequest::Announce {

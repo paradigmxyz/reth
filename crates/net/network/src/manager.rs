@@ -615,7 +615,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     fn on_block_announce_request(&mut self, event: BlockAnnounceRequest<N::NewBlockPayload>) {
         match event {
             BlockAnnounceRequest::Announce { block, hash, strategy } => {
-                let msg = NewBlockMessage { hash, block: Arc::new(block) };
+                let msg = NewBlockMessage { hash, block: Arc::new(block.clone()) };
 
                 match strategy {
                     PropagationStrategy::FullBlock => {
@@ -632,6 +632,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         self.swarm.state_mut().announce_new_block_hash(msg);
                     }
                 }
+
+                self.block_announce.on_announced_block(block);
             }
         }
     }
