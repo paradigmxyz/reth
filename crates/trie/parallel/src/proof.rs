@@ -36,7 +36,7 @@ pub struct ParallelProof {
     collect_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
-    /// Handle to the proof task manager.
+    /// Handle to the proof worker pools.
     proof_task_handle: ProofTaskManagerHandle,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.

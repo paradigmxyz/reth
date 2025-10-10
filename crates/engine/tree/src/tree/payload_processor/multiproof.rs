@@ -346,10 +346,9 @@ pub struct MultiproofManager {
     pending: VecDeque<PendingMultiproofTask>,
     /// Executor for tasks
     executor: WorkloadExecutor,
-    /// Handle to the proof task manager used for creating `ParallelProof` instances for storage
-    /// proofs.
+    /// Handle to the proof worker pool for storage proofs.
     storage_proof_task_handle: ProofTaskManagerHandle,
-    /// Handle to the proof task manager used for account multiproofs.
+    /// Handle to the proof worker pool for account multiproofs.
     account_proof_task_handle: ProofTaskManagerHandle,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
