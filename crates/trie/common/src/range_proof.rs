@@ -1,7 +1,10 @@
 //! Range proof verification for snap sync protocol
 
 use crate::Nibbles;
-use alloc::{collections::{BTreeMap, VecDeque}, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    vec::Vec,
+};
 use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::Decodable;
 use alloy_trie::{nodes::TrieNode, EMPTY_ROOT_HASH};
