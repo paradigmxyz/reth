@@ -48,6 +48,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     /// hashed (missed) addresses to their storage proof roots.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     /// Marker to keep the Factory type parameter.
+    /// TODO: Remove this field if the Factory generic is not needed in the future.
     _phantom: std::marker::PhantomData<Factory>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
