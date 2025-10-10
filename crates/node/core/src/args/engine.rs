@@ -113,6 +113,11 @@ pub struct EngineArgs {
     /// If not specified, defaults to 2x available parallelism, clamped between 2 and 64.
     #[arg(long = "engine.storage-worker-count")]
     pub storage_worker_count: Option<usize>,
+
+    /// Configure the number of account proof workers in the Tokio blocking pool.
+    /// If not specified, defaults to 1.5x storage workers.
+    #[arg(long = "engine.account-worker-count")]
+    pub account_worker_count: Option<usize>,
 }
 
 #[allow(deprecated)]
@@ -140,6 +145,7 @@ impl Default for EngineArgs {
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
+            account_worker_count: None,
         }
     }
 }
@@ -169,6 +175,10 @@ impl EngineArgs {
 
         if let Some(count) = self.storage_worker_count {
             config = config.with_storage_worker_count(count);
+        }
+
+        if let Some(count) = self.account_worker_count {
+            config = config.with_account_worker_count(count);
         }
 
         config
