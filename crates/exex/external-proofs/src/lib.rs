@@ -1,32 +1,21 @@
-//! External Proofs ExEx - processes blocks and tracks state changes
+//! OP Proofs ExEx - processes blocks and tracks state changes
 
-use std::sync::Arc;
-
+use crate::{backfill::BackfillJob, in_memory::InMemoryProofsStorage};
 use futures_util::TryStreamExt;
 use reth_chainspec::ChainInfo;
+use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_node_types::NodeTypes;
-use reth_primitives_traits::AlloyBlockHeader;
-use reth_provider::{
-    BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory, TransactionVariant,
-};
+use reth_provider::{BlockNumReader, DBProvider, DatabaseProviderFactory};
+use std::sync::Arc;
 
-use reth_exex::{ExExContext, ExExEvent, ExExNotification};
-use tracing::info;
-
-use crate::{
-    backfill::BackfillJob, in_memory::InMemoryExternalStorage, live::LiveTrieCollector,
-    storage::ExternalStorage,
-};
-
-mod backfill;
-mod in_memory;
-mod live;
-mod mdbx;
-mod models;
-mod proof;
-mod provider;
-mod storage;
+pub mod backfill;
+pub mod in_memory;
+pub mod live;
+pub mod mdbx;
+pub mod proof;
+pub mod provider;
+pub mod storage;
 
 #[cfg(test)]
 mod storage_tests;
@@ -35,22 +24,22 @@ mod storage_tests;
 /// saving the current state, new blocks as they're added, and serving proof RPCs
 /// based on the saved data.
 #[derive(Debug)]
-pub struct ExternalProofExEx<Node>
+pub struct OpProofsExEx<Node>
 where
     Node: FullNodeComponents,
 {
     ctx: ExExContext<Node>,
-    storage: Arc<InMemoryExternalStorage>,
+    storage: Arc<InMemoryProofsStorage>,
 }
 
-impl<Node, Primitives> ExternalProofExEx<Node>
+impl<Node, Primitives> OpProofsExEx<Node>
 where
     Node: FullNodeComponents<Types: NodeTypes<Primitives = Primitives>>,
     Primitives: NodePrimitives,
 {
-    /// Create a new `ExternalProofExEx` instance
+    /// Create a new `OpProofsExEx` instance
     pub fn new(ctx: ExExContext<Node>) -> Self {
-        Self { ctx, storage: Arc::new(InMemoryExternalStorage::new()) }
+        Self { ctx, storage: Arc::new(InMemoryProofsStorage::new()) }
     }
 
     /// Main execution loop for the ExEx

@@ -61,4 +61,7 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-trie/test-utils",
     "reth-db/test-utils",
+    "reth-chainspec/test-utils",
+    "reth-evm/test-utils",
+    "reth-revm/test-utils",
 ]

@@ -1,3 +1,9 @@
+//! Live trie collector for external proofs storage.
+
+use crate::{
+    provider::OpProofsStateProviderRef,
+    storage::{BlockStateDiff, OpProofsStorage},
+};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes};
 use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock};
@@ -7,39 +13,35 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use std::time::Instant;
-use tracing::{debug, info};
+use tracing::debug;
 
-use crate::provider::ExternalOverlayStateProviderRef;
-use crate::storage::{BlockStateDiff, ExternalStorage};
-
-pub(crate) struct LiveTrieCollector<Node, Storage>
+/// Live trie collector for external proofs storage.
+#[derive(Debug)]
+pub struct LiveTrieCollector<Node, PreimageStore>
 where
     Node: FullNodeComponents,
     Node::Provider: StateReader + DatabaseProviderFactory + StateProviderFactory,
 {
     evm_config: Node::Evm,
     provider: Node::Provider,
-    storage: Storage,
+    storage: PreimageStore,
 }
 
-impl<Node, Storage> LiveTrieCollector<Node, Storage>
+impl<Node, Store, Primitives> LiveTrieCollector<Node, Store>
 where
-    Node: FullNodeComponents,
-    Storage: ExternalStorage + Clone + 'static,
+    Node: FullNodeComponents<Types: NodeTypes<Primitives = Primitives>>,
+    Primitives: NodePrimitives,
+    Store: OpProofsStorage + Clone + 'static,
 {
     /// Create a new `LiveTrieCollector` instance
-    pub(crate) const fn new(
-        evm_config: Node::Evm,
-        provider: Node::Provider,
-        storage: Storage,
-    ) -> Self {
+    pub const fn new(evm_config: Node::Evm, provider: Node::Provider, storage: Store) -> Self {
         Self { evm_config, provider, storage }
     }
 
-    /// Execute a block and store the trie updates and post state
-    pub(crate) async fn execute_and_store_block_updates(
+    /// Execute a block and store the updates in the storage.
+    pub async fn execute_and_store_block_updates(
         &self,
-        block: &RecoveredBlock<<<Node::Types as NodeTypes>::Primitives as NodePrimitives>::Block>,
+        block: &RecoveredBlock<Primitives::Block>,
     ) -> eyre::Result<()> {
         let start = Instant::now();
         // ensure that we have the state of the parent block
@@ -72,7 +74,7 @@ where
 
         // TODO: should we check block hash here?
 
-        let state_provider = ExternalOverlayStateProviderRef::new(
+        let state_provider = OpProofsStateProviderRef::new(
             self.provider.state_by_block_hash(block.parent_hash())?,
             self.storage.clone(),
             parent_block_number,
@@ -103,7 +105,6 @@ where
             ));
         }
 
-        // Store the trie updates and post state
         self.storage
             .store_trie_updates(
                 block_number,
@@ -119,8 +120,6 @@ where
         debug!("- execute_block_duration: {:?}", execute_block_duration);
         debug!("- calculate_state_root_duration: {:?}", calculate_state_root_duration);
         debug!("- write_trie_updates_duration: {:?}", write_trie_updates_duration);
-
-        info!("Stored trie updates for block {}", block_number);
 
         Ok(())
     }

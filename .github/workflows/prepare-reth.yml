@@ -24,10 +24,9 @@ on:
 
 jobs:
   prepare-reth:
-    if: github.repository == 'paradigmxyz/reth'
+    if: github.repository == 'op-rs/op-reth'
     timeout-minutes: 45
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - run: mkdir artifacts
