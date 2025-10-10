@@ -922,8 +922,10 @@ pub struct ProofTaskManagerHandle {
 
 impl ProofTaskManagerHandle {
     /// Creates a new [`ProofTaskManagerHandle`] with direct access to worker pools.
-    #[allow(private_interfaces)]
-    pub fn new(
+    ///
+    /// This is an internal constructor used by `spawn_proof_workers`.
+    /// External users should call `spawn_proof_workers` to create handles.
+    fn new(
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         account_work_tx: CrossbeamSender<AccountWorkerJob>,
         active_handles: Arc<AtomicUsize>,
@@ -1034,7 +1036,8 @@ impl Drop for ProofTaskManagerHandle {
 
         debug_assert_ne!(
             previous_handles, 0,
-            "active_handles underflow in ProofTaskManagerHandle::drop"
+            "active_handles underflow in ProofTaskManagerHandle::drop (previous={})",
+            previous_handles
         );
 
         #[cfg(feature = "metrics")]
