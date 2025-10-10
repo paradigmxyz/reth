@@ -16,7 +16,7 @@
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the `RLPx` session.
 
 use crate::{
-    announce::{BlockAnnounce, BlockAnnounceRequest},
+    announce::{BlockAnnounce, BlockAnnounceRequest, PropagationStrategy},
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
     discovery::Discovery,
@@ -613,8 +613,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     /// Invoked when a block is ready to be announced to peers
     fn on_block_announce_request(&mut self, event: BlockAnnounceRequest<N::NewBlockPayload>) {
-        use crate::announce::PropagationStrategy;
-
         match event {
             BlockAnnounceRequest::Announce { block, hash, strategy } => {
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
@@ -706,14 +704,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         match msg {
             NetworkHandleMessage::DiscoveryListener(tx) => {
                 self.swarm.state_mut().discovery_mut().add_listener(tx);
-            }
-            NetworkHandleMessage::AnnounceBlock(block, hash) => {
-                use crate::announce::PropagationStrategy;
-                self.on_block_announce_request(BlockAnnounceRequest::Announce {
-                    block,
-                    hash,
-                    strategy: PropagationStrategy::Both,
-                });
             }
             NetworkHandleMessage::EthRequest { peer_id, request } => {
                 self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::EthRequest(request))
