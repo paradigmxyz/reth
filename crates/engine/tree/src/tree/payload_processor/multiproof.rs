@@ -346,10 +346,8 @@ pub struct MultiproofManager {
     pending: VecDeque<PendingMultiproofTask>,
     /// Executor for tasks
     executor: WorkloadExecutor,
-    /// Handle to the proof worker pool for storage proofs.
-    storage_proof_task_handle: ProofTaskManagerHandle,
-    /// Handle to the proof worker pool for account multiproofs.
-    account_proof_task_handle: ProofTaskManagerHandle,
+    /// Handle to the proof worker pools (storage and account).
+    proof_task_handle: ProofTaskManagerHandle,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     ///
@@ -371,8 +369,7 @@ impl MultiproofManager {
     fn new(
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
-        storage_proof_task_handle: ProofTaskManagerHandle,
-        account_proof_task_handle: ProofTaskManagerHandle,
+        proof_task_handle: ProofTaskManagerHandle,
         max_concurrent: usize,
     ) -> Self {
         Self {
@@ -381,8 +378,7 @@ impl MultiproofManager {
             executor,
             inflight: 0,
             metrics,
-            storage_proof_task_handle,
-            account_proof_task_handle,
+            proof_task_handle,
             missed_leaves_storage_roots: Default::default(),
         }
     }
@@ -451,7 +447,7 @@ impl MultiproofManager {
             multi_added_removed_keys,
         } = storage_multiproof_input;
 
-        let storage_proof_task_handle = self.storage_proof_task_handle.clone();
+        let storage_proof_task_handle = self.proof_task_handle.clone();
         let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
 
         self.executor.spawn_blocking(move || {
@@ -523,7 +519,7 @@ impl MultiproofManager {
             state_root_message_sender,
             multi_added_removed_keys,
         } = multiproof_input;
-        let account_proof_task_handle = self.account_proof_task_handle.clone();
+        let account_proof_task_handle = self.proof_task_handle.clone();
         let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
 
         self.executor.spawn_blocking(move || {
@@ -707,8 +703,7 @@ impl MultiProofTask {
             multiproof_manager: MultiproofManager::new(
                 executor,
                 metrics.clone(),
-                proof_task_handle.clone(), // handle for storage proof workers
-                proof_task_handle,         // handle for account proof workers
+                proof_task_handle,
                 max_concurrency,
             ),
             metrics,
