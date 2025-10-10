@@ -375,7 +375,12 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// the invalid fork from in-memory state, preventing it from being referenced
     /// during state provider construction.
     pub fn remove_invalid_block_and_descendants(&self, invalid_block_hash: B256) {
-        // First, collect all blocks that need to be removed using BFS
+        // If the block doesn't exist in the state, there's nothing to remove
+        if !self.inner.in_memory_state.blocks.read().contains_key(&invalid_block_hash) {
+            return;
+        }
+
+        // Collect all blocks that need to be removed using BFS
         let mut blocks_to_remove = std::collections::HashSet::new();
         let mut queue = VecDeque::from([invalid_block_hash]);
 
