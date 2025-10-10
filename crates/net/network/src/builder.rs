@@ -123,4 +123,31 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         );
         NetworkBuilder { network, request_handler, transactions }
     }
+
+    /// Sets the [`BlockAnnounce`] implementation for announcing blocks to the network.
+    ///
+    /// This is primarily useful for Proof-of-Work chains or custom block production scenarios.
+    /// For Proof-of-Stake chains, block announce should remain unset as block propagation
+    /// over devp2p is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use reth_network::{NetworkManager, BlockAnnounce};
+    ///
+    /// // Custom block announcer for PoW or similar chains
+    /// let block_announcer = Box::new(MyBlockAnnouncer::new());
+    ///
+    /// let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
+    ///     .await?
+    ///     .block_announce(block_announcer)
+    ///     .split_with_handle();
+    /// ```
+    pub fn block_announce(
+        mut self,
+        announcer: Box<dyn crate::import::BlockAnnounce<N::NewBlockPayload>>,
+    ) -> Self {
+        self.network.set_block_announce(announcer);
+        self
+    }
 }

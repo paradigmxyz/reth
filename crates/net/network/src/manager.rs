@@ -21,7 +21,10 @@ use crate::{
     discovery::Discovery,
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
-    import::{BlockImport, BlockImportEvent, BlockImportOutcome, BlockValidation, NewBlockEvent},
+    import::{
+        BlockAnnounce, BlockAnnounceEvent, BlockImport, BlockImportEvent, BlockImportOutcome,
+        BlockValidation, NewBlockEvent,
+    },
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
@@ -111,6 +114,14 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage<N>>,
     /// Handles block imports according to the `eth` protocol.
     block_import: Box<dyn BlockImport<N::NewBlockPayload>>,
+    /// Handles block announcements to the network.
+    ///
+    /// This is the symmetric counterpart to `block_import`. While `block_import` processes
+    /// incoming blocks from peers, `block_announce` polls for outgoing block announcements.
+    ///
+    /// For Proof-of-Stake chains, this should remain `None` as block propagation over devp2p
+    /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
+    block_announce: Option<Box<dyn BlockAnnounce<N::NewBlockPayload>>>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// Sender half to send events to the
@@ -189,6 +200,28 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
     pub fn set_eth_request_handler(&mut self, tx: mpsc::Sender<IncomingEthRequest<N>>) {
         self.to_eth_request_handler = Some(tx);
+    }
+
+    /// Sets the [`BlockAnnounce`] implementation for announcing blocks to the network.
+    ///
+    /// This is primarily useful for Proof-of-Work chains or custom block production scenarios.
+    /// For Proof-of-Stake chains, this should remain unset as block propagation over devp2p
+    /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
+    pub fn with_block_announce(
+        mut self,
+        announcer: Box<dyn BlockAnnounce<N::NewBlockPayload>>,
+    ) -> Self {
+        self.set_block_announce(announcer);
+        self
+    }
+
+    /// Sets the [`BlockAnnounce`] implementation for announcing blocks to the network.
+    ///
+    /// This is primarily useful for Proof-of-Work chains or custom block production scenarios.
+    /// For Proof-of-Stake chains, this should remain unset as block propagation over devp2p
+    /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
+    pub fn set_block_announce(&mut self, announcer: Box<dyn BlockAnnounce<N::NewBlockPayload>>) {
+        self.block_announce = Some(announcer);
     }
 
     /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
@@ -348,6 +381,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             handle,
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
             block_import,
+            block_announce: None,
             event_sender,
             to_transactions_manager: None,
             to_eth_request_handler: None,
@@ -576,6 +610,16 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                             .apply_reputation_change(&peer, ReputationChangeKind::BadBlock);
                     }
                 }
+            }
+        }
+    }
+
+    /// Invoked when a block is ready to be announced to peers
+    fn on_block_announce_event(&mut self, event: BlockAnnounceEvent<N::NewBlockPayload>) {
+        match event {
+            BlockAnnounceEvent::Announce { block, hash } => {
+                let msg = NewBlockMessage { hash, block: Arc::new(block) };
+                self.swarm.state_mut().announce_new_block(msg);
             }
         }
     }
@@ -1099,6 +1143,22 @@ impl<N: NetworkPrimitives> Future for NetworkManager<N> {
         // poll new block imports (expected to be a noop for POS)
         while let Poll::Ready(outcome) = this.block_import.poll(cx) {
             this.on_block_import_result(outcome);
+        }
+
+        // poll new block announcements (expected to be a noop for POS)
+        // Only poll if block_announce is configured and not in PoS mode
+        if !this.handle.mode().is_stake() {
+            if let Some(announcer) = &mut this.block_announce {
+                // Collect events first to avoid borrow checker issues
+                let mut events = Vec::new();
+                while let Poll::Ready(event) = announcer.poll(cx) {
+                    events.push(event);
+                }
+                // Process collected events
+                for event in events {
+                    this.on_block_announce_event(event);
+                }
+            }
         }
 
         // These loops drive the entire state of network and does a lot of work. Under heavy load
