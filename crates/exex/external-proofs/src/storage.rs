@@ -1,6 +1,5 @@
 //! Traits for external storage for trie nodes.
 
-#![expect(dead_code)]
 use alloy_primitives::{map::HashMap, B256, U256};
 use async_trait::async_trait;
 use auto_impl::auto_impl;

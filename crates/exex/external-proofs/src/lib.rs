@@ -4,7 +4,6 @@ use crate::{backfill::BackfillJob, in_memory::InMemoryExternalStorage};
 use futures_util::TryStreamExt;
 use reth_chainspec::ChainInfo;
 use reth_exex::{ExExContext, ExExEvent};
-use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_node_types::NodeTypes;
 use reth_provider::{BlockNumReader, DBProvider, DatabaseProviderFactory};
