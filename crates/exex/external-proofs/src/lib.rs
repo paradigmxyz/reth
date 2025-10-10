@@ -1,17 +1,18 @@
 //! External Proofs ExEx - processes blocks and tracks state changes
 
+use crate::{backfill::BackfillJob, in_memory::InMemoryExternalStorage};
 use futures_util::TryStreamExt;
-use std::sync::Arc;
 use reth_chainspec::ChainInfo;
+use reth_exex::{ExExContext, ExExEvent};
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_node_types::NodeTypes;
 use reth_provider::{BlockNumReader, DBProvider, DatabaseProviderFactory};
-use crate::{backfill::BackfillJob, in_memory::InMemoryExternalStorage};
+use std::sync::Arc;
 
-mod backfill;
-mod in_memory;
-mod storage;
+pub mod backfill;
+pub mod in_memory;
+pub mod storage;
 
 #[cfg(test)]
 mod storage_tests;
