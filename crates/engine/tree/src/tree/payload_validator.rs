@@ -877,17 +877,37 @@ where
                 // too expensive because it requires walking all paths in every proof.
                 let spawn_start = Instant::now();
                 let (handle, strategy) = if trie_input.prefix_sets.is_empty() {
-                    (
-                        self.payload_processor.spawn(
-                            env,
-                            txs,
-                            provider_builder,
-                            consistent_view,
-                            trie_input,
-                            &self.config,
-                        ),
-                        StateRootStrategy::StateRootTask,
-                    )
+                    match self.payload_processor.spawn(
+                        env,
+                        txs,
+                        provider_builder,
+                        consistent_view,
+                        trie_input,
+                        &self.config,
+                    ) {
+                        Ok(handle) => {
+                            // Successfully spawned with state root task support
+                            (handle, StateRootStrategy::StateRootTask)
+                        }
+                        Err((error, txs, env, provider_builder)) => {
+                            // Failed to initialize proof task manager, fallback to parallel state
+                            // root
+                            error!(
+                                target: "engine::tree",
+                                block=?block_num_hash,
+                                ?error,
+                                "Failed to initialize proof task manager, falling back to parallel state root"
+                            );
+                            (
+                                self.payload_processor.spawn_cache_exclusive(
+                                    env,
+                                    txs,
+                                    provider_builder,
+                                ),
+                                StateRootStrategy::Parallel,
+                            )
+                        }
+                    }
                 // if prefix sets are not empty, we spawn a task that exclusively handles cache
                 // prewarming for transaction execution
                 } else {
