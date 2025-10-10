@@ -70,7 +70,6 @@ pub enum PropagationStrategy {
 /// // NetworkManager will poll and announce it automatically!
 /// ```
 pub trait BlockAnnounce<B = NewBlock>: std::fmt::Debug + Send + Sync {
-
     /// Invoked for a received block announcement from the peer.
     ///
     /// For a `NewBlock` message:
@@ -79,7 +78,7 @@ pub trait BlockAnnounce<B = NewBlock>: std::fmt::Debug + Send + Sync {
     ///
     /// For a `NewBlockHashes` message, hash announcement should be processed accordingly.
     ///
-    /// The results are expected to be returned via [`BlockImport::poll`].
+    /// The results are expected to be returned via [`BlockAnnounce::poll`].
     fn on_announced_block(&mut self, block: B);
 
     /// Poll for blocks that need to be announced to peers.
