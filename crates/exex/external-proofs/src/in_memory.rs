@@ -4,13 +4,10 @@
 //! that can be used for testing and development. The implementation uses tokio async `RwLock`
 //! for thread-safe concurrent access and stores all data in memory using `BTreeMap` collections.
 
-#![allow(dead_code, unreachable_pub)]
-
 use alloy_primitives::{map::HashMap, B256, U256};
+use async_trait::async_trait;
 use reth_primitives_traits::Account;
 use reth_trie::{updates::TrieUpdates, BranchNodeCompact, HashedPostState, Nibbles};
-
-use async_trait::async_trait;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -48,6 +45,92 @@ struct InMemoryStorageInner {
 
     /// Earliest block number and hash
     earliest_block: Option<(u64, B256)>,
+}
+
+impl InMemoryStorageInner {
+    fn store_trie_updates(&mut self, block_number: u64, block_state_diff: BlockStateDiff) {
+        // Store account branch nodes
+        for (path, branch) in block_state_diff.trie_updates.account_nodes_ref() {
+            self.account_branches.insert((block_number, *path), Some(branch.clone()));
+        }
+
+        // Store removed account nodes
+        let account_removals = block_state_diff
+            .trie_updates
+            .removed_nodes_ref()
+            .iter()
+            .filter_map(|n| {
+                (!block_state_diff.trie_updates.account_nodes_ref().contains_key(n))
+                    .then_some((n, None))
+            })
+            .collect::<Vec<_>>();
+
+        for (path, branch) in account_removals {
+            self.account_branches.insert((block_number, *path), branch);
+        }
+
+        // Store storage branch nodes and removals
+        for (address, storage_trie_updates) in block_state_diff.trie_updates.storage_tries_ref() {
+            // Store storage branch nodes
+            for (path, branch) in storage_trie_updates.storage_nodes_ref() {
+                self.storage_branches.insert((block_number, *address, *path), Some(branch.clone()));
+            }
+
+            // Store removed storage nodes
+            let storage_removals = storage_trie_updates
+                .removed_nodes_ref()
+                .iter()
+                .filter_map(|n| {
+                    (!storage_trie_updates.storage_nodes_ref().contains_key(n)).then_some((n, None))
+                })
+                .collect::<Vec<_>>();
+
+            for (path, branch) in storage_removals {
+                self.storage_branches.insert((block_number, *address, *path), branch);
+            }
+        }
+
+        for (address, account) in &block_state_diff.post_state.accounts {
+            self.hashed_accounts.insert((block_number, *address), *account);
+        }
+
+        for (hashed_address, storage) in &block_state_diff.post_state.storages {
+            // Handle wiped storage: iterate all existing values and mark them as deleted
+            // This is an expensive operation and should never happen for blocks going forward.
+            if storage.wiped {
+                // Collect latest values for each slot up to the current block
+                let mut slot_to_latest: std::collections::BTreeMap<B256, (u64, U256)> =
+                    std::collections::BTreeMap::new();
+
+                for ((block, address, slot), value) in &self.hashed_storages {
+                    if *block < block_number && *address == *hashed_address {
+                        if let Some((existing_block, _)) = slot_to_latest.get(slot) {
+                            if *block > *existing_block {
+                                slot_to_latest.insert(*slot, (*block, *value));
+                            }
+                        } else {
+                            slot_to_latest.insert(*slot, (*block, *value));
+                        }
+                    }
+                }
+
+                // Store zero values for all non-zero slots to mark them as deleted
+                for (slot, (_, value)) in slot_to_latest {
+                    if !value.is_zero() {
+                        self.hashed_storages
+                            .insert((block_number, *hashed_address, slot), U256::ZERO);
+                    }
+                }
+            } else {
+                for (slot, value) in &storage.storage {
+                    self.hashed_storages.insert((block_number, *hashed_address, *slot), *value);
+                }
+            }
+        }
+
+        self.trie_updates.insert(block_number, block_state_diff.trie_updates.clone());
+        self.post_states.insert(block_number, block_state_diff.post_state.clone());
+    }
 }
 
 impl Default for InMemoryProofsStorage {
@@ -426,39 +509,7 @@ impl OpProofsStorage for InMemoryProofsStorage {
     ) -> OpProofsStorageResult<()> {
         let mut inner = self.inner.write().await;
 
-        // Handle wiped storage: iterate all existing values and mark them as deleted
-        // This is an expensive operation and should never happen for blocks going forward.
-        for (hashed_address, storage) in &block_state_diff.post_state.storages {
-            if storage.wiped {
-                // Collect latest values for each slot up to the current block
-                let mut slot_to_latest: std::collections::BTreeMap<B256, (u64, U256)> =
-                    std::collections::BTreeMap::new();
-
-                for ((block, address, slot), value) in &inner.hashed_storages {
-                    if *block < block_number && *address == *hashed_address {
-                        if let Some((existing_block, _)) = slot_to_latest.get(slot) {
-                            if *block > *existing_block {
-                                slot_to_latest.insert(*slot, (*block, *value));
-                            }
-                        } else {
-                            slot_to_latest.insert(*slot, (*block, *value));
-                        }
-                    }
-                }
-
-                // Store zero values for all non-zero slots to mark them as deleted
-                for (slot, (_, value)) in slot_to_latest {
-                    if !value.is_zero() {
-                        inner
-                            .hashed_storages
-                            .insert((block_number, *hashed_address, slot), U256::ZERO);
-                    }
-                }
-            }
-        }
-
-        inner.trie_updates.insert(block_number, block_state_diff.trie_updates);
-        inner.post_states.insert(block_number, block_state_diff.post_state);
+        inner.store_trie_updates(block_number, block_state_diff);
 
         Ok(())
     }
@@ -554,10 +605,8 @@ impl OpProofsStorage for InMemoryProofsStorage {
         inner.hashed_accounts.retain(|(block, _), _| *block <= latest_common_block_number);
         inner.hashed_storages.retain(|(block, _, _), _| *block <= latest_common_block_number);
 
-        // Add new updates
         for (block_number, block_state_diff) in blocks_to_add {
-            inner.trie_updates.insert(block_number, block_state_diff.trie_updates);
-            inner.post_states.insert(block_number, block_state_diff.post_state);
+            inner.store_trie_updates(block_number, block_state_diff);
         }
 
         Ok(())

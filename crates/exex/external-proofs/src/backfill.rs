@@ -1,6 +1,6 @@
-use std::{collections::HashMap, time::Instant};
-use tracing::info;
+//! Backfill job for proofs storage. Handles storing the existing state into the proofs storage.
 
+use super::storage::OpProofsStorage;
 use alloy_primitives::B256;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -10,8 +10,8 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles};
-
-use super::storage::OpProofsStorage;
+use std::{collections::HashMap, time::Instant};
+use tracing::info;
 
 /// Batch size threshold for storing entries during backfill
 const BACKFILL_STORAGE_THRESHOLD: usize = 100000;
