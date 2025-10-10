@@ -864,6 +864,9 @@ Engine:
       --engine.allow-unwind-canonical-header
           Allow unwinding canonical header to ancestor during forkchoice updates. See `TreeConfig::unwind_canonical_header` for more details
 
+      --engine.storage-worker-count <STORAGE_WORKER_COUNT>
+          Configure the number of storage proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism, clamped between 2 and 64
+
 ERA:
       --era.enable
           Enable import from ERA1 files
