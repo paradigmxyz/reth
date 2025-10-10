@@ -323,7 +323,6 @@ mod tests {
         // after we compute the state root
         let join_handle = rt.spawn_blocking(move || proof_task.run());
 
-        type Factory = ProviderFactory<MockNodeTypesWithDB>;
         let parallel_result = ParallelProof::new(
             Default::default(),
             Default::default(),
