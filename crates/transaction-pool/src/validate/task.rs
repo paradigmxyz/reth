@@ -200,17 +200,17 @@ where
         let hash = *transaction.hash();
         let (tx, rx) = oneshot::channel();
         {
-            let res = {
+            let send_result = {
                 let to_validation_task = self.to_validation_task.clone();
                 let validator = self.validator.clone();
                 let fut = Box::pin(async move {
-                    let res = validator.validate_transaction(origin, transaction).await;
-                    let _ = tx.send(res);
+                    let validation_result = validator.validate_transaction(origin, transaction).await;
+                    let _ = tx.send(validation_result);
                 });
                 let to_validation_task = to_validation_task.lock().await;
                 to_validation_task.send(fut).await
             };
-            if res.is_err() {
+            if send_result.is_err() {
                 return TransactionValidationOutcome::Error(
                     hash,
                     Box::new(TransactionValidatorError::ValidationServiceUnreachable),
@@ -234,17 +234,17 @@ where
         let hashes: Vec<_> = transactions.iter().map(|(_, tx)| *tx.hash()).collect();
         let (tx, rx) = oneshot::channel();
         {
-            let res = {
+            let send_result = {
                 let to_validation_task = self.to_validation_task.clone();
                 let validator = self.validator.clone();
                 let fut = Box::pin(async move {
-                    let res = validator.validate_transactions(transactions).await;
-                    let _ = tx.send(res);
+                    let validation_result = validator.validate_transactions(transactions).await;
+                    let _ = tx.send(validation_result);
                 });
                 let to_validation_task = to_validation_task.lock().await;
                 to_validation_task.send(fut).await
             };
-            if res.is_err() {
+            if send_result.is_err() {
                 return hashes
                     .into_iter()
                     .map(|hash| {
