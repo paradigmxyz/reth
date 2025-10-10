@@ -324,7 +324,7 @@ mod tests {
         let join_handle = rt.spawn_blocking(move || proof_task.run());
 
         type Factory = ProviderFactory<MockNodeTypesWithDB>;
-        let parallel_result = ParallelProof::<Factory>::new(
+        let parallel_result = ParallelProof::new(
             Default::default(),
             Default::default(),
             Default::default(),
