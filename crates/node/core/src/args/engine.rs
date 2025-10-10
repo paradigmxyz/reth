@@ -115,7 +115,7 @@ pub struct EngineArgs {
     pub storage_worker_count: Option<usize>,
 
     /// Configure the number of account proof workers in the Tokio blocking pool.
-    /// If not specified, defaults to 1.5x storage workers.
+    /// If not specified, defaults to the same count as storage workers.
     #[arg(long = "engine.account-worker-count")]
     pub account_worker_count: Option<usize>,
 }

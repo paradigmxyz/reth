@@ -868,7 +868,7 @@ Engine:
           Configure the number of storage proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism, clamped between 2 and 64
 
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
-          Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to 1.5x storage workers
+          Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to the same count as storage workers
 
 ERA:
       --era.enable
