@@ -131,7 +131,12 @@ fn verify_and_repair<N: ProviderNodeTypes>(
     let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
     let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
 
+    let account =
+        B256::from(hex!("0xbe67e4c7cd9e0722c7a175135f72c02b5ec1ddba0f73dacde8e007defbe9fca9"));
+    let nibbles = StoredNibblesSubKey(Nibbles::from_nibbles([0x4, 0xf, 0x8, 0x8, 0x0, 0x7]));
+
     {
+        println!("UPSERTING");
         let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
 
         // Write the two storage trie nodes as specified
@@ -163,37 +168,28 @@ fn verify_and_repair<N: ProviderNodeTypes>(
             None,
         );
         let nibbles_a = StoredNibblesSubKey(Nibbles::from_nibbles([0x4, 0xf, 0x8, 0x8, 0x0, 0x7]));
-        let entry_a = StorageTrieEntry { nibbles: nibbles_a, node: node_a };
+        let entry_a = StorageTrieEntry { nibbles: nibbles_a.clone(), node: node_a };
         storage_trie_cursor.upsert(account, &entry_a)?;
+    }
 
-        // Node b)
-        let node_b = BranchNodeCompact::new(
-            TrieMask::new(0b1111111111111111),
-            TrieMask::new(0b0101010101101110),
-            TrieMask::new(0b1111111111110111),
-            vec![
-                hex!("0x1370b32c4be926dbbd0bf7cd30f378cc39aa00a8302b5ccb765da99aee356683").into(),
-                hex!("0x377110fb0d615f569260981807882eda72a46f4a61a110a05538f1388ff1ccb8").into(),
-                hex!("0x42d91b168b8efa5b15b7f67db06df0a7ccdcbec0e478d5ddbd82991bfda6971e").into(),
-                hex!("0x158860817b4a21866c0bc78d07ef1ea846ac9bc38d68457eaf18f40b4e638e2e").into(),
-                hex!("0x213508bc0206208e3f1c574150f27e0c74c33628ebb1f2cb8f8dd912368fb9f1").into(),
-                hex!("0xd8b948e0d54e23870e1365359610b309947ed09274940bbbf133132d82853ffe").into(),
-                hex!("0x7d8f730f65b30a51a7df0ce473f87f4a909993da228ec7077df8d8d0fdbaba6e").into(),
-                hex!("0xdbf65737c38f987f81a9ff5d1e3f60c1c03755ceb4b0d53757e3ef88c2cf46fb").into(),
-                hex!("0xbc67029fdd6db7d74d711a00dcf27330ec50c0d1f09764601b20d327448301cd").into(),
-                hex!("0xf72a9d9b75966048d6992d5b7297ef23e42eaaebde092df4445f50dd1ea8c68a").into(),
-                hex!("0xf67fb0f5e664df69a47b78ba5a201d89eac0b84666e0653cc95d170d534afadf").into(),
-                hex!("0x559f8a25600a2956dd4feab9ef4fab84b80356c6daf947d0c371bf2353ed7b82").into(),
-                hex!("0x29927f11dec376fc5a3a54517f5900a6c46aff1ad5d59a1cf80c016681c20b73").into(),
-                hex!("0xd883c5a3228eb64047fb71e855a3bbe10476e40c2e9f2118eb842955debcf3a0").into(),
-                hex!("0x1ab341110fb3376fb09f4448bef33da54659edad8cf2011d1e481a9a6b2cf784").into(),
-            ],
-            None,
-        );
-        let nibbles_b =
-            StoredNibblesSubKey(Nibbles::from_nibbles_unchecked([0x8, 0x9, 0x2, 0x4, 0xe, 0x8]));
-        let entry_b = StorageTrieEntry { nibbles: nibbles_b, node: node_b };
-        storage_trie_cursor.upsert(account, &entry_b)?;
+    {
+        println!("WALKING");
+        let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        let mut walker = storage_trie_cursor.walk_dup(Some(account), Some(nibbles.clone()))?;
+
+        let mut prev = None;
+        while let Some((_, entry)) = walker.next().transpose()? {
+            println!("{entry:?}");
+            if prev.is_some_and(|prev| prev != entry.nibbles.clone()) {
+                break;
+            }
+
+            prev = Some(entry.nibbles.clone());
+
+            if !entry.nibbles.starts_with(&nibbles) {
+                break;
+            }
+        }
     }
 
     // Create the cursor factories. These cannot accept the `&mut` tx above because they require it
@@ -262,8 +258,8 @@ fn verify_and_repair<N: ProviderNodeTypes>(
     if inconsistent_nodes == 0 {
         info!("No inconsistencies found");
     } else {
-        info!("Repaired {} inconsistencies, committing changes", inconsistent_nodes);
-        provider_rw.commit()?;
+        //info!("Repaired {} inconsistencies, committing changes", inconsistent_nodes);
+        //provider_rw.commit()?;
     }
 
     Ok(())
