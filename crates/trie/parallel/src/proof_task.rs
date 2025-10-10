@@ -1,9 +1,14 @@
-//! A Task that manages sending proof requests to a number of tasks that have longer-running
-//! database transactions.
+//! Parallel proof computation using worker pools with dedicated database transactions.
 //!
-//! The [`ProofTaskManager`] ensures that there are a max number of currently executing proof tasks,
-//! and is responsible for managing the fixed number of database transactions created at the start
-//! of the task.
+//!
+//! # Architecture
+//!
+//! - **Worker Pools**: Pre-spawned workers with dedicated database transactions
+//!   - Storage pool: Handles storage proofs and blinded storage node requests
+//!   - Account pool: Handles account multiproofs and blinded account node requests
+//! - **Direct Channel Access**: [`ProofTaskManagerHandle`] provides type-safe queue methods with
+//!   direct access to worker channels, eliminating routing overhead
+//! - **Automatic Shutdown**: Workers terminate gracefully when all handles are dropped
 //!
 //! Individual [`ProofTaskTx`] instances manage a dedicated [`InMemoryTrieCursorFactory`] and
 //! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
@@ -65,9 +70,6 @@ type AccountMultiproofResult =
     Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError>;
 
 /// Internal message for storage workers.
-///
-/// This is NOT exposed publicly. External callers use `ProofTaskKind::StorageProof` or
-/// `ProofTaskKind::BlindedStorageNode` which are routed through the manager's `std::mpsc` channel.
 #[derive(Debug)]
 enum StorageWorkerJob {
     /// Storage proof computation request
@@ -119,60 +121,12 @@ where
         "Spawning proof worker pools"
     );
 
-    // Spawn storage workers (reuse existing spawn_storage_workers logic)
-    spawn_storage_workers_internal(
-        &executor,
-        &view,
-        &task_ctx,
-        storage_worker_count,
-        storage_work_rx,
-    )?;
-
-    // Spawn account workers (reuse existing spawn_account_workers logic)
-    spawn_account_workers_internal(
-        &executor,
-        &view,
-        &task_ctx,
-        account_worker_count,
-        account_work_rx,
-        storage_work_tx.clone(),
-    )?;
-
-    Ok(ProofTaskManagerHandle::new(
-        storage_work_tx,
-        account_work_tx,
-        Arc::new(AtomicUsize::new(0)),
-        #[cfg(feature = "metrics")]
-        Arc::new(ProofTaskMetrics::default()),
-    ))
-}
-
-/// Spawns a pool of storage workers with dedicated database transactions.
-///
-/// Each worker receives `StorageWorkerJob` from the channel and processes storage proofs
-/// and blinded storage node requests using a dedicated long-lived transaction.
-///
-/// # Parameters
-/// - `executor`: Tokio runtime handle for spawning blocking tasks
-/// - `view`: Consistent database view for creating transactions
-/// - `task_ctx`: Shared context with trie updates and prefix sets
-/// - `worker_count`: Number of storage workers to spawn
-/// - `work_rx`: Receiver for storage worker jobs
-fn spawn_storage_workers_internal<Factory>(
-    executor: &Handle,
-    view: &ConsistentDbView<Factory>,
-    task_ctx: &ProofTaskCtx,
-    worker_count: usize,
-    work_rx: CrossbeamReceiver<StorageWorkerJob>,
-) -> ProviderResult<()>
-where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>,
-{
-    for worker_id in 0..worker_count {
+    // Spawn storage workers
+    for worker_id in 0..storage_worker_count {
         let provider_ro = view.provider_ro()?;
         let tx = provider_ro.into_tx();
         let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
-        let work_rx_clone = work_rx.clone();
+        let work_rx_clone = storage_work_rx.clone();
 
         executor
             .spawn_blocking(move || storage_worker_loop(proof_task_tx, work_rx_clone, worker_id));
@@ -184,38 +138,12 @@ where
         );
     }
 
-    Ok(())
-}
-
-/// Spawns a pool of account workers with dedicated database transactions.
-///
-/// Each worker receives `AccountWorkerJob` from the channel and processes account multiproofs
-/// and blinded account node requests using a dedicated long-lived transaction. Account workers
-/// can delegate storage proof computation to the storage worker pool.
-///
-/// # Parameters
-/// - `executor`: Tokio runtime handle for spawning blocking tasks
-/// - `view`: Consistent database view for creating transactions
-/// - `task_ctx`: Shared context with trie updates and prefix sets
-/// - `worker_count`: Number of account workers to spawn
-/// - `work_rx`: Receiver for account worker jobs
-/// - `storage_work_tx`: Sender to delegate storage proofs to storage worker pool
-fn spawn_account_workers_internal<Factory>(
-    executor: &Handle,
-    view: &ConsistentDbView<Factory>,
-    task_ctx: &ProofTaskCtx,
-    worker_count: usize,
-    work_rx: CrossbeamReceiver<AccountWorkerJob>,
-    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
-) -> ProviderResult<()>
-where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>,
-{
-    for worker_id in 0..worker_count {
+    // Spawn account workers
+    for worker_id in 0..account_worker_count {
         let provider_ro = view.provider_ro()?;
         let tx = provider_ro.into_tx();
         let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
-        let work_rx_clone = work_rx.clone();
+        let work_rx_clone = account_work_rx.clone();
         let storage_work_tx_clone = storage_work_tx.clone();
 
         executor.spawn_blocking(move || {
@@ -229,69 +157,13 @@ where
         );
     }
 
-    Ok(())
-}
-
-/// Manager for coordinating proof request execution across different task types.
-///
-/// # Architecture
-///
-/// This manager operates two distinct worker pools for parallel trie operations:
-///
-/// **Worker Pools**:
-///    - Pre-spawned workers with dedicated long-lived transactions
-///    - **Storage pool**: Handles `StorageProof` and `BlindedStorageNode` requests
-///    - **Account pool**: Handles `AccountMultiproof` and `BlindedAccountNode` requests, delegates
-///      storage proof computation to storage pool
-///    - Tasks queued via crossbeam unbounded channels
-///    - Workers continuously process without transaction overhead
-///    - Returns error if worker pool is unavailable (all workers panicked)
-///
-/// # Public Interface
-///
-/// The public interface through `ProofTaskManagerHandle` allows external callers to:
-/// - Submit tasks via `queue_task(ProofTaskKind)`
-/// - Use standard `std::mpsc` message passing
-/// - Receive consistent return types and error handling
-///
-/// # Deprecation Notice
-///
-/// This struct is deprecated. Use `spawn_proof_workers()` instead, which returns
-/// a `ProofTaskManagerHandle` directly without requiring a separate manager instance.
-#[deprecated(note = "Use spawn_proof_workers() instead")]
-#[allow(deprecated)]
-#[derive(Debug)]
-pub struct ProofTaskManager {
-    /// Sender for storage worker jobs to worker pool.
-    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
-
-    /// Number of storage workers successfully spawned.
-    ///
-    /// May be less than requested if concurrency limits reduce the worker budget.
-    storage_worker_count: usize,
-
-    /// Sender for account worker jobs to worker pool.
-    account_work_tx: CrossbeamSender<AccountWorkerJob>,
-
-    /// Number of account workers successfully spawned.
-    account_worker_count: usize,
-
-    /// Receives proof task requests from [`ProofTaskManagerHandle`].
-    proof_task_rx: CrossbeamReceiver<ProofTaskMessage>,
-
-    /// Sender for creating handles that can queue tasks.
-    #[allow(dead_code)]
-    proof_task_tx: CrossbeamSender<ProofTaskMessage>,
-
-    /// The number of active handles.
-    ///
-    /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
-    /// [`ProofTaskManagerHandle::drop`].
-    active_handles: Arc<AtomicUsize>,
-
-    /// Metrics tracking proof task operations.
-    #[cfg(feature = "metrics")]
-    metrics: ProofTaskMetrics,
+    Ok(ProofTaskManagerHandle::new(
+        storage_work_tx,
+        account_work_tx,
+        Arc::new(AtomicUsize::new(0)),
+        #[cfg(feature = "metrics")]
+        Arc::new(ProofTaskMetrics::default()),
+    ))
 }
 
 /// Worker loop for storage trie operations.
@@ -436,8 +308,6 @@ fn storage_worker_loop<Tx>(
     );
 }
 
-// TODO: Refactor this with storage_worker_loop. ProofTaskManager should be removed in the following
-// pr and `MultiproofManager` should be used instead to dispatch jobs directly.
 /// Worker loop for account trie operations.
 ///
 /// # Lifecycle
@@ -809,219 +679,6 @@ fn queue_storage_proofs(
     Ok(storage_proof_receivers)
 }
 
-#[allow(deprecated)]
-impl ProofTaskManager {
-    /// Creates a new [`ProofTaskManager`] with pre-spawned storage and account proof workers.
-    ///
-    /// This manager coordinates both storage and account worker pools:
-    /// - Storage workers handle `StorageProof` and `BlindedStorageNode` requests
-    /// - Account workers handle `AccountMultiproof` and `BlindedAccountNode` requests
-    ///
-    /// The `storage_worker_count` determines how many storage workers to spawn, and
-    /// `account_worker_count` determines how many account workers to spawn.
-    /// Returns an error if the underlying provider fails to create the transactions required for
-    /// spawning workers.
-    pub fn new<Factory>(
-        executor: Handle,
-        view: ConsistentDbView<Factory>,
-        task_ctx: ProofTaskCtx,
-        storage_worker_count: usize,
-        account_worker_count: usize,
-    ) -> ProviderResult<Self>
-    where
-        Factory: DatabaseProviderFactory<Provider: BlockReader>,
-    {
-        // Use unbounded channel for the router to prevent account workers from blocking
-        // when queuing storage proofs. Account workers queue many storage proofs through
-        // this channel, and blocking on a bounded channel wastes parallel worker capacity.
-        let (proof_task_tx, proof_task_rx) = unbounded();
-
-        // Use unbounded channel to ensure all storage operations are queued to workers.
-        // This maintains transaction reuse benefits and avoids fallback to on-demand execution.
-        let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
-        let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
-
-        tracing::info!(
-            target: "trie::proof_task",
-            storage_worker_count,
-            account_worker_count,
-            "Initializing storage and account worker pools with unbounded queues"
-        );
-
-        // Spawn storage workers
-        spawn_storage_workers_internal(
-            &executor,
-            &view,
-            &task_ctx,
-            storage_worker_count,
-            storage_work_rx,
-        )?;
-
-        // Spawn account workers with direct access to the storage worker queue
-        spawn_account_workers_internal(
-            &executor,
-            &view,
-            &task_ctx,
-            account_worker_count,
-            account_work_rx,
-            storage_work_tx.clone(),
-        )?;
-
-        Ok(Self {
-            storage_work_tx,
-            storage_worker_count,
-            account_work_tx,
-            account_worker_count,
-            proof_task_rx,
-            proof_task_tx,
-            active_handles: Arc::new(AtomicUsize::new(0)),
-
-            #[cfg(feature = "metrics")]
-            metrics: ProofTaskMetrics::default(),
-        })
-    }
-
-    /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
-    ///
-    /// DEPRECATED: This method returns a handle that uses the deprecated routing mechanism.
-    /// Use `spawn_proof_workers()` instead for direct worker pool access.
-    #[deprecated(note = "Use spawn_proof_workers() instead")]
-    pub fn handle(&self) -> ProofTaskManagerHandle {
-        ProofTaskManagerHandle::new(
-            self.storage_work_tx.clone(),
-            self.account_work_tx.clone(),
-            self.active_handles.clone(),
-            #[cfg(feature = "metrics")]
-            Arc::new(ProofTaskMetrics::default()),
-        )
-    }
-
-    /// Loops, managing the proof tasks, routing them to the appropriate worker pools.
-    ///
-    /// # Task Routing
-    ///
-    /// - **Storage Trie Operations** (`StorageProof` and `BlindedStorageNode`): Routed to
-    ///   pre-spawned storage worker pool via unbounded channel. Returns error if workers are
-    ///   disconnected (e.g., all workers panicked).
-    /// - **Account Trie Operations** (`AccountMultiproof` and `BlindedAccountNode`): Routed to
-    ///   pre-spawned account worker pool via unbounded channel. Returns error if workers are
-    ///   disconnected.
-    ///
-    /// # Shutdown
-    ///
-    /// On termination, `storage_work_tx` and `account_work_tx` are dropped, closing the channels
-    /// and signaling all workers to shut down gracefully.
-    ///
-    /// # Deprecation Notice
-    ///
-    /// This method is deprecated. With `spawn_proof_workers()`, workers are spawned directly
-    /// and no routing thread is needed. Workers shut down automatically when all handles are
-    /// dropped.
-    #[deprecated(note = "Use spawn_proof_workers() instead - no routing thread needed")]
-    pub fn run(self) -> ProviderResult<()> {
-        loop {
-            match self.proof_task_rx.recv() {
-                Ok(message) => {
-                    match message {
-                        ProofTaskMessage::QueueTask(task) => match task {
-                            ProofTaskKind::StorageProof(input, sender) => {
-                                self.storage_work_tx
-                                    .send(StorageWorkerJob::StorageProof {
-                                        input,
-                                        result_sender: sender,
-                                    })
-                                    .expect("storage worker pool should be available");
-
-                                tracing::trace!(
-                                    target: "trie::proof_task",
-                                    "Storage proof dispatched to worker pool"
-                                );
-                            }
-
-                            ProofTaskKind::BlindedStorageNode(account, path, sender) => {
-                                #[cfg(feature = "metrics")]
-                                {
-                                    self.metrics.storage_nodes.fetch_add(1, Ordering::Relaxed);
-                                }
-
-                                self.storage_work_tx
-                                    .send(StorageWorkerJob::BlindedStorageNode {
-                                        account,
-                                        path,
-                                        result_sender: sender,
-                                    })
-                                    .expect("storage worker pool should be available");
-
-                                tracing::trace!(
-                                    target: "trie::proof_task",
-                                    ?account,
-                                    ?path,
-                                    "Blinded storage node dispatched to worker pool"
-                                );
-                            }
-
-                            ProofTaskKind::BlindedAccountNode(path, sender) => {
-                                #[cfg(feature = "metrics")]
-                                {
-                                    self.metrics.account_nodes.fetch_add(1, Ordering::Relaxed);
-                                }
-
-                                self.account_work_tx
-                                    .send(AccountWorkerJob::BlindedAccountNode {
-                                        path,
-                                        result_sender: sender,
-                                    })
-                                    .expect("account worker pool should be available");
-
-                                tracing::trace!(
-                                    target: "trie::proof_task",
-                                    ?path,
-                                    "Blinded account node dispatched to worker pool"
-                                );
-                            }
-
-                            ProofTaskKind::AccountMultiproof(input, sender) => {
-                                self.account_work_tx
-                                    .send(AccountWorkerJob::AccountMultiproof {
-                                        input,
-                                        result_sender: sender,
-                                    })
-                                    .expect("account worker pool should be available");
-
-                                tracing::trace!(
-                                    target: "trie::proof_task",
-                                    "Account multiproof dispatched to worker pool"
-                                );
-                            }
-                        },
-                        ProofTaskMessage::Terminate => {
-                            // Drop worker channels to signal workers to shut down
-                            drop(self.storage_work_tx);
-                            drop(self.account_work_tx);
-
-                            tracing::debug!(
-                                target: "trie::proof_task",
-                                storage_worker_count = self.storage_worker_count,
-                                account_worker_count = self.account_worker_count,
-                                "Shutting down proof task manager, signaling workers to terminate"
-                            );
-
-                            // Record metrics before terminating
-                            #[cfg(feature = "metrics")]
-                            self.metrics.record();
-
-                            return Ok(())
-                        }
-                    }
-                }
-                // All senders are disconnected, so we can terminate
-                // However this should never happen, as this struct stores a sender
-                Err(_) => return Ok(()),
-            };
-        }
-    }
-}
-
 /// Type alias for the factory tuple returned by `create_factories`
 type ProofFactories<'a, Tx> = (
     InMemoryTrieCursorFactory<DatabaseTrieCursorFactory<&'a Tx>, &'a TrieUpdatesSorted>,
@@ -1037,8 +694,7 @@ pub struct ProofTaskTx<Tx> {
     /// Trie updates, prefix sets, and state updates
     task_ctx: ProofTaskCtx,
 
-    /// Identifier for the tx within the context of a single [`ProofTaskManager`], used only for
-    /// tracing.
+    /// Identifier for the worker within the worker pool, used only for tracing.
     id: usize,
 }
 
@@ -1203,9 +859,6 @@ struct AccountMultiproofParams<'a> {
 }
 
 /// Internal message for account workers.
-///
-/// This is NOT exposed publicly. External callers use `ProofTaskKind::AccountMultiproof` or
-/// `ProofTaskKind::BlindedAccountNode` which are routed through the manager's `std::mpsc` channel.
 #[derive(Debug)]
 enum AccountWorkerJob {
     /// Account multiproof computation request
@@ -1247,42 +900,6 @@ impl ProofTaskCtx {
     ) -> Self {
         Self { nodes_sorted, state_sorted, prefix_sets }
     }
-}
-
-/// Message used to communicate with [`ProofTaskManager`].
-///
-/// DEPRECATED: No longer needed with `spawn_proof_workers()` which provides direct
-/// worker pool access. Use explicit queue methods on `ProofTaskManagerHandle` instead.
-#[deprecated(note = "Use explicit queue methods on ProofTaskManagerHandle instead")]
-#[allow(deprecated)]
-#[derive(Debug)]
-pub enum ProofTaskMessage {
-    /// A request to queue a proof task.
-    QueueTask(ProofTaskKind),
-    /// A request to terminate the proof task manager.
-    Terminate,
-}
-
-/// Proof task kind.
-///
-/// When queueing a task using [`ProofTaskMessage::QueueTask`], this enum
-/// specifies the type of proof task to be executed.
-///
-/// DEPRECATED: Use explicit queue methods on `ProofTaskManagerHandle` instead:
-/// - `queue_storage_proof()` for storage proofs
-/// - `queue_account_multiproof()` for account multiproofs
-#[deprecated(note = "Use explicit queue methods on ProofTaskManagerHandle instead")]
-#[allow(deprecated)]
-#[derive(Debug)]
-pub enum ProofTaskKind {
-    /// A storage proof request.
-    StorageProof(StorageProofInput, Sender<StorageProofResult>),
-    /// A blinded account node request.
-    BlindedAccountNode(Nibbles, Sender<TrieNodeProviderResult>),
-    /// A blinded storage node request.
-    BlindedStorageNode(B256, Nibbles, Sender<TrieNodeProviderResult>),
-    /// An account multiproof request.
-    AccountMultiproof(AccountMultiproofInput, Sender<AccountMultiproofResult>),
 }
 
 /// A handle that provides type-safe access to proof worker pools.
@@ -1394,55 +1011,6 @@ impl ProofTaskManagerHandle {
 
         Ok(rx)
     }
-
-    /// Queues a task to the proof task manager.
-    ///
-    /// DEPRECATED: Use explicit methods like `queue_storage_proof` or `queue_account_multiproof`
-    /// instead. This method is kept temporarily for backwards compatibility during the
-    /// migration.
-    #[allow(deprecated)]
-    #[deprecated(note = "Use explicit queue methods instead")]
-    pub fn queue_task(
-        &self,
-        task: ProofTaskKind,
-    ) -> Result<(), crossbeam_channel::SendError<ProofTaskMessage>> {
-        match task {
-            ProofTaskKind::StorageProof(input, sender) => {
-                self.storage_work_tx
-                    .send(StorageWorkerJob::StorageProof { input, result_sender: sender })
-                    .expect("storage workers should be available");
-            }
-            ProofTaskKind::BlindedStorageNode(account, path, sender) => {
-                self.storage_work_tx
-                    .send(StorageWorkerJob::BlindedStorageNode {
-                        account,
-                        path,
-                        result_sender: sender,
-                    })
-                    .expect("storage workers should be available");
-            }
-            ProofTaskKind::BlindedAccountNode(path, sender) => {
-                self.account_work_tx
-                    .send(AccountWorkerJob::BlindedAccountNode { path, result_sender: sender })
-                    .expect("account workers should be available");
-            }
-            ProofTaskKind::AccountMultiproof(input, sender) => {
-                self.account_work_tx
-                    .send(AccountWorkerJob::AccountMultiproof { input, result_sender: sender })
-                    .expect("account workers should be available");
-            }
-        }
-        Ok(())
-    }
-
-    /// Terminates the proof task manager.
-    ///
-    /// DEPRECATED: Workers now shut down automatically when all handles are dropped.
-    /// This method is kept for backwards compatibility but does nothing.
-    #[deprecated(note = "Workers shut down automatically when all handles are dropped")]
-    pub const fn terminate(&self) {
-        // No-op: workers shut down when all handles are dropped
-    }
 }
 
 impl Clone for ProofTaskManagerHandle {
@@ -1483,14 +1051,14 @@ impl TrieNodeProviderFactory for ProofTaskManagerHandle {
 pub enum ProofTaskTrieNodeProvider {
     /// Blinded account trie node provider.
     AccountNode {
-        /// Handle to the proof task manager.
+        /// Handle to the proof worker pools.
         handle: ProofTaskManagerHandle,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
-        /// Handle to the proof task manager.
+        /// Handle to the proof worker pools.
         handle: ProofTaskManagerHandle,
     },
 }
