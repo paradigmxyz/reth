@@ -1981,7 +1981,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                 let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
                 // delete previous value
-                // TODO: This does not use dupsort features
                 if plain_storage_cursor
                     .seek_by_key_subkey(*address, *storage_key)?
                     .filter(|s| s.key == *storage_key)
@@ -2080,7 +2079,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                 let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
                 // delete previous value
-                // TODO: This does not use dupsort features
                 if plain_storage_cursor
                     .seek_by_key_subkey(*address, *storage_key)?
                     .filter(|s| s.key == *storage_key)
