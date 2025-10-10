@@ -616,7 +616,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         match event {
             BlockAnnounceEvent::Announce { block, hash } => {
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
-                self.swarm.state_mut().announce_new_block(msg);
+                // announce the block to √n peers
+                self.swarm.state_mut().announce_new_block(msg.clone());
+                // announce the block hash to all peers
+                self.swarm.state_mut().announce_new_block_hash(msg);
             }
         }
     }

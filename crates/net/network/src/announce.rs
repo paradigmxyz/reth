@@ -11,7 +11,7 @@ use std::task::{Context, Poll};
 /// announcements to peers.
 ///
 /// This is primarily useful for:
-/// - Proof-of-Work chains where the execution layer mines blocks
+/// - Custom chains where the execution layer mines blocks
 /// - Development/testing scenarios with custom block production
 /// - Sidechains or Layer 2 solutions that sequence blocks at the execution layer
 ///
