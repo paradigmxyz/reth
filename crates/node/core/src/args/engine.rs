@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::Args;
-use reth_engine_primitives::{TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE};
+use reth_engine_primitives::{TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, MIN_WORKER_COUNT};
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
@@ -111,12 +111,18 @@ pub struct EngineArgs {
 
     /// Configure the number of storage proof workers in the Tokio blocking pool.
     /// If not specified, defaults to 2x available parallelism, clamped between 2 and 64.
-    #[arg(long = "engine.storage-worker-count")]
+    #[arg(
+        long = "engine.storage-worker-count",
+        value_parser = clap::value_parser!(usize).range(MIN_WORKER_COUNT..)
+    )]
     pub storage_worker_count: Option<usize>,
 
     /// Configure the number of account proof workers in the Tokio blocking pool.
     /// If not specified, defaults to 1.5x storage workers.
-    #[arg(long = "engine.account-worker-count")]
+    #[arg(
+        long = "engine.account-worker-count",
+        value_parser = clap::value_parser!(usize).range(MIN_WORKER_COUNT..)
+    )]
     pub account_worker_count: Option<usize>,
 }
 
