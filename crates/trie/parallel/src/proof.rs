@@ -1,8 +1,6 @@
 use crate::{
     metrics::ParallelTrieMetrics,
-    proof_task::{
-        AccountMultiproofInput, ProofTaskKind, ProofTaskManagerHandle, StorageProofInput,
-    },
+    proof_task::{AccountMultiproofInput, ProofTaskManagerHandle, StorageProofInput},
     root::ParallelStateRootError,
     StorageRootTargets,
 };
@@ -16,10 +14,7 @@ use reth_trie::{
     DecodedMultiProof, DecodedStorageMultiProof, HashedPostStateSorted, MultiProofTargets, Nibbles,
 };
 use reth_trie_common::added_removed_keys::MultiAddedRemovedKeys;
-use std::sync::{
-    mpsc::{channel, Receiver},
-    Arc,
-};
+use std::sync::{mpsc::Receiver, Arc};
 use tracing::trace;
 
 /// Parallel proof calculator.
@@ -93,7 +88,10 @@ impl ParallelProof {
         hashed_address: B256,
         prefix_set: PrefixSet,
         target_slots: B256Set,
-    ) -> Receiver<Result<DecodedStorageMultiProof, ParallelStateRootError>> {
+    ) -> Result<
+        Receiver<Result<DecodedStorageMultiProof, ParallelStateRootError>>,
+        ParallelStateRootError,
+    > {
         let input = StorageProofInput::new(
             hashed_address,
             prefix_set,
@@ -102,9 +100,9 @@ impl ParallelProof {
             self.multi_added_removed_keys.clone(),
         );
 
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let _ = self.proof_task_handle.queue_task(ProofTaskKind::StorageProof(input, sender));
-        receiver
+        self.proof_task_handle
+            .queue_storage_proof(input)
+            .map_err(|e| ParallelStateRootError::Other(e.to_string()))
     }
 
     /// Generate a storage multiproof according to the specified targets and hashed address.
@@ -124,7 +122,7 @@ impl ParallelProof {
             "Starting storage proof generation"
         );
 
-        let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots);
+        let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots)?;
         let proof_result = receiver.recv().map_err(|_| {
             ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
                 format!("channel closed for {hashed_address}"),
@@ -193,15 +191,10 @@ impl ParallelProof {
             missed_leaves_storage_roots: self.missed_leaves_storage_roots.clone(),
         };
 
-        let (sender, receiver) = channel();
-        self.proof_task_handle
-            .queue_task(ProofTaskKind::AccountMultiproof(input, sender))
-            .map_err(|_| {
-                ParallelStateRootError::Other(
-                    "Failed to queue account multiproof: account worker pool unavailable"
-                        .to_string(),
-                )
-            })?;
+        let receiver = self
+            .proof_task_handle
+            .queue_account_multiproof(input)
+            .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
         // Wait for account multiproof result from worker
         let (multiproof, stats) = receiver.recv().map_err(|_| {
@@ -231,7 +224,7 @@ impl ParallelProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proof_task::{ProofTaskCtx, ProofTaskManager};
+    use crate::proof_task::{spawn_proof_workers, ProofTaskCtx};
     use alloy_primitives::{
         keccak256,
         map::{B256Set, DefaultHashBuilder, HashMap},
@@ -313,13 +306,8 @@ mod tests {
 
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_task =
-            ProofTaskManager::new(rt.handle().clone(), consistent_view, task_ctx, 1, 1).unwrap();
-        let proof_task_handle = proof_task.handle();
-
-        // keep the join handle around to make sure it does not return any errors
-        // after we compute the state root
-        let join_handle = rt.spawn_blocking(move || proof_task.run());
+        let proof_task_handle =
+            spawn_proof_workers(rt.handle().clone(), consistent_view, task_ctx, 1, 1).unwrap();
 
         let parallel_result = ParallelProof::new(
             Default::default(),
@@ -354,9 +342,7 @@ mod tests {
         // then compare the entire thing for any mask differences
         assert_eq!(parallel_result, sequential_result_decoded);
 
-        // drop the handle to terminate the task and then block on the proof task handle to make
-        // sure it does not return any errors
+        // Workers shut down automatically when handle is dropped
         drop(proof_task_handle);
-        rt.block_on(join_handle).unwrap().expect("The proof task should not return an error");
     }
 }
