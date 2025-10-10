@@ -415,15 +415,19 @@ fn account_worker_loop<Tx>(
 
                 let account_prefix_set = std::mem::take(&mut input.prefix_sets.account_prefix_set);
 
+                let ctx = AccountMultiproofParams {
+                    targets: &input.targets,
+                    prefix_set: account_prefix_set,
+                    collect_branch_node_masks: input.collect_branch_node_masks,
+                    multi_added_removed_keys: input.multi_added_removed_keys.as_ref(),
+                    storage_proof_receivers,
+                    missed_leaves_storage_roots,
+                };
+
                 let result = build_account_multiproof_with_storage_roots(
                     trie_cursor_factory.clone(),
                     hashed_cursor_factory.clone(),
-                    &input.targets,
-                    account_prefix_set,
-                    input.collect_branch_node_masks,
-                    input.multi_added_removed_keys.as_ref(),
-                    storage_proof_receivers,
-                    missed_leaves_storage_roots,
+                    ctx,
                     &mut tracker,
                 );
 
@@ -495,6 +499,22 @@ fn account_worker_loop<Tx>(
     );
 }
 
+/// Parameters for building an account multiproof with pre-computed storage roots.
+struct AccountMultiproofParams<'a> {
+    /// The targets for which to compute the multiproof.
+    targets: &'a MultiProofTargets,
+    /// The prefix set for the account trie walk.
+    prefix_set: PrefixSet,
+    /// Whether or not to collect branch node masks.
+    collect_branch_node_masks: bool,
+    /// Provided by the user to give the necessary context to retain extra proofs.
+    multi_added_removed_keys: Option<&'a Arc<MultiAddedRemovedKeys>>,
+    /// Receivers for storage proofs being computed in parallel.
+    storage_proof_receivers: B256Map<Receiver<StorageProofResult>>,
+    /// Cached storage proof roots for missed leaves encountered during account trie walk.
+    missed_leaves_storage_roots: &'a DashMap<B256, B256>,
+}
+
 /// Builds an account multiproof by consuming storage proof receivers lazily during trie walk.
 ///
 /// This is a helper function used by account workers to build the account subtree proof
@@ -502,16 +522,10 @@ fn account_worker_loop<Tx>(
 /// enabling interleaved parallelism between account trie traversal and storage proof computation.
 ///
 /// Returns a `DecodedMultiProof` containing the account subtree and storage proofs.
-#[allow(clippy::too_many_arguments)]
 fn build_account_multiproof_with_storage_roots<C, H>(
     trie_cursor_factory: C,
     hashed_cursor_factory: H,
-    targets: &MultiProofTargets,
-    prefix_set: PrefixSet,
-    collect_branch_node_masks: bool,
-    multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
-    mut storage_proof_receivers: B256Map<Receiver<StorageProofResult>>,
-    missed_leaves_storage_roots: &DashMap<B256, B256>,
+    ctx: AccountMultiproofParams<'_>,
     tracker: &mut ParallelTrieTracker,
 ) -> Result<DecodedMultiProof, ParallelStateRootError>
 where
@@ -519,35 +533,38 @@ where
     H: HashedCursorFactory + Clone,
 {
     let accounts_added_removed_keys =
-        multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
+        ctx.multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
 
     // Create the walker.
     let walker = TrieWalker::<_>::state_trie(
         trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
-        prefix_set,
+        ctx.prefix_set,
     )
     .with_added_removed_keys(accounts_added_removed_keys)
     .with_deletions_retained(true);
 
     // Create a hash builder to rebuild the root node since it is not available in the database.
-    let retainer = targets
+    let retainer = ctx
+        .targets
         .keys()
         .map(Nibbles::unpack)
         .collect::<ProofRetainer>()
         .with_added_removed_keys(accounts_added_removed_keys);
     let mut hash_builder = HashBuilder::default()
         .with_proof_retainer(retainer)
-        .with_updates(collect_branch_node_masks);
+        .with_updates(ctx.collect_branch_node_masks);
 
     // Initialize storage multiproofs map with pre-allocated capacity.
     // Proofs will be inserted as they're consumed from receivers during trie walk.
     let mut collected_decoded_storages: B256Map<DecodedStorageMultiProof> =
-        B256Map::with_capacity_and_hasher(targets.len(), Default::default());
+        B256Map::with_capacity_and_hasher(ctx.targets.len(), Default::default());
     let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
     let mut account_node_iter = TrieNodeIter::state_trie(
         walker,
         hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
     );
+
+    let mut storage_proof_receivers = ctx.storage_proof_receivers;
 
     while let Some(account_node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
         match account_node {
@@ -577,7 +594,7 @@ where
                     None => {
                         tracker.inc_missed_leaves();
 
-                        match missed_leaves_storage_roots.entry(hashed_address) {
+                        match ctx.missed_leaves_storage_roots.entry(hashed_address) {
                             dashmap::Entry::Occupied(occ) => *occ.get(),
                             dashmap::Entry::Vacant(vac) => {
                                 let root = StorageProof::new_hashed(
@@ -587,7 +604,7 @@ where
                                 )
                                 .with_prefix_set_mut(Default::default())
                                 .storage_multiproof(
-                                    targets.get(&hashed_address).cloned().unwrap_or_default(),
+                                    ctx.targets.get(&hashed_address).cloned().unwrap_or_default(),
                                 )
                                 .map_err(|e| {
                                     ParallelStateRootError::StorageRoot(
@@ -627,7 +644,7 @@ where
     let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
     let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)?;
 
-    let (branch_node_hash_masks, branch_node_tree_masks) = if collect_branch_node_masks {
+    let (branch_node_hash_masks, branch_node_tree_masks) = if ctx.collect_branch_node_masks {
         let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
         (
             updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
