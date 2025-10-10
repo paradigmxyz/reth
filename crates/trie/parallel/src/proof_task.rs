@@ -23,8 +23,8 @@ use dashmap::DashMap;
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderError, ProviderResult,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
+    ProviderResult,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -63,24 +63,6 @@ type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootErro
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 type AccountMultiproofResult =
     Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError>;
-
-/// Worker type identifier
-#[derive(Debug)]
-enum WorkerType {
-    /// Storage proof worker
-    Storage,
-    /// Account multiproof worker
-    Account,
-}
-
-impl std::fmt::Display for WorkerType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Storage => write!(f, "Storage"),
-            Self::Account => write!(f, "Account"),
-        }
-    }
-}
 
 /// Internal message for storage workers.
 ///
@@ -714,30 +696,22 @@ impl ProofTaskManager {
         );
 
         // Spawn storage workers
-        let spawned_storage_workers = Self::spawn_worker_pool(
+        let spawned_storage_workers = Self::spawn_storage_workers(
             &executor,
             &view,
             &task_ctx,
             storage_worker_count,
             storage_work_rx,
-            WorkerType::Storage,
-            storage_worker_loop,
         )?;
 
-        // Spawn account workers with direct access to the storage worker queue.
-        let spawned_account_workers = Self::spawn_worker_pool(
+        // Spawn account workers with direct access to the storage worker queue
+        let spawned_account_workers = Self::spawn_account_workers(
             &executor,
             &view,
             &task_ctx,
             account_worker_count,
             account_work_rx,
-            WorkerType::Account,
-            {
-                let storage_work_tx = storage_work_tx.clone();
-                move |proof_tx, work_rx, worker_id| {
-                    account_worker_loop(proof_tx, work_rx, storage_work_tx.clone(), worker_id)
-                }
-            },
+            storage_work_tx.clone(),
         )?;
 
         Ok(Self {
@@ -759,48 +733,41 @@ impl ProofTaskManager {
         ProofTaskManagerHandle::new(self.proof_task_tx.clone(), self.active_handles.clone())
     }
 
-    /// Spawns a pool of workers with dedicated database transactions.
+    /// Spawns a pool of storage workers with dedicated database transactions.
     ///
-    /// # Type Parameters
-    /// - `Job`: The job type the workers will process
-    /// - `F`: The worker loop function type
+    /// Each worker receives `StorageWorkerJob` from the channel and processes storage proofs
+    /// and blinded storage node requests using a dedicated long-lived transaction.
     ///
     /// # Parameters
-    /// - `worker_count`: Number of workers to spawn
-    /// - `work_rx`: Receiver for the worker job channel
-    /// - `worker_type`: Type of worker for logging
-    /// - `worker_fn`: The worker loop function to execute
+    /// - `executor`: Tokio runtime handle for spawning blocking tasks
+    /// - `view`: Consistent database view for creating transactions
+    /// - `task_ctx`: Shared context with trie updates and prefix sets
+    /// - `worker_count`: Number of storage workers to spawn
+    /// - `work_rx`: Receiver for storage worker jobs
     ///
-    /// Returns
-    /// The number of workers successfully spawned
-    fn spawn_worker_pool<Factory, Job, F>(
+    /// # Returns
+    /// The number of storage workers successfully spawned
+    fn spawn_storage_workers<Factory>(
         executor: &Handle,
         view: &ConsistentDbView<Factory>,
         task_ctx: &ProofTaskCtx,
         worker_count: usize,
-        work_rx: CrossbeamReceiver<Job>,
-        worker_type: WorkerType,
-        worker_fn: F,
+        work_rx: CrossbeamReceiver<StorageWorkerJob>,
     ) -> ProviderResult<usize>
     where
         Factory: DatabaseProviderFactory<Provider: BlockReader>,
-        Job: Send + 'static,
-        F: Fn(ProofTaskTx<FactoryTx<Factory>>, CrossbeamReceiver<Job>, usize)
-            + Send
-            + Clone
-            + 'static,
     {
         let mut spawned_workers = 0;
-        // spawns workers that will execute worker_fn
+
         for worker_id in 0..worker_count {
             let provider_ro = view.provider_ro()?;
             let tx = provider_ro.into_tx();
             let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
             let work_rx_clone = work_rx.clone();
-            let worker_fn_clone = worker_fn.clone();
 
-            executor
-                .spawn_blocking(move || worker_fn_clone(proof_task_tx, work_rx_clone, worker_id));
+            executor.spawn_blocking(move || {
+                storage_worker_loop(proof_task_tx, work_rx_clone, worker_id)
+            });
 
             spawned_workers += 1;
 
@@ -808,8 +775,60 @@ impl ProofTaskManager {
                 target: "trie::proof_task",
                 worker_id,
                 spawned_workers,
-                worker_type = %worker_type,
-                "{} worker spawned successfully", worker_type
+                "Storage worker spawned successfully"
+            );
+        }
+
+        Ok(spawned_workers)
+    }
+
+    /// Spawns a pool of account workers with dedicated database transactions.
+    ///
+    /// Each worker receives `AccountWorkerJob` from the channel and processes account multiproofs
+    /// and blinded account node requests using a dedicated long-lived transaction. Account workers
+    /// can delegate storage proof computation to the storage worker pool.
+    ///
+    /// # Parameters
+    /// - `executor`: Tokio runtime handle for spawning blocking tasks
+    /// - `view`: Consistent database view for creating transactions
+    /// - `task_ctx`: Shared context with trie updates and prefix sets
+    /// - `worker_count`: Number of account workers to spawn
+    /// - `work_rx`: Receiver for account worker jobs
+    /// - `storage_work_tx`: Sender to delegate storage proofs to storage worker pool
+    ///
+    /// # Returns
+    /// The number of account workers successfully spawned
+    fn spawn_account_workers<Factory>(
+        executor: &Handle,
+        view: &ConsistentDbView<Factory>,
+        task_ctx: &ProofTaskCtx,
+        worker_count: usize,
+        work_rx: CrossbeamReceiver<AccountWorkerJob>,
+        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    ) -> ProviderResult<usize>
+    where
+        Factory: DatabaseProviderFactory<Provider: BlockReader>,
+    {
+        let mut spawned_workers = 0;
+
+        for worker_id in 0..worker_count {
+            let provider_ro = view.provider_ro()?;
+            let tx = provider_ro.into_tx();
+            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let work_rx_clone = work_rx.clone();
+            let storage_work_tx_clone = storage_work_tx.clone();
+
+            executor.spawn_blocking(move || {
+                account_worker_loop(proof_task_tx, work_rx_clone, storage_work_tx_clone, worker_id)
+            });
+
+            spawned_workers += 1;
+
+            tracing::debug!(
+                target: "trie::proof_task",
+                worker_id,
+                spawned_workers,
+                "Account worker spawned successfully"
             );
         }
 
