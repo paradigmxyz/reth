@@ -29,6 +29,46 @@ pub enum PropagationStrategy {
 ///
 /// For Proof-of-Stake chains (post-merge Ethereum), this should remain unused as block
 /// propagation over devp2p is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use reth_network::announce::{BlockAnnounce, BlockAnnounceRequest, PropagationStrategy};
+/// use tokio::sync::mpsc;
+/// use std::task::{Context, Poll};
+///
+/// #[derive(Debug)]
+/// struct ChannelBlockAnnounce {
+///     rx: mpsc::UnboundedReceiver<(Block, B256)>,
+/// }
+///
+/// impl BlockAnnounce<Block> for ChannelBlockAnnounce {
+///     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BlockAnnounceRequest<Block>> {
+///         match self.rx.poll_recv(cx) {
+///             Poll::Ready(Some((block, hash))) => {
+///                 Poll::Ready(BlockAnnounceRequest::Announce {
+///                     block,
+///                     hash,
+///                     strategy: PropagationStrategy::Both, // Full block + hash
+///                 })
+///             }
+///             _ => Poll::Pending,
+///         }
+///     }
+/// }
+///
+/// // Usage:
+/// let (tx, rx) = mpsc::unbounded_channel();
+/// let announcer = Box::new(ChannelBlockAnnounce { rx });
+///
+/// let config = NetworkConfig::builder(secret_key)
+///     .block_announce(announcer)
+///     .build(client);
+///
+/// // When you produce a block:
+/// tx.send((new_block, block_hash)).unwrap();
+/// // NetworkManager will poll and announce it automatically!
+/// ```
 pub trait BlockAnnounce<B = NewBlock>: std::fmt::Debug + Send + Sync {
     /// Poll for blocks that need to be announced to peers.
     ///
