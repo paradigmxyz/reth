@@ -9,7 +9,6 @@ use crate::{
 use alloy_primitives::{map::B256Set, B256};
 use dashmap::DashMap;
 use reth_execution_errors::StorageRootError;
-use reth_provider::{BlockReader, DatabaseProviderFactory};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
@@ -28,7 +27,7 @@ use tracing::trace;
 /// This can collect proof for many targets in parallel, spawning a task for each hashed address
 /// that has proof targets.
 #[derive(Debug)]
-pub struct ParallelProof<Factory: DatabaseProviderFactory> {
+pub struct ParallelProof {
     /// The sorted collection of cached in-memory intermediate trie nodes that
     /// can be reused for computation.
     pub nodes_sorted: Arc<TrieUpdatesSorted>,
@@ -47,14 +46,11 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-    /// Marker to keep the Factory type parameter.
-    /// TODO: Remove this field if the Factory generic is not needed in the future.
-    _phantom: std::marker::PhantomData<Factory>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
 
-impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
+impl ParallelProof {
     /// Create new state proof generator.
     pub fn new(
         nodes_sorted: Arc<TrieUpdatesSorted>,
@@ -71,7 +67,6 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
             collect_branch_node_masks: false,
             multi_added_removed_keys: None,
             proof_task_handle,
-            _phantom: std::marker::PhantomData,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
@@ -92,12 +87,6 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         self.multi_added_removed_keys = multi_added_removed_keys;
         self
     }
-}
-
-impl<Factory> ParallelProof<Factory>
-where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
-{
     /// Queues a storage proof task and returns a receiver for the result.
     fn queue_storage_proof(
         &self,
