@@ -7,7 +7,7 @@ use super::{codec::BlockNumberHash, models::MetadataKey};
 use crate::models::IntegerList;
 use alloy_primitives::B256;
 use reth_db_api::table::{DupSort, Table};
-use reth_trie_common::{StoredNibbles, StoredNibblesSubKey};
+use reth_trie_common::StoredNibbles;
 
 // ============================================================================
 // Main Data Tables (store actual trie/state data)
@@ -37,8 +37,8 @@ impl DupSort for ExternalAccountBranches {
 
 /// Storage trie branches by address, path, and block (DupSort)
 ///
-/// Key: hashed_address (B256)
-/// SubKey: (path, block_number) - StorageBranchSubKey
+/// Key: (hashed_address, path)
+/// SubKey: block_number (u64)
 /// Value: MaybeDeleted<BranchNodeCompact> (empty bytes = deleted, non-empty = present)
 ///
 /// This structure allows efficient iteration by address and path, with block versioning
@@ -49,12 +49,12 @@ impl Table for ExternalStorageBranches {
     const NAME: &'static str = "ExternalStorageBranches";
     const DUPSORT: bool = true;
 
-    type Key = B256;
+    type Key = super::models::StorageBranchSubKey;
     type Value = super::codec::MaybeDeleted<reth_trie::BranchNodeCompact>;
 }
 
 impl DupSort for ExternalStorageBranches {
-    type SubKey = super::models::StorageBranchSubKey; // (path, block_number)
+    type SubKey = u64; // block_number
 }
 
 /// Hashed accounts by address and block (DupSort)
@@ -81,8 +81,8 @@ impl DupSort for ExternalHashedAccounts {
 
 /// Hashed storage values by address, storage_key, and block (DupSort)
 ///
-/// Key: hashed_address (B256)
-/// SubKey: (storage_key, block_number) - HashedStorageSubKey
+/// Key: (hashed_address, storage_key) - HashedStorageSubKey
+/// SubKey: block_number (u64)
 /// Value: StorageEntry (zero values are NOT stored)
 ///
 /// This structure allows efficient iteration by address and storage_key, with block versioning
@@ -93,12 +93,12 @@ impl Table for ExternalHashedStorages {
     const NAME: &'static str = "ExternalHashedStorages";
     const DUPSORT: bool = true;
 
-    type Key = B256;
+    type Key = super::models::HashedStorageSubKey;
     type Value = reth_primitives_traits::StorageEntry;
 }
 
 impl DupSort for ExternalHashedStorages {
-    type SubKey = super::models::HashedStorageSubKey; // (storage_key, block_number)
+    type SubKey = u64; // block_number
 }
 
 // ============================================================================
@@ -127,22 +127,17 @@ impl Table for ExternalAccountBranchesIndex {
 ///
 /// This allows efficient cleanup of storage branches during pruning/reorgs.
 ///
-/// Key: hashed_address
-/// SubKey: path
+/// Key: (hashed_address, path) - StorageBranchSubKey
 /// Value: BlockNumberList
 #[derive(Debug, Clone)]
 pub struct ExternalStorageBranchesIndex;
 
 impl Table for ExternalStorageBranchesIndex {
     const NAME: &'static str = "ExternalStorageBranchesIndex";
-    const DUPSORT: bool = true;
+    const DUPSORT: bool = false;
 
-    type Key = B256;
+    type Key = super::models::StorageBranchSubKey;
     type Value = IntegerList;
-}
-
-impl DupSort for ExternalStorageBranchesIndex {
-    type SubKey = StoredNibblesSubKey;
 }
 
 /// Index: hashed_address → list of block numbers that modified it
@@ -166,22 +161,17 @@ impl Table for ExternalHashedAccountsIndex {
 ///
 /// This allows efficient cleanup of storage values during pruning/reorgs.
 ///
-/// Key: hashed_address
-/// SubKey: storage_key (B256)
+/// Key: (hashed_address, storage_key) - HashedStorageSubKey
 /// Value: BlockNumberList (IntegerList)
 #[derive(Debug, Clone)]
 pub struct ExternalHashedStoragesIndex;
 
 impl Table for ExternalHashedStoragesIndex {
     const NAME: &'static str = "ExternalHashedStoragesIndex";
-    const DUPSORT: bool = true;
+    const DUPSORT: bool = false;
 
-    type Key = B256;
+    type Key = super::models::HashedStorageSubKey;
     type Value = IntegerList;
-}
-
-impl DupSort for ExternalHashedStoragesIndex {
-    type SubKey = B256;
 }
 
 // ============================================================================
@@ -264,10 +254,10 @@ impl Tables {
     /// Check if the table is a DUPSORT table
     pub const fn is_dupsort(&self) -> bool {
         match self {
-            Self::ExternalStorageBranches
-            | Self::ExternalStorageBranchesIndex
-            | Self::ExternalHashedStorages
-            | Self::ExternalHashedStoragesIndex => true,
+            Self::ExternalAccountBranches
+            | Self::ExternalStorageBranches
+            | Self::ExternalHashedAccounts
+            | Self::ExternalHashedStorages => true,
             _ => false,
         }
     }

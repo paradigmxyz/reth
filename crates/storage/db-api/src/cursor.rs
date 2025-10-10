@@ -62,6 +62,15 @@ pub trait DbCursorRO<T: Table> {
 
 /// A read-only cursor over the dup table `T`.
 pub trait DbDupCursorRO<T: DupSort> {
+    /// Positions the cursor at the previous KV pair of the table, returning it.
+    fn prev_dup(&mut self) -> PairResult<T>;
+
+    /// Positions the cursor at the previous KV pair of the table, skipping duplicates.
+    fn prev_no_dup(&mut self) -> PairResult<T>;
+
+    /// Positions the cursor at the previous duplicate value of the current key.
+    fn prev_dup_val(&mut self) -> ValueOnlyResult<T>;
+
     /// Positions the cursor at the next KV pair of the table, returning it.
     fn next_dup(&mut self) -> PairResult<T>;
 
@@ -225,7 +234,7 @@ impl<T: Table, CURSOR: DbCursorRO<T>> Iterator for ReverseWalker<'_, T, CURSOR> 
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {
-            return start
+            return start;
         }
 
         self.cursor.prev().transpose()
@@ -265,7 +274,7 @@ impl<T: Table, CURSOR: DbCursorRO<T>> Iterator for RangeWalker<'_, T, CURSOR> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_done {
-            return None
+            return None;
         }
 
         let next_item = self.start.take().or_else(|| self.cursor.next().transpose());
@@ -356,7 +365,7 @@ impl<T: DupSort, CURSOR: DbDupCursorRO<T>> Iterator for DupWalker<'_, T, CURSOR>
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {
-            return start
+            return start;
         }
         self.cursor.next_dup().transpose()
     }

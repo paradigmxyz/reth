@@ -158,6 +158,25 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
 }
 
 impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
+    /// Returns the previous `(key, value)` pair of a DUPSORT table.
+    fn prev_dup(&mut self) -> PairResult<T> {
+        decode::<T>(self.inner.prev_dup())
+    }
+
+    /// Returns the previous `(key, value)` pair of a DUPSORT table, skipping duplicates.
+    fn prev_no_dup(&mut self) -> PairResult<T> {
+        decode::<T>(self.inner.prev_nodup())
+    }
+
+    /// Returns the previous `value` of a duplicate `key`.
+    fn prev_dup_val(&mut self) -> ValueOnlyResult<T> {
+        self.inner
+            .prev_dup()
+            .map_err(|e| DatabaseError::Read(e.into()))?
+            .map(decode_value::<T>)
+            .transpose()
+    }
+
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
         decode::<T>(self.inner.next_dup())
@@ -166,10 +185,6 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     /// Returns the next `(key, value)` pair skipping the duplicates.
     fn next_no_dup(&mut self) -> PairResult<T> {
         decode::<T>(self.inner.next_nodup())
-    }
-
-    fn prev_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.prev_dup())
     }
 
     /// Returns the next `value` of a duplicate `key`.

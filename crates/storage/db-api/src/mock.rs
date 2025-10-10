@@ -189,6 +189,18 @@ impl<T: Table> DbCursorRO<T> for CursorMock {
 }
 
 impl<T: DupSort> DbDupCursorRO<T> for CursorMock {
+    fn prev_dup(&mut self) -> PairResult<T> {
+        Ok(None)
+    }
+
+    fn prev_no_dup(&mut self) -> PairResult<T> {
+        Ok(None)
+    }
+
+    fn prev_dup_val(&mut self) -> ValueOnlyResult<T> {
+        Ok(None)
+    }
+
     fn next_dup(&mut self) -> PairResult<T> {
         Ok(None)
     }

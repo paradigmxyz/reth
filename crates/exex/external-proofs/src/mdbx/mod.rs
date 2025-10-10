@@ -37,7 +37,7 @@ use std::{
 };
 
 pub use codec::{BlockNumberHash, MaybeDeleted};
-pub use cursor::{MdbxAccountHashedCursor, MdbxStorageCursor, MdbxTrieCursor};
+pub use cursor::{MdbxStorageTrieCursor, MdbxTrieCursor};
 pub use models::{HashedStorageSubKey, MetadataKey, StorageBranchSubKey};
 pub use tables::Tables as ExternalTables;
 
@@ -119,7 +119,7 @@ impl MdbxExternalStorage {
 // Implement ExternalStorage trait - will be filled in phases 4-6
 #[async_trait::async_trait]
 impl ExternalStorage for MdbxExternalStorage {
-    type TrieCursor = MdbxTrieCursor;
+    type TrieCursor = MdbxTrieCursor<tables::ExternalAccountBranches, Cursor>;
     type AccountHashedCursor = MdbxAccountHashedCursor;
     type StorageCursor = MdbxStorageCursor;
 
@@ -425,7 +425,11 @@ impl ExternalStorage for MdbxExternalStorage {
         max_block_number: u64,
     ) -> ExternalStorageResult<Self::TrieCursor> {
         // Create a lazy cursor that queries MDBX on-demand
-        Ok(MdbxTrieCursor::new(Arc::clone(&self.db), hashed_address, max_block_number))
+        if let Some(hashed_address) = hashed_address {
+            Ok(MdbxStorageTrieCursor::new(Arc::clone(&self.db), hashed_address, max_block_number))
+        } else {
+            Ok(MdbxTrieCursor::new(Arc::clone(&self.db), max_block_number))
+        }
     }
 
     fn account_hashed_cursor(

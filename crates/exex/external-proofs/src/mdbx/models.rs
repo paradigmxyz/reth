@@ -7,116 +7,109 @@ use reth_db_api::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use reth_trie::Nibbles;
 use reth_trie_common::StoredNibbles;
 use serde::{Deserialize, Serialize};
 
-/// Composite key: (block_number, path)
+// ============================================================================
+// Composite Keys
+// ============================================================================
+
+/// Composite key: (hashed_address, path) for storage trie branches
 ///
-/// Used for indexing trie branches by block number and path.
-/// The block number is encoded in big-endian to ensure lexicographic
-/// ordering matches numeric ordering.
+/// Used to efficiently index storage branches by both account address and trie path.
+/// The encoding ensures lexicographic ordering: first by address, then by path.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct BlockPath(pub u64, pub StoredNibbles);
-
-impl Encode for BlockPath {
-    type Encoded = Vec<u8>;
-
-    fn encode(self) -> Self::Encoded {
-        // Use big-endian encoding for block number to ensure lexicographic = numeric ordering
-        let block_bytes = self.0.to_be_bytes();
-        let nibbles_bytes: Vec<u8> = self.1.encode();
-
-        let mut buf = Vec::with_capacity(8 + nibbles_bytes.len());
-        buf.extend_from_slice(&block_bytes);
-        buf.extend_from_slice(&nibbles_bytes);
-        buf
-    }
+pub struct StorageBranchSubKey {
+    /// Hashed account address
+    pub hashed_address: B256,
+    /// Trie path as nibbles
+    pub path: StoredNibbles,
 }
 
-impl Decode for BlockPath {
-    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
-        if value.len() < 8 {
-            return Err(DatabaseError::Decode);
-        }
-
-        let block = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
-        let nibbles = StoredNibbles::decode(&value[8..])?;
-        Ok(Self(block, nibbles))
+impl StorageBranchSubKey {
+    /// Create a new storage branch key
+    pub const fn new(hashed_address: B256, path: StoredNibbles) -> Self {
+        Self { hashed_address, path }
     }
 }
-
-impl From<(u64, Nibbles)> for BlockPath {
-    fn from((block, nibbles): (u64, Nibbles)) -> Self {
-        Self(block, StoredNibbles(nibbles))
-    }
-}
-
-/// Composite subkey for storage branches: (path, block_number)
-///
-/// Used for storage trie branches indexed by address. The path comes first
-/// so we can iterate by path, then block number gives us versioning.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct StorageBranchSubKey(pub StoredNibbles, pub u64);
 
 impl Encode for StorageBranchSubKey {
     type Encoded = Vec<u8>;
 
     fn encode(self) -> Self::Encoded {
-        let nibbles_bytes: Vec<u8> = self.0.encode();
-        let block_bytes = self.1.to_be_bytes();
-
-        let mut buf = Vec::with_capacity(nibbles_bytes.len() + 8);
-        buf.extend_from_slice(&nibbles_bytes);
-        buf.extend_from_slice(&block_bytes);
+        let mut buf = Vec::with_capacity(32 + self.path.0.len());
+        // First encode the address (32 bytes)
+        buf.extend_from_slice(self.hashed_address.as_slice());
+        // Then encode the path
+        buf.extend_from_slice(&self.path.encode());
         buf
     }
 }
 
 impl Decode for StorageBranchSubKey {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
-        if value.len() < 8 {
+        if value.len() < 32 {
             return Err(DatabaseError::Decode);
         }
 
-        let block = u64::from_be_bytes(
-            value[value.len() - 8..].try_into().map_err(|_| DatabaseError::Decode)?,
-        );
-        let nibbles = StoredNibbles::decode(&value[..value.len() - 8])?;
-        Ok(Self(nibbles, block))
+        // First 32 bytes are the address
+        let hashed_address = B256::from_slice(&value[..32]);
+
+        // Remaining bytes are the path
+        let path = StoredNibbles::decode(&value[32..])?;
+
+        Ok(Self { hashed_address, path })
     }
 }
 
-/// Composite subkey for hashed storage: (storage_key, block_number)
+/// Composite key: (hashed_address, hashed_storage_key) for hashed storage values
 ///
-/// Used for storage values indexed by hashed address. The storage key comes first
-/// so we can iterate by storage key, then block number gives us versioning.
+/// Used to efficiently index storage values by both account address and storage key.
+/// The encoding ensures lexicographic ordering: first by address, then by storage key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct HashedStorageSubKey(pub B256, pub u64);
+pub struct HashedStorageSubKey {
+    /// Hashed account address
+    pub hashed_address: B256,
+    /// Hashed storage key
+    pub hashed_storage_key: B256,
+}
+
+impl HashedStorageSubKey {
+    /// Create a new hashed storage key
+    pub const fn new(hashed_address: B256, hashed_storage_key: B256) -> Self {
+        Self { hashed_address, hashed_storage_key }
+    }
+}
 
 impl Encode for HashedStorageSubKey {
-    type Encoded = Vec<u8>;
+    type Encoded = [u8; 64];
 
     fn encode(self) -> Self::Encoded {
-        let mut buf = Vec::with_capacity(32 + 8);
-        buf.extend_from_slice(self.0.as_slice());
-        buf.extend_from_slice(&self.1.to_be_bytes());
+        let mut buf = [0u8; 64];
+        // First 32 bytes: address
+        buf[..32].copy_from_slice(self.hashed_address.as_slice());
+        // Next 32 bytes: storage key
+        buf[32..].copy_from_slice(self.hashed_storage_key.as_slice());
         buf
     }
 }
 
 impl Decode for HashedStorageSubKey {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
-        if value.len() != 40 {
+        if value.len() != 64 {
             return Err(DatabaseError::Decode);
         }
 
-        let storage_key = B256::from_slice(&value[..32]);
-        let block =
-            u64::from_be_bytes(value[32..40].try_into().map_err(|_| DatabaseError::Decode)?);
-        Ok(Self(storage_key, block))
+        let hashed_address = B256::from_slice(&value[..32]);
+        let hashed_storage_key = B256::from_slice(&value[32..64]);
+
+        Ok(Self { hashed_address, hashed_storage_key })
     }
 }
+
+// ============================================================================
+// Metadata Keys
+// ============================================================================
 
 /// Metadata keys for tracking block ranges
 ///
@@ -151,28 +144,86 @@ impl Decode for MetadataKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_trie::Nibbles;
 
     #[test]
-    fn test_block_path_encode_decode() {
-        let path = BlockPath(42, StoredNibbles(Nibbles::from_nibbles_unchecked(&[1, 2, 3, 4])));
-        let encoded = path.clone().encode();
-        let decoded = BlockPath::decode(&encoded).unwrap();
-        assert_eq!(path, decoded);
+    fn test_storage_branch_subkey_encode_decode() {
+        let addr = B256::from([1u8; 32]);
+        let path = StoredNibbles(Nibbles::from_nibbles_unchecked(&[1, 2, 3, 4]));
+        let key = StorageBranchSubKey::new(addr, path.clone());
+
+        let encoded = key.clone().encode();
+        let decoded = StorageBranchSubKey::decode(&encoded).unwrap();
+
+        assert_eq!(key, decoded);
+        assert_eq!(decoded.hashed_address, addr);
+        assert_eq!(decoded.path, path);
     }
 
     #[test]
-    fn test_block_path_ordering() {
-        let path1 = BlockPath(1, StoredNibbles(Nibbles::from_nibbles_unchecked(&[1, 2])));
-        let path2 = BlockPath(2, StoredNibbles(Nibbles::from_nibbles_unchecked(&[1, 2])));
-        let path3 = BlockPath(2, StoredNibbles(Nibbles::from_nibbles_unchecked(&[1, 3])));
+    fn test_storage_branch_subkey_ordering() {
+        let addr1 = B256::from([1u8; 32]);
+        let addr2 = B256::from([2u8; 32]);
+        let path1 = StoredNibbles(Nibbles::from_nibbles_unchecked(&[1, 2]));
+        let path2 = StoredNibbles(Nibbles::from_nibbles_unchecked(&[1, 3]));
 
-        // Encoded bytes should be sortable
-        let enc1 = path1.encode();
-        let enc2 = path2.encode();
-        let enc3 = path3.encode();
+        let key1 = StorageBranchSubKey::new(addr1, path1.clone());
+        let key2 = StorageBranchSubKey::new(addr1, path2.clone());
+        let key3 = StorageBranchSubKey::new(addr2, path1.clone());
 
-        assert!(enc1 < enc2);
-        assert!(enc2 < enc3);
+        // Encoded bytes should be sortable: first by address, then by path
+        let enc1 = key1.encode();
+        let enc2 = key2.encode();
+        let enc3 = key3.encode();
+
+        assert!(enc1 < enc2, "Same address, path1 < path2");
+        assert!(enc1 < enc3, "addr1 < addr2");
+        assert!(enc2 < enc3, "addr1 < addr2 (even with larger path)");
+    }
+
+    #[test]
+    fn test_hashed_storage_subkey_encode_decode() {
+        let addr = B256::from([1u8; 32]);
+        let storage_key = B256::from([2u8; 32]);
+        let key = HashedStorageSubKey::new(addr, storage_key);
+
+        let encoded = key.clone().encode();
+        let decoded = HashedStorageSubKey::decode(&encoded).unwrap();
+
+        assert_eq!(key, decoded);
+        assert_eq!(decoded.hashed_address, addr);
+        assert_eq!(decoded.hashed_storage_key, storage_key);
+    }
+
+    #[test]
+    fn test_hashed_storage_subkey_ordering() {
+        let addr1 = B256::from([1u8; 32]);
+        let addr2 = B256::from([2u8; 32]);
+        let storage1 = B256::from([10u8; 32]);
+        let storage2 = B256::from([20u8; 32]);
+
+        let key1 = HashedStorageSubKey::new(addr1, storage1);
+        let key2 = HashedStorageSubKey::new(addr1, storage2);
+        let key3 = HashedStorageSubKey::new(addr2, storage1);
+
+        // Encoded bytes should be sortable: first by address, then by storage key
+        let enc1 = key1.encode();
+        let enc2 = key2.encode();
+        let enc3 = key3.encode();
+
+        assert!(enc1 < enc2, "Same address, storage1 < storage2");
+        assert!(enc1 < enc3, "addr1 < addr2");
+        assert!(enc2 < enc3, "addr1 < addr2 (even with larger storage key)");
+    }
+
+    #[test]
+    fn test_hashed_storage_subkey_size() {
+        let addr = B256::from([1u8; 32]);
+        let storage_key = B256::from([2u8; 32]);
+        let key = HashedStorageSubKey::new(addr, storage_key);
+
+        let encoded = key.encode();
+        assert_eq!(encoded.len(), 64, "Encoded size should be exactly 64 bytes");
     }
 
     #[test]
