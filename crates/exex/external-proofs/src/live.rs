@@ -33,8 +33,8 @@ where
     Primitives: NodePrimitives,
     Store: OpProofsStorage + Clone + 'static,
 {
-    /// Create a new ProofHelper instance
-    pub fn new(evm_config: Node::Evm, provider: Node::Provider, storage: Store) -> Self {
+    /// Create a new `LiveTrieCollector` instance
+    pub const fn new(evm_config: Node::Evm, provider: Node::Provider, storage: Store) -> Self {
         Self { evm_config, provider, storage }
     }
 
