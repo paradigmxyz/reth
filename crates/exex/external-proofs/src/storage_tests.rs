@@ -1379,9 +1379,9 @@ mod tests {
 
     /// Test that `replace_updates` properly applies hashed/trie storage updates to the DB
     ///
-    /// This test verifies the bug fix where `replace_updates` was only storing trie_updates
-    /// and post_states directly without populating the internal data structures
-    /// (hashed_accounts, hashed_storages, account_branches, storage_branches).
+    /// This test verifies the bug fix where `replace_updates` was only storing `trie_updates`
+    /// and `post_states` directly without populating the internal data structures
+    /// (`hashed_accounts`, `hashed_storages`, `account_branches`, `storage_branches`).
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
     #[tokio::test]
     async fn test_replace_updates_applies_all_updates<S: ExternalStorage>(
