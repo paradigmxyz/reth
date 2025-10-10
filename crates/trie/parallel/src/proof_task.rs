@@ -903,7 +903,7 @@ impl ProofTaskManager {
                                         path,
                                         result_sender: sender,
                                     })
-                                    .expect("account worker pool should be available");
+                                    .expect("failed to send job to account worker pool: all workers panicked or pool was shut down");
 
                                 tracing::trace!(
                                     target: "trie::proof_task",
