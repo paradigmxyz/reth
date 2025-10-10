@@ -62,6 +62,7 @@ impl DefaultArbOsHooks {
         if amount.is_zero() {
             return;
         }
+        let _ = state.load_cache_account(address);
         let amount_u128: u128 = amount.try_into().unwrap_or(u128::MAX);
         let _ = state.increment_balances(core::iter::once((address, amount_u128)));
     }
@@ -78,6 +79,9 @@ impl DefaultArbOsHooks {
         if amount.is_zero() {
             return Ok(());
         }
+        
+        let _ = state.load_cache_account(from);
+        let _ = state.load_cache_account(to);
         
         let from_account = match state.basic(from) {
             Ok(info) => info,
@@ -134,7 +138,7 @@ impl DefaultArbOsHooks {
         let network_fee_account = state.network_fee_account;
 
         let mut available_refund = deposit_value;
-        let retry_value_taken = Self::take_funds(&mut available_refund, retry_value);
+        let _retry_value_taken = Self::take_funds(&mut available_refund, retry_value);
 
         Self::mint_balance(state_db, from, deposit_value);
 
