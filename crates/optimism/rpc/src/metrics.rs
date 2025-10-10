@@ -6,7 +6,7 @@ use reth_metrics::Metrics;
 
 /// Optimism sequencer metrics
 #[derive(Metrics, Clone)]
-#[metrics(scope = "optimism_transaction_pool.sequencer")]
+#[metrics(scope = "optimism_rpc.sequencer")]
 pub struct SequencerMetrics {
     /// How long it takes to forward a transaction to the sequencer
     pub(crate) sequencer_forward_latency: Histogram,
