@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.21.2"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#8c98c8937cc21a567f2a80903fdbd212d939989c"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#9271afd6d0f8bd36ba234a5ebfd11f8da721fb4d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -385,7 +385,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.21.2"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#8c98c8937cc21a567f2a80903fdbd212d939989c"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#9271afd6d0f8bd36ba234a5ebfd11f8da721fb4d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5314,9 +5314,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.176"
+version = "0.2.177"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58f929b4d672ea937a23a1ab494143d968337a5f47e56d0815df1e0890ddf174"
+checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
 
 [[package]]
 name = "libgit2-sys"
@@ -6373,12 +6373,12 @@ dependencies = [
 
 [[package]]
 name = "pem"
-version = "3.0.5"
+version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38af38e8470ac9dee3ce1bae1af9c1671fffc44ddfd8bd1d0a3445bf349a8ef3"
+checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
 dependencies = [
  "base64 0.22.1",
- "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -6671,7 +6671,7 @@ version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "219cb19e96be00ab2e37d6e299658a0cfa83e52429179969b0f0121b4ac46983"
 dependencies = [
- "toml_edit 0.23.6",
+ "toml_edit 0.23.7",
 ]
 
 [[package]]
@@ -12536,9 +12536,9 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32f1085dec27c2b6632b04c80b3bb1b4300d6495d1e129693bdda7d91e72eec1"
+checksum = "f2cdb639ebbc97961c51720f858597f7f24c4fc295327923af55b74c3c724533"
 dependencies = [
  "serde_core",
 ]
@@ -12559,21 +12559,21 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.23.6"
+version = "0.23.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3effe7c0e86fdff4f69cdd2ccc1b96f933e24811c5441d44904e8683e27184b"
+checksum = "6485ef6d0d9b5d0ec17244ff7eb05310113c3f316f2d14200d4de56b3cb98f8d"
 dependencies = [
  "indexmap 2.11.4",
- "toml_datetime 0.7.2",
+ "toml_datetime 0.7.3",
  "toml_parser",
  "winnow",
 ]
 
 [[package]]
 name = "toml_parser"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cf893c33be71572e0e9aa6dd15e6677937abd686b066eac3f8cd3531688a627"
+checksum = "c0cbe268d35bdb4bb5a56a2de88d0ad0eb70af5384a99d648cd4b3d04039800e"
 dependencies = [
  "winnow",
 ]
