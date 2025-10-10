@@ -302,9 +302,8 @@ mod read_transactions {
                     // the closest deadline of an active read transaction
                     // Use saturating_sub to avoid panic when active duration exceeds max_duration
                     let sleep_duration = READ_TRANSACTIONS_CHECK_INTERVAL.min(
-                        self.max_duration.saturating_sub(
-                            max_active_transaction_duration.unwrap_or_default(),
-                        ),
+                        self.max_duration
+                            .saturating_sub(max_active_transaction_duration.unwrap_or_default()),
                     );
                     trace!(target: "libmdbx", ?sleep_duration, elapsed = ?now.elapsed(), "Putting transaction monitor to sleep");
                     std::thread::sleep(sleep_duration);
