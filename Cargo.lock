@@ -10739,6 +10739,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "codspeed-criterion-compat",
+ "crossbeam-channel",
  "dashmap 6.1.0",
  "derive_more",
  "itertools 0.14.0",
