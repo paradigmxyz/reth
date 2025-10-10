@@ -479,22 +479,6 @@ fn account_worker_loop<Tx>(
     );
 }
 
-/// Parameters for building an account multiproof with pre-computed storage roots.
-struct AccountMultiproofParams<'a> {
-    /// The targets for which to compute the multiproof.
-    targets: &'a MultiProofTargets,
-    /// The prefix set for the account trie walk.
-    prefix_set: PrefixSet,
-    /// Whether or not to collect branch node masks.
-    collect_branch_node_masks: bool,
-    /// Provided by the user to give the necessary context to retain extra proofs.
-    multi_added_removed_keys: Option<&'a Arc<MultiAddedRemovedKeys>>,
-    /// Receivers for storage proofs being computed in parallel.
-    storage_proof_receivers: B256Map<Receiver<StorageProofResult>>,
-    /// Cached storage proof roots for missed leaves encountered during account trie walk.
-    missed_leaves_storage_roots: &'a DashMap<B256, B256>,
-}
-
 /// Builds an account multiproof by consuming storage proof receivers lazily during trie walk.
 ///
 /// This is a helper function used by account workers to build the account subtree proof
@@ -1113,6 +1097,22 @@ pub struct AccountMultiproofInput {
     pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Cached storage proof roots for missed leaves encountered during account trie walk.
     pub missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
+}
+
+/// Parameters for building an account multiproof with pre-computed storage roots.
+struct AccountMultiproofParams<'a> {
+    /// The targets for which to compute the multiproof.
+    targets: &'a MultiProofTargets,
+    /// The prefix set for the account trie walk.
+    prefix_set: PrefixSet,
+    /// Whether or not to collect branch node masks.
+    collect_branch_node_masks: bool,
+    /// Provided by the user to give the necessary context to retain extra proofs.
+    multi_added_removed_keys: Option<&'a Arc<MultiAddedRemovedKeys>>,
+    /// Receivers for storage proofs being computed in parallel.
+    storage_proof_receivers: B256Map<Receiver<StorageProofResult>>,
+    /// Cached storage proof roots for missed leaves encountered during account trie walk.
+    missed_leaves_storage_roots: &'a DashMap<B256, B256>,
 }
 
 /// Internal message for account workers.
