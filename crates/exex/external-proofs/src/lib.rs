@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 pub mod backfill;
 pub mod in_memory;
+pub mod live;
 pub mod proof;
 pub mod provider;
 pub mod storage;
