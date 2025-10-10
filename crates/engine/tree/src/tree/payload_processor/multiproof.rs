@@ -20,7 +20,7 @@ use reth_trie::{
 };
 use reth_trie_parallel::{
     proof::ParallelProof,
-    proof_task::{AccountMultiproofInput, ProofTaskKind, ProofTaskManagerHandle},
+    proof_task::{AccountMultiproofInput, ProofTaskManagerHandle},
     root::ParallelStateRootError,
 };
 use std::{
@@ -556,15 +556,10 @@ impl MultiproofManager {
                 missed_leaves_storage_roots,
             };
 
-            let (sender, receiver) = channel();
             let proof_result: Result<DecodedMultiProof, ParallelStateRootError> = (|| {
-                account_proof_task_handle
-                    .queue_task(ProofTaskKind::AccountMultiproof(input, sender))
-                    .map_err(|_| {
-                        ParallelStateRootError::Other(
-                            "Failed to queue account multiproof to worker pool".into(),
-                        )
-                    })?;
+                let receiver = account_proof_task_handle
+                    .queue_account_multiproof(input)
+                    .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
                 receiver
                     .recv()
@@ -1223,7 +1218,7 @@ mod tests {
         DatabaseProviderFactory,
     };
     use reth_trie::{MultiProof, TrieInput};
-    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofTaskManager};
+    use reth_trie_parallel::proof_task::{spawn_proof_workers, ProofTaskCtx};
     use revm_primitives::{B256, U256};
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
@@ -1238,12 +1233,12 @@ mod tests {
             config.prefix_sets.clone(),
         );
         let consistent_view = ConsistentDbView::new(factory, None);
-        let proof_task =
-            ProofTaskManager::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1)
-                .expect("Failed to create ProofTaskManager");
+        let proof_handle =
+            spawn_proof_workers(executor.handle().clone(), consistent_view, task_ctx, 1, 1)
+                .expect("Failed to spawn proof workers");
         let channel = channel();
 
-        MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1, None)
+        MultiProofTask::new(config, executor, proof_handle, channel.0, 1, None)
     }
 
     #[test]
