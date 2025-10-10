@@ -181,23 +181,6 @@ where
             self.tx_state = state;
         }
 
-        let gas_ctx = ArbGasChargingContext {
-            intrinsic_gas: 21_000,
-            calldata: calldata.to_vec(),
-            basefee: block_basefee,
-            is_executed_on_chain: true,
-            skip_l1_charging: false,
-        };
-        {
-            let mut state = core::mem::take(&mut self.tx_state);
-            let res = {
-                let evm = self.inner.evm_mut();
-                self.hooks.gas_charging::<E>(evm, &mut state, &gas_ctx)
-            };
-            self.tx_state = state;
-            let _ = res;
-        }
-
         if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable) {
             use alloy_consensus::Transaction as _;
             use alloy_consensus::transaction::TxHashRef;
@@ -223,6 +206,25 @@ where
             if result.is_err() {
                 return Err(BlockExecutionError::msg("SubmitRetryable execution failed"));
             }
+            
+            return Ok(Some(0));
+        }
+
+        let gas_ctx = ArbGasChargingContext {
+            intrinsic_gas: 21_000,
+            calldata: calldata.to_vec(),
+            basefee: block_basefee,
+            is_executed_on_chain: true,
+            skip_l1_charging: false,
+        };
+        {
+            let mut state = core::mem::take(&mut self.tx_state);
+            let res = {
+                let evm = self.inner.evm_mut();
+                self.hooks.gas_charging::<E>(evm, &mut state, &gas_ctx)
+            };
+            self.tx_state = state;
+            let _ = res;
         }
 
         if is_deposit {
