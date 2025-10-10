@@ -8,7 +8,7 @@ use reth_provider::StateReader;
 use reth_exex::{ExExContext, ExExEvent};
 
 pub mod in_memory;
-mod storage;
+pub mod storage;
 #[cfg(test)]
 mod storage_tests;
 
