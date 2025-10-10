@@ -862,7 +862,7 @@ impl ProofTaskManager {
                                         input,
                                         result_sender: sender,
                                     })
-                                    .expect("storage worker pool should be available");
+                                    .expect("failed to dispatch storage proof: storage worker pool unavailable (all workers panicked or pool shut down)");
 
                                 tracing::trace!(
                                     target: "trie::proof_task",
@@ -882,7 +882,7 @@ impl ProofTaskManager {
                                         path,
                                         result_sender: sender,
                                     })
-                                    .expect("storage worker pool should be available");
+                                    .expect("failed to dispatch blinded storage node: storage worker pool unavailable (all workers panicked or pool shut down)");
 
                                 tracing::trace!(
                                     target: "trie::proof_task",
@@ -903,7 +903,7 @@ impl ProofTaskManager {
                                         path,
                                         result_sender: sender,
                                     })
-                                    .expect("failed to send job to account worker pool: all workers panicked or pool was shut down");
+                                    .expect("failed to dispatch blinded account node: account worker pool unavailable (all workers panicked or pool shut down)");
 
                                 tracing::trace!(
                                     target: "trie::proof_task",
@@ -918,7 +918,7 @@ impl ProofTaskManager {
                                         input,
                                         result_sender: sender,
                                     })
-                                    .expect("account worker pool should be available");
+                                    .expect("failed to dispatch account multiproof: account worker pool unavailable (all workers panicked or pool shut down)");
 
                                 tracing::trace!(
                                     target: "trie::proof_task",
