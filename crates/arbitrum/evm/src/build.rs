@@ -198,6 +198,42 @@ where
             let _ = res;
         }
 
+        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable) {
+            use alloy_consensus::Transaction as _;
+            use alloy_consensus::transaction::TxHashRef;
+            let tx_hash = *tx.tx().tx_hash();
+            let block_env = alloy_evm::Evm::block(self.evm());
+            let block_timestamp = u64::try_from(block_env.timestamp).unwrap_or(0);
+            
+            let mut state = core::mem::take(&mut self.tx_state);
+            let result = {
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let db: &mut revm::database::State<D> = *db_ref;
+                DefaultArbOsHooks::execute_submit_retryable(
+                    db,
+                    &mut state,
+                    tx.tx(),
+                    tx_hash,
+                    block_basefee,
+                    block_timestamp,
+                )
+            };
+            self.tx_state = state;
+            
+            if result.is_err() {
+                return Err(BlockExecutionError::msg("SubmitRetryable execution failed"));
+            }
+        }
+
+        if is_deposit {
+            let deposit_value = tx.tx().value();
+            if !deposit_value.is_zero() {
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let db: &mut revm::database::State<D> = *db_ref;
+                DefaultArbOsHooks::mint_balance(db, sender, deposit_value);
+            }
+        }
+
         let mut used_pre_nonce = None;
         let mut maybe_predeploy_result: Option<(revm::context::result::ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>, u64)> = None;
         let to_addr = match tx.tx().kind() {
@@ -226,8 +262,20 @@ where
                 }
             }
             let mut emitter = SinkEmitter;
+            
+            use crate::retryables::DefaultRetryables;
+            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+            let db: &mut revm::database::State<D> = *db_ref;
+            
+            let arbos_addr = alloy_primitives::Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                              0x00, 0x00, 0x00, 0x64]);
+            let _ = db.basic(arbos_addr);
+            
+            let mut retryables = DefaultRetryables::new(db as *mut _, alloy_primitives::B256::ZERO);
+            
             if let Ok(mut reg) = self.predeploys.lock() {
-                let _ = reg.dispatch_with_emitter(&ctx, call_to, &calldata, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut emitter);
+                let _ = reg.dispatch_with_emitter(&ctx, call_to, &calldata, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut retryables, &mut emitter);
             }
         }
 
@@ -255,6 +303,27 @@ where
                     let state: &mut revm::database::State<D> = *db_ref;
 
                     let (arbos_addr, l1_slot) = header::arbos_l1_block_number_slot();
+                    
+                    if !state.bundle_state.state.contains_key(&arbos_addr) {
+                        use revm_state::AccountInfo;
+                        let info = match state.basic(arbos_addr) {
+                            Ok(Some(account_info)) => Some(account_info),
+                            _ => Some(AccountInfo {
+                                balance: alloy_primitives::U256::ZERO,
+                                nonce: 0,
+                                code_hash: alloy_primitives::keccak256([]),
+                                code: None,
+                            }),
+                        };
+                        let acc = BundleAccount {
+                            info,
+                            storage: HashMap::default(),
+                            original_info: None,
+                            status: AccountStatus::Changed,
+                        };
+                        state.bundle_state.state.insert(arbos_addr, acc);
+                    }
+                    
                     let l1_slot_u256 = alloy_primitives::U256::from_be_bytes(l1_slot.0);
                     let present = alloy_primitives::U256::from(l1_bn);
 
@@ -263,19 +332,6 @@ where
                             l1_slot_u256,
                             EvmStorageSlot { present_value: present, ..Default::default() }.into(),
                         );
-                    } else {
-                        let mut storage = HashMap::default();
-                        storage.insert(
-                            l1_slot_u256,
-                            EvmStorageSlot { present_value: present, ..Default::default() }.into(),
-                        );
-                        let acc = BundleAccount {
-                            info: None,
-                            storage,
-                            original_info: Default::default(),
-                            status: AccountStatus::Changed,
-                        };
-                        state.bundle_state.state.insert(arbos_addr, acc);
                     }
                 }
             }

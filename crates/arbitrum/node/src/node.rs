@@ -267,6 +267,12 @@ where
 
         let mut attrs2 = attrs.clone();
         attrs2.prev_randao = sealed_parent.mix_hash().unwrap_or_default();
+        reth_tracing::tracing::info!(
+            target: "arb-reth::follower",
+            suggested_fee_recipient = %attrs2.suggested_fee_recipient,
+            poster = %poster,
+            "follower: attrs2 suggested_fee_recipient before build_next_env"
+        );
         let mut next_env = <reth_arbitrum_evm::ArbEvmConfig<
             ChainSpec,
             reth_arbitrum_primitives::ArbPrimitives,
@@ -279,6 +285,12 @@ where
             evm_config.chain_spec().as_ref(),
         )
         .map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
+        reth_tracing::tracing::info!(
+            target: "arb-reth::follower",
+            suggested_fee_recipient = %next_env.suggested_fee_recipient,
+            "follower: next_env suggested_fee_recipient after build_next_env"
+        );
+        next_env.suggested_fee_recipient = poster;
         next_env.delayed_messages_read = delayed_messages_read;
         next_env.l1_block_number = l1_block_number;
 
@@ -846,6 +858,19 @@ where
                 "follower: finalized txs after finish()"
             );
         }
+        let sealed_block0 = outcome.block.sealed_block().clone();
+        let (mut header_unsealed, body_unsealed) = sealed_block0.clone().split_header_body();
+        header_unsealed.nonce = alloy_primitives::B64::new(delayed_messages_read.to_be_bytes());
+        type ArbBlock = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned, alloy_consensus::Header>;
+        let sealed_block: reth_primitives_traits::block::SealedBlock<ArbBlock> =
+            reth_primitives_traits::block::SealedBlock::seal_parts(header_unsealed, body_unsealed);
+
+        let header = sealed_block.header();
+        let new_block_hash = sealed_block.hash();
+        
+        let senders = outcome.block.senders().to_vec();
+        let modified_block = reth_primitives_traits::block::RecoveredBlock::new_sealed(sealed_block.clone(), senders);
+        
         let exec_outcome = reth_execution_types::ExecutionOutcome::new(
             db.take_bundle(),
             vec![outcome.execution_result.receipts.clone()],
@@ -857,25 +882,13 @@ where
             let provider_rw = db_factory.provider_rw().map_err(|e| eyre::eyre!("provider_rw error: {e}"))?;
             provider_rw
                 .append_blocks_with_state(
-                    vec![outcome.block.clone()],
+                    vec![modified_block],
                     &exec_outcome,
                     hashed_sorted,
                 )
                 .map_err(|e| eyre::eyre!("append_blocks_with_state error: {e}"))?;
+            provider_rw.commit().map_err(|e| eyre::eyre!("provider commit error: {e}"))?;
         }
-
-
-
-        let sealed_block0 = outcome.block.sealed_block().clone();
-        let (mut header_unsealed, body_unsealed) = sealed_block0.clone().split_header_body();
-        header_unsealed.nonce = alloy_primitives::B64::new(delayed_messages_read.to_be_bytes());
-        type ArbBlock = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned, alloy_consensus::Header>;
-        let sealed_block: reth_primitives_traits::block::SealedBlock<ArbBlock> =
-            reth_primitives_traits::block::SealedBlock::seal_parts(header_unsealed, body_unsealed);
-
-        let header = sealed_block.header();
-
-        let new_block_hash = sealed_block.hash();
         let header_hash_hex = format!("{:#x}", new_block_hash);
         let header_mix_hex = format!("{:#x}", header.mix_hash);
         let header_extra_hex = format!("{:#x}", alloy_primitives::B256::from_slice(&header.extra_data));

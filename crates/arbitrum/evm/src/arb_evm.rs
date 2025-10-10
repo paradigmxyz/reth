@@ -47,7 +47,22 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
         }
         tx.kind = kind;
         tx.data = signed.input().clone();
-        tx.chain_id = Some(signed.chain_id().unwrap_or_default());
+        
+        let should_skip_checks = matches!(
+            signed.tx_type(),
+            reth_arbitrum_primitives::ArbTxType::Internal
+                | reth_arbitrum_primitives::ArbTxType::Deposit
+                | reth_arbitrum_primitives::ArbTxType::Contract
+                | reth_arbitrum_primitives::ArbTxType::Retry
+                | reth_arbitrum_primitives::ArbTxType::SubmitRetryable
+        );
+        
+        if should_skip_checks {
+            tx.chain_id = Some(421614);
+        } else {
+            tx.chain_id = Some(signed.chain_id().unwrap_or(421614));
+        }
+        
         tx.nonce = signed.nonce();
         tx.access_list = signed.access_list().cloned().unwrap_or_default();
         tx.blob_hashes = signed.blob_versioned_hashes().unwrap_or(&[]).to_vec();

@@ -29,11 +29,12 @@ fn parse_b256_hex(s: &str) -> B256 {
 }
 
 fn decode_embedded_alloc_json() -> Result<serde_json::Value> {
-    let b64 = SEPOLIA_SECURE_ALLOC_B64.trim();
-    if b64.is_empty() {
+    let b64_raw = SEPOLIA_SECURE_ALLOC_B64.trim();
+    if b64_raw.is_empty() {
         bail!("embedded sepolia alloc is empty");
     }
-    let gz = base64::decode(b64)?;
+    let b64: String = b64_raw.chars().filter(|c| !c.is_whitespace()).collect();
+    let gz = base64::decode(&b64)?;
     let mut decoder = libflate::gzip::Decoder::new(&gz[..])?;
     let mut buf = Vec::new();
     decoder.read_to_end(&mut buf)?;

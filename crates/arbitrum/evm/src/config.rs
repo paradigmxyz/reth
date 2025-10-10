@@ -67,6 +67,12 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             excess_blob_gas: None,
             requests_hash: None,
         };
+        reth_tracing::tracing::info!(
+            target: "arb-evm::assemble",
+            number = header.number,
+            beneficiary = %header.beneficiary,
+            "ArbBlockAssembler: initial beneficiary set from evm_env"
+        );
         header.difficulty = U256::from(1u64);
         header.nonce = B64::from(input.execution_ctx.delayed_messages_read.to_be_bytes()).into();
 

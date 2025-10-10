@@ -7459,6 +7459,7 @@ dependencies = [
  "reth-rpc-eth-api",
  "reth-storage-api",
  "reth-storage-errors",
+ "reth-tracing",
  "revm",
  "revm-context-interface",
  "revm-database",

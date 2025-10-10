@@ -45,6 +45,16 @@ mod arb_evm;
 pub use arb_evm::{ArbTransaction, ArbEvm, ArbEvmFactory};
 
 mod log_sink;
+pub mod storage;
+pub mod l1_pricing;
+pub mod l2_pricing;
+pub mod addressset;
+pub mod addresstable;
+pub mod merkleaccumulator;
+pub mod blockhash;
+pub mod features;
+pub mod programs;
+pub mod arbosstate;
 
 
 pub struct ArbEvmConfig<ChainSpec = (), N = (), R = ArbRethReceiptBuilder>
@@ -280,7 +290,7 @@ impl<ChainSpec: ArbitrumChainSpec, N, R: Clone> ArbEvmConfig<ChainSpec, N, R> {
 
 impl<ChainSpec: ArbitrumChainSpec, N, R: Clone> ArbEvmConfig<ChainSpec, N, R> {
     pub fn default_predeploy_registry(&self) -> PredeployRegistry {
-        PredeployRegistry::with_default_addresses()
+        PredeployRegistry::default()
     }
 
     pub fn arb_tx_iterator_for_payload(
