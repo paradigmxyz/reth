@@ -16,6 +16,8 @@ mod index_account_history;
 mod index_storage_history;
 /// Stage for computing state root.
 mod merkle;
+/// Stage for computing merkle changesets.
+mod merkle_changesets;
 mod prune;
 /// The sender recovery stage.
 mod sender_recovery;
@@ -32,6 +34,7 @@ pub use headers::*;
 pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
+pub use merkle_changesets::*;
 pub use prune::*;
 pub use sender_recovery::*;
 pub use tx_lookup::*;

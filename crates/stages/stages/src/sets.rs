@@ -39,9 +39,9 @@
 use crate::{
     stages::{
         AccountHashingStage, BodyStage, EraImportSource, EraStage, ExecutionStage, FinishStage,
-        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-        PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
+        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleChangeSets,
+        MerkleStage, PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage,
+        StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -75,6 +75,7 @@ use tokio::sync::watch;
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
 /// - [`MerkleStage`] (execute)
+/// - [`MerkleChangeSets`]
 /// - [`TransactionLookupStage`]
 /// - [`IndexStorageHistoryStage`]
 /// - [`IndexAccountHistoryStage`]
@@ -387,6 +388,13 @@ where
 }
 
 /// A set containing all stages that hash account state.
+///
+/// This includes:
+/// - [`MerkleStage`] (unwind)
+/// - [`AccountHashingStage`]
+/// - [`StorageHashingStage`]
+/// - [`MerkleStage`] (execute)
+/// - [`MerkleChangeSets`]
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct HashingStages {
@@ -399,6 +407,7 @@ where
     MerkleStage: Stage<Provider>,
     AccountHashingStage: Stage<Provider>,
     StorageHashingStage: Stage<Provider>,
+    MerkleChangeSets: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
@@ -415,6 +424,7 @@ where
                 self.stages_config.merkle.rebuild_threshold,
                 self.stages_config.merkle.incremental_threshold,
             ))
+            .add_stage(MerkleChangeSets::new())
     }
 }
 

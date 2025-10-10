@@ -3,7 +3,7 @@
 use crate::{
     AccountReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, StageCheckpointReader, StateProviderFactory,
-    StateReader, StaticFileProviderFactory,
+    StateReader, StaticFileProviderFactory, TrieReader,
 };
 use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
@@ -12,7 +12,7 @@ use std::fmt::Debug;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
-    DatabaseProviderFactory<DB = N::DB, Provider: BlockReader>
+    DatabaseProviderFactory<DB = N::DB, Provider: BlockReader + TrieReader>
     + NodePrimitivesProvider<Primitives = N::Primitives>
     + StaticFileProviderFactory<Primitives = N::Primitives>
     + BlockReaderIdExt<
@@ -37,7 +37,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 }
 
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
-    T: DatabaseProviderFactory<DB = N::DB, Provider: BlockReader>
+    T: DatabaseProviderFactory<DB = N::DB, Provider: BlockReader + TrieReader>
         + NodePrimitivesProvider<Primitives = N::Primitives>
         + StaticFileProviderFactory<Primitives = N::Primitives>
         + BlockReaderIdExt<

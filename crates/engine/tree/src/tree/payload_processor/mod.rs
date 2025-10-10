@@ -45,7 +45,7 @@ use std::sync::{
     mpsc::{self, channel, Sender},
     Arc,
 };
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 mod configured_sparse_trie;
 pub mod executor;
@@ -166,6 +166,10 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
+    ///
+    /// Returns an error with the original transactions iterator if the proof task manager fails to
+    /// initialize.
+    #[allow(clippy::type_complexity)]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -174,7 +178,10 @@ where
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+    ) -> Result<
+        PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
+        (reth_provider::ProviderError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
+    >
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -196,12 +203,19 @@ where
             state_root_config.prefix_sets.clone(),
         );
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
-        let proof_task = ProofTaskManager::new(
+        let storage_worker_count = config.storage_worker_count();
+        let proof_task = match ProofTaskManager::new(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
             task_ctx,
             max_proof_task_concurrency,
-        );
+            storage_worker_count,
+        ) {
+            Ok(task) => task,
+            Err(error) => {
+                return Err((error, transactions, env, provider_builder));
+            }
+        };
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
@@ -252,12 +266,12 @@ where
             }
         });
 
-        PayloadHandle {
+        Ok(PayloadHandle {
             to_multi_proof,
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
-        }
+        })
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
@@ -857,14 +871,20 @@ mod tests {
             PrecompileCacheMap::default(),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
-        let mut handle = payload_processor.spawn(
-            Default::default(),
-            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
-            StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-            ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-            TrieInput::from_state(hashed_state),
-            &TreeConfig::default(),
-        );
+        let mut handle =
+            payload_processor
+                .spawn(
+                    Default::default(),
+                    core::iter::empty::<
+                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+                    >(),
+                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                    ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+                    TrieInput::from_state(hashed_state),
+                    &TreeConfig::default(),
+                )
+                .map_err(|(err, ..)| err)
+                .expect("failed to spawn payload processor");
 
         let mut state_hook = handle.state_hook();
 
