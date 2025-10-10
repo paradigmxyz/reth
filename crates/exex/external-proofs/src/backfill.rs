@@ -19,7 +19,9 @@ const BACKFILL_STORAGE_THRESHOLD: usize = 100000;
 /// Threshold for logging progress during backfill
 const BACKFILL_LOG_THRESHOLD: usize = 100000;
 
-pub(crate) struct BackfillJob<'a, Tx: DbTx, S: OpProofsStorage + Send> {
+/// Backfill job for external storage.
+#[derive(Debug)]
+pub struct BackfillJob<'a, Tx: DbTx, S: OpProofsStorage + Send> {
     storage: S,
     tx: &'a Tx,
 }
@@ -195,7 +197,8 @@ async fn backfill<
 }
 
 impl<'a, Tx: DbTx, S: OpProofsStorage + Send> BackfillJob<'a, Tx, S> {
-    pub(crate) const fn new(storage: S, tx: &'a Tx) -> Self {
+    /// Create a new backfill job.
+    pub const fn new(storage: S, tx: &'a Tx) -> Self {
         Self { storage, tx }
     }
 
@@ -333,7 +336,8 @@ impl<'a, Tx: DbTx, S: OpProofsStorage + Send> BackfillJob<'a, Tx, S> {
         Ok(())
     }
 
-    pub(crate) async fn run(&self, best_number: u64, best_hash: B256) -> eyre::Result<()> {
+    /// Run the backfill job.
+    pub async fn run(&self, best_number: u64, best_hash: B256) -> eyre::Result<()> {
         if self.storage.get_earliest_block_number().await?.is_none() {
             self.backfill_trie().await?;
 
