@@ -1051,7 +1051,7 @@ checksum = "d96157f2af6b7adee519c2fce60b07a79628164410c2b32558ef816018ec748e"
 
 [[package]]
 name = "arb-alloy-predeploys"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
 ]
@@ -7552,7 +7552,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arb-alloy-consensus",
- "arb-alloy-predeploys 0.1.0",
+ "arb-alloy-predeploys 0.1.1",
  "bytes",
  "modular-bitfield",
  "reth-codecs",
