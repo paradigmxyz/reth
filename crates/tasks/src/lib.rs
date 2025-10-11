@@ -247,7 +247,8 @@ impl TaskManager {
                 debug!("graceful shutdown timed out");
                 return false
             }
-            std::hint::spin_loop();
+            // Avoid busy-waiting; sleep briefly to reduce CPU usage during graceful shutdown loop.
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
 
         debug!("gracefully shut down");
