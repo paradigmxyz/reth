@@ -14,6 +14,7 @@ const EXTENSION: &str = "toml";
 /// The default prune block interval
 pub const DEFAULT_BLOCK_INTERVAL: usize = 5;
 
+
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -125,6 +126,8 @@ pub struct StageConfig {
     pub index_account_history: IndexHistoryConfig,
     /// Index Storage History stage configuration.
     pub index_storage_history: IndexHistoryConfig,
+    /// Snap Sync stage configuration.
+    pub snap_sync: SnapSyncConfig,
     /// Common ETL related configuration.
     pub etl: EtlConfig,
 }
@@ -258,6 +261,39 @@ impl Default for SenderRecoveryConfig {
     }
 }
 
+/// Snap Sync stage configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct SnapSyncConfig {
+    /// Enable snap sync stage.
+    pub enabled: bool,
+    /// Max account ranges per execution.
+    pub max_ranges_per_execution: usize,
+    /// Max response bytes per request.
+    pub max_response_bytes: u64,
+    /// Timeout for peer requests (seconds).
+    pub request_timeout_seconds: u64,
+    /// Range size for account hash ranges (in hash space units).
+    /// Larger values = fewer requests but more data per request.
+    pub range_size: u64,
+    /// Maximum number of retries for failed requests.
+    pub max_retries: u32,
+}
+
+impl Default for SnapSyncConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_ranges_per_execution: 100,
+            max_response_bytes: 2 * 1024 * 1024, // 2MB
+            request_timeout_seconds: 30,
+            range_size: 0x10, // 16 hash values (very small default for testing)
+            max_retries: 3, // 3 retries by default
+        }
+    }
+}
+
 /// Execution stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -278,6 +314,8 @@ pub struct ExecutionConfig {
         )
     )]
     pub max_duration: Option<Duration>,
+    /// External clean threshold for execution stage.
+    pub external_clean_threshold: u64,
 }
 
 impl Default for ExecutionConfig {
@@ -289,6 +327,7 @@ impl Default for ExecutionConfig {
             max_cumulative_gas: Some(30_000_000 * 50_000),
             // 10 minutes
             max_duration: Some(Duration::from_secs(10 * 60)),
+            external_clean_threshold: 100_000,
         }
     }
 }
