@@ -38,7 +38,11 @@ pub struct DatabaseArgs {
     #[arg(long = "db.max-readers")]
     pub max_readers: Option<u64>,
     /// Controls how aggressively the database synchronizes data to disk.
-    #[arg(long = "db.sync-mode", value_parser = SyncModeValueParser::default())]
+    #[arg(
+        long = "db.sync-mode",
+        value_parser = SyncModeValueParser::default(),
+        default_value = "durable"
+    )]
     pub sync_mode: SyncMode,
 }
 
@@ -257,6 +261,7 @@ mod tests {
         let default_args = DatabaseArgs::default();
         let args = CommandParser::<DatabaseArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+        assert!(matches!(args.sync_mode, SyncMode::Durable));
     }
 
     #[test]
