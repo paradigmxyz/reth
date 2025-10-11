@@ -24,6 +24,23 @@ impl StorageRootTargets {
                 .collect(),
         )
     }
+
+    /// Returns the total number of unique storage root targets without allocating new maps.
+    pub fn count(
+        account_prefix_set: &PrefixSet,
+        storage_prefix_sets: &B256Map<PrefixSet>,
+    ) -> usize {
+        let mut count = storage_prefix_sets.len();
+
+        for nibbles in account_prefix_set {
+            let hashed_address = B256::from_slice(&nibbles.pack());
+            if !storage_prefix_sets.contains_key(&hashed_address) {
+                count += 1;
+            }
+        }
+
+        count
+    }
 }
 
 impl IntoIterator for StorageRootTargets {

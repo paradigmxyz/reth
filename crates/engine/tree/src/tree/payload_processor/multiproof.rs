@@ -12,14 +12,18 @@ use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
 use reth_metrics::Metrics;
-use reth_provider::{providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx};
+use reth_provider::{providers::ConsistentDbView, BlockReader, DatabaseProviderFactory};
 use reth_revm::state::EvmState;
 use reth_trie::{
     added_removed_keys::MultiAddedRemovedKeys, prefix_set::TriePrefixSetsMut,
     updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState, HashedPostStateSorted,
     HashedStorage, MultiProofTargets, TrieInput,
 };
-use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
+use reth_trie_parallel::{
+    proof::ParallelProof,
+    proof_task::{AccountMultiproofInput, ProofTaskKind, ProofTaskManagerHandle},
+    root::ParallelStateRootError,
+};
 use std::{
     collections::{BTreeMap, VecDeque},
     ops::DerefMut,
@@ -349,8 +353,11 @@ pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
     pending: VecDeque<PendingMultiproofTask<Factory>>,
     /// Executor for tasks
     executor: WorkloadExecutor,
-    /// Sender to the storage proof task.
-    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    /// Handle to the proof task manager used for creating `ParallelProof` instances for storage
+    /// proofs.
+    storage_proof_task_handle: ProofTaskManagerHandle,
+    /// Handle to the proof task manager used for account multiproofs.
+    account_proof_task_handle: ProofTaskManagerHandle,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     ///
@@ -375,7 +382,8 @@ where
     fn new(
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
-        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        storage_proof_task_handle: ProofTaskManagerHandle,
+        account_proof_task_handle: ProofTaskManagerHandle,
         max_concurrent: usize,
     ) -> Self {
         Self {
@@ -385,6 +393,7 @@ where
             inflight: 0,
             metrics,
             storage_proof_task_handle,
+            account_proof_task_handle,
             missed_leaves_storage_roots: Default::default(),
         }
     }
@@ -467,13 +476,12 @@ where
                 "Starting dedicated storage proof calculation",
             );
             let start = Instant::now();
-            let proof_result = ParallelProof::new(
-                config.consistent_view,
+            let proof_result = ParallelProof::<Factory>::new(
                 config.nodes_sorted,
                 config.state_sorted,
                 config.prefix_sets,
                 missed_leaves_storage_roots,
-                storage_proof_task_handle.clone(),
+                storage_proof_task_handle,
             )
             .with_branch_node_masks(true)
             .with_multi_added_removed_keys(Some(multi_added_removed_keys))
@@ -526,7 +534,7 @@ where
             state_root_message_sender,
             multi_added_removed_keys,
         } = multiproof_input;
-        let storage_proof_task_handle = self.storage_proof_task_handle.clone();
+        let account_proof_task_handle = self.account_proof_task_handle.clone();
         let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
 
         self.executor.spawn_blocking(move || {
@@ -544,17 +552,39 @@ where
             );
 
             let start = Instant::now();
-            let proof_result = ParallelProof::new(
-                config.consistent_view,
-                config.nodes_sorted,
-                config.state_sorted,
-                config.prefix_sets,
+
+            // Extend prefix sets with targets
+            let frozen_prefix_sets = ParallelProof::<Factory>::extend_prefix_sets_with_targets(
+                &config.prefix_sets,
+                &proof_targets,
+            );
+
+            // Queue account multiproof to worker pool
+            let input = AccountMultiproofInput {
+                targets: proof_targets,
+                prefix_sets: frozen_prefix_sets,
+                collect_branch_node_masks: true,
+                multi_added_removed_keys,
                 missed_leaves_storage_roots,
-                storage_proof_task_handle.clone(),
-            )
-            .with_branch_node_masks(true)
-            .with_multi_added_removed_keys(multi_added_removed_keys)
-            .decoded_multiproof(proof_targets);
+            };
+
+            let (sender, receiver) = channel();
+            let proof_result: Result<DecodedMultiProof, ParallelStateRootError> = (|| {
+                account_proof_task_handle
+                    .queue_task(ProofTaskKind::AccountMultiproof(input, sender))
+                    .map_err(|_| {
+                        ParallelStateRootError::Other(
+                            "Failed to queue account multiproof to worker pool".into(),
+                        )
+                    })?;
+
+                receiver
+                    .recv()
+                    .map_err(|_| {
+                        ParallelStateRootError::Other("Account multiproof channel closed".into())
+                    })?
+                    .map(|(proof, _stats)| proof)
+            })();
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
@@ -678,7 +708,7 @@ where
     pub(super) fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
-        proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        proof_task_handle: ProofTaskManagerHandle,
         to_sparse_trie: Sender<SparseTrieUpdate>,
         max_concurrency: usize,
         chunk_size: Option<usize>,
@@ -698,7 +728,8 @@ where
             multiproof_manager: MultiproofManager::new(
                 executor,
                 metrics.clone(),
-                proof_task_handle,
+                proof_task_handle.clone(), // handle for storage proof workers
+                proof_task_handle,         // handle for account proof workers
                 max_concurrency,
             ),
             metrics,
