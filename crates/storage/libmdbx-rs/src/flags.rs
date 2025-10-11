@@ -2,7 +2,7 @@ use bitflags::bitflags;
 use ffi::*;
 
 /// MDBX sync mode
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Default)]
 pub enum SyncMode {
     /// Default robust and durable sync mode.
     /// Metadata is written and flushed to disk after a data is written and flushed, which

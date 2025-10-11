@@ -8,7 +8,10 @@ use clap::{
     error::ErrorKind,
     Arg, Args, Command, Error,
 };
-use reth_db::{mdbx::MaxReadTransactionDuration, ClientVersion};
+use reth_db::{
+    mdbx::{MaxReadTransactionDuration, SyncMode},
+    ClientVersion,
+};
 use reth_storage_errors::db::LogLevel;
 
 /// Parameters for database configuration
@@ -34,6 +37,13 @@ pub struct DatabaseArgs {
     /// Maximum number of readers allowed to access the database concurrently.
     #[arg(long = "db.max-readers")]
     pub max_readers: Option<u64>,
+    /// Controls how aggressively the database synchronizes data to disk.
+    #[arg(
+        long = "db.sync-mode",
+        value_parser = SyncModeValueParser::default(),
+        default_value = "durable"
+    )]
+    pub sync_mode: SyncMode,
 }
 
 impl DatabaseArgs {
@@ -54,7 +64,7 @@ impl DatabaseArgs {
             Some(secs) => Some(MaxReadTransactionDuration::Set(Duration::from_secs(secs))),
         };
 
-        reth_db::mdbx::DatabaseArguments::new(client_version)
+        reth_db::mdbx::DatabaseArguments::new(client_version, self.sync_mode)
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
             .with_max_read_transaction_duration(max_read_transaction_duration)
@@ -175,6 +185,64 @@ fn parse_byte_size(s: &str) -> Result<usize, String> {
     s.parse::<ByteSize>().map(Into::into)
 }
 
+/// clap value parser for [`SyncMode`].
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+struct SyncModeValueParser;
+
+impl TypedValueParser for SyncModeValueParser {
+    type Value = SyncMode;
+
+    fn parse_ref(
+        &self,
+        _cmd: &Command,
+        arg: Option<&Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, Error> {
+        let raw =
+            value.to_str().ok_or_else(|| Error::raw(ErrorKind::InvalidUtf8, "Invalid UTF-8"))?;
+        let val = raw.trim().to_ascii_lowercase();
+
+        let parsed = match val.as_str() {
+            "durable" => SyncMode::Durable,
+            "safe-no-sync" | "safenosync" | "safe_no_sync" => SyncMode::SafeNoSync,
+            _ => {
+                let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+                let possible_values = [
+                    PossibleValue::new("durable")
+                        .help("Flushes data to disk on commit; highest durability (slower writes)"),
+                    PossibleValue::new("safe-no-sync").help(
+                        "Skips some fsyncs; faster writes with risk of losing latest txns on crash",
+                    ),
+                ];
+                let rendered = possible_values
+                    .iter()
+                    .map(|v| {
+                        let help = v.get_help().map(|s| s.to_string()).unwrap_or_default();
+                        format!("- {}: {}", v.get_name(), help)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                let msg =
+                    format!("Invalid value '{raw}' for {arg}.\n    Possible values:\n{rendered}");
+                return Err(Error::raw(clap::error::ErrorKind::InvalidValue, msg));
+            }
+        };
+        Ok(parsed)
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        let values = vec![
+            PossibleValue::new("durable")
+                .help("Flushes data to disk on commit; highest durability (slower writes)"),
+            PossibleValue::new("safe-no-sync")
+                .help("Skips some fsyncs; faster writes with risk of losing latest txns on crash"),
+        ];
+        Some(Box::new(values.into_iter()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,6 +261,7 @@ mod tests {
         let default_args = DatabaseArgs::default();
         let args = CommandParser::<DatabaseArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+        assert!(matches!(args.sync_mode, SyncMode::Durable));
     }
 
     #[test]
@@ -339,5 +408,31 @@ mod tests {
     fn test_command_parser_without_log_level() {
         let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth"]).unwrap();
         assert_eq!(cmd.args.log_level, None);
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_sync_mode_durable() {
+        let cmd =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "durable"])
+                .unwrap();
+        assert!(matches!(cmd.args.sync_mode, SyncMode::Durable));
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_sync_mode_safe_no_sync() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.sync-mode",
+            "safe-no-sync",
+        ])
+        .unwrap();
+        assert!(matches!(cmd.args.sync_mode, SyncMode::SafeNoSync));
+    }
+
+    #[test]
+    fn test_command_parser_with_invalid_sync_mode() {
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "ultra-fast"]);
+        assert!(result.is_err());
     }
 }
