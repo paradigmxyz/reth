@@ -47,11 +47,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     logs.append(&mut extra);
                 }
                 
-                let cumulative_gas = if ty == ArbTxType::Internal {
-                    ctx.cumulative_gas_used.saturating_sub(gas_used)
-                } else {
-                    ctx.cumulative_gas_used
-                };
+                let cumulative_gas = ctx.cumulative_gas_used;
                 
                 let receipt = AlloyReceipt {
                     status: Eip658Value::Eip658(status_flag),
