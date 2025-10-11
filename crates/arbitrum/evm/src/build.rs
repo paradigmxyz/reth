@@ -390,7 +390,9 @@ where
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
         }
 
-        let result = {
+        let result = if is_internal {
+            Ok(Some(0))
+        } else {
             let evm = self.inner.evm_mut();
             let prev_disable = evm.cfg_mut().disable_balance_check;
             evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
