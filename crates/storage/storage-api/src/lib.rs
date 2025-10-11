@@ -96,3 +96,6 @@ pub use header_sync_gap::HeaderSyncGapProvider;
 
 mod full;
 pub use full::*;
+
+mod log_index;
+pub use log_index::*;

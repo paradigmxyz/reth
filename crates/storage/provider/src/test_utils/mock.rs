@@ -1,9 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, StateProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
-    TransactionsProvider,
+    ChainSpecProvider, ChangeSetReader, HeaderProvider, LogIndexProvider, ReceiptProviderIdExt,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{
     constants::EMPTY_ROOT_HASH,
@@ -25,11 +25,13 @@ use reth_db_api::{
 };
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
+use reth_log_index_common::{BlockBoundary, FilterMapMeta, MapValueRows};
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
     SignerRecoverable,
 };
 use reth_prune_types::PruneModes;
+
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
@@ -1002,6 +1004,45 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<
         _block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
         Ok(None)
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync> LogIndexProvider for MockEthProvider<T, ChainSpec> {
+    fn get_metadata(&self) -> ProviderResult<Option<FilterMapMeta>> {
+        Ok(None)
+    }
+
+    fn get_base_layer_rows_for_value(
+        &self,
+        _map_start: u32,
+        _map_end: u32,
+        _value: &B256,
+    ) -> ProviderResult<Vec<Vec<u32>>> {
+        Ok(Vec::new())
+    }
+
+    fn get_log_value_indices_range(
+        &self,
+        _block_range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockBoundary>> {
+        Ok(Vec::new())
+    }
+
+    fn get_rows_until_short_row(
+        &self,
+        _map_start: u32,
+        _map_end: u32,
+        _values: &[B256],
+    ) -> ProviderResult<Vec<MapValueRows>> {
+        Ok(Vec::new())
+    }
+
+    fn fetch_more_layers_for_map(
+        &self,
+        _map_index: u32,
+        _value: &B256,
+    ) -> ProviderResult<Vec<Vec<u32>>> {
+        Ok(Vec::new())
     }
 }
 

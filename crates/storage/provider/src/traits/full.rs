@@ -2,8 +2,8 @@
 
 use crate::{
     AccountReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, StageCheckpointReader, StateProviderFactory,
-    StateReader, StaticFileProviderFactory,
+    DatabaseProviderFactory, HashedPostStateProvider, LogIndexProvider, StageCheckpointReader,
+    StateProviderFactory, StateReader, StaticFileProviderFactory,
 };
 use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
@@ -24,6 +24,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + StateProviderFactory
     + StateReader
     + HashedPostStateProvider
+    + LogIndexProvider
     + ChainSpecProvider<ChainSpec = N::ChainSpec>
     + ChangeSetReader
     + CanonStateSubscriptions
@@ -49,6 +50,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
+        + LogIndexProvider
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + ChangeSetReader
         + CanonStateSubscriptions

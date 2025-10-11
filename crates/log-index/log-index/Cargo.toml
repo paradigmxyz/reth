@@ -1,0 +1,53 @@
+[package]
+name = "reth-log-index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Log index implementation for efficient log indexing"
+
+[lints]
+workspace = true
+
+[dependencies]
+# alloy
+alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+
+# reth
+reth-primitives-traits.workspace = true
+reth-log-index-common.workspace = true
+reth-storage-errors.workspace = true
+reth-storage-api.workspace = true
+
+tracing.workspace = true
+
+# misc
+sha2.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+futures.workspace = true
+itertools.workspace = true
+
+# codecs
+
+[dev-dependencies]
+# For tests
+alloy-consensus.workspace = true
+rand.workspace = true
+futures.workspace = true
+
+# For integration tests
+reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
+tokio = { workspace = true, features = ["full"] }
+reth-storage-errors.workspace = true
+
+[features]
+default = []
+reth-codecs = []
+test-utils = [
+    "reth-ethereum-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-log-index-common/test-utils",
+]
