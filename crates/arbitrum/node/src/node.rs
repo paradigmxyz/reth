@@ -871,24 +871,6 @@ where
         let senders = outcome.block.senders().to_vec();
         let modified_block = reth_primitives_traits::block::RecoveredBlock::new_sealed(sealed_block.clone(), senders);
         
-        let exec_outcome = reth_execution_types::ExecutionOutcome::new(
-            db.take_bundle(),
-            vec![outcome.execution_result.receipts.clone()],
-            outcome.block.number(),
-            Vec::new(),
-        );
-        let hashed_sorted = outcome.hashed_state.clone().into_sorted();
-        {
-            let provider_rw = db_factory.provider_rw().map_err(|e| eyre::eyre!("provider_rw error: {e}"))?;
-            provider_rw
-                .append_blocks_with_state(
-                    vec![modified_block],
-                    &exec_outcome,
-                    hashed_sorted,
-                )
-                .map_err(|e| eyre::eyre!("append_blocks_with_state error: {e}"))?;
-            provider_rw.commit().map_err(|e| eyre::eyre!("provider commit error: {e}"))?;
-        }
         let header_hash_hex = format!("{:#x}", new_block_hash);
         let header_mix_hex = format!("{:#x}", header.mix_hash);
         let header_extra_hex = format!("{:#x}", alloy_primitives::B256::from_slice(&header.extra_data));
