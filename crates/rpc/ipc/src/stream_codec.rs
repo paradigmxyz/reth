@@ -24,7 +24,7 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-// This basis of this file has been taken from the deprecated jsonrpc codebase:
+// This file is based on the deprecated jsonrpc codebase:
 // https://github.com/paritytech/jsonrpc
 
 use bytes::BytesMut;
