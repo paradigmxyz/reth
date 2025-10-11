@@ -38,21 +38,7 @@ pub struct DatabaseArgs {
     #[arg(long = "db.max-readers")]
     pub max_readers: Option<u64>,
     /// Controls how aggressively the database synchronizes data to disk.
-    ///
-    /// This option determines the trade-off between **data durability** and **write performance**
-    /// for MDBX. The selected sync mode affects how transaction commits are handled at the OS level:
-    ///
-    /// - `durable` — Flushes all data to disk on every commit, guaranteeing maximum crash safety.
-    ///   This is the safest option but can result in slower write performance.
-    ///
-    /// - `safe-no-sync` — Skips certain `fsync` calls to improve performance while still preserving
-    ///   database integrity. However, the most recent transactions may be lost if the system crashes
-    ///   before the data is fully written to disk.
-    ///
-    /// Use `durable` for production environments where reliability is critical.  
-    /// Use `safe-no-sync` for development, testing, or scenarios where performance is more important
-    /// than full durability guarantees.
-    #[arg(long = "db.sync-mode", value_parser = parse_sync_mode)]
+    #[arg(long = "db.sync-mode", value_parser = SyncModeValueParser::default())]
     pub sync_mode: SyncMode,
 }
 
@@ -195,15 +181,61 @@ fn parse_byte_size(s: &str) -> Result<usize, String> {
     s.parse::<ByteSize>().map(Into::into)
 }
 
-/// String parser function for the sync-mode arg that reads the string and returns the selected SyncMode.
-fn parse_sync_mode(s: &str) -> Result<SyncMode, String> {
-    let value = s.trim().to_ascii_lowercase();
-    match value.as_str() {
-        "durable" => Ok(SyncMode::Durable),
-        "safe-no-sync" | "safenosync" | "safe_no_sync" => Ok(SyncMode::SafeNoSync),
-        invalid => {
-            Err(format!("Invalid sync mode '{invalid}'. Possible values: durable, safe-no-sync",))
-        }
+/// clap value parser for [`SyncMode`].
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+struct SyncModeValueParser;
+
+impl TypedValueParser for SyncModeValueParser {
+    type Value = SyncMode;
+
+    fn parse_ref(
+        &self,
+        _cmd: &Command,
+        arg: Option<&Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, Error> {
+        let raw =
+            value.to_str().ok_or_else(|| Error::raw(ErrorKind::InvalidUtf8, "Invalid UTF-8"))?;
+        let val = raw.trim().to_ascii_lowercase();
+
+        let parsed = match val.as_str() {
+            "durable" => SyncMode::Durable,
+            "safe-no-sync" | "safenosync" | "safe_no_sync" => SyncMode::SafeNoSync,
+            _ => {
+                let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+                let possible_values = [
+                    PossibleValue::new("durable")
+                        .help("Flushes data to disk on commit; highest durability (slower writes)"),
+                    PossibleValue::new("safe-no-sync").help(
+                        "Skips some fsyncs; faster writes with risk of losing latest txns on crash",
+                    ),
+                ];
+                let rendered = possible_values
+                    .iter()
+                    .map(|v| {
+                        let help = v.get_help().map(|s| s.to_string()).unwrap_or_default();
+                        format!("- {}: {}", v.get_name(), help)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                let msg =
+                    format!("Invalid value '{raw}' for {arg}.\n    Possible values:\n{rendered}");
+                return Err(Error::raw(clap::error::ErrorKind::InvalidValue, msg));
+            }
+        };
+        Ok(parsed)
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        let values = vec![
+            PossibleValue::new("durable")
+                .help("Flushes data to disk on commit; highest durability (slower writes)"),
+            PossibleValue::new("safe-no-sync")
+                .help("Skips some fsyncs; faster writes with risk of losing latest txns on crash"),
+        ];
+        Some(Box::new(values.into_iter()))
     }
 }
 
