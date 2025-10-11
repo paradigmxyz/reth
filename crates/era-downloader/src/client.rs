@@ -128,8 +128,6 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                     let Some(number) = self.file_name_to_number(name) &&
                     (number < index || number >= last)
                 {
-                    eprintln!("Deleting file {}", entry.path().display());
-                    eprintln!("{number} < {index} || {number} >= {last}");
                     reth_fs_util::remove_file(entry.path())?;
                 }
             }
