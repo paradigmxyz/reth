@@ -21,6 +21,9 @@ use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
+/// BLOCKHASH ancestor lookup window limit per EVM (number of most recent blocks accessible).
+const BLOCKHASH_ANCESTOR_LIMIT: usize = 256;
+
 /// Errors that can occur during stateless validation.
 #[derive(Debug, thiserror::Error)]
 pub enum StatelessValidationError {
@@ -174,6 +177,15 @@ where
     // Sort the headers by their block number to ensure that they are in
     // ascending order.
     ancestor_headers.sort_by_key(|header| header.number());
+
+    // Enforce BLOCKHASH ancestor headers limit (256 most recent blocks)
+    let count = ancestor_headers.len();
+    if count > BLOCKHASH_ANCESTOR_LIMIT {
+        return Err(StatelessValidationError::AncestorHeaderLimitExceeded {
+            count,
+            limit: BLOCKHASH_ANCESTOR_LIMIT,
+        });
+    }
 
     // Check that the ancestor headers form a contiguous chain and are not just random headers.
     let ancestor_hashes = compute_ancestor_hashes(&current_block, &ancestor_headers)?;
