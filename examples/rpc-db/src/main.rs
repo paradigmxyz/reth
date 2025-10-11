@@ -23,7 +23,10 @@ use reth_ethereum::{
     node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthereumNode},
     pool::noop::NoopTransactionPool,
     provider::{
-        db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv},
+        db::{
+            mdbx::{DatabaseArguments, SyncMode},
+            open_db_read_only, ClientVersion, DatabaseEnv,
+        },
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
     },
@@ -46,7 +49,7 @@ async fn main() -> eyre::Result<()> {
     let db_path = Path::new(&db_path);
     let db = Arc::new(open_db_read_only(
         db_path.join("db").as_path(),
-        DatabaseArguments::new(ClientVersion::default()),
+        DatabaseArguments::new(ClientVersion::default(), SyncMode::SafeNoSync),
     )?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
     let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::new(

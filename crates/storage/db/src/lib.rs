@@ -47,7 +47,7 @@ pub mod test_utils {
         database::Database, database_metrics::DatabaseMetrics, models::ClientVersion,
     };
     use reth_fs_util;
-    use reth_libmdbx::MaxReadTransactionDuration;
+    use reth_libmdbx::{MaxReadTransactionDuration, SyncMode};
     use std::{
         fmt::Formatter,
         path::{Path, PathBuf},
@@ -173,7 +173,7 @@ pub mod test_utils {
 
         let db = init_db(
             &path,
-            DatabaseArguments::new(ClientVersion::default())
+            DatabaseArguments::new(ClientVersion::default(), SyncMode::SafeNoSync)
                 .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )
         .expect(&emsg);
@@ -187,7 +187,7 @@ pub mod test_utils {
         let path = path.as_ref().to_path_buf();
         let db = init_db(
             path.as_path(),
-            DatabaseArguments::new(ClientVersion::default())
+            DatabaseArguments::new(ClientVersion::default(), SyncMode::SafeNoSync)
                 .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )
         .expect(ERROR_DB_CREATION);
@@ -197,7 +197,7 @@ pub mod test_utils {
     /// Create read only database for testing
     #[track_caller]
     pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let args = DatabaseArguments::new(ClientVersion::default())
+        let args = DatabaseArguments::new(ClientVersion::default(), SyncMode::SafeNoSync)
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
 
         let path = tempdir_path();
@@ -221,7 +221,7 @@ mod tests {
     use reth_db_api::{
         cursor::DbCursorRO, database::Database, models::ClientVersion, transaction::DbTx,
     };
-    use reth_libmdbx::MaxReadTransactionDuration;
+    use reth_libmdbx::{MaxReadTransactionDuration, SyncMode};
     use std::time::Duration;
     use tempfile::tempdir;
 
@@ -229,7 +229,7 @@ mod tests {
     fn db_version() {
         let path = tempdir().unwrap();
 
-        let args = DatabaseArguments::new(ClientVersion::default())
+        let args = DatabaseArguments::new(ClientVersion::default(), SyncMode::SafeNoSync)
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
 
         // Database is empty
@@ -274,7 +274,11 @@ mod tests {
 
         // Empty client version is not recorded
         {
-            let db = init_db(&path, DatabaseArguments::new(ClientVersion::default())).unwrap();
+            let db = init_db(
+                &path,
+                DatabaseArguments::new(ClientVersion::default(), SyncMode::SafeNoSync),
+            )
+            .unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_matches!(cursor.first(), Ok(None));
@@ -283,7 +287,9 @@ mod tests {
         // Client version is recorded
         let first_version = ClientVersion { version: String::from("v1"), ..Default::default() };
         {
-            let db = init_db(&path, DatabaseArguments::new(first_version.clone())).unwrap();
+            let db =
+                init_db(&path, DatabaseArguments::new(first_version.clone(), SyncMode::SafeNoSync))
+                    .unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(
@@ -299,7 +305,9 @@ mod tests {
 
         // Same client version is not duplicated.
         {
-            let db = init_db(&path, DatabaseArguments::new(first_version.clone())).unwrap();
+            let db =
+                init_db(&path, DatabaseArguments::new(first_version.clone(), SyncMode::SafeNoSync))
+                    .unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(
@@ -317,7 +325,11 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
         let second_version = ClientVersion { version: String::from("v2"), ..Default::default() };
         {
-            let db = init_db(&path, DatabaseArguments::new(second_version.clone())).unwrap();
+            let db = init_db(
+                &path,
+                DatabaseArguments::new(second_version.clone(), SyncMode::SafeNoSync),
+            )
+            .unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(
@@ -335,7 +347,11 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
         let third_version = ClientVersion { version: String::from("v3"), ..Default::default() };
         {
-            let db = open_db(path.path(), DatabaseArguments::new(third_version.clone())).unwrap();
+            let db = open_db(
+                path.path(),
+                DatabaseArguments::new(third_version.clone(), SyncMode::SafeNoSync),
+            )
+            .unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(

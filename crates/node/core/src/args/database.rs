@@ -8,7 +8,10 @@ use clap::{
     error::ErrorKind,
     Arg, Args, Command, Error,
 };
-use reth_db::{mdbx::MaxReadTransactionDuration, ClientVersion};
+use reth_db::{
+    mdbx::{MaxReadTransactionDuration, SyncMode},
+    ClientVersion,
+};
 use reth_storage_errors::db::LogLevel;
 
 /// Parameters for database configuration
@@ -34,6 +37,23 @@ pub struct DatabaseArgs {
     /// Maximum number of readers allowed to access the database concurrently.
     #[arg(long = "db.max-readers")]
     pub max_readers: Option<u64>,
+    /// Controls how aggressively the database synchronizes data to disk.
+    ///
+    /// This option determines the trade-off between **data durability** and **write performance**
+    /// for MDBX. The selected sync mode affects how transaction commits are handled at the OS level:
+    ///
+    /// - `durable` — Flushes all data to disk on every commit, guaranteeing maximum crash safety.
+    ///   This is the safest option but can result in slower write performance.
+    ///
+    /// - `safe-no-sync` — Skips certain `fsync` calls to improve performance while still preserving
+    ///   database integrity. However, the most recent transactions may be lost if the system crashes
+    ///   before the data is fully written to disk.
+    ///
+    /// Use `durable` for production environments where reliability is critical.  
+    /// Use `safe-no-sync` for development, testing, or scenarios where performance is more important
+    /// than full durability guarantees.
+    #[arg(long = "db.sync-mode", value_parser = parse_sync_mode)]
+    pub sync_mode: SyncMode,
 }
 
 impl DatabaseArgs {
@@ -54,7 +74,7 @@ impl DatabaseArgs {
             Some(secs) => Some(MaxReadTransactionDuration::Set(Duration::from_secs(secs))),
         };
 
-        reth_db::mdbx::DatabaseArguments::new(client_version)
+        reth_db::mdbx::DatabaseArguments::new(client_version, self.sync_mode)
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
             .with_max_read_transaction_duration(max_read_transaction_duration)
@@ -173,6 +193,18 @@ impl fmt::Display for ByteSize {
 /// Value parser function that supports various formats.
 fn parse_byte_size(s: &str) -> Result<usize, String> {
     s.parse::<ByteSize>().map(Into::into)
+}
+
+/// String parser function for the sync-mode arg that reads the string and returns the selected SyncMode.
+fn parse_sync_mode(s: &str) -> Result<SyncMode, String> {
+    let value = s.trim().to_ascii_lowercase();
+    match value.as_str() {
+        "durable" => Ok(SyncMode::Durable),
+        "safe-no-sync" | "safenosync" | "safe_no_sync" => Ok(SyncMode::SafeNoSync),
+        invalid => {
+            Err(format!("Invalid sync mode '{invalid}'. Possible values: durable, safe-no-sync",))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -339,5 +371,31 @@ mod tests {
     fn test_command_parser_without_log_level() {
         let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth"]).unwrap();
         assert_eq!(cmd.args.log_level, None);
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_sync_mode_durable() {
+        let cmd =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "durable"])
+                .unwrap();
+        assert!(matches!(cmd.args.sync_mode, SyncMode::Durable));
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_sync_mode_safe_no_sync() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.sync-mode",
+            "safe-no-sync",
+        ])
+        .unwrap();
+        assert!(matches!(cmd.args.sync_mode, SyncMode::SafeNoSync));
+    }
+
+    #[test]
+    fn test_command_parser_with_invalid_sync_mode() {
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "ultra-fast"]);
+        assert!(result.is_err());
     }
 }
