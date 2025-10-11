@@ -108,10 +108,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         deposit_contract: Some(MAINNET_DEPOSIT_CONTRACT),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
-        blob_params: BlobScheduleBlobParams::default().with_scheduled([
-            (mainnet::MAINNET_BPO1_TIMESTAMP, BlobParams::bpo1()),
-            (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
-        ]),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -140,10 +137,7 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: BlobScheduleBlobParams::default().with_scheduled([
-            (sepolia::SEPOLIA_BPO1_TIMESTAMP, BlobParams::bpo1()),
-            (sepolia::SEPOLIA_BPO2_TIMESTAMP, BlobParams::bpo2()),
-        ]),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -170,10 +164,7 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: BlobScheduleBlobParams::default().with_scheduled([
-            (holesky::HOLESKY_BPO1_TIMESTAMP, BlobParams::bpo1()),
-            (holesky::HOLESKY_BPO2_TIMESTAMP, BlobParams::bpo2()),
-        ]),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -202,10 +193,7 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: BlobScheduleBlobParams::default().with_scheduled([
-            (hoodi::HOODI_BPO1_TIMESTAMP, BlobParams::bpo1()),
-            (hoodi::HOODI_BPO2_TIMESTAMP, BlobParams::bpo2()),
-        ]),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()

@@ -55,6 +55,11 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
         self.chain().is_optimism()
     }
 
+    /// Returns `true` if this chain contains Arbitrum configuration.
+    fn is_arbitrum(&self) -> bool {
+        self.chain().is_arbitrum()
+    }
+
     /// Returns `true` if this chain contains Ethereum configuration.
     fn is_ethereum(&self) -> bool {
         self.chain().is_ethereum()

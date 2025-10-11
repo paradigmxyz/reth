@@ -1,0 +1,59 @@
+[package]
+name = "reth-arbitrum-rpc"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[features]
+default = ["std"]
+std = []
+client = []
+
+[dependencies]
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+jsonrpsee-core = { workspace = true }
+jsonrpsee-types = { workspace = true }
+alloy-primitives = { workspace = true }
+once_cell = "1.19"
+alloy-eips = { workspace = true }
+alloy-rpc-types-engine = { workspace = true }
+alloy-rpc-types-eth = { workspace = true }
+alloy-consensus = { workspace = true }
+alloy-serde = { workspace = true }
+arb-alloy-network = "0.1.2"
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde_json = { version = "1", default-features = false }
+thiserror = "1"
+revm = { workspace = true }
+
+reth-rpc-engine-api = { path = "../../rpc/rpc-engine-api", default-features = false }
+reth-rpc-api = { path = "../../rpc/rpc-api", default-features = false }
+reth-rpc-eth-api = { path = "../../rpc/rpc-eth-api", default-features = false }
+reth-rpc-eth-types = { path = "../../rpc/rpc-eth-types", default-features = false }
+reth-rpc = { path = "../../rpc/rpc", default-features = false }
+reth-rpc-server-types = { path = "../../rpc/rpc-server-types", default-features = false }
+reth-rpc-convert = { path = "../../rpc/rpc-convert", default-features = false, features = ["arb"] }
+
+reth-node-api = { path = "../../node/api", default-features = false }
+reth-node-builder = { path = "../../node/builder", default-features = false }
+
+reth-storage-api = { path = "../../storage/storage-api", default-features = false }
+reth-transaction-pool = { path = "../../transaction-pool", default-features = false }
+reth-chainspec = { path = "../../chainspec", default-features = false }
+reth-engine-primitives = { path = "../../engine/primitives", default-features = false }
+reth-tasks = { path = "../../tasks", default-features = false }
+reth-evm = { path = "../../evm/evm", default-features = false }
+
+revm-context = { workspace = true }
+reth-arbitrum-payload = { path = "../payload", default-features = false }
+reth-arbitrum-primitives = { path = "../primitives", default-features = false }
+reth-primitives-traits = { path = "../../primitives-traits", default-features = false }
+reth-arbitrum-evm = { path = "../evm", default-features = false, features = ["rpc"] }
+
+tracing = { workspace = true }
+async-trait = "0.1"
+eyre = { workspace = true }
+tokio = { workspace = true }
+[dev-dependencies]
+arb-alloy-consensus = "0.1.2"

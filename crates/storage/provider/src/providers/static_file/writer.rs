@@ -334,6 +334,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {
         let segment = self.writer.user_header().segment();
+        
+        tracing::info!(
+            target: "reth::static_file",
+            "increment_block called: segment={:?}, expected_block={}, current_next={}",
+            segment,
+            expected_block_number,
+            self.next_block_number()
+        );
 
         self.check_next_block_number(expected_block_number)?;
 
@@ -360,6 +368,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         self.writer.user_header_mut().increment_block();
+        
+        tracing::info!(
+            target: "reth::static_file",
+            "increment_block completed: segment={:?}, block_range={:?}",
+            segment,
+            self.writer.user_header().block_range()
+        );
+        
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 segment,
@@ -389,6 +405,15 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let next_static_file_block = self.next_block_number();
 
         if expected_block_number != next_static_file_block {
+            tracing::error!(
+                target: "reth::static_file",
+                "check_next_block_number FAILED: segment={:?}, expected={}, actual_next={}, block_range={:?}, block_end={:?}",
+                self.writer.user_header().segment(),
+                expected_block_number,
+                next_static_file_block,
+                self.writer.user_header().block_range(),
+                self.writer.user_header().block_end()
+            );
             return Err(ProviderError::UnexpectedStaticFileBlockNumber(
                 self.writer.user_header().segment(),
                 expected_block_number,

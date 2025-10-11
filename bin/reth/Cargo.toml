@@ -111,6 +111,8 @@ tracy-allocator = [
 # Because jemalloc is default and preferred over snmalloc when both features are
 # enabled, `--no-default-features` should be used when enabling snmalloc or
 # snmalloc-native.
+arbitrum = []
+
 snmalloc = [
     "reth-cli-util/snmalloc",
     "reth-ethereum-cli/snmalloc",
