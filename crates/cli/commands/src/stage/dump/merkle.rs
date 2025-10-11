@@ -6,7 +6,14 @@ use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::DatabaseEnv;
-use reth_db_api::{database::Database, table::TableImporter, tables};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRW},
+    database::Database,
+    models::BlockNumberAddress,
+    table::TableImporter,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_db_common::DbTool;
 use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
@@ -135,9 +142,18 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 
     let unwind_inner_tx = provider.into_tx();
 
-    // TODO optimize we can actually just get the entries we need
-    output_db
-        .update(|tx| tx.import_dupsort::<tables::StorageChangeSets, _>(&unwind_inner_tx))??;
+    // Import only the StorageChangeSets entries within the block range (from, to)
+    output_db.update(|tx| {
+        let mut source_cursor = unwind_inner_tx.cursor_dup_read::<tables::StorageChangeSets>()?;
+        let mut target_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
+
+        let range = BlockNumberAddress::range(from..=to);
+        for row in source_cursor.walk_range(range)? {
+            let (key, value) = row?;
+            target_cursor.append_dup(key, value)?;
+        }
+        Ok::<(), reth_db::DatabaseError>(())
+    })??;
 
     output_db.update(|tx| tx.import_table::<tables::HashedAccounts, _>(&unwind_inner_tx))??;
     output_db.update(|tx| tx.import_dupsort::<tables::HashedStorages, _>(&unwind_inner_tx))??;
