@@ -28,6 +28,7 @@ use alloy_primitives::{
     map::{hash_map, B256Map, HashMap, HashSet},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
+use alloy_rpc_types_debug::{StorageMap, StorageRangeResult, StorageResult};
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
@@ -1627,6 +1628,38 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
             )?;
 
         Ok(storage_changeset_lists)
+    }
+
+    fn storage_range_at(
+        &self,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> ProviderResult<StorageRangeResult> {
+        let mut storage_cursor = self.tx_ref().cursor_dup_read::<tables::PlainStorageState>()?;
+
+        let mut results = Vec::new();
+        let mut next_key = None;
+
+        if let Some(first_entry) = storage_cursor.seek_by_key_subkey(contract_address, key_start)? {
+            results.push((first_entry.key, first_entry.value));
+
+            for _ in 1..max_result {
+                if let Some((_, entry)) = storage_cursor.next_dup()? {
+                    results.push((entry.key, entry.value));
+                    next_key = Some(B256::from(entry.key));
+                } else {
+                    break;
+                }
+            }
+        }
+
+        let mut storage_map = BTreeMap::new();
+        for (key, value) in results {
+            storage_map.insert(key, StorageResult { key, value: B256::from(value.to_be_bytes()) });
+        }
+
+        Ok(StorageRangeResult { storage: StorageMap(storage_map), next_key })
     }
 }
 

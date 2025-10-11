@@ -6,17 +6,18 @@ use crate::{
     HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider,
+    StorageReader, StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
 use crate::{DBProvider, DatabaseProviderFactory};
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
+use alloy_rpc_types_debug::StorageRangeResult;
 use core::{
     fmt::Debug,
     marker::PhantomData,
@@ -28,7 +29,9 @@ use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{
+    Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader, StorageEntry,
+};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -240,6 +243,39 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
 
     fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         Ok(None)
+    }
+}
+
+impl StorageReader for NoopProvider {
+    fn plain_state_storages(
+        &self,
+        _addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
+    ) -> ProviderResult<Vec<(Address, Vec<StorageEntry>)>> {
+        Ok(Vec::new())
+    }
+
+    fn changed_storages_with_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<alloc::collections::BTreeMap<Address, alloc::collections::BTreeSet<B256>>>
+    {
+        Ok(BTreeMap::new())
+    }
+
+    fn changed_storages_and_blocks_with_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<alloc::collections::BTreeMap<(Address, B256), Vec<u64>>> {
+        Ok(BTreeMap::new())
+    }
+
+    fn storage_range_at(
+        &self,
+        _contract_address: Address,
+        _key_start: B256,
+        _max_result: u64,
+    ) -> ProviderResult<StorageRangeResult> {
+        Ok(Default::default())
     }
 }
 

@@ -38,6 +38,7 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
+alloy-rpc-types-debug.workspace = true
 revm-database.workspace = true
 revm-state = { workspace = true, optional = true }
 

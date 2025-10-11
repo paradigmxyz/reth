@@ -3,8 +3,8 @@ use crate::{
     providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider,
     ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
-    TransactionsProvider,
+    StageCheckpointReader, StateReader, StaticFileProviderFactory, StorageReader,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{
@@ -15,6 +15,7 @@ use alloy_primitives::{
     map::{hash_map, HashMap},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
+use alloy_rpc_types_debug::StorageRangeResult;
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
@@ -1245,6 +1246,38 @@ impl<N: ProviderNodeTypes> ChainSpecProvider for ConsistentProvider<N> {
 
     fn chain_spec(&self) -> Arc<N::ChainSpec> {
         ChainSpecProvider::chain_spec(&self.storage_provider)
+    }
+}
+
+impl<N: ProviderNodeTypes> StorageReader for ConsistentProvider<N> {
+    fn plain_state_storages(
+        &self,
+        addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
+    ) -> ProviderResult<Vec<(Address, Vec<reth_primitives_traits::StorageEntry>)>> {
+        self.storage_provider.plain_state_storages(addresses_with_keys)
+    }
+
+    fn changed_storages_with_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<Address, std::collections::BTreeSet<B256>>> {
+        self.storage_provider.changed_storages_with_range(range)
+    }
+
+    fn changed_storages_and_blocks_with_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<(Address, B256), Vec<u64>>> {
+        self.storage_provider.changed_storages_and_blocks_with_range(range)
+    }
+
+    fn storage_range_at(
+        &self,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> ProviderResult<StorageRangeResult> {
+        self.storage_provider.storage_range_at(contract_address, key_start, max_result)
     }
 }
 

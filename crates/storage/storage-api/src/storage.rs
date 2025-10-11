@@ -3,6 +3,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_rpc_types_debug::StorageRangeResult;
 use core::ops::RangeInclusive;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
@@ -30,6 +31,14 @@ pub trait StorageReader: Send + Sync {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<(Address, B256), Vec<u64>>>;
+
+    /// Get storage entries for a specific contract address and key range.
+    fn storage_range_at(
+        &self,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> ProviderResult<StorageRangeResult>;
 }
 
 /// Storage `ChangeSet` reader

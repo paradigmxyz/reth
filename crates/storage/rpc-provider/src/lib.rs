@@ -32,6 +32,7 @@ use alloy_primitives::{
 };
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
 use alloy_rpc_types::{AccountInfo, BlockId};
+use alloy_rpc_types_debug::StorageRangeResult;
 use alloy_rpc_types_engine::ForkchoiceState;
 use parking_lot::RwLock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
@@ -1247,6 +1248,15 @@ where
         _range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<(Address, StorageKey), Vec<u64>>, ProviderError> {
         Ok(BTreeMap::new())
+    }
+
+    fn storage_range_at(
+        &self,
+        _contract_address: Address,
+        _key_start: B256,
+        _max_result: u64,
+    ) -> ProviderResult<StorageRangeResult> {
+        Ok(Default::default())
     }
 }
 
