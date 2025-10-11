@@ -924,6 +924,16 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 }
 
+impl<N: NetworkPrimitives> Drop for QueuedOutgoingMessages<N> {
+    fn drop(&mut self) {
+        // Ensure gauge is decremented for any remaining items to avoid metric leak on teardown.
+        let remaining = self.messages.len();
+        if remaining > 0 {
+            self.count.decrement(remaining as f64);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
