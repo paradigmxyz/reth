@@ -147,3 +147,7 @@ The `NippyJar` and `Compact` encoding formats and their implementations are desi
 
 [book]: https://reth.rs/
 [tg-url]: https://t.me/paradigm_reth
+
+
+
+> Note: For more details, see the official Reth documentation at https://paradigmxyz.github.io/reth/
