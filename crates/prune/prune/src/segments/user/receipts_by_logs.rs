@@ -178,15 +178,13 @@ where
             let last_pruned_transaction = *last_pruned_transaction
                 .insert(last_pruned_transaction.unwrap_or_default().max(last_skipped_transaction));
 
-            last_pruned_block = Some(
-                provider
-                    .transaction_block(last_pruned_transaction)?
-                    .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
-                    // If there's more receipts to prune, set the checkpoint block number to
-                    // previous, so we could finish pruning its receipts on the
-                    // next run.
-                    .saturating_sub(if done { 0 } else { 1 }),
-            );
+            last_pruned_block = provider
+                .transaction_block(last_pruned_transaction)?
+                .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
+                // If there's more receipts to prune, set the checkpoint block number to
+                // previous, so we could finish pruning its receipts on the
+                // next run.
+                .checked_sub(if done { 0 } else { 1 });
 
             if limiter.is_limit_reached() {
                 done &= end_block == to_block;
@@ -213,7 +211,7 @@ where
         provider.save_prune_checkpoint(
             PruneSegment::ContractLogs,
             PruneCheckpoint {
-                block_number: Some(prune_mode_block.min(last_pruned_block.unwrap_or(u64::MAX))),
+                block_number: last_pruned_block.map(|b| prune_mode_block.min(b)),
                 tx_number: last_pruned_transaction,
                 prune_mode: PruneMode::Before(prune_mode_block),
             },
