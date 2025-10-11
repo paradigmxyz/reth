@@ -582,7 +582,7 @@ where
         // ensure recorder runs upkeep periodically
         install_prometheus_recorder().spawn_upkeep();
 
-        let listen_addr = self.node_config().metrics;
+        let listen_addr = self.node_config().metrics.prometheus;
         if let Some(addr) = listen_addr {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", addr);
             let config = MetricServerConfig::new(

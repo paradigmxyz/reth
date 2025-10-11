@@ -10,6 +10,12 @@ Reth exposes a number of metrics which can be enabled by adding the `--metrics` 
 reth node --metrics 127.0.0.1:9001
 ```
 
+Alternatively, you can export metrics to an OpenTelemetry collector using `--otlp-metrics`:
+
+```bash
+reth node --otlp-metrics 127.0.0.1:4318
+```
+
 Now, as the node is running, you can `curl` the endpoint you provided to the `--metrics` flag to get a text dump of the metrics at that time:
 
 ```bash

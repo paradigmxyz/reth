@@ -39,7 +39,7 @@ Options:
           Print help (see a summary with '-h')
 
 Metrics:
-      --metrics <SOCKET>
+      --metrics <PROMETHEUS>
           Enable Prometheus metrics.
 
           The metrics will be served at the given interface and port.
@@ -987,4 +987,12 @@ Display:
 
   -q, --quiet
           Silence all log output
+
+Tracing:
+      --tracing-otlp[=<URL>]
+          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+
+          If no value provided, defaults to `http://localhost:4318/v1/traces`.
+
+          Example: --tracing-otlp=http://collector:4318/v1/traces
 ```

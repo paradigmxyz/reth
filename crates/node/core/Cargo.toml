@@ -77,6 +77,8 @@ tokio.workspace = true
 # Features for vergen to generate correct env vars
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
+# Feature to enable opentelemetry export
+otlp = ["reth-tracing/otlp"]
 
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }
