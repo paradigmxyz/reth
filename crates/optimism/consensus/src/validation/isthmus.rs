@@ -146,7 +146,7 @@ mod test {
     };
     use reth_revm::db::BundleState;
     use reth_storage_api::StateProviderFactory;
-    use reth_trie::{test_utils::storage_root_prehashed, HashedStorage};
+    use reth_trie::{test_utils::storage_root_unhashed, HashedStorage};
     use reth_trie_common::HashedPostState;
 
     #[test]
@@ -169,7 +169,7 @@ mod test {
 
         // init test db
         // note: must be empty (default) chain spec to ensure storage is empty after init genesis,
-        // otherwise can't use `storage_root_prehashed` to determine storage root later
+        // otherwise can't use `storage_root_unhashed` to determine storage root later
         let provider_factory = create_test_provider_factory_with_node_types::<OpNode>(Arc::new(
             OpChainSpecBuilder::default().chain(Chain::dev()).genesis(Default::default()).build(),
         ));
@@ -182,7 +182,7 @@ mod test {
 
         // create block header with withdrawals root set to storage root of l2tol1-msg-passer
         let header = Header {
-            withdrawals_root: Some(storage_root_prehashed(init_storage.storage)),
+            withdrawals_root: Some(storage_root_unhashed(init_storage.storage)),
             ..Default::default()
         };
 
