@@ -55,6 +55,7 @@ pub mod blockhash;
 pub mod features;
 pub mod programs;
 pub mod arbosstate;
+mod internal_tx;
 
 
 pub struct ArbEvmConfig<ChainSpec = (), N = (), R = ArbRethReceiptBuilder>

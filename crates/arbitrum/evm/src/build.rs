@@ -109,6 +109,7 @@ where
     type Evm = E;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        self.tx_state.brotli_compression_level = 0;
         self.inner.apply_pre_execution_changes()
     }
 
@@ -172,47 +173,30 @@ where
             executed_on_chain: true,
             is_eth_call: false,
         };
-        {
-            let mut state = core::mem::take(&mut self.tx_state);
-            {
-                let evm = self.inner.evm_mut();
-                self.hooks.start_tx::<E>(evm, &mut state, &start_ctx);
-            }
-            self.tx_state = state;
-        }
-
-        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable) {
-            use alloy_consensus::Transaction as _;
-            use alloy_consensus::transaction::TxHashRef;
-            let tx_hash = *tx.tx().tx_hash();
-            let block_env = alloy_evm::Evm::block(self.evm());
-            let block_timestamp = u64::try_from(block_env.timestamp).unwrap_or(0);
-            
+        
+        let start_hook_result = {
             let mut state = core::mem::take(&mut self.tx_state);
             let result = {
-                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-                let db: &mut revm::database::State<D> = *db_ref;
-                DefaultArbOsHooks::execute_submit_retryable(
-                    db,
-                    &mut state,
-                    tx.tx(),
-                    tx_hash,
-                    block_basefee,
-                    block_timestamp,
-                )
+                let evm = self.inner.evm_mut();
+                self.hooks.start_tx::<E>(evm, &mut state, &start_ctx)
             };
             self.tx_state = state;
-            
-            if result.is_err() {
-                return Err(BlockExecutionError::msg("SubmitRetryable execution failed"));
-            }
-            
-            return Ok(Some(0));
-        }
+            result
+        };
 
+        let tx_type = tx.tx().tx_type();
+        use reth_arbitrum_primitives::ArbTxType;
+
+        let tx_bytes = {
+            use alloy_eips::eip2718::Encodable2718;
+            let mut buf = Vec::new();
+            tx.tx().encode_2718(&mut buf);
+            buf
+        };
+        
         let gas_ctx = ArbGasChargingContext {
             intrinsic_gas: 21_000,
-            calldata: calldata.to_vec(),
+            calldata: tx_bytes,
             basefee: block_basefee,
             is_executed_on_chain: true,
             skip_l1_charging: false,
@@ -390,19 +374,15 @@ where
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
         }
 
-        let result = {
-            let evm = self.inner.evm_mut();
-            let prev_disable = evm.cfg_mut().disable_balance_check;
-            evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
+        let evm = self.inner.evm_mut();
+        let prev_disable = evm.cfg_mut().disable_balance_check;
+        evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
 
-            let wrapped = WithTxEnv { tx_env, tx };
-            let res = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+        let wrapped = WithTxEnv { tx_env, tx };
+        let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
 
-            let evm = self.inner.evm_mut();
-            evm.cfg_mut().disable_balance_check = prev_disable;
-
-            res
-        };
+        let evm = self.inner.evm_mut();
+        evm.cfg_mut().disable_balance_check = prev_disable;
 
         if used_pre_nonce.is_some() {
             if let Ok(Some(_)) = result {

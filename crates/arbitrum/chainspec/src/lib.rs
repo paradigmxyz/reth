@@ -784,7 +784,7 @@ pub fn sepolia_baked_genesis_from_header(
     header.base_fee_per_gas = Some(base_fee.to::<u64>());
 
     use reth_primitives_traits::SealedHeader;
-    let sealed = SealedHeader::new_unhashed(header);
+    let sealed = SealedHeader::seal_slow(header);
     spec.genesis_header = sealed;
     spec.genesis = genesis;
 

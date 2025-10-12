@@ -30,8 +30,24 @@ pub struct ArbEndTxContext {
     pub basefee: U256,
 }
 
+pub struct StartTxHookResult {
+    pub end_tx_now: bool,
+    pub gas_used: u64,
+    pub error: Option<String>,
+}
+
+impl Default for StartTxHookResult {
+    fn default() -> Self {
+        Self {
+            end_tx_now: false,
+            gas_used: 0,
+            error: None,
+        }
+    }
+}
+
 pub trait ArbOsHooks {
-    fn start_tx<E>(&self, evm: &mut E, state: &mut ArbTxProcessorState, ctx: &ArbStartTxContext);
+    fn start_tx<E>(&self, evm: &mut E, state: &mut ArbTxProcessorState, ctx: &ArbStartTxContext) -> StartTxHookResult;
     fn gas_charging<E>(
         &self,
         evm: &mut E,
@@ -47,6 +63,23 @@ pub trait ArbOsHooks {
 pub struct DefaultArbOsHooks;
 
 impl DefaultArbOsHooks {
+    fn compress_tx_data(data: &[u8], level: u32) -> Result<Vec<u8>, std::io::Error> {
+        let mut compressed = Vec::new();
+        let params = brotli::enc::BrotliEncoderParams {
+            quality: level as i32,
+            lgwin: 22,
+            ..Default::default()
+        };
+        let mut compressor = brotli::CompressorWriter::with_params(
+            &mut compressed,
+            4096,
+            &params
+        );
+        std::io::Write::write_all(&mut compressor, data)?;
+        drop(compressor);
+        Ok(compressed)
+    }
+
     fn get_poster_gas(basefee: U256, poster_cost: U256) -> u64 {
         if basefee.is_zero() {
             return 0;
@@ -67,7 +100,7 @@ impl DefaultArbOsHooks {
         let _ = state.increment_balances(core::iter::once((address, amount_u128)));
     }
 
-    fn transfer_balance<D>(
+    pub fn transfer_balance<D>(
         state: &mut revm::database::State<D>,
         from: Address,
         to: Address,
@@ -144,11 +177,15 @@ impl DefaultArbOsHooks {
 
         let after_mint_account = match state_db.basic(from) {
             Ok(info) => info,
-            Err(_) => return Err(()),
+            Err(_) => {
+                tracing::error!("execute_submit_retryable: failed to get account info for {:?}", from);
+                return Err(());
+            }
         };
         let balance_after_mint = after_mint_account.map(|i| U256::from(i.balance)).unwrap_or_default();
 
         if balance_after_mint < max_submission_fee {
+            tracing::error!("execute_submit_retryable: insufficient balance balance={} max_submission_fee={}", balance_after_mint, max_submission_fee);
             return Err(());
         }
 
@@ -158,10 +195,14 @@ impl DefaultArbOsHooks {
         ));
 
         if max_submission_fee < submission_fee {
+            tracing::error!("execute_submit_retryable: max_submission_fee too low max={} required={}", max_submission_fee, submission_fee);
             return Err(());
         }
 
-        Self::transfer_balance(state_db, from, network_fee_account, submission_fee)?;
+        if let Err(_) = Self::transfer_balance(state_db, from, network_fee_account, submission_fee) {
+            tracing::error!("execute_submit_retryable: failed to transfer submission_fee from={:?} to={:?} amount={}", from, network_fee_account, submission_fee);
+            return Err(());
+        }
         let withheld_submission_fee = Self::take_funds(&mut available_refund, submission_fee);
 
         let submission_fee_refund = Self::take_funds(
@@ -171,6 +212,7 @@ impl DefaultArbOsHooks {
         let _ = Self::transfer_balance(state_db, from, fee_refund_addr, submission_fee_refund);
 
         if let Err(_) = Self::transfer_balance(state_db, from, escrow, retry_value) {
+            tracing::error!("execute_submit_retryable: failed to transfer retry_value from={:?} to={:?} amount={}", from, escrow, retry_value);
             let _ = Self::transfer_balance(state_db, network_fee_account, from, submission_fee);
             let _ = Self::transfer_balance(state_db, from, fee_refund_addr, withheld_submission_fee);
             return Err(());
@@ -201,8 +243,10 @@ impl DefaultArbOsHooks {
 }
 
 impl ArbOsHooks for DefaultArbOsHooks {
-    fn start_tx<E>(&self, _evm: &mut E, state: &mut ArbTxProcessorState, ctx: &ArbStartTxContext) {
+    fn start_tx<E>(&self, _evm: &mut E, state: &mut ArbTxProcessorState, ctx: &ArbStartTxContext) -> StartTxHookResult {
         state.delayed_inbox = ctx.coinbase != Address::ZERO;
+        
+        StartTxHookResult::default()
     }
 
     fn gas_charging<E>(
@@ -213,7 +257,14 @@ impl ArbOsHooks for DefaultArbOsHooks {
     ) -> (Address, Result<(), ()>) {
         let tip_recipient = Address::ZERO;
         if !ctx.skip_l1_charging && !ctx.basefee.is_zero() {
-            let units = L1PricingState::poster_units_from_brotli_len(ctx.calldata.len() as u64);
+            let brotli_level = state.brotli_compression_level;
+            let compressed_len = if let Ok(compressed) = Self::compress_tx_data(&ctx.calldata, brotli_level) {
+                compressed.len() as u64
+            } else {
+                ctx.calldata.len() as u64
+            };
+            
+            let units = L1PricingState::poster_units_from_brotli_len(compressed_len);
             let padded_units = L1PricingState::apply_estimation_padding(units);
             let l1_base_fee_wei: u128 = ctx.basefee.try_into().unwrap_or_default();
             let pricing = L1PricingState { l1_base_fee_wei };
@@ -248,6 +299,7 @@ pub struct ArbTxProcessorState {
     pub delayed_inbox: bool,
     pub retryables: Option<*mut revm::database::State<()>>,
     pub network_fee_account: Address,
+    pub brotli_compression_level: u32,
 }
 
 impl Default for ArbTxProcessorState {
@@ -261,6 +313,7 @@ impl Default for ArbTxProcessorState {
             delayed_inbox: false,
             retryables: None,
             network_fee_account,
+            brotli_compression_level: 0,
         }
     }
 }

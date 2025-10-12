@@ -235,6 +235,15 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     pub fn commit(&mut self) -> ProviderResult<()> {
         let start = Instant::now();
 
+        tracing::info!(
+            target: "reth::static_file",
+            segment = ?self.writer.user_header().segment(),
+            block_range = ?self.writer.user_header().block_range(),
+            tx_range = ?self.writer.user_header().tx_range(),
+            is_dirty = %self.writer.is_dirty(),
+            "commit called"
+        );
+
         // Truncates the data file if instructed to.
         if let Some((to_delete, last_block_number)) = self.prune_on_commit.take() {
             match self.writer.user_header().segment() {
@@ -601,6 +610,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
+        
+        tracing::info!(
+            target: "reth::static_file",
+            tx_num = %tx_num,
+            tx_range = ?self.writer.user_header().tx_range(),
+            "append_transaction called"
+        );
+        
         self.append_with_tx_number(tx_num, tx)?;
 
         if let Some(metrics) = &self.metrics {
@@ -628,6 +645,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
+        
+        tracing::info!(
+            target: "reth::static_file",
+            tx_num = %tx_num,
+            tx_range = ?self.writer.user_header().tx_range(),
+            "append_receipt called"
+        );
+        
         self.append_with_tx_number(tx_num, receipt)?;
 
         if let Some(metrics) = &self.metrics {
