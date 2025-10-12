@@ -232,6 +232,22 @@ where
             result
         };
 
+        if start_hook_result.end_tx_now {
+            tracing::debug!(
+                target: "arb-reth::executor",
+                tx_type = ?tx.tx().tx_type(),
+                gas_used = start_hook_result.gas_used,
+                error = ?start_hook_result.error,
+                "Transaction ended early by start_tx hook"
+            );
+            
+            if let Some(err_msg) = start_hook_result.error {
+                return Err(BlockExecutionError::msg(err_msg));
+            }
+            
+            return Ok(Some(start_hook_result.gas_used));
+        }
+
         let tx_type = tx.tx().tx_type();
         use reth_arbitrum_primitives::ArbTxType;
 
