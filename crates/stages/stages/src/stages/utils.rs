@@ -108,18 +108,21 @@ where
 /// ## Process
 ///
 /// 1. **Iteration**: Processes all entries from the collector in order
-/// 2. **Partial Key Grouping**: Groups indices by their partial keys (e.g., `Address` or `Address.StorageKey`)
-/// 3. **Shard Management**: Flushes indices to disk when reaching shard limits or when partial key changes
+/// 2. **Partial Key Grouping**: Groups indices by their partial keys (e.g., `Address` or
+///    `Address.StorageKey`)
+/// 3. **Shard Management**: Flushes indices to disk when reaching shard limits or when partial key
+///    changes
 /// 4. **Existing Shard Merging**: For non-append-only mode, merges with existing database shards
 /// 5. **Final Flush**: Ensures the last shard is properly stored
 ///
 /// ## Key Logic
 ///
-/// - **Shard Boundaries**: Automatically flushes when `NUM_OF_INDICES_IN_SHARD` is reached or
-///   when the partial key changes
+/// - **Shard Boundaries**: Automatically flushes when `NUM_OF_INDICES_IN_SHARD` is reached or when
+///   the partial key changes
 /// - **Merge Strategy**: In non-append-only mode, loads existing shards from the database and
 ///   merges them with new data before writing
-/// - **Memory Efficiency**: Processes data incrementally to avoid loading entire datasets into memory
+/// - **Memory Efficiency**: Processes data incrementally to avoid loading entire datasets into
+///   memory
 /// - **Progress Tracking**: Provides progress updates for long-running operations
 ///
 /// ## Parameters
@@ -236,18 +239,19 @@ where
 ///
 /// ## Process
 ///
-/// 1. **Sharding Decision**: Only processes the list if it exceeds `NUM_OF_INDICES_IN_SHARD`
-///    or if the mode requires flushing all data
+/// 1. **Sharding Decision**: Only processes the list if it exceeds `NUM_OF_INDICES_IN_SHARD` or if
+///    the mode requires flushing all data
 /// 2. **Chunking**: Splits the list into chunks of maximum size `NUM_OF_INDICES_IN_SHARD`
 /// 3. **Key Generation**: Creates sharded keys using the highest block number in each chunk
-/// 4. **Storage Strategy**: Uses either append-only or upsert operations based on the `append_only` flag
+/// 4. **Storage Strategy**: Uses either append-only or upsert operations based on the `append_only`
+///    flag
 /// 5. **Last Chunk Handling**: Keeps the last chunk in memory if not flushing, otherwise stores it
 ///
 /// ## Key Logic
 ///
 /// - **Shard Key Strategy**: Uses the highest block number in each chunk as the shard key
-/// - **Last Shard Special Case**: The final shard uses `u64::MAX` as its key to ensure it's
-///   always the last shard for a given partial key
+/// - **Last Shard Special Case**: The final shard uses `u64::MAX` as its key to ensure it's always
+///   the last shard for a given partial key
 /// - **Memory Management**: When not flushing, the last chunk is kept in the input `list` for
 ///   potential future merging with additional data
 ///
@@ -349,8 +353,8 @@ impl LoadMode {
 /// 1. **Find Highest Static Block**: Gets the highest block number available in static files
 /// 2. **Validate Transaction Alignment**: Ensures the last transaction number in the static files
 ///    doesn't exceed the expected `last_tx_num`
-/// 3. **Backtrack if Necessary**: If there's a mismatch, walks backwards through blocks to find
-///    the last valid block where transaction indices are consistent
+/// 3. **Backtrack if Necessary**: If there's a mismatch, walks backwards through blocks to find the
+///    last valid block where transaction indices are consistent
 /// 4. **Identify Missing Block**: The missing block is the next block after the last valid one
 /// 5. **Create Error**: Returns a `MissingStaticFileData` error with the missing block information
 ///
@@ -361,8 +365,8 @@ impl LoadMode {
 /// - **Backtracking Strategy**: If inconsistencies are found, it walks backwards block by block
 ///   until it finds a block where `indices.last_tx_num() <= last_tx_num`
 /// - **Boundary Handling**: Stops at block 0 to prevent infinite loops
-/// - **Error Construction**: Creates a comprehensive error that includes both the missing block
-///   and the affected segment for proper error reporting
+/// - **Error Construction**: Creates a comprehensive error that includes both the missing block and
+///   the affected segment for proper error reporting
 ///
 /// ## Parameters
 ///
