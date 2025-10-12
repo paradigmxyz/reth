@@ -212,14 +212,32 @@ where
             let db: &mut revm::database::State<D> = *db_ref;
             let mut state = core::mem::take(&mut self.tx_state);
             
-            if let Err(e) = apply_internal_tx_update(db, &mut state, tx.tx()) {
-                return Err(BlockExecutionError::msg(format!("Internal tx failed: {}", e)));
-            }
+            let success = match apply_internal_tx_update(db, &mut state, tx.tx()) {
+                Ok(_) => true,
+                Err(e) => {
+                    tracing::error!("Internal tx failed: {}", e);
+                    false
+                }
+            };
             
             self.tx_state = state;
             
+            let fake_result = revm::context::result::ExecutionResult::Success {
+                reason: revm::context::result::SuccessReason::Stop,
+                gas_used: 0,
+                gas_refunded: 0,
+                logs: crate::log_sink::take(),
+                output: revm::context::result::Output::Call(alloy_primitives::Bytes::default()),
+            };
+            let fake_state = revm::context::result::ResultAndState {
+                result: fake_result,
+                state: Default::default(),
+            };
+            
+            let _ = self.inner.commit_transaction(fake_state, tx)?;
+            
             let end_ctx = ArbEndTxContext {
-                success: true,
+                success,
                 gas_left: 0,
                 gas_limit: 0,
                 basefee: block_basefee,
@@ -238,16 +256,33 @@ where
 
         if matches!(tx_type, ArbTxType::Deposit) {
             let deposit_value = tx.tx().value();
-            if !deposit_value.is_zero() {
+            let success = if !deposit_value.is_zero() {
                 let to_addr = tx.tx().to().ok_or_else(|| BlockExecutionError::msg("Deposit has no To address"))?;
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
                 let db: &mut revm::database::State<D> = *db_ref;
                 DefaultArbOsHooks::mint_balance(db, sender, deposit_value);
                 let _ = DefaultArbOsHooks::transfer_balance(db, sender, to_addr, deposit_value);
-            }
+                true
+            } else {
+                true
+            };
+            
+            let fake_result = revm::context::result::ExecutionResult::Success {
+                reason: revm::context::result::SuccessReason::Stop,
+                gas_used: 0,
+                gas_refunded: 0,
+                logs: crate::log_sink::take(),
+                output: revm::context::result::Output::Call(alloy_primitives::Bytes::default()),
+            };
+            let fake_state = revm::context::result::ResultAndState {
+                result: fake_result,
+                state: Default::default(),
+            };
+            
+            let _ = self.inner.commit_transaction(fake_state, tx)?;
             
             let end_ctx = ArbEndTxContext {
-                success: true,
+                success,
                 gas_left: 0,
                 gas_limit: 0,
                 basefee: block_basefee,
@@ -286,13 +321,30 @@ where
             };
             self.tx_state = state;
             
-            if let Err(e) = result {
-                tracing::error!("SubmitRetryable execution failed: {:?}", e);
-                return Err(BlockExecutionError::msg("SubmitRetryable execution failed"));
-            }
+            let success = match result {
+                Ok(_) => true,
+                Err(e) => {
+                    tracing::error!("SubmitRetryable execution failed: {:?}", e);
+                    false
+                }
+            };
+            
+            let fake_result = revm::context::result::ExecutionResult::Success {
+                reason: revm::context::result::SuccessReason::Stop,
+                gas_used: gas_limit,
+                gas_refunded: 0,
+                logs: crate::log_sink::take(),
+                output: revm::context::result::Output::Call(alloy_primitives::Bytes::default()),
+            };
+            let fake_state = revm::context::result::ResultAndState {
+                result: fake_result,
+                state: Default::default(),
+            };
+            
+            let _ = self.inner.commit_transaction(fake_state, tx)?;
             
             let end_ctx = ArbEndTxContext {
-                success: true,
+                success,
                 gas_left: 0,
                 gas_limit,
                 basefee: block_basefee,
