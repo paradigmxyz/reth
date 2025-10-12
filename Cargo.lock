@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.21.2"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#359e1d35d2f99a4913b539dac26f9e11cad0cce1"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#03d821bbfc2bab55669156e971754780fe2ecd4b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -385,7 +385,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.21.2"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#359e1d35d2f99a4913b539dac26f9e11cad0cce1"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#03d821bbfc2bab55669156e971754780fe2ecd4b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6158,7 +6158,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "auto_impl",
  "revm",
@@ -10856,7 +10856,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "29.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10874,7 +10874,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "6.2.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "bitvec",
  "phf 0.13.1",
@@ -10885,7 +10885,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "9.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10902,7 +10902,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "10.1.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10917,7 +10917,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10930,7 +10930,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "auto_impl",
  "either",
@@ -10942,7 +10942,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10960,7 +10960,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "auto_impl",
  "either",
@@ -10997,7 +10997,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "25.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11009,7 +11009,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "27.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11033,7 +11033,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "20.2.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -11044,7 +11044,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#c44477cacbf6a5b166b7ac441d3e9ead216cf223"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c0155a9962309ee522639e135395e123f12a4426"
 dependencies = [
  "bitflags 2.9.4",
  "revm-bytecode",
