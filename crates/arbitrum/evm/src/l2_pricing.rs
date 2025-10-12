@@ -173,4 +173,17 @@ impl<D: Database> L2PricingState<D> {
         let gas_pool = self.get_gas_pool()?;
         Ok(gas_pool >= U256::from(gas_limit))
     }
+
+    pub fn add_to_gas_pool(&self, amount: i64) -> Result<(), ()> {
+        let current_pool = self.get_gas_pool()?;
+        
+        let new_pool = if amount >= 0 {
+            current_pool.saturating_add(U256::from(amount as u64))
+        } else {
+            let to_subtract = U256::from(amount.unsigned_abs());
+            current_pool.saturating_sub(to_subtract)
+        };
+        
+        self.set_gas_pool(new_pool)
+    }
 }

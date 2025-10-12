@@ -156,4 +156,12 @@ impl<D: Database> ArbosState<D> {
     pub fn set_brotli_compression_level(&self, level: u64) -> Result<(), ()> {
         self.brotli_compression_level.set(level)
     }
+
+    pub fn get_infra_fee_account(&self) -> Result<Address, ()> {
+        self.infra_fee_account.get()
+    }
+
+    pub fn set_infra_fee_account(&self, account: Address) -> Result<(), ()> {
+        self.infra_fee_account.set(account)
+    }
 }
