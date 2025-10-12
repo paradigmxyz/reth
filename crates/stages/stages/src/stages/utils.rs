@@ -382,10 +382,10 @@ impl LoadMode {
 ///
 /// ## Example
 ///
-/// If the database has transactions up to tx_num 1000, but static files only contain data
-/// up to block 50 with tx_num 800, this function will:
+/// If the database has transactions up to `tx_num` 1000, but static files only contain data
+/// up to block 50 with `tx_num` 800, this function will:
 /// 1. Find block 50 as the highest static file block
-/// 2. Verify that block 50's last tx_num (800) <= 1000 ✓
+/// 2. Verify that block 50's last `tx_num` (800) <= 1000 ✓
 /// 3. Identify block 51 as the first missing block
 /// 4. Return an error indicating block 51 is missing from static files
 pub(crate) fn missing_static_data_error<Provider>(
