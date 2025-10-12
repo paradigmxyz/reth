@@ -109,6 +109,7 @@ where
     type Evm = E;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        self.tx_state.brotli_compression_level = 0;
         self.inner.apply_pre_execution_changes()
     }
 
@@ -172,16 +173,98 @@ where
             executed_on_chain: true,
             is_eth_call: false,
         };
-        {
+        
+        let start_hook_result = {
             let mut state = core::mem::take(&mut self.tx_state);
-            {
+            let result = {
                 let evm = self.inner.evm_mut();
-                self.hooks.start_tx::<E>(evm, &mut state, &start_ctx);
-            }
+                self.hooks.start_tx::<E>(evm, &mut state, &start_ctx)
+            };
             self.tx_state = state;
+            result
+        };
+
+        let tx_type = tx.tx().tx_type();
+        use reth_arbitrum_primitives::ArbTxType;
+        
+        tracing::info!(
+            "Transaction type detection: tx_type={:?}",
+            tx_type
+        );
+        
+        let should_execute_in_evm = match tx_type {
+            ArbTxType::Internal => false,
+            ArbTxType::Deposit => false,
+            ArbTxType::SubmitRetryable => false,
+            _ => true,
+        };
+
+        tracing::info!(
+            "Transaction execution routing: should_execute_in_evm={}, tx_type={:?}",
+            should_execute_in_evm,
+            tx_type
+        );
+
+        if matches!(tx_type, ArbTxType::Internal) {
+            tracing::info!("Routing transaction to Internal handler");
+            use crate::internal_tx::apply_internal_tx_update;
+            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+            let db: &mut revm::database::State<D> = *db_ref;
+            let mut state = core::mem::take(&mut self.tx_state);
+            
+            if let Err(e) = apply_internal_tx_update(db, &mut state, tx.tx()) {
+                return Err(BlockExecutionError::msg(format!("Internal tx failed: {}", e)));
+            }
+            
+            self.tx_state = state;
+            
+            let end_ctx = ArbEndTxContext {
+                success: true,
+                gas_left: 0,
+                gas_limit: 0,
+                basefee: block_basefee,
+            };
+            {
+                let mut state = core::mem::take(&mut self.tx_state);
+                {
+                    let evm = self.inner.evm_mut();
+                    self.hooks.end_tx::<E>(evm, &mut state, &end_ctx);
+                }
+                self.tx_state = state;
+            }
+            
+            return Ok(Some(0));
         }
 
-        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable) {
+        if matches!(tx_type, ArbTxType::Deposit) {
+            let deposit_value = tx.tx().value();
+            if !deposit_value.is_zero() {
+                let to_addr = tx.tx().to().ok_or_else(|| BlockExecutionError::msg("Deposit has no To address"))?;
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let db: &mut revm::database::State<D> = *db_ref;
+                DefaultArbOsHooks::mint_balance(db, sender, deposit_value);
+                let _ = DefaultArbOsHooks::transfer_balance(db, sender, to_addr, deposit_value);
+            }
+            
+            let end_ctx = ArbEndTxContext {
+                success: true,
+                gas_left: 0,
+                gas_limit: 0,
+                basefee: block_basefee,
+            };
+            {
+                let mut state = core::mem::take(&mut self.tx_state);
+                {
+                    let evm = self.inner.evm_mut();
+                    self.hooks.end_tx::<E>(evm, &mut state, &end_ctx);
+                }
+                self.tx_state = state;
+            }
+            
+            return Ok(Some(0));
+        }
+
+        if matches!(tx_type, ArbTxType::SubmitRetryable) {
             use alloy_consensus::Transaction as _;
             use alloy_consensus::transaction::TxHashRef;
             let tx_hash = *tx.tx().tx_hash();
@@ -203,16 +286,39 @@ where
             };
             self.tx_state = state;
             
-            if result.is_err() {
+            if let Err(e) = result {
+                tracing::error!("SubmitRetryable execution failed: {:?}", e);
                 return Err(BlockExecutionError::msg("SubmitRetryable execution failed"));
             }
             
-            return Ok(Some(0));
+            let end_ctx = ArbEndTxContext {
+                success: true,
+                gas_left: 0,
+                gas_limit,
+                basefee: block_basefee,
+            };
+            {
+                let mut state = core::mem::take(&mut self.tx_state);
+                {
+                    let evm = self.inner.evm_mut();
+                    self.hooks.end_tx::<E>(evm, &mut state, &end_ctx);
+                }
+                self.tx_state = state;
+            }
+            
+            return Ok(Some(gas_limit));
         }
 
+        let tx_bytes = {
+            use alloy_eips::eip2718::Encodable2718;
+            let mut buf = Vec::new();
+            tx.tx().encode_2718(&mut buf);
+            buf
+        };
+        
         let gas_ctx = ArbGasChargingContext {
             intrinsic_gas: 21_000,
-            calldata: calldata.to_vec(),
+            calldata: tx_bytes,
             basefee: block_basefee,
             is_executed_on_chain: true,
             skip_l1_charging: false,
@@ -390,21 +496,15 @@ where
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
         }
 
-        let result = if is_internal {
-            Ok(Some(0))
-        } else {
-            let evm = self.inner.evm_mut();
-            let prev_disable = evm.cfg_mut().disable_balance_check;
-            evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
+        let evm = self.inner.evm_mut();
+        let prev_disable = evm.cfg_mut().disable_balance_check;
+        evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
 
-            let wrapped = WithTxEnv { tx_env, tx };
-            let res = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+        let wrapped = WithTxEnv { tx_env, tx };
+        let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
 
-            let evm = self.inner.evm_mut();
-            evm.cfg_mut().disable_balance_check = prev_disable;
-
-            res
-        };
+        let evm = self.inner.evm_mut();
+        evm.cfg_mut().disable_balance_check = prev_disable;
 
         if used_pre_nonce.is_some() {
             if let Ok(Some(_)) = result {

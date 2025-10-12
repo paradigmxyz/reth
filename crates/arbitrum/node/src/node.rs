@@ -560,14 +560,42 @@ where
             l2_block_number: u64,
             time_passed: u64,
         ) -> alloy_primitives::Bytes {
-            const SIG: &str = "startBlock(uint256,uint64,uint64,uint64)";
-            let selector = alloy_primitives::keccak256(SIG.as_bytes());
+            const SELECTOR: [u8; 4] = [0xef, 0x5c, 0xc5, 0x56];
+            
+            reth_tracing::tracing::info!(
+                target: "arb-reth::follower",
+                "encode_start_block_data: Using correct startBlock selector={:02x?}",
+                SELECTOR
+            );
+            
             let mut out = Vec::with_capacity(4 + 32 * 4);
-            out.extend_from_slice(&selector.0[..4]);
-            out.extend_from_slice(&abi_encode_u256(&l1_base_fee));
-            out.extend_from_slice(&abi_encode_u64(l1_block_number));
-            out.extend_from_slice(&abi_encode_u64(l2_block_number));
-            out.extend_from_slice(&abi_encode_u64(time_passed));
+            out.extend_from_slice(&SELECTOR);
+            
+            let encoded_l1_base_fee = abi_encode_u256(&l1_base_fee);
+            let encoded_l1_block_number = abi_encode_u64(l1_block_number);
+            let encoded_l2_block_number = abi_encode_u64(l2_block_number);
+            let encoded_time_passed = abi_encode_u64(time_passed);
+            
+            reth_tracing::tracing::info!(
+                target: "arb-reth::follower",
+                "Encoding params: l1_base_fee={:02x?}, l1_block_number={:02x?}, l2_block_number={:02x?}, time_passed={:02x?}",
+                &encoded_l1_base_fee[..8],
+                &encoded_l1_block_number[..8],
+                &encoded_l2_block_number[..8],
+                &encoded_time_passed[..8]
+            );
+            
+            out.extend_from_slice(&encoded_l1_base_fee);
+            out.extend_from_slice(&encoded_l1_block_number);
+            out.extend_from_slice(&encoded_l2_block_number);
+            out.extend_from_slice(&encoded_time_passed);
+            
+            reth_tracing::tracing::info!(
+                target: "arb-reth::follower",
+                "Final encoded data first 8 bytes: {:02x?}",
+                &out[..std::cmp::min(8, out.len())]
+            );
+            
             alloy_primitives::Bytes::from(out)
         }
 
@@ -578,10 +606,9 @@ where
             batch_data_gas: u64,
             l1_base_fee: alloy_primitives::U256,
         ) -> alloy_primitives::Bytes {
-            const SIG: &str = "batchPostingReport(uint256,address,uint64,uint64,uint256)";
-            let selector = alloy_primitives::keccak256(SIG.as_bytes());
+            const SELECTOR: [u8; 4] = [0x0a, 0xdc, 0x77, 0x7d];
             let mut out = Vec::with_capacity(4 + 32 * 5);
-            out.extend_from_slice(&selector.0[..4]);
+            out.extend_from_slice(&SELECTOR);
             out.extend_from_slice(&abi_encode_u256(&batch_timestamp));
             out.extend_from_slice(&abi_encode_address(batch_poster));
             out.extend_from_slice(&abi_encode_u64(batch_num));
@@ -592,6 +619,14 @@ where
         reth_tracing::tracing::info!(target: "arb-reth::follower", %kind, "follower: deriving txs for message kind");
         let chain_id_u256 =
             alloy_primitives::U256::from(evm_config.chain_spec().chain().id());
+        
+        reth_tracing::tracing::info!(
+            target: "arb-reth::follower",
+            "Before match: l2_owned len={}, l2_owned first bytes={:02x?}",
+            l2_owned.len(),
+            &l2_owned[..std::cmp::min(32, l2_owned.len())]
+        );
+        
         let mut txs: Vec<reth_arbitrum_primitives::ArbTransactionSigned> = match kind {
             3 => {
                 let first = l2_owned.first().copied().unwrap_or(0xff);
@@ -724,17 +759,43 @@ where
                         gas,
                         to: retry_to_opt,
                         value: callvalue,
-                        data: alloy_primitives::Bytes::from(retry_data),
+                        data: alloy_primitives::Bytes::from(retry_data.clone()),
                         ticket_id,
                         refund_to: fee_refund_addr,
                         max_refund,
                         submission_fee_refund: max_submission_fee,
                     },
                 );
+                
+                reth_tracing::tracing::info!(
+                    target: "arb-reth::follower",
+                    "Creating Retry transaction: retry_data_len={}, retry_data_prefix={:02x?}",
+                    retry_data.len(),
+                    &retry_data[..std::cmp::min(4, retry_data.len())]
+                );
+                
                 let mut retry_enc = retry_env.encode_typed();
+                
+                reth_tracing::tracing::info!(
+                    target: "arb-reth::follower",
+                    "Retry envelope encoded: type_byte={:02x}, total_len={}, first_4_bytes={:02x?}",
+                    retry_enc[0],
+                    retry_enc.len(),
+                    &retry_enc[..std::cmp::min(5, retry_enc.len())]
+                );
+                
                 let mut rs = retry_enc.as_slice();
                 let retry_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut rs)
                     .map_err(|_| eyre::eyre!("decode retry failed"))?;
+                
+                use reth_primitives_traits::SignedTransaction;
+                reth_tracing::tracing::info!(
+                    target: "arb-reth::follower",
+                    "Decoded Retry transaction: tx_type={:?}, tx_hash={:?}",
+                    retry_tx.tx_type(),
+                    retry_tx.tx_hash()
+                );
+                
                 vec![submit_tx, retry_tx]
             }
             10 => return Err(eyre::eyre!("BatchForGasEstimation unimplemented")),
@@ -763,7 +824,43 @@ where
                     .map_err(|_| eyre::eyre!("decode deposit failed"))?]
             }
             13 => {
-                Vec::new()
+                let mut cur = &l2_owned[..];
+                let batch_timestamp = read_u256_be32(&mut cur)?;
+                let batch_poster = read_address20(&mut cur)?;
+                let _data_hash = read_u256_be32(&mut cur)?; // Skip data hash
+                let batch_num_u256 = read_u256_be32(&mut cur)?;
+                let batch_num = u256_to_u64_checked(&batch_num_u256, "batch_num")?;
+                let l1_base_fee_wei = read_u256_be32(&mut cur)?;
+                let extra_gas = if cur.len() >= 8 {
+                    read_u64_be(&mut cur)?
+                } else {
+                    0u64
+                };
+                
+                let batch_data_gas = if let Some(gas) = batch_gas_cost {
+                    gas.saturating_add(extra_gas)
+                } else {
+                    extra_gas
+                };
+                
+                let batch_report_data = encode_batch_posting_report_data(
+                    batch_timestamp,
+                    batch_poster,
+                    batch_num,
+                    batch_data_gas,
+                    l1_base_fee_wei,
+                );
+                
+                let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
+                    arb_alloy_consensus::tx::ArbInternalTx {
+                        chain_id: chain_id_u256,
+                        data: batch_report_data,
+                    }
+                );
+                let mut enc = env.encode_typed();
+                let mut s = enc.as_slice();
+                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    .map_err(|_| eyre::eyre!("decode Internal failed for BatchPostingReport"))?]
             }
             0xff => {
                 reth_tracing::tracing::info!(target: "arb-reth::follower", "follower: skipping invalid placeholder message kind=0xff");
@@ -771,6 +868,31 @@ where
             }
             _ => return Err(eyre::eyre!("unknown L2 message kind")),
         };
+        
+        reth_tracing::tracing::info!(
+            target: "arb-reth::follower",
+            "After match: txs.len()={}, tx_types={:?}",
+            txs.len(),
+            txs.iter().map(|tx| {
+                use reth_primitives_traits::SignedTransaction;
+                format!("{:?}", tx.tx_type())
+            }).collect::<Vec<_>>()
+        );
+        
+        for (i, tx) in txs.iter().enumerate() {
+            use reth_primitives_traits::SignedTransaction;
+            use alloy_consensus::Transaction;
+            let input = tx.input();
+            reth_tracing::tracing::info!(
+                target: "arb-reth::follower",
+                "TX[{}]: type={:?}, hash={:?}, input_len={}, input_prefix={:02x?}",
+                i,
+                tx.tx_type(),
+                tx.tx_hash(),
+                input.len(),
+                &input[..std::cmp::min(4, input.len())]
+            );
+        }
 
         {
             let is_first_startblock = txs.first().map(|tx| {
@@ -794,6 +916,18 @@ where
                     l2_block_number,
                     time_passed,
                 );
+                
+                reth_tracing::tracing::info!(
+                    target: "arb-reth::follower",
+                    "Creating StartBlock: l1_base_fee={}, l1_block_number={}, l2_block_number={}, time_passed={}, start_data_len={}, start_data_prefix={:02x?}",
+                    l1_base_fee,
+                    l1_block_number,
+                    l2_block_number,
+                    time_passed,
+                    start_data.len(),
+                    &start_data[..std::cmp::min(4, start_data.len())]
+                );
+                
                 let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
                     arb_alloy_consensus::tx::ArbInternalTx {
                         chain_id: chain_id_u256,
@@ -804,7 +938,26 @@ where
                 let mut s = enc.as_slice();
                 let start_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                     .map_err(|_| eyre::eyre!("decode Internal failed for StartBlock"))?;
+                
+                use reth_primitives_traits::SignedTransaction;
+                use alloy_consensus::Transaction;
+                reth_tracing::tracing::info!(
+                    target: "arb-reth::follower",
+                    "Created StartBlock tx: type={:?}, hash={:?}, input_len={}, input_prefix={:02x?}",
+                    start_tx.tx_type(),
+                    start_tx.tx_hash(),
+                    start_tx.input().len(),
+                    &start_tx.input()[..std::cmp::min(4, start_tx.input().len())]
+                );
+                
                 txs.insert(0, start_tx);
+                
+                reth_tracing::tracing::info!(
+                    target: "arb-reth::follower",
+                    "After StartBlock insertion: txs.len()={}, tx_types={:?}",
+                    txs.len(),
+                    txs.iter().map(|tx| format!("{:?}", tx.tx_type())).collect::<Vec<_>>()
+                );
             }
         }
 

@@ -7445,6 +7445,8 @@ dependencies = [
  "arb-alloy-consensus",
  "arb-alloy-predeploys 0.1.2",
  "arb-alloy-util",
+ "brotli",
+ "hex",
  "reth-arbitrum-chainspec",
  "reth-arbitrum-payload",
  "reth-arbitrum-primitives",

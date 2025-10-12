@@ -46,7 +46,11 @@ revm.workspace = true
 revm-state.workspace = true
 revm-database.workspace = true
 
+# Compression
+brotli.workspace = true
 
+# Encoding
+hex = "0.4"
 
 # arb-alloy
 arb-alloy-predeploys = { workspace = true, features = ["alloc"] }
