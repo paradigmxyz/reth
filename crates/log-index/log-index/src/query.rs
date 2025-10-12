@@ -1,15 +1,11 @@
-use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
+use std::collections::BTreeSet;
 
 use crate::utils::{address_value, topic_value};
 use alloy_primitives::{map::HashMap, BlockNumber, B256};
 use alloy_rpc_types_eth::Filter;
-use futures::stream::FuturesOrdered;
-use itertools::Itertools;
-use reth_log_index_common::{BlockBoundary, FilterError, FilterMapParams, MapValueRows};
+use reth_log_index_common::{BlockBoundary, FilterMapParams, MapValueRows};
 use reth_storage_api::LogIndexProvider;
 use reth_storage_errors::provider::ProviderResult;
-use tokio::task;
-use tracing::trace;
 
 const ADDRESS_OFFSET: u64 = 0;
 const TOPIC_OFFSET_BASE: u64 = 1;
@@ -241,88 +237,4 @@ where
     let results = resolve_to_blocks(matches, &log_value_indices, from_block, to_block);
 
     Ok(results)
-}
-
-/// Query logs in a block range in parallel.
-/// TODO: this can be massively cleaner
-pub async fn spawn_query_logs_tasks<P>(
-    provider: Arc<P>,
-    params: FilterMapParams,
-    filter: Filter,
-    from_block: u64,
-    to_block: u64,
-    concurrency: usize,
-) -> ProviderResult<
-    FuturesOrdered<Pin<Box<dyn Future<Output = Result<Vec<BlockNumber>, FilterError>> + Send>>>,
->
-where
-    P: LogIndexProvider + Send + Sync + 'static,
-{
-    let mut handles = FuturesOrdered::new();
-
-    let log_value_indices = fetch_block_boundaries(provider.as_ref(), from_block, to_block)?;
-
-    let (first_map, last_map) =
-        match calculate_map_range(&log_value_indices, params.log_values_per_map) {
-            Some(r) => r,
-            None => return Ok(handles),
-        };
-
-    let maps = (first_map..=last_map).collect::<Vec<_>>();
-
-    let chunk_size = std::cmp::max(maps.len() / concurrency, 1);
-
-    let chunks = maps
-        .into_iter()
-        .chunks(chunk_size)
-        .into_iter()
-        .map(|chunk| chunk.collect::<Vec<_>>())
-        .collect::<Vec<_>>();
-
-    let has_constraints = !filter.address.is_empty() || filter.topics.iter().any(|t| !t.is_empty());
-    if !has_constraints {
-        // TODO: error
-        // return Err(FilterError::NoConstraints);
-    }
-
-    let values = extract_all_filter_values(&filter);
-
-    for chunk in chunks {
-        let provider = Arc::clone(&provider);
-        let params = params.clone();
-        let filter = filter.clone();
-        let values = values.clone();
-        let log_value_indices = log_value_indices.clone();
-
-        let map_start = *chunk.first().unwrap();
-        let map_end = *chunk.last().unwrap();
-
-        let chunk_task = Box::pin(async move {
-            let chunk_task = task::spawn_blocking(move || -> Vec<BlockNumber> {
-                let rows = provider
-                    .get_rows_until_short_row(map_start, map_end, &values)
-                    .unwrap_or(Vec::new());
-                let mut rows_by_map = HashMap::default();
-                for row in rows {
-                    rows_by_map.insert((row.map_index, row.value), row);
-                }
-
-                let matches = query_maps_range(&params, map_start, map_end, &filter, &rows_by_map)
-                    .unwrap_or_default();
-                resolve_to_blocks(matches, &log_value_indices, from_block, to_block)
-            });
-
-            match chunk_task.await {
-                Ok(chunk_results) => Ok(chunk_results),
-                Err(join_err) => {
-                    trace!(target: "rpc::eth::filter", error = ?join_err, "Task join error");
-                    Err(FilterError::Task("Join error".to_string()))
-                }
-            }
-        });
-
-        handles.push_back(chunk_task);
-    }
-
-    Ok(handles)
 }

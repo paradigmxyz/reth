@@ -26,9 +26,6 @@ tracing.workspace = true
 
 # misc
 sha2.workspace = true
-tokio = { workspace = true, features = ["rt"] }
-futures.workspace = true
-itertools.workspace = true
 
 # codecs
 

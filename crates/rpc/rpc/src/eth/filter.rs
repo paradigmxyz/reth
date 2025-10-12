@@ -15,7 +15,7 @@ use futures::{
 use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
-use reth_log_index::query::spawn_query_logs_tasks;
+use reth_log_index::query::query_logs_in_block_range;
 use reth_log_index_common::FilterMapParams;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
@@ -679,32 +679,17 @@ where
         // TODO: figure out params passing
         let params = FilterMapParams::default();
 
-        let provider_arc: Arc<_> = Arc::new(self.provider().clone());
-        let mut tasks = match spawn_query_logs_tasks(
-            provider_arc,
-            params.clone(),
-            filter.clone(),
-            from_block,
-            to_block,
-            DEFAULT_PARALLEL_CONCURRENCY,
-        )
-        .await
-        {
-            Ok(v) => v,
-            Err(_) => return Ok(Vec::new()),
-        };
+        let results =
+            query_logs_in_block_range(self.provider(), &params, filter, from_block, to_block)?;
 
         let mut matching_headers = Vec::new();
 
-        while let Some(Ok(results)) = tasks.next().await {
-            for block_number in results {
-                let header = match self.provider().header_by_number(block_number)? {
-                    Some(h) => h,
-                    None => continue,
-                };
-                let block_hash = header.hash_slow();
-                matching_headers.push(SealedHeader::new(header, block_hash));
-            }
+        for block_number in results {
+            let sealed_header = match self.provider().sealed_header(block_number)? {
+                Some(h) => h,
+                None => continue,
+            };
+            matching_headers.push(sealed_header);
         }
         // initialize the appropriate range mode based on collected headers
         let mut range_mode = RangeMode::new(
