@@ -560,7 +560,7 @@ where
             l2_block_number: u64,
             time_passed: u64,
         ) -> alloy_primitives::Bytes {
-            const SELECTOR: [u8; 4] = [0xef, 0x5c, 0xc5, 0x56];
+            const SELECTOR: [u8; 4] = [0x6b, 0xf6, 0xa4, 0x2d]; // startBlock(uint256,uint64,uint64,uint64)
             
             reth_tracing::tracing::info!(
                 target: "arb-reth::follower",
