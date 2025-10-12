@@ -54,6 +54,7 @@ impl<D: Database> Storage<D> {
         let slot = self.compute_slot(offset);
         unsafe {
             let state = &mut *self.state;
+            ensure_arbos_account_loaded(state);
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
@@ -97,6 +98,7 @@ impl<D: Database> Storage<D> {
     pub fn get(&self, key: B256) -> Result<B256, ()> {
         unsafe {
             let state = &mut *self.state;
+            ensure_arbos_account_loaded(state);
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
@@ -164,6 +166,7 @@ impl<D: Database> StorageBackedUint64<D> {
     pub fn get(&self) -> Result<u64, ()> {
         unsafe {
             let state = &mut *self.storage;
+            ensure_arbos_account_loaded(state);
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
@@ -216,6 +219,7 @@ impl<D: Database> StorageBackedBigUint<D> {
     pub fn get(&self) -> Result<U256, ()> {
         unsafe {
             let state = &mut *self.storage;
+            ensure_arbos_account_loaded(state);
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
@@ -264,6 +268,7 @@ impl<D: Database> StorageBackedAddress<D> {
     pub fn get(&self) -> Result<Address, ()> {
         unsafe {
             let state = &mut *self.storage;
+            ensure_arbos_account_loaded(state);
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);

@@ -164,6 +164,34 @@ where
         };
         let upfront_gas_price = alloy_primitives::U256::from(tx.tx().max_fee_per_gas());
 
+        let tx_type_u8 = match tx.tx().tx_type() {
+            ArbTxType::Deposit => 0x64,
+            ArbTxType::Unsigned => 0x65,
+            ArbTxType::Contract => 0x66,
+            ArbTxType::Retry => 0x68,
+            ArbTxType::SubmitRetryable => 0x69,
+            ArbTxType::Internal => 0x6A,
+            ArbTxType::Legacy => 0x78,
+            ArbTxType::Eip2930 => 0x01,
+            ArbTxType::Eip1559 => 0x02,
+            ArbTxType::Eip4844 => 0x03,
+            ArbTxType::Eip7702 => 0x04,
+        };
+        
+        let to_addr_opt = match tx.tx().kind() {
+            alloy_primitives::TxKind::Call(a) => Some(a),
+            _ => None,
+        };
+        
+        let block_timestamp = alloy_evm::Evm::block(self.evm()).timestamp.try_into().unwrap_or(0);
+        
+        let tx_hash = {
+            use alloy_eips::eip2718::Encodable2718;
+            let mut buf = Vec::new();
+            tx.tx().encode_2718(&mut buf);
+            alloy_primitives::keccak256(&buf)
+        };
+        
         let start_ctx = ArbStartTxContext {
             sender,
             nonce,
@@ -172,13 +200,33 @@ where
             coinbase: block_coinbase,
             executed_on_chain: true,
             is_eth_call: false,
+            tx_type: tx_type_u8,
+            to: to_addr_opt,
+            value: tx.tx().value(),
+            gas_limit,
+            basefee: block_basefee,
+            ticket_id: None,
+            refund_to: None,
+            gas_fee_cap: None,
+            max_refund: None,
+            submission_fee_refund: None,
+            tx_hash,
+            deposit_value: None,
+            retry_value: None,
+            retry_to: None,
+            retry_data: None,
+            beneficiary: None,
+            max_submission_fee: None,
+            fee_refund_addr: None,
+            block_timestamp,
         };
         
         let start_hook_result = {
             let mut state = core::mem::take(&mut self.tx_state);
             let result = {
-                let evm = self.inner.evm_mut();
-                self.hooks.start_tx::<E>(evm, &mut state, &start_ctx)
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let state_db: &mut revm::database::State<D> = *db_ref;
+                self.hooks.start_tx(state_db, &mut state, &start_ctx)
             };
             self.tx_state = state;
             result
@@ -204,28 +252,32 @@ where
         {
             let mut state = core::mem::take(&mut self.tx_state);
             let res = {
-                let evm = self.inner.evm_mut();
-                self.hooks.gas_charging::<E>(evm, &mut state, &gas_ctx)
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let state_db: &mut revm::database::State<D> = *db_ref;
+                self.hooks.gas_charging(state_db, &mut state, &gas_ctx)
             };
             self.tx_state = state;
             let _ = res;
         }
 
+        let to_addr = match tx.tx().kind() {
+            alloy_primitives::TxKind::Call(a) => Some(a),
+            _ => None,
+        };
+
         if is_deposit {
             let deposit_value = tx.tx().value();
             if !deposit_value.is_zero() {
-                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-                let db: &mut revm::database::State<D> = *db_ref;
-                DefaultArbOsHooks::mint_balance(db, sender, deposit_value);
+                if let Some(to) = to_addr {
+                    let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                    let db: &mut revm::database::State<D> = *db_ref;
+                    let _ = DefaultArbOsHooks::execute_deposit(db, sender, to, deposit_value);
+                }
             }
         }
 
         let mut used_pre_nonce = None;
         let mut maybe_predeploy_result: Option<(revm::context::result::ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>, u64)> = None;
-        let to_addr = match tx.tx().kind() {
-            alloy_primitives::TxKind::Call(a) => Some(a),
-            _ => None,
-        };
         if let Some(call_to) = to_addr {
             let evm = self.inner.evm();
             let block = alloy_evm::Evm::block(evm);
@@ -275,52 +327,18 @@ where
         };
 
         if is_internal {
-            let input_bytes = calldata.as_ref();
-            if input_bytes.len() >= 4 {
-                const SIG: &str = "startBlock(uint256,uint64,uint64,uint64)";
-                let selector = alloy_primitives::keccak256(SIG.as_bytes());
-                if &input_bytes[0..4] == &selector.0[0..4] && input_bytes.len() >= 4 + 32 * 4 {
-                    let bn_slice = &input_bytes[4 + 32..4 + 64];
-                    let mut buf = [0u8; 8];
-                    buf.copy_from_slice(&bn_slice[24..32]);
-                    let l1_bn = u64::from_be_bytes(buf);
-
-                    let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-                    let state: &mut revm::database::State<D> = *db_ref;
-
-                    let (arbos_addr, l1_slot) = header::arbos_l1_block_number_slot();
-                    
-                    if !state.bundle_state.state.contains_key(&arbos_addr) {
-                        use revm_state::AccountInfo;
-                        let info = match state.basic(arbos_addr) {
-                            Ok(Some(account_info)) => Some(account_info),
-                            _ => Some(AccountInfo {
-                                balance: alloy_primitives::U256::ZERO,
-                                nonce: 0,
-                                code_hash: alloy_primitives::keccak256([]),
-                                code: None,
-                            }),
-                        };
-                        let acc = BundleAccount {
-                            info,
-                            storage: HashMap::default(),
-                            original_info: None,
-                            status: AccountStatus::Changed,
-                        };
-                        state.bundle_state.state.insert(arbos_addr, acc);
-                    }
-                    
-                    let l1_slot_u256 = alloy_primitives::U256::from_be_bytes(l1_slot.0);
-                    let present = alloy_primitives::U256::from(l1_bn);
-
-                    if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
-                        acc.storage.insert(
-                            l1_slot_u256,
-                            EvmStorageSlot { present_value: present, ..Default::default() }.into(),
-                        );
-                    }
-                }
+            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+            let state_db: &mut revm::database::State<D> = *db_ref;
+            
+            let mut tx_state = core::mem::take(&mut self.tx_state);
+            
+            if let Err(e) = crate::internal_tx::apply_internal_tx_update(state_db, &mut tx_state, tx.tx()) {
+                tracing::error!(target: "arb-reth::executor", error = %e, "Failed to apply internal tx update");
+            } else {
+                tracing::info!(target: "arb-reth::executor", "Successfully applied internal tx update");
             }
+            
+            self.tx_state = tx_state;
         }
 
         let mut tx_env = tx.to_tx_env();
@@ -398,17 +416,33 @@ where
             }
         }
 
+        let tx_type_u8 = match tx_type {
+            ArbTxType::Deposit => 0x64,
+            ArbTxType::Unsigned => 0x65,
+            ArbTxType::Contract => 0x66,
+            ArbTxType::Retry => 0x68,
+            ArbTxType::SubmitRetryable => 0x69,
+            ArbTxType::Internal => 0x6A,
+            ArbTxType::Legacy => 0x78,
+            ArbTxType::Eip2930 => 0x01,
+            ArbTxType::Eip1559 => 0x02,
+            ArbTxType::Eip4844 => 0x03,
+            ArbTxType::Eip7702 => 0x04,
+        };
+        
         let end_ctx = ArbEndTxContext {
             success: result.is_ok(),
             gas_left: 0,
             gas_limit,
             basefee: block_basefee,
+            tx_type: tx_type_u8,
         };
         {
             let mut state = core::mem::take(&mut self.tx_state);
             {
-                let evm = self.inner.evm_mut();
-                self.hooks.end_tx::<E>(evm, &mut state, &end_ctx);
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let state_db: &mut revm::database::State<D> = *db_ref;
+                self.hooks.end_tx(state_db, &mut state, &end_ctx);
             }
             self.tx_state = state;
         }
