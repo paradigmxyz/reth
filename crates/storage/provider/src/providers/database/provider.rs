@@ -45,7 +45,7 @@ use reth_db_api::{
     BlockNumberList, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_log_index_common::{BlockBoundary, FilterMapMeta, LogIndexParams, MapValueRows};
+use reth_log_index_common::{BlockBoundary, FilterMapMeta, LogIndexParams};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, GotExpected, RecoveredBlock, SealedHeader,
@@ -77,7 +77,7 @@ use std::{
     ops::{Deref, DerefMut, Not, Range, RangeBounds, RangeInclusive},
     sync::Arc,
 };
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
@@ -2886,122 +2886,87 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
             .map_err(ProviderError::Database)
     }
 
-    fn get_base_layer_rows_for_value(
+    fn get_rows_for_value_layer(
         &self,
-        map_start: u32,
-        map_end: u32,
         value: &B256,
-    ) -> ProviderResult<Vec<Vec<u32>>> {
+        map_indices: &[u32],
+        layer: u32,
+    ) -> ProviderResult<Vec<(u32, Vec<u32>)>> {
+        if map_indices.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        debug_assert!(map_indices.windows(2).all(|w| w[0] < w[1]));
+
         let params = LogIndexParams::default();
-
-        let total = (map_end - map_start + 1) as usize;
-        let mut results = vec![Vec::new(); total];
-
         let mut cursor = self
             .tx_ref()
             .cursor_read::<tables::FilterMapRows>()
             .map_err(ProviderError::Database)?;
 
-        // Epoch geometry
-        let epoch_size: u32 = 1u32 << params.log_maps_per_epoch;
-
-        // Walk the requested range by epoch-aligned segments.
-        let mut seg_start = map_start;
-        while seg_start <= map_end {
-            let epoch = params.map_epoch(seg_start);
-            let first_epoch = params.first_epoch_map(epoch);
-            let seg_end = std::cmp::min(map_end, first_epoch + epoch_size - 1);
-
-            // For the base layer, the row index is keyed to the *first map of this epoch*.
-            let row_index = params.row_index(seg_start, 0, value);
-
-            // Scan only the row for this (epoch, value) across the segment.
-            let start_key = params.map_row_index(seg_start, row_index);
-            let end_key = params.map_row_index(seg_end, row_index);
-
-            for entry in cursor.walk_range(start_key..=end_key).map_err(ProviderError::Database)? {
-                let (map_row_idx, columns) = entry.map_err(ProviderError::Database)?;
-
-                // Decode map index within this epoch, then rebase to absolute map index.
-                let in_epoch_mask = (1u64 << params.log_maps_per_epoch) - 1;
-                let map_in_epoch = (map_row_idx & in_epoch_mask) as u32;
-                let map_index = first_epoch + map_in_epoch;
-
-                // Sanity (should always hold if keys are well-formed)
-                if map_index < seg_start || map_index > seg_end {
-                    continue;
-                }
-
-                // Place into the result slot for this absolute map.
-                let pos = (map_index - map_start) as usize;
-                if pos < results.len() {
-                    results[pos] = columns.indices;
-                }
-            }
-
-            // Advance to next epoch slice
-            seg_start = seg_end.saturating_add(1);
+        let mut results: Vec<(u32, Vec<u32>)> =
+            map_indices.iter().map(|&idx| (idx, Vec::new())).collect();
+        let mut index_lookup = HashMap::with_capacity(map_indices.len());
+        for (pos, &idx) in map_indices.iter().enumerate() {
+            index_lookup.insert(idx, pos);
         }
 
-        Ok(results)
-    }
+        let layer_log =
+            core::cmp::min(layer.saturating_mul(params.log_layer_diff), params.log_maps_per_epoch);
+        let segment_span = 1u32 << (params.log_maps_per_epoch - layer_log);
 
-    fn fetch_more_layers_for_map(
-        &self,
-        map_index: u32,
-        value: &B256,
-    ) -> ProviderResult<Vec<Vec<u32>>> {
-        let params = LogIndexParams::default();
-        let mut layers = Vec::new();
+        let mut process_range = |range_start: u32, range_end: u32| -> ProviderResult<()> {
+            let mut seg_start = range_start;
+            while seg_start <= range_end {
+                let epoch = params.map_epoch(seg_start);
+                let epoch_first = params.first_epoch_map(epoch);
+                let epoch_last = params.last_epoch_map(epoch);
+                let seg_end = core::cmp::min(range_end, epoch_last);
 
-        for layer in 1..reth_log_index_common::MAX_LAYERS {
-            let row_index = params.row_index(map_index, layer as u32, value);
-            let map_row_index = params.map_row_index(map_index, row_index);
-            let max_len = params.max_row_length(layer as u32) as usize;
+                let mut group_start = seg_start;
+                while group_start <= seg_end {
+                    let rem = (group_start - epoch_first) % segment_span;
+                    let max_group_end = group_start.saturating_add(segment_span - rem - 1);
+                    let group_end = core::cmp::min(seg_end, max_group_end);
 
-            let columns = self
-                .tx_ref()
-                .get::<tables::FilterMapRows>(map_row_index)
-                .map_err(ProviderError::Database)?
-                .unwrap_or_default();
+                    let row_index = params.row_index(group_start, layer, value);
+                    let start_key = params.map_row_index(group_start, row_index);
+                    let end_key = params.map_row_index(group_end, row_index);
 
-            if columns.indices.len() < max_len {
-                layers.push(columns.indices);
-                break;
-            }
+                    for entry in
+                        cursor.walk_range(start_key..=end_key).map_err(ProviderError::Database)?
+                    {
+                        let (map_row_idx, columns) = entry.map_err(ProviderError::Database)?;
+                        let in_epoch_mask = (1u64 << params.log_maps_per_epoch) - 1;
+                        let map_in_epoch = (map_row_idx & in_epoch_mask) as u32;
+                        let map_index = params.first_epoch_map(epoch) + map_in_epoch;
 
-            layers.push(columns.indices);
-        }
+                        if let Some(&pos) = index_lookup.get(&map_index) {
+                            results[pos].1 = columns.indices;
+                        }
+                    }
 
-        Ok(layers)
-    }
-
-    fn get_rows_until_short_row(
-        &self,
-        map_start: u32,
-        map_end: u32,
-        values: &[B256],
-    ) -> ProviderResult<Vec<MapValueRows>> {
-        let mut results = Vec::new();
-
-        for value in values {
-            let base_rows = self.get_base_layer_rows_for_value(map_start, map_end, value)?;
-
-            for (i, base_row) in base_rows.iter().enumerate() {
-                let map_index = map_start + i as u32;
-                let params = LogIndexParams::default();
-                let max_len = params.max_row_length(0) as usize;
-
-                let mut layers = vec![base_row.clone()];
-
-                if base_row.len() >= max_len {
-                    let more_layers = self.fetch_more_layers_for_map(map_index, value)?;
-                    layers.extend(more_layers);
+                    group_start = group_end.saturating_add(1);
                 }
 
-                results.push(MapValueRows { map_index, value: *value, layers });
+                seg_start = seg_end.saturating_add(1);
+            }
+
+            Ok(())
+        };
+
+        let mut range_start = map_indices[0];
+        let mut prev = map_indices[0];
+        for &idx in &map_indices[1..] {
+            if idx == prev + 1 {
+                prev = idx;
+            } else {
+                process_range(range_start, prev)?;
+                range_start = idx;
+                prev = idx;
             }
         }
+        process_range(range_start, prev)?;
 
         Ok(results)
     }

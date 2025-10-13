@@ -19,7 +19,7 @@ use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStatePro
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
-use reth_log_index_common::{BlockBoundary, FilterMapMeta, MapValueRows};
+use reth_log_index_common::{BlockBoundary, FilterMapMeta};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -1464,13 +1464,13 @@ impl<N: ProviderNodeTypes> LogIndexProvider for ConsistentProvider<N> {
         self.storage_provider.get_metadata()
     }
 
-    fn get_base_layer_rows_for_value(
+    fn get_rows_for_value_layer(
         &self,
-        map_start: u32,
-        map_end: u32,
         value: &B256,
-    ) -> ProviderResult<Vec<Vec<u32>>> {
-        self.storage_provider.get_base_layer_rows_for_value(map_start, map_end, value)
+        map_indices: &[u32],
+        layer: u32,
+    ) -> ProviderResult<Vec<(u32, Vec<u32>)>> {
+        self.storage_provider.get_rows_for_value_layer(value, map_indices, layer)
     }
 
     fn get_log_value_indices_range(
@@ -1478,23 +1478,6 @@ impl<N: ProviderNodeTypes> LogIndexProvider for ConsistentProvider<N> {
         block_range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<BlockBoundary>> {
         self.storage_provider.get_log_value_indices_range(block_range)
-    }
-
-    fn get_rows_until_short_row(
-        &self,
-        map_start: u32,
-        map_end: u32,
-        values: &[B256],
-    ) -> ProviderResult<Vec<MapValueRows>> {
-        self.storage_provider.get_rows_until_short_row(map_start, map_end, values)
-    }
-
-    fn fetch_more_layers_for_map(
-        &self,
-        map_index: u32,
-        value: &B256,
-    ) -> ProviderResult<Vec<Vec<u32>>> {
-        self.storage_provider.fetch_more_layers_for_map(map_index, value)
     }
 }
 

@@ -162,18 +162,6 @@ pub struct MatcherResult {
     pub matches: Vec<u64>,
 }
 
-/// Rows for a specific map and value combination
-#[derive(Debug, Clone)]
-pub struct MapValueRows {
-    /// The map index these rows are for
-    pub map_index: u32,
-    /// The value hash these rows are for
-    pub value: B256,
-    /// Rows across all layers for this (map, value) pair
-    /// Ordered by layer (`1..MAX_LAYERS`)
-    pub layers: Vec<Vec<u32>>,
-}
-
 /// Represents a storage-ready log value with its position in the filter maps.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowCell {

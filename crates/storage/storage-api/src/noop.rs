@@ -28,7 +28,7 @@ use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
-use reth_log_index_common::{BlockBoundary, FilterMapMeta, MapValueRows};
+use reth_log_index_common::{BlockBoundary, FilterMapMeta};
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
@@ -617,12 +617,12 @@ impl<C: Send + Sync, N: Send + Sync> LogIndexProvider for NoopProvider<C, N> {
         Ok(None)
     }
 
-    fn get_base_layer_rows_for_value(
+    fn get_rows_for_value_layer(
         &self,
-        _map_start: u32,
-        _map_end: u32,
         _value: &B256,
-    ) -> ProviderResult<Vec<Vec<u32>>> {
+        _map_indices: &[u32],
+        _layer: u32,
+    ) -> ProviderResult<Vec<(u32, Vec<u32>)>> {
         Ok(Vec::new())
     }
 
@@ -630,23 +630,6 @@ impl<C: Send + Sync, N: Send + Sync> LogIndexProvider for NoopProvider<C, N> {
         &self,
         _block_range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<BlockBoundary>> {
-        Ok(Vec::new())
-    }
-
-    fn get_rows_until_short_row(
-        &self,
-        _map_start: u32,
-        _map_end: u32,
-        _values: &[B256],
-    ) -> ProviderResult<Vec<MapValueRows>> {
-        Ok(Vec::new())
-    }
-
-    fn fetch_more_layers_for_map(
-        &self,
-        _map_index: u32,
-        _value: &B256,
-    ) -> ProviderResult<Vec<Vec<u32>>> {
         Ok(Vec::new())
     }
 }
