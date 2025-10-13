@@ -2,7 +2,7 @@ use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256};
-use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_rpc_types_debug::{ExecutionWitness, StorageRangeResult};
 use alloy_rpc_types_eth::{Block, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
@@ -389,7 +389,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         contract_address: Address,
         key_start: B256,
         max_result: u64,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<StorageRangeResult>;
 
     /// Returns the structured logs created during the execution of EVM against a block pulled
     /// from the pool of bad ones and returns them as a JSON object. For the second parameter see

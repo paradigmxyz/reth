@@ -8,7 +8,7 @@ use reth_node_api::{FullNodeComponents, NodePrimitives, PrimitivesTy};
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_rpc_eth_types::EthStateCache;
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, StageCheckpointReader, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, StageCheckpointReader, StateProviderFactory, StorageReader,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -37,6 +37,7 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
         > + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Self::Primitives>
         + StageCheckpointReader
+        + StorageReader
         + Send
         + Sync
         + Clone
@@ -64,7 +65,9 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
 
 impl<T> RpcNodeCore for T
 where
-    T: FullNodeComponents<Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>>,
+    T: FullNodeComponents<
+        Provider: StorageReader + ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>,
+    >,
 {
     type Primitives = PrimitivesTy<T::Types>;
     type Provider = T::Provider;
@@ -130,6 +133,7 @@ where
         > + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Evm::Primitives>
         + StageCheckpointReader
+        + StorageReader
         + Send
         + Sync
         + Unpin

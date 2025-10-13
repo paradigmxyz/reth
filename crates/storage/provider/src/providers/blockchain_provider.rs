@@ -7,14 +7,18 @@ use crate::{
     DatabaseProviderFactory, FullProvider, HashedPostStateProvider, HeaderProvider, ProviderError,
     ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    StaticFileProviderFactory, StorageReader, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
 };
-use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{
+    Address, BlockHash, BlockNumber, Sealable, StorageKey, StorageValue, TxHash, TxNumber, B256,
+    U256,
+};
+use alloy_rpc_types_debug::StorageRangeResult;
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
@@ -411,6 +415,38 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
         self.consistent_provider()?.transaction_sender(id)
+    }
+}
+
+impl<N: ProviderNodeTypes> StorageReader for BlockchainProvider<N> {
+    fn plain_state_storages(
+        &self,
+        addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
+    ) -> ProviderResult<Vec<(Address, Vec<reth_primitives_traits::StorageEntry>)>> {
+        self.consistent_provider()?.plain_state_storages(addresses_with_keys)
+    }
+
+    fn changed_storages_with_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<Address, std::collections::BTreeSet<B256>>> {
+        self.consistent_provider()?.changed_storages_with_range(range)
+    }
+
+    fn changed_storages_and_blocks_with_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<(Address, B256), Vec<u64>>> {
+        self.consistent_provider()?.changed_storages_and_blocks_with_range(range)
+    }
+
+    fn storage_range_at(
+        &self,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> ProviderResult<StorageRangeResult> {
+        self.consistent_provider()?.storage_range_at(contract_address, key_start, max_result)
     }
 }
 

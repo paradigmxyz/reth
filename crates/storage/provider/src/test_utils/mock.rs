@@ -15,6 +15,7 @@ use alloy_primitives::{
     keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
     TxHash, TxNumber, B256, U256,
 };
+use alloy_rpc_types_debug::StorageRangeResult;
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, EthChainSpec};
@@ -352,6 +353,40 @@ where
 
     fn chain_spec(&self) -> Arc<Self::ChainSpec> {
         self.chain_spec.clone()
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync> reth_storage_api::StorageReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn plain_state_storages(
+        &self,
+        _addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
+    ) -> ProviderResult<Vec<(Address, Vec<reth_primitives_traits::StorageEntry>)>> {
+        Ok(Vec::new())
+    }
+
+    fn changed_storages_with_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<Address, std::collections::BTreeSet<B256>>> {
+        Ok(BTreeMap::new())
+    }
+
+    fn changed_storages_and_blocks_with_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<(Address, B256), Vec<u64>>> {
+        Ok(BTreeMap::new())
+    }
+
+    fn storage_range_at(
+        &self,
+        _contract_address: Address,
+        _key_start: B256,
+        _max_result: u64,
+    ) -> ProviderResult<StorageRangeResult> {
+        Ok(Default::default())
     }
 }
 
