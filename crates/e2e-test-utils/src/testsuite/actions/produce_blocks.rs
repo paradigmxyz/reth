@@ -605,8 +605,11 @@ where
                         rpc_latest_header.hash;
 
                     // update local copy for any further usage in this scope
-                    latest_block.hash = rpc_latest_header.hash;
-                    latest_block.number = rpc_latest_header.inner.number;
+                    #[allow(unused_assignments)]
+                    {
+                        latest_block.hash = rpc_latest_header.hash;
+                        latest_block.number = rpc_latest_header.inner.number;
+                    }
                 }
             }
 
