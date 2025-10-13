@@ -39,9 +39,13 @@ pub struct ArbStartTxContext {
 pub struct ArbGasChargingContext {
     pub intrinsic_gas: u64,
     pub calldata: Vec<u8>,
+    pub tx_bytes: Vec<u8>,
     pub basefee: U256,
     pub is_executed_on_chain: bool,
     pub skip_l1_charging: bool,
+    pub poster: Address,
+    pub gas_remaining: u64,
+    pub is_ethcall: bool,
 }
 
 pub struct ArbEndTxContext {
@@ -476,10 +480,15 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     }
                 };
                 
-                const ARBOS_VERSION: u64 = 11;
+                let arbos_version = if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
+                    arbos_state.arbos_version
+                } else {
+                    11
+                };
+                
                 let prev_hash = B256::ZERO;
                 
-                if ARBOS_VERSION >= 40 {
+                if arbos_version >= 40 {
                     Self::process_parent_block_hash(state_db, prev_hash);
                 }
                 
@@ -496,7 +505,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     if let Err(e) = blockhashes.record_new_l1_block(
                         l1_block_number - 1,
                         prev_hash,
-                        ARBOS_VERSION,
+                        arbos_version,
                     ) {
                         tracing::error!("Failed to record new L1 block: {:?}", e);
                     }
@@ -550,6 +559,32 @@ impl ArbOsHooks for DefaultArbOsHooks {
                         };
                     }
                 };
+                
+                let retryable_storage = crate::storage::Storage::new(
+                    state_db as *mut _,
+                    crate::arbosstate::arbos_state_subspace(2),
+                );
+                let retryable_state = crate::retryables::RetryableState::new(
+                    state_db as *mut _,
+                    retryable_storage.base_key,
+                );
+                
+                let ticket_id_struct = crate::retryables::RetryableTicketId(ticket_id.0);
+                let current_time = ctx.block_timestamp;
+                
+                if let Some(retryable) = retryable_state.open_retryable(
+                    state_db as *mut _,
+                    &ticket_id_struct,
+                    current_time,
+                ) {
+                    let _ = retryable.increment_tries();
+                } else {
+                    return StartTxHookResult {
+                        end_tx_now: true,
+                        gas_used: 0,
+                        error: Some("retryable not found or expired".to_string()),
+                    };
+                }
                 
                 use arb_alloy_util::retryables::escrow_address_from_ticket;
                 let escrow = Address::from_slice(&escrow_address_from_ticket(ticket_id.0));
@@ -714,6 +749,36 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 
                 crate::log_sink::push(ARB_RETRYABLE_TX_ADDRESS, &[TICKET_CREATED_TOPIC, ticket_id.0], &[]);
                 
+                let retryable_storage = crate::storage::Storage::new(
+                    state_db as *mut _,
+                    crate::arbosstate::arbos_state_subspace(2),
+                );
+                let retryable_state = crate::retryables::RetryableState::new(
+                    state_db as *mut _,
+                    retryable_storage.base_key,
+                );
+                
+                let timeout = ctx.block_timestamp + crate::retryables::RETRYABLE_LIFETIME_SECONDS;
+                
+                use crate::retryables::RetryableCreateParams;
+                let create_params = RetryableCreateParams {
+                    sender: ctx.sender,
+                    beneficiary,
+                    call_to: retry_to,
+                    call_data: Bytes::from(retry_data.to_vec()),
+                    l1_base_fee: ctx.l1_base_fee,
+                    submission_fee: submission_fee_u256,
+                    max_submission_cost: max_submission_fee,
+                    max_gas: U256::from(usergas),
+                    gas_price_bid: gas_fee_cap,
+                };
+                
+                let _ticket = retryable_state.create_retryable(
+                    state_db as *mut _,
+                    create_params,
+                    ctx.block_timestamp,
+                );
+                
                 let retry_tx_nonce = 0u64;
                 let retry_tx_hash = B256::ZERO;
                 let sequence_num_bytes: [u8; 32] = {
@@ -751,32 +816,75 @@ impl ArbOsHooks for DefaultArbOsHooks {
         state: &mut ArbTxProcessorState,
         ctx: &ArbGasChargingContext,
     ) -> (Address, Result<(), ()>) {
+        let mut gas_needed_to_start_evm = 0u64;
         let tip_recipient = state.network_fee_account;
         
-        if !ctx.skip_l1_charging && !ctx.basefee.is_zero() {
-            let brotli_level = state.brotli_compression_level;
-            let compressed_len = if let Ok(compressed) = Self::compress_tx_data(&ctx.calldata, brotli_level) {
-                compressed.len() as u64
-            } else {
-                ctx.calldata.len() as u64
+        if ctx.basefee.is_zero() || ctx.skip_l1_charging {
+            if !ctx.is_ethcall && ctx.gas_remaining > 0 {
+                if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
+                    if let Ok(gas_available) = arbos_state.l2_pricing_state.get_per_block_gas_limit() {
+                        if ctx.gas_remaining > gas_available {
+                            state.compute_hold_gas = ctx.gas_remaining.saturating_sub(gas_available);
+                        }
+                    }
+                }
+            }
+            return (tip_recipient, Ok(()));
+        }
+        
+        if ctx.poster != crate::l1_pricing::BATCH_POSTER_ADDRESS {
+            if !ctx.is_ethcall && ctx.gas_remaining > 0 {
+                if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
+                    if let Ok(gas_available) = arbos_state.l2_pricing_state.get_per_block_gas_limit() {
+                        if ctx.gas_remaining > gas_available {
+                            state.compute_hold_gas = ctx.gas_remaining.saturating_sub(gas_available);
+                        }
+                    }
+                }
+            }
+            return (tip_recipient, Ok(()));
+        }
+        
+        let brotli_level = state.brotli_compression_level as u64;
+        
+        if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
+            let (poster_cost, calldata_units) = match arbos_state.l1_pricing_state.get_poster_data_cost(
+                &ctx.tx_bytes,
+                ctx.poster,
+                brotli_level
+            ) {
+                Ok(result) => result,
+                Err(_) => {
+                    tracing::error!("Failed to get poster data cost");
+                    return (tip_recipient, Err(()));
+                }
             };
             
-            let units = AlloyL1PricingState::poster_units_from_brotli_len(compressed_len);
-            let padded_units = AlloyL1PricingState::apply_estimation_padding(units);
-            
-            if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
-                let units_u64: u64 = units.try_into().unwrap_or(u64::MAX);
-                let _ = arbos_state.l1_pricing_state.add_to_units_since_update(units_u64);
+            if calldata_units > 0 {
+                let _ = arbos_state.l1_pricing_state.add_to_units_since_update(calldata_units);
             }
-            
-            let l1_base_fee_wei: u128 = state.l1_base_fee.try_into().unwrap_or_default();
-            let pricing = AlloyL1PricingState { l1_base_fee_wei };
-            let poster_cost_u128 = pricing.poster_data_cost_from_units(padded_units);
-            let poster_cost = U256::from(poster_cost_u128);
             
             let poster_gas = Self::get_poster_gas(ctx.basefee, poster_cost);
             state.poster_gas = poster_gas;
             state.poster_fee = ctx.basefee.saturating_mul(U256::from(poster_gas));
+            gas_needed_to_start_evm = poster_gas;
+        }
+        
+        if ctx.gas_remaining < gas_needed_to_start_evm {
+            tracing::debug!("Insufficient gas for L1 calldata costs");
+            return (tip_recipient, Err(()));
+        }
+        
+        let gas_remaining_after_l1 = ctx.gas_remaining.saturating_sub(gas_needed_to_start_evm);
+        
+        if !ctx.is_ethcall {
+            if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
+                if let Ok(gas_available) = arbos_state.l2_pricing_state.get_per_block_gas_limit() {
+                    if gas_remaining_after_l1 > gas_available {
+                        state.compute_hold_gas = gas_remaining_after_l1.saturating_sub(gas_available);
+                    }
+                }
+            }
         }
         
         (tip_recipient, Ok(()))
@@ -843,8 +951,36 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 }
                 
                 if ctx.success {
-                    use crate::retryables::{RetryableState, DefaultRetryables};
-                    let retryable_state = RetryableState::new(state_db as *mut _, retry_data.ticket_id);
+                    let retryable_storage = crate::storage::Storage::new(
+                        state_db as *mut _,
+                        crate::arbosstate::arbos_state_subspace(2),
+                    );
+                    let retryable_state = crate::retryables::RetryableState::new(
+                        state_db as *mut _,
+                        retryable_storage.base_key,
+                    );
+                    
+                    let ticket_id_struct = crate::retryables::RetryableTicketId(retry_data.ticket_id.0);
+                    if let Some(retryable) = retryable_state.open_retryable(
+                        state_db as *mut _,
+                        &ticket_id_struct,
+                        ctx.block_timestamp,
+                    ) {
+                        use arb_alloy_util::retryables::escrow_address_from_ticket;
+                        let escrow = Address::from_slice(&escrow_address_from_ticket(retry_data.ticket_id.0));
+                        
+                        if let Some(beneficiary) = retryable.get_beneficiary() {
+                            let escrow_balance = match state_db.basic(escrow) {
+                                Ok(Some(acc)) => U256::from(acc.balance),
+                                _ => U256::ZERO,
+                            };
+                            if escrow_balance > U256::ZERO {
+                                let _ = Self::transfer_balance(state_db, escrow, beneficiary, escrow_balance);
+                            }
+                        }
+                        
+                        let _ = retryable.deactivate();
+                    }
                 } else {
                     use arb_alloy_util::retryables::escrow_address_from_ticket;
                     let escrow = Address::from_slice(&escrow_address_from_ticket(retry_data.ticket_id.0));
@@ -967,11 +1103,18 @@ impl ArbOsHooks for DefaultArbOsHooks {
     
     fn l1_block_number<D: Database>(
         &self,
-        _state_db: &mut revm::database::State<D>,
+        state_db: &mut revm::database::State<D>,
         state: &mut ArbTxProcessorState,
     ) -> Result<u64, ()> {
         if let Some(cached) = state.cached_l1_block_number {
             return Ok(cached);
+        }
+        
+        if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
+            if let Ok(block_num) = arbos_state.blockhashes.l1_block_number() {
+                state.cached_l1_block_number = Some(block_num);
+                return Ok(block_num);
+            }
         }
         
         Ok(0)
@@ -979,12 +1122,19 @@ impl ArbOsHooks for DefaultArbOsHooks {
     
     fn l1_block_hash<D: Database>(
         &self,
-        _state_db: &mut revm::database::State<D>,
+        state_db: &mut revm::database::State<D>,
         state: &mut ArbTxProcessorState,
         l1_block_number: u64,
     ) -> Result<B256, ()> {
         if let Some(cached) = state.cached_l1_block_hashes.get(&l1_block_number) {
             return Ok(*cached);
+        }
+        
+        if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
+            if let Ok(Some(hash)) = arbos_state.blockhashes.block_hash(l1_block_number) {
+                state.cached_l1_block_hashes.insert(l1_block_number, hash);
+                return Ok(hash);
+            }
         }
         
         Ok(B256::ZERO)
