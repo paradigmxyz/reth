@@ -133,8 +133,11 @@ impl Layers {
         endpoint_exporter: Url,
     ) -> eyre::Result<()> {
         // Create the span provider
+
+        use tracing::{level_filters::LevelFilter, Level};
         let span_layer = span_layer(service_name, &endpoint_exporter)
-            .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?;
+            .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?
+            .with_filter(LevelFilter::from_level(Level::TRACE));
 
         self.add_layer(span_layer);
 
