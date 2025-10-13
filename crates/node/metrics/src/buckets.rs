@@ -46,10 +46,10 @@ static BUCKET_REGISTRY: LazyLock<parking_lot::RwLock<Vec<BucketConfig>>> =
 /// ```
 /// use reth_node_metrics::buckets::{register_buckets, BucketConfig};
 ///
-/// // Register buckets for a specific metric
+/// // Register buckets for a specific metric (EIP-7805)
 /// register_buckets(BucketConfig::new(
-///     "reth_ef_execution_inclusion_list_transactions_validation_time_seconds",
-///     vec![0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0],
+///     "reth_ef_execution_inclusion_list_block_validation_time_seconds",
+///     vec![0.05, 0.1, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0],
 /// ));
 /// ```
 pub fn register_buckets(config: BucketConfig) {
@@ -71,14 +71,12 @@ pub(crate) fn register_default_histogram_buckets() {
     register_ef_execution_buckets();
 }
 
-/// Register histogram buckets for EF execution metrics.
+/// Register histogram buckets for EF execution metrics (EIP-7805).
 fn register_ef_execution_buckets() {
-    use presets::DURATION_MICROS_TO_SECS;
-
-    // Histogram: validation time in seconds (microsecond to multi-second range)
+    // EIP-7805: Block validation time histogram with custom buckets
     register_buckets(BucketConfig::new(
-        "reth_ef_execution_inclusion_list_transactions_validation_time_seconds",
-        DURATION_MICROS_TO_SECS.to_vec(),
+        "reth_ef_execution_inclusion_list_block_validation_time_seconds",
+        vec![0.05, 0.1, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0],
     ));
 }
 

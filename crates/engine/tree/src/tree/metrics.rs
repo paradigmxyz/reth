@@ -201,53 +201,34 @@ impl BlockValidationMetrics {
     }
 }
 
-/// EF execution Metrics
+/// EIP-7805 Execution Metrics
 #[derive(Metrics)]
 #[metrics(scope = "ef_execution")]
 pub struct EfExecutionMetrics {
-    /// Total number of inclusion list transactions received in payload
-    pub(crate) inclusion_list_transactions_received_in_payload_total: Counter,
-    /// Total number of valid inclusion list transactions
-    pub(crate) inclusion_list_transactions_valid_total: Counter,
-    /// Total number of invalid inclusion list transactions
-    pub(crate) inclusion_list_transactions_invalid_total: Counter,
-    /// Time taken to validate inclusion list transactions (histogram, seconds)
-    pub(crate) inclusion_list_transactions_validation_time_seconds: Histogram,
-    /// Total number of unsatisfied inclusion list blocks
-    pub(crate) inclusion_list_unsatisfied_blocks_total: Counter,
-    /// Total number of transactions received in payload
-    pub(crate) transactions_received_in_payload_total: Counter,
+    /// Total number of inclusion list transactions included into block
+    pub(crate) inclusion_list_transactions_included_total: Counter,
+    /// Time taken to validate a block against its inclusion list (histogram, seconds)
+    #[metrics(buckets = [0.05, 0.1, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0])]
+    pub(crate) inclusion_list_block_validation_time_seconds: Histogram,
 }
 
 impl EfExecutionMetrics {
-    /// Record the number of inclusion list transactions received in a payload
-    pub(crate) fn record_inclusion_list_transactions_received(&self, count: u64) {
-        self.inclusion_list_transactions_received_in_payload_total.increment(count);
+    /// Record inclusion list transaction included into block
+    pub(crate) fn record_inclusion_list_transaction_included(&self) {
+        self.inclusion_list_transactions_included_total.increment(1);
     }
 
-    /// Record the number of transactions received in a payload
-    pub(crate) fn record_transactions_received(&self, count: u64) {
-        self.transactions_received_in_payload_total.increment(count);
+    /// Record inclusion list transaction excluded from block with reason
+    pub(crate) fn record_inclusion_list_transaction_excluded(&self, reason: &'static str) {
+        metrics::counter!("ef_execution_inclusion_list_transactions_excluded_total", "reason" => reason).increment(1);
     }
 
-    /// Record valid inclusion list transactions
-    pub(crate) fn record_valid_inclusion_list_transactions(&self, count: u64) {
-        self.inclusion_list_transactions_valid_total.increment(count);
-    }
-
-    /// Record invalid inclusion list transactions
-    pub(crate) fn record_invalid_inclusion_list_transactions(&self, count: u64) {
-        self.inclusion_list_transactions_invalid_total.increment(count);
-    }
-
-    /// Record inclusion list validation time into the histogram
-    pub(crate) fn record_inclusion_list_validation_time(&self, duration: std::time::Duration) {
-        self.inclusion_list_transactions_validation_time_seconds.record(duration.as_secs_f64());
-    }
-
-    /// Record unsatisfied inclusion list blocks
-    pub(crate) fn record_unsatisfied_inclusion_list_blocks(&self) {
-        self.inclusion_list_unsatisfied_blocks_total.increment(1);
+    /// Record block validation time against inclusion list
+    pub(crate) fn record_inclusion_list_block_validation_time(
+        &self,
+        duration: std::time::Duration,
+    ) {
+        self.inclusion_list_block_validation_time_seconds.record(duration.as_secs_f64());
     }
 }
 

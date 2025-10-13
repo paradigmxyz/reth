@@ -37,8 +37,8 @@ use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    transaction::TxHashRef, AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives,
-    Recovered, RecoveredBlock, SealedHeader,
+    transaction::TxHashRef, AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, Recovered,
+    RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     BlockExecutionOutput, BlockHashReader, BlockNumReader, BlockReader, DBProvider,
@@ -472,10 +472,6 @@ where
 
         let block = self.convert_to_block(input)?;
 
-        // Record EIP-7805 metrics for transactions received in payload
-        let transaction_count = block.body().transactions().len() as u64;
-        self.metrics.ef_excution.record_transactions_received(transaction_count);
-
         // Inclusion list verification
         if let Some(il) = &il {
             let validation_start = Instant::now();
@@ -484,14 +480,13 @@ where
                     // Record successful validation time
                     self.metrics
                         .ef_excution
-                        .record_inclusion_list_validation_time(validation_start.elapsed());
+                        .record_inclusion_list_block_validation_time(validation_start.elapsed());
                 }
                 Err(err) => {
-                    // Record failed validation time and unsatisfied block
+                    // Record failed validation time
                     self.metrics
                         .ef_excution
-                        .record_inclusion_list_validation_time(validation_start.elapsed());
-                    self.metrics.ef_excution.record_unsatisfied_inclusion_list_blocks();
+                        .record_inclusion_list_block_validation_time(validation_start.elapsed());
 
                     warn!("Block failed inclusionlist test.");
                     self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
@@ -1210,34 +1205,35 @@ where
     where
         S: StateProvider,
     {
-        let mut invalid_count = 0;
-
-        // 1) Gather all tx hashes already in the block
+        // Gather all tx hashes already in the block
         let included: BTreeSet<_> =
             block.transactions_recovered().map(|tx| *tx.inner().tx_hash()).collect();
 
-        // 2) Compute remaining gas after block execution
+        // Compute remaining gas after block execution
         let remaining = block.header().gas_limit().saturating_sub(block.gas_used());
 
-        // 3) Check each inclusion-list transaction
+        // Check each inclusion-list transaction
         for recovered in il.as_ref() {
             let tx = recovered.inner();
             let h = tx.tx_hash();
 
             // Skip if already included
             if included.contains(h) {
+                self.metrics.ef_excution.record_inclusion_list_transaction_included();
                 continue
             }
 
-            // Skip blob (EIP-4844) transactions
+            // Skip blob (EIP-4844) transactions (reason: blob_transaction)
             if tx.is_eip4844() {
-                invalid_count += 1;
+                self.metrics
+                    .ef_excution
+                    .record_inclusion_list_transaction_excluded("blob_transaction");
                 continue
             }
 
-            //Skip if not enough gas
+            // Skip if not enough gas (reason: gas_limit)
             if tx.gas_limit() > remaining {
-                invalid_count += 1;
+                self.metrics.ef_excution.record_inclusion_list_transaction_excluded("gas_limit");
                 continue
             }
 
@@ -1247,44 +1243,43 @@ where
             // Get nonce
             let account_nonce = match state_provider.account_nonce(&sender) {
                 Ok(Some(nonce)) => nonce,
-                // account does not exist or error reading nonce, skip
+                // account does not exist or error reading nonce (reason: unknown)
                 Ok(None) | Err(_) => {
-                    invalid_count += 1;
+                    self.metrics.ef_excution.record_inclusion_list_transaction_excluded("unknown");
                     continue
                 }
             };
 
-            // Check nonce
-            if account_nonce == tx.nonce() {
-                // Check balance (value + gas_limit * max_fee_per_gas)
-                let max_cost = tx.value().saturating_add(
-                    U256::from(tx.gas_limit()).saturating_mul(U256::from(tx.max_fee_per_gas())),
-                );
-
-                let account_balance = match state_provider.account_balance(&sender) {
-                    Ok(Some(balance)) => balance,
-                    Ok(None) | Err(_) => {
-                        invalid_count += 1;
-                        continue
-                    } /* account does not exist or error reading balance, skip */
-                };
-
-                if account_balance >= max_cost {
-                    // Transaction would still be valid - inclusion list violation
-                    info!("Failed on TX: {:?}", recovered);
-                    return Err(BlockExecutionError::Validation(
-                        BlockValidationError::InvalidInclusionList,
-                    ));
-                }
-                invalid_count += 1
+            // Check nonce matches - if not, it's excluded due to nonce mismatch
+            if account_nonce != tx.nonce() {
+                self.metrics.ef_excution.record_inclusion_list_transaction_excluded("nonce");
+                continue
             }
-        }
 
-        // Record invalid and invalid inclusion list transactions
-        let il_len = il.as_ref().len() as u64;
-        let valid_count = il_len - invalid_count;
-        self.metrics.ef_excution.record_invalid_inclusion_list_transactions(invalid_count);
-        self.metrics.ef_excution.record_valid_inclusion_list_transactions(valid_count);
+            // Check balance (value + gas_limit * max_fee_per_gas)
+            let max_cost = tx.value().saturating_add(
+                U256::from(tx.gas_limit()).saturating_mul(U256::from(tx.max_fee_per_gas())),
+            );
+
+            let account_balance = match state_provider.account_balance(&sender) {
+                Ok(Some(balance)) => balance,
+                // account does not exist or error reading balance (reason: unknown)
+                Ok(None) | Err(_) => {
+                    self.metrics.ef_excution.record_inclusion_list_transaction_excluded("unknown");
+                    continue
+                }
+            };
+
+            if account_balance >= max_cost {
+                // Transaction would still be valid - inclusion list violation
+                info!("Failed on TX: {:?}", recovered);
+                return Err(BlockExecutionError::Validation(
+                    BlockValidationError::InvalidInclusionList,
+                ));
+            }
+            // Insufficient balance (reason: balance)
+            self.metrics.ef_excution.record_inclusion_list_transaction_excluded("balance");
+        }
 
         Ok(())
     }
