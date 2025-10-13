@@ -35,7 +35,7 @@ use reth_errors::{ProviderResult, RethResult};
 pub use set::*;
 
 /// A container for a queued stage.
-pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
+pub type BoxedStage<Provider> = Box<dyn Stage<Provider>>;
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
 /// [`Pipeline::run_as_fut`].

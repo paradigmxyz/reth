@@ -25,7 +25,10 @@ use reth_stages_api::{
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderError;
-use std::task::{ready, Context, Poll};
+use std::{
+    fmt::Debug,
+    task::{ready, Context, Poll},
+};
 
 use tokio::sync::watch;
 use tracing::*;
@@ -186,7 +189,7 @@ where
 
 impl<Provider, P, D> Stage<Provider> for HeaderStage<P, D>
 where
-    Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
+    Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + Debug,
     P: HeaderSyncGapProvider<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
     D: HeaderDownloader<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
     <Provider::Primitives as NodePrimitives>::BlockHeader: FullBlockHeader + Value,

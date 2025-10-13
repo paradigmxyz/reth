@@ -7,9 +7,11 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
-    DBProvider, DatabaseProviderFactory, ProviderFactory,
+    DBProvider, DatabaseProviderFactory, ProviderFactory, StageCheckpointReader,
+    StageCheckpointWriter,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
+use reth_stages::{BoxedStage, ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
     sync::mpsc::{Receiver, SendError, Sender},
@@ -26,7 +28,7 @@ use tracing::{debug, error};
 ///
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking I/O operations in an endless loop.
-#[derive(Debug)]
+#[expect(missing_debug_implementations)]
 pub struct PersistenceService<N>
 where
     N: ProviderNodeTypes,
@@ -41,6 +43,8 @@ where
     metrics: PersistenceMetrics,
     /// Sender for sync metrics - we only submit sync metrics for persisted blocks
     sync_metrics_tx: MetricEventsSender,
+    /// Custom pipeline stages advanced on new blocks.
+    custom_stages: Vec<BoxedStage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>>,
 }
 
 impl<N> PersistenceService<N>
@@ -53,8 +57,16 @@ where
         incoming: Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
+        custom_stages: Vec<BoxedStage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>>,
     ) -> Self {
-        Self { provider, incoming, pruner, metrics: PersistenceMetrics::default(), sync_metrics_tx }
+        Self {
+            provider,
+            incoming,
+            pruner,
+            metrics: PersistenceMetrics::default(),
+            sync_metrics_tx,
+            custom_stages,
+        }
     }
 
     /// Prunes block data before the given block number according to the configured prune
@@ -67,12 +79,7 @@ where
         self.metrics.prune_before_duration_seconds.record(start_time.elapsed());
         result
     }
-}
 
-impl<N> PersistenceService<N>
-where
-    N: ProviderNodeTypes,
-{
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
@@ -122,7 +129,7 @@ where
     }
 
     fn on_remove_blocks_above(
-        &self,
+        &mut self,
         new_tip_num: u64,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
@@ -130,6 +137,17 @@ where
         let provider_rw = self.provider.database_provider_rw()?;
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
+
+        for stage in self.custom_stages.iter_mut().rev() {
+            if let Some(checkpoint) = provider_rw.get_stage_checkpoint(stage.id())? {
+                let UnwindOutput { checkpoint } = stage.unwind(
+                    &provider_rw,
+                    UnwindInput { checkpoint, unwind_to: new_tip_num, bad_block: None },
+                )?;
+                provider_rw.save_stage_checkpoint(stage.id(), checkpoint)?;
+            }
+        }
+
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
         provider_rw.commit()?;
 
@@ -139,7 +157,7 @@ where
     }
 
     fn on_save_blocks(
-        &self,
+        &mut self,
         blocks: Vec<ExecutedBlockWithTrieUpdates<N::Primitives>>,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
         debug!(target: "engine::persistence", first=?blocks.first().map(|b| b.recovered_block.num_hash()), last=?blocks.last().map(|b| b.recovered_block.num_hash()), "Saving range of blocks");
@@ -149,10 +167,28 @@ where
             number: block.recovered_block().header().number(),
         });
 
-        if last_block_hash_num.is_some() {
+        if let Some(num_hash) = last_block_hash_num {
             let provider_rw = self.provider.database_provider_rw()?;
 
             provider_rw.save_blocks(blocks)?;
+
+            for stage in &mut self.custom_stages {
+                loop {
+                    let checkpoint = provider_rw.get_stage_checkpoint(stage.id())?;
+
+                    let ExecOutput { checkpoint, done } = stage.execute(
+                        &provider_rw,
+                        ExecInput { target: Some(num_hash.number), checkpoint },
+                    )?;
+
+                    provider_rw.save_stage_checkpoint(stage.id(), checkpoint)?;
+
+                    if done {
+                        break
+                    }
+                }
+            }
+
             provider_rw.commit()?;
         }
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
@@ -170,6 +206,10 @@ pub enum PersistenceError {
     /// A provider error
     #[error(transparent)]
     ProviderError(#[from] ProviderError),
+
+    /// A stage error
+    #[error(transparent)]
+    StageError(#[from] StageError),
 }
 
 /// A signal to the persistence service that part of the tree state can be persisted.
@@ -213,6 +253,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
+        custom_stages: Vec<BoxedStage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>>,
     ) -> PersistenceHandle<N::Primitives>
     where
         N: ProviderNodeTypes,
@@ -224,8 +265,13 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         let persistence_handle = PersistenceHandle::new(db_service_tx);
 
         // spawn the persistence service
-        let db_service =
-            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
+        let db_service = PersistenceService::new(
+            provider_factory,
+            db_service_rx,
+            pruner,
+            sync_metrics_tx,
+            custom_stages,
+        );
         std::thread::Builder::new()
             .name("Persistence Service".to_string())
             .spawn(|| {
@@ -313,7 +359,12 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
+        PersistenceHandle::<EthPrimitives>::spawn_service(
+            provider,
+            pruner,
+            sync_metrics_tx,
+            Default::default(),
+        )
     }
 
     #[tokio::test]

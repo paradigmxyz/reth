@@ -11,7 +11,8 @@ use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_provider::FullProvider;
+use reth_provider::{DatabaseProviderFactory, FullProvider};
+use reth_stages_api::BoxedStage;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -203,6 +204,13 @@ pub trait NodeAddOns<N: FullNodeComponents>: Send {
         self,
         ctx: AddOnsContext<'_, N>,
     ) -> impl Future<Output = eyre::Result<Self::Handle>> + Send;
+
+    /// Returns additional stages to be added to the pipeline.
+    fn extra_stages(
+        &self,
+    ) -> Vec<BoxedStage<<N::Provider as DatabaseProviderFactory>::ProviderRW>> {
+        Vec::new()
+    }
 }
 
 impl<N: FullNodeComponents> NodeAddOns<N> for () {
