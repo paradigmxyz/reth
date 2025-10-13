@@ -565,7 +565,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                         error: None,
                     }
                 } else if selector == INTERNAL_TX_BATCH_POSTING_REPORT_METHOD_ID {
-                    let _report_data = match unpack_internal_tx_data_batch_posting_report(data) {
+                    let report_data = match unpack_internal_tx_data_batch_posting_report(data) {
                         Ok(d) => d,
                         Err(e) => {
                             tracing::error!("Failed to unpack batch posting report data: {}", e);
@@ -577,12 +577,36 @@ impl ArbOsHooks for DefaultArbOsHooks {
                         }
                     };
                     
+                    let l1_pricing = crate::l1_pricing::L1PricingState::open(
+                        crate::storage::Storage::new(
+                            state_db as *mut _,
+                            crate::arbosstate::arbos_state_subspace(0),
+                        ),
+                        11,
+                    );
+                    
+                    let per_batch_gas_cost = l1_pricing.get_per_batch_gas_cost().unwrap_or(0);
+                    let gas_spent = per_batch_gas_cost.saturating_add(report_data.batch_data_gas);
+                    let wei_spent = report_data.l1_base_fee_wei.saturating_mul(U256::from(gas_spent));
+                    
+                    let batch_timestamp = report_data.batch_timestamp.try_into().unwrap_or(0u64);
+                    let current_time = ctx.block_timestamp;
+                    
+                    if let Err(e) = l1_pricing.update_for_batch_poster_spending(
+                        gas_spent,
+                        report_data.batch_data_gas,
+                        report_data.l1_base_fee_wei,
+                        current_time,
+                    ) {
+                        tracing::warn!("Failed to update L1 pricing for batch poster spending: {:?}", e);
+                    }
+                    
                     StartTxHookResult {
                         end_tx_now: true,
                         gas_used: 0,
                         error: None,
                     }
-                } else {
+                }else {
                     tracing::error!("Unknown internal tx method selector: {:?}", selector);
                     StartTxHookResult {
                         end_tx_now: true,
