@@ -30,6 +30,12 @@ use revm::{
 };
 use std::sync::{mpsc, Arc};
 
+// Test constants
+const HISTORY_BUFFER_LENGTH: u64 = 8191;
+const TEST_BEACON_ROOT_BYTE: u8 = 0x69;
+const WITHDRAWAL_REQUEST_INPUT_LENGTH: usize = 56;
+const GWEI_IN_WEI: u64 = 1_000_000_000;
+
 fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
     let mut db = CacheDB::new(Default::default());
 
@@ -98,7 +104,7 @@ fn eip_4788_non_genesis_call() {
     ));
 
     // fix header, set a gas limit
-    header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
+    header.parent_beacon_block_root = Some(B256::with_last_byte(TEST_BEACON_ROOT_BYTE));
 
     // Now execute a block with the fixed header, ensure that it does not fail
     executor
@@ -116,7 +122,7 @@ fn eip_4788_non_genesis_call() {
     // header.timestamp
     // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH //
     //   should be parent_beacon_block_root
-    let history_buffer_length = 8191u64;
+    let history_buffer_length = HISTORY_BUFFER_LENGTH;
     let timestamp_index = header.timestamp % history_buffer_length;
     let parent_beacon_block_root_index =
         timestamp_index % history_buffer_length + history_buffer_length;
@@ -132,7 +138,7 @@ fn eip_4788_non_genesis_call() {
             .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
             .expect("storage value should exist")
     });
-    assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
+    assert_eq!(parent_beacon_block_root_storage, U256::from(TEST_BEACON_ROOT_BYTE));
 }
 
 #[test]
@@ -142,7 +148,7 @@ fn eip_4788_no_code_cancun() {
     let header = Header {
         timestamp: 1,
         number: 1,
-        parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
+        parent_beacon_block_root: Some(B256::with_last_byte(TEST_BEACON_ROOT_BYTE)),
         excess_blob_gas: Some(0),
         ..Header::default()
     };
@@ -195,7 +201,7 @@ fn eip_4788_empty_account_call() {
     let header = Header {
         timestamp: 1,
         number: 1,
-        parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
+        parent_beacon_block_root: Some(B256::with_last_byte(TEST_BEACON_ROOT_BYTE)),
         excess_blob_gas: Some(0),
         ..Header::default()
     };
@@ -236,7 +242,7 @@ fn eip_4788_genesis_call() {
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute the genesis block with non-zero parent beacon block root, expect err
-    header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
+    header.parent_beacon_block_root = Some(B256::with_last_byte(TEST_BEACON_ROOT_BYTE));
     let _err = executor
         .execute_one(&RecoveredBlock::new_unhashed(
             Block { header: header.clone(), body: Default::default() },
@@ -276,7 +282,7 @@ fn eip_4788_high_base_fee() {
     let header = Header {
         timestamp: 1,
         number: 1,
-        parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
+        parent_beacon_block_root: Some(B256::with_last_byte(TEST_BEACON_ROOT_BYTE)),
         base_fee_per_gas: Some(u64::MAX),
         excess_blob_gas: Some(0),
         ..Header::default()
@@ -309,7 +315,7 @@ fn eip_4788_high_base_fee() {
     // header.timestamp
     // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH //
     //   should be parent_beacon_block_root
-    let history_buffer_length = 8191u64;
+    let history_buffer_length = HISTORY_BUFFER_LENGTH;
     let timestamp_index = header.timestamp % history_buffer_length;
     let parent_beacon_block_root_index =
         timestamp_index % history_buffer_length + history_buffer_length;
@@ -324,7 +330,7 @@ fn eip_4788_high_base_fee() {
     let parent_beacon_block_root_storage = executor.with_state_mut(|state| {
         state.storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index)).unwrap()
     });
-    assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
+    assert_eq!(parent_beacon_block_root_storage, U256::from(TEST_BEACON_ROOT_BYTE));
 }
 
 /// Create a state provider with blockhashes and the EIP-2935 system contract.
@@ -637,7 +643,7 @@ fn eip_7002() {
         );
     let withdrawal_amount = fixed_bytes!("0203040506070809");
     let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
-    assert_eq!(input.len(), 56);
+    assert_eq!(input.len(), WITHDRAWAL_REQUEST_INPUT_LENGTH);
 
     let mut header = chain_spec.genesis_header().clone();
     header.gas_limit = 1_500_000;
@@ -712,7 +718,7 @@ fn block_gas_limit_error() {
     // Concatenate the validator public key and withdrawal amount into a single byte array
     let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
     // Ensure the input length is 56 bytes
-    assert_eq!(input.len(), 56);
+    assert_eq!(input.len(), WITHDRAWAL_REQUEST_INPUT_LENGTH);
 
     // Create a genesis block header with a specified gas limit and gas used
     let mut header = chain_spec.genesis_header().clone();
@@ -819,7 +825,7 @@ fn test_balance_increment_not_duplicated() {
     let balance_changes: Vec<U256> = rx.try_iter().collect();
 
     if let Some(final_balance) = balance_changes.last() {
-        let expected_final_balance = U256::from(initial_balance) + U256::from(1_000_000_000); // initial + 1 Gwei in Wei
+        let expected_final_balance = U256::from(initial_balance) + U256::from(GWEI_IN_WEI); // initial + 1 Gwei in Wei
         assert_eq!(
             *final_balance, expected_final_balance,
             "Final balance should match expected value after withdrawal"
