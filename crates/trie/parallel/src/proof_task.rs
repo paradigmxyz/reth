@@ -62,7 +62,7 @@ use tokio::runtime::Handle;
 use tracing::trace;
 
 #[cfg(feature = "metrics")]
-use crate::proof_task_metrics::ProofTaskMetrics;
+use crate::proof_task_metrics::ProofTaskTrieMetrics;
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
@@ -117,7 +117,7 @@ fn storage_worker_loop<Tx>(
     proof_tx: ProofTaskTx<Tx>,
     work_rx: CrossbeamReceiver<StorageWorkerJob>,
     worker_id: usize,
-    #[cfg(feature = "metrics")] metrics: ProofTaskMetrics,
+    #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
 ) where
     Tx: DbTx,
 {
@@ -264,7 +264,7 @@ fn account_worker_loop<Tx>(
     work_rx: CrossbeamReceiver<AccountWorkerJob>,
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     worker_id: usize,
-    #[cfg(feature = "metrics")] metrics: ProofTaskMetrics,
+    #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
 ) where
     Tx: DbTx,
 {
@@ -890,7 +890,7 @@ impl ProofTaskManagerHandle {
 
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
-                let metrics = ProofTaskMetrics::default();
+                let metrics = ProofTaskTrieMetrics::default();
 
                 storage_worker_loop(
                     proof_task_tx,
@@ -918,7 +918,7 @@ impl ProofTaskManagerHandle {
 
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
-                let metrics = ProofTaskMetrics::default();
+                let metrics = ProofTaskTrieMetrics::default();
 
                 account_worker_loop(
                     proof_task_tx,

@@ -1,24 +1,5 @@
 use reth_metrics::{metrics::Histogram, Metrics};
 
-/// Metrics for blinded node fetching by proof workers.
-#[derive(Clone, Debug, Default)]
-pub struct ProofTaskMetrics {
-    /// The actual metrics for blinded nodes.
-    pub task_metrics: ProofTaskTrieMetrics,
-}
-
-impl ProofTaskMetrics {
-    /// Record the blinded account node count into the histogram.
-    pub fn record_account_nodes(&self, count: usize) {
-        self.task_metrics.record_account_nodes(count);
-    }
-
-    /// Record the blinded storage node count into the histogram.
-    pub fn record_storage_nodes(&self, count: usize) {
-        self.task_metrics.record_storage_nodes(count);
-    }
-}
-
 /// Metrics for the proof task.
 #[derive(Clone, Metrics)]
 #[metrics(scope = "trie.proof_task")]
