@@ -13,12 +13,12 @@ use reth_revm::{
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
+use revm::state::AccountInfo;
 use revm_bytecode::Bytecode;
 use revm_database::{
     states::{reverts::AccountInfoRevert, StorageSlot},
     AccountStatus, RevertToSlot,
 };
-use revm_state::AccountInfo;
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
@@ -415,8 +415,8 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_revm::db::{BundleAccount, BundleState};
+    use revm::state::AccountInfo;
     use revm_database::{states::StorageSlot, AccountRevert, AccountStatus};
-    use revm_state::AccountInfo;
     use tempfile::TempDir;
 
     use reth_revm::test_utils::StateProviderTest;
