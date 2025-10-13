@@ -44,7 +44,7 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInpu
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use tracing::{debug, debug_span, error, info, trace, warn};
+use tracing::{debug, error, info, instrument, trace, trace_span, warn};
 
 /// Context providing access to tree state during validation.
 ///
@@ -322,6 +322,7 @@ where
     /// - Block execution
     /// - State root computation
     /// - Fork detection
+    #[instrument(target = "engine::tree", skip_all)]
     pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &mut self,
         input: BlockOrPayload<T>,
@@ -365,6 +366,7 @@ where
         let block_num_hash = input.num_hash();
 
         trace!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Fetching block state provider");
+        let _span = trace_span!("state provider").entered();
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
@@ -375,8 +377,8 @@ where
             )
             .into())
         };
-
         let state_provider = ensure_ok!(provider_builder.build());
+        drop(_span);
 
         // fetch parent block
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
@@ -388,7 +390,8 @@ where
             .into())
         };
 
-        let evm_env = self.evm_env_for(&input).map_err(NewPayloadError::other)?;
+        let evm_env = trace_span!("evm env")
+            .in_scope(|| self.evm_env_for(&input).map_err(NewPayloadError::other))?;
 
         let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
 
@@ -626,6 +629,7 @@ where
     }
 
     /// Executes a block with the given state provider
+    #[instrument(target = "engine::tree", skip_all)]
     fn execute_block<S, Err, T>(
         &mut self,
         state_provider: S,
@@ -641,9 +645,6 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
-
-        let span = debug_span!(target: "engine::tree", "execute_block", num = ?num_hash.number, hash = ?num_hash.hash);
-        let _enter = span.enter();
         debug!(target: "engine::tree", "Executing block");
 
         let mut db = State::builder()
@@ -695,6 +696,7 @@ where
     /// Returns `Err(_)` if error was encountered during computation.
     /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
     /// should be used instead.
+    #[instrument(target = "engine::tree", skip_all)]
     fn compute_state_root_parallel(
         &self,
         persisting_kind: PersistingKind,
@@ -830,6 +832,7 @@ where
     /// The method handles strategy fallbacks if the preferred approach fails, ensuring
     /// block execution always completes with a valid state root.
     #[allow(clippy::too_many_arguments)]
+    #[instrument(target = "engine::tree", skip_all, fields(strategy))]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -999,6 +1002,7 @@ where
     }
 
     /// Determines the state root computation strategy based on persistence state and configuration.
+    #[instrument(target = "engine::tree", skip_all)]
     fn plan_state_root_computation<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &BlockOrPayload<T>,
@@ -1081,6 +1085,7 @@ where
     ///    block.
     /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
     ///    [`HashedPostState`] from them.
+    #[instrument(target = "engine::tree", skip_all, fields(persisting_kind))]
     fn compute_trie_input<TP: DBProvider + BlockNumReader>(
         &self,
         persisting_kind: PersistingKind,

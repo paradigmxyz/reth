@@ -500,7 +500,11 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
-    #[instrument(level = "trace", skip_all, fields(block_hash = %payload.block_hash(), block_num = %payload.block_number(),), target = "engine::tree")]
+    #[instrument(
+        target = "engine::tree",
+        skip_all,
+        fields(block_hash = %payload.block_hash(), block_num = %payload.block_number()),
+    )]
     fn on_new_payload(
         &mut self,
         payload: T::ExecutionData,
@@ -581,6 +585,7 @@ where
     /// - `Valid`: Payload successfully validated and inserted
     /// - `Syncing`: Parent missing, payload buffered for later
     /// - Error status: Payload is invalid
+    #[instrument(target = "engine::tree", skip(self))]
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
@@ -2068,7 +2073,7 @@ where
     }
 
     /// Attempts to connect any buffered blocks that are connected to the given parent hash.
-    #[instrument(level = "trace", skip(self), target = "engine::tree")]
+    #[instrument(target = "engine::tree", skip(self))]
     fn try_connect_buffered_blocks(
         &mut self,
         parent: BlockNumHash,
@@ -2501,6 +2506,7 @@ where
     /// Returns `InsertPayloadOk::Inserted(BlockStatus::Valid)` on successful execution,
     /// `InsertPayloadOk::AlreadySeen` if the block already exists, or
     /// `InsertPayloadOk::Inserted(BlockStatus::Disconnected)` if parent state is missing.
+    #[instrument(target = "engine::tree", skip_all, fields(block_id))]
     fn insert_block_or_payload<Input, Err>(
         &mut self,
         block_id: BlockWithParent,

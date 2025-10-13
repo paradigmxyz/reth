@@ -170,6 +170,7 @@ where
     /// Returns an error with the original transactions iterator if the proof task manager fails to
     /// initialize.
     #[allow(clippy::type_complexity)]
+    #[instrument(target = "engine::tree", skip_all)]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -277,6 +278,7 @@ where
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
     ///
     /// Returns a [`PayloadHandle`] to communicate with the task.
+    #[instrument(target = "engine::tree", skip_all)]
     pub(super) fn spawn_cache_exclusive<P, I: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
@@ -472,6 +474,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
+    #[instrument(target = "engine::tree", skip_all)]
     pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.state_root
             .take()
