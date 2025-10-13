@@ -416,6 +416,9 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 }
                 
                 
+                
+                tracing::warn!("Internal tx (0x6A) handler not fully implemented - state updates missing!");
+                
                 StartTxHookResult {
                     end_tx_now: true,
                     gas_used: 0,
