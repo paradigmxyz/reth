@@ -466,20 +466,37 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     };
                 }
                 
-                use crate::internal_tx::unpack_internal_tx_data_start_block;
-                
                 let data = ctx.data.as_deref().unwrap_or(&[]);
-                let internal_data = match unpack_internal_tx_data_start_block(data) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        tracing::error!("Failed to unpack internal tx data: {}", e);
-                        return StartTxHookResult {
-                            end_tx_now: true,
-                            gas_used: 0,
-                            error: Some(format!("invalid internal tx data: {}", e)),
-                        };
-                    }
+                
+                if data.len() < 4 {
+                    return StartTxHookResult {
+                        end_tx_now: true,
+                        gas_used: 0,
+                        error: Some("internal tx data too short".to_string()),
+                    };
+                }
+                
+                let selector = &data[0..4];
+                
+                use crate::internal_tx::{
+                    INTERNAL_TX_START_BLOCK_METHOD_ID,
+                    INTERNAL_TX_BATCH_POSTING_REPORT_METHOD_ID,
+                    unpack_internal_tx_data_start_block,
+                    unpack_internal_tx_data_batch_posting_report,
                 };
+                
+                if selector == INTERNAL_TX_START_BLOCK_METHOD_ID {
+                    let internal_data = match unpack_internal_tx_data_start_block(data) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            tracing::error!("Failed to unpack internal tx data: {}", e);
+                            return StartTxHookResult {
+                                end_tx_now: true,
+                                gas_used: 0,
+                                error: Some(format!("invalid internal tx data: {}", e)),
+                            };
+                        }
+                    };
                 
                 let arbos_version = if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
                     arbos_state.arbos_version
@@ -536,16 +553,42 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     tracing::error!("Failed to update L2 pricing model: {:?}", e);
                 }
                 
-                if let Ok(mut arbos_state) = crate::arbosstate::ArbosState::open(state_db as *mut _) {
-                    if let Err(e) = arbos_state.upgrade_arbos_version_if_necessary(current_time, state_db) {
-                        tracing::error!("Failed to upgrade ArbOS version: {:?}", e);
+                    if let Ok(mut arbos_state) = crate::arbosstate::ArbosState::open(state_db as *mut _) {
+                        if let Err(e) = arbos_state.upgrade_arbos_version_if_necessary(current_time, state_db) {
+                            tracing::error!("Failed to upgrade ArbOS version: {:?}", e);
+                        }
                     }
-                }
-                
-                StartTxHookResult {
-                    end_tx_now: true,
-                    gas_used: 0,
-                    error: None,
+                    
+                    StartTxHookResult {
+                        end_tx_now: true,
+                        gas_used: 0,
+                        error: None,
+                    }
+                } else if selector == INTERNAL_TX_BATCH_POSTING_REPORT_METHOD_ID {
+                    let _report_data = match unpack_internal_tx_data_batch_posting_report(data) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            tracing::error!("Failed to unpack batch posting report data: {}", e);
+                            return StartTxHookResult {
+                                end_tx_now: true,
+                                gas_used: 0,
+                                error: Some(format!("invalid batch posting report data: {}", e)),
+                            };
+                        }
+                    };
+                    
+                    StartTxHookResult {
+                        end_tx_now: true,
+                        gas_used: 0,
+                        error: None,
+                    }
+                } else {
+                    tracing::error!("Unknown internal tx method selector: {:?}", selector);
+                    StartTxHookResult {
+                        end_tx_now: true,
+                        gas_used: 0,
+                        error: Some(format!("unknown internal tx method selector: {:?}", selector)),
+                    }
                 }
             }
             
