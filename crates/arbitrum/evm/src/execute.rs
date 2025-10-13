@@ -592,9 +592,35 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 available_refund = available_refund.saturating_add(withheld_gas_funds);
                 available_refund = available_refund.saturating_add(withheld_submission_fee);
                 
+                const ARB_RETRYABLE_TX_ADDRESS: Address = Address::new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x6e]);
+                const TICKET_CREATED_TOPIC: [u8; 32] = [0x7c, 0x79, 0x3c, 0xce, 0xd5, 0x74, 0x3d, 0xc5, 0xf5, 0x31, 0xbb, 0xe2, 0xbf, 0xb5, 0xa9, 0xfa, 0x3f, 0x40, 0xad, 0xef, 0x29, 0x23, 0x1e, 0x6a, 0xb1, 0x65, 0xc0, 0x8a, 0x29, 0xe3, 0xdd, 0x89];
+                const REDEEM_SCHEDULED_TOPIC: [u8; 32] = [0x5c, 0xcd, 0x00, 0x95, 0x02, 0x50, 0x9c, 0xf2, 0x87, 0x62, 0xc6, 0x78, 0x58, 0x99, 0x4d, 0x85, 0xb1, 0x63, 0xbb, 0x6e, 0x45, 0x1f, 0x5e, 0x9d, 0xf7, 0xc5, 0xe1, 0x8c, 0x9c, 0x2e, 0x12, 0x3e];
+                
+                crate::log_sink::push(ARB_RETRYABLE_TX_ADDRESS, &[TICKET_CREATED_TOPIC, ticket_id.0], &[]);
+                
+                let retry_tx_nonce = 0u64;
+                let retry_tx_hash = B256::ZERO;
+                let sequence_num_bytes: [u8; 32] = {
+                    let mut bytes = [0u8; 32];
+                    bytes[24..].copy_from_slice(&retry_tx_nonce.to_be_bytes());
+                    bytes
+                };
+                
+                let mut redeem_data = Vec::new();
+                redeem_data.extend_from_slice(&[0u8; 24]);
+                redeem_data.extend_from_slice(&usergas.to_be_bytes());
+                redeem_data.extend_from_slice(&[0u8; 12]);
+                redeem_data.extend_from_slice(fee_refund_addr.as_slice());
+                let max_refund_bytes: [u8; 32] = available_refund.to_be_bytes();
+                redeem_data.extend_from_slice(&max_refund_bytes);
+                let submission_fee_bytes: [u8; 32] = submission_fee_u256.to_be_bytes();
+                redeem_data.extend_from_slice(&submission_fee_bytes);
+                
+                crate::log_sink::push(ARB_RETRYABLE_TX_ADDRESS, &[REDEEM_SCHEDULED_TOPIC, ticket_id.0, retry_tx_hash.0, sequence_num_bytes], &redeem_data);
+                
                 StartTxHookResult {
                     end_tx_now: true,
-                    gas_used: 0,
+                    gas_used: usergas,
                     error: None,
                 }
             }

@@ -39,21 +39,57 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
         match ctx.tx.tx_type() {
             ArbTxType::Deposit => Err(ctx),
             ty => {
+                use alloy_eips::eip2718::Encodable2718;
+                let tx_hash = {
+                    let mut buf = Vec::new();
+                    ctx.tx.encode_2718(&mut buf);
+                    alloy_primitives::keccak256(&buf)
+                };
+                
                 let status_flag = ctx.result.is_success();
                 let gas_used = ctx.result.gas_used();
+                
+                let (actual_gas_used, cumulative_gas) = if let Some((early_gas, early_cumulative)) = crate::get_early_tx_gas(&tx_hash) {
+                    tracing::info!(
+                        target: "arb-reth::receipt-builder",
+                        tx_hash = ?tx_hash,
+                        early_gas = early_gas,
+                        early_cumulative = early_cumulative,
+                        evm_gas = gas_used,
+                        ctx_cumulative = ctx.cumulative_gas_used,
+                        "Using early termination gas for receipt - will use early_cumulative"
+                    );
+                    crate::clear_early_tx_gas(&tx_hash);
+                    (early_gas, early_cumulative)
+                } else {
+                    tracing::info!(
+                        target: "arb-reth::receipt-builder",
+                        tx_hash = ?tx_hash,
+                        evm_gas = gas_used,
+                        ctx_cumulative = ctx.cumulative_gas_used,
+                        "No early gas found - using ctx cumulative"
+                    );
+                    (gas_used, ctx.cumulative_gas_used)
+                };
+                
                 let mut logs = ctx.result.into_logs();
                 let mut extra = crate::log_sink::take();
                 if !extra.is_empty() {
                     logs.append(&mut extra);
                 }
                 
-                let cumulative_gas = ctx.cumulative_gas_used;
-                
                 let receipt = AlloyReceipt {
                     status: Eip658Value::Eip658(status_flag),
                     cumulative_gas_used: cumulative_gas,
                     logs,
                 };
+                
+                tracing::info!(
+                    target: "arb-reth::receipt-builder",
+                    tx_hash = ?tx_hash,
+                    cumulative_in_receipt = receipt.cumulative_gas_used,
+                    "Created receipt with cumulative_gas_used"
+                );
                 let out = match ty {
                     ArbTxType::Unsigned => ArbReceipt::Legacy(receipt),
                     ArbTxType::Contract => ArbReceipt::Legacy(receipt),

@@ -75,6 +75,7 @@ pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::Re
     predeploys: Arc<Mutex<PredeployRegistry>>,
     hooks: DefaultArbOsHooks,
     tx_state: ArbTxProcessorState,
+    cumulative_gas_used: u64,
     _phantom: PhantomData<CS>,
 }
 
@@ -192,10 +193,20 @@ where
             alloy_primitives::keccak256(&buf)
         };
         
+        let (ticket_id, refund_to, gas_fee_cap_opt, max_refund, submission_fee_refund, deposit_value, retry_value, retry_to, retry_data, beneficiary, max_submission_fee, fee_refund_addr, l1_base_fee_opt) = match &**tx.tx() {
+            reth_arbitrum_primitives::ArbTypedTransaction::Retry(retry_tx) => {
+                (Some(retry_tx.ticket_id), Some(retry_tx.refund_to), Some(retry_tx.gas_fee_cap), Some(retry_tx.max_refund), Some(retry_tx.submission_fee_refund), None, None, None, None, None, None, None, None)
+            },
+            reth_arbitrum_primitives::ArbTypedTransaction::SubmitRetryable(submit_tx) => {
+                (None, None, Some(submit_tx.gas_fee_cap), None, None, Some(submit_tx.deposit_value), Some(submit_tx.retry_value), submit_tx.retry_to, Some(submit_tx.retry_data.to_vec()), Some(submit_tx.beneficiary), Some(submit_tx.max_submission_fee), Some(submit_tx.fee_refund_addr), Some(submit_tx.l1_base_fee))
+            },
+            _ => (None, None, None, None, None, None, None, None, None, None, None, None, None),
+        };
+        
         let start_ctx = ArbStartTxContext {
             sender,
             nonce,
-            l1_base_fee: block_basefee,
+            l1_base_fee: l1_base_fee_opt.unwrap_or(block_basefee),
             calldata_len,
             coinbase: block_coinbase,
             executed_on_chain: true,
@@ -205,19 +216,19 @@ where
             value: tx.tx().value(),
             gas_limit,
             basefee: block_basefee,
-            ticket_id: None,
-            refund_to: None,
-            gas_fee_cap: None,
-            max_refund: None,
-            submission_fee_refund: None,
+            ticket_id,
+            refund_to,
+            gas_fee_cap: gas_fee_cap_opt,
+            max_refund,
+            submission_fee_refund,
             tx_hash,
-            deposit_value: None,
-            retry_value: None,
-            retry_to: None,
-            retry_data: None,
-            beneficiary: None,
-            max_submission_fee: None,
-            fee_refund_addr: None,
+            deposit_value,
+            retry_value,
+            retry_to,
+            retry_data,
+            beneficiary,
+            max_submission_fee,
+            fee_refund_addr,
             block_timestamp,
         };
         
@@ -230,6 +241,24 @@ where
             };
             self.tx_state = state;
             result
+        };
+
+        let hook_gas_override = if start_hook_result.end_tx_now {
+            tracing::debug!(
+                target: "arb-reth::executor",
+                tx_type = ?tx.tx().tx_type(),
+                gas_used = start_hook_result.gas_used,
+                error = ?start_hook_result.error,
+                "Transaction ended early - will override EVM gas with hook gas"
+            );
+            
+            if let Some(err_msg) = start_hook_result.error {
+                return Err(BlockExecutionError::msg(err_msg));
+            }
+            
+            Some(start_hook_result.gas_used)
+        } else {
+            None
         };
 
         let tx_type = tx.tx().tx_type();
@@ -397,7 +426,31 @@ where
         evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
 
         let wrapped = WithTxEnv { tx_env, tx };
-        let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+        let result = self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
+            let evm_gas = exec_result.gas_used();
+            let actual_gas = hook_gas_override.unwrap_or(evm_gas);
+            let new_cumulative = self.cumulative_gas_used + actual_gas;
+            
+            tracing::debug!(
+                target: "arb-reth::executor",
+                tx_hash = ?tx_hash,
+                evm_gas = evm_gas,
+                actual_gas = actual_gas,
+                current_cumulative = self.cumulative_gas_used,
+                new_cumulative = new_cumulative,
+                is_override = hook_gas_override.is_some(),
+                "Storing cumulative gas before receipt creation"
+            );
+            
+            crate::set_early_tx_gas(tx_hash, actual_gas, new_cumulative);
+            
+            f(exec_result)
+        });
+        
+        if let Ok(Some(evm_gas)) = result {
+            let actual_gas = hook_gas_override.unwrap_or(evm_gas);
+            self.cumulative_gas_used += actual_gas;
+        }
 
         let evm = self.inner.evm_mut();
         evm.cfg_mut().disable_balance_check = prev_disable;
@@ -451,7 +504,38 @@ where
     }
 
     fn finish(self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
-        self.inner.finish()
+        tracing::info!(
+            target: "arb-reth::executor",
+            "ArbBlockExecutor::finish() called"
+        );
+        
+        let (evm, mut result) = self.inner.finish()?;
+        
+        tracing::info!(
+            target: "arb-reth::executor",
+            receipts_count = result.receipts.len(),
+            inner_gas_used = result.gas_used,
+            "Got result from inner executor"
+        );
+        
+        if let Some(last_receipt) = result.receipts.last() {
+            use alloy_consensus::TxReceipt;
+            let correct_gas_used = last_receipt.cumulative_gas_used();
+            tracing::info!(
+                target: "arb-reth::executor",
+                inner_gas = result.gas_used,
+                correct_gas = correct_gas_used,
+                "Correcting block gasUsed from inner executor value to actual cumulative"
+            );
+            result.gas_used = correct_gas_used;
+        } else {
+            tracing::warn!(
+                target: "arb-reth::executor",
+                "No receipts in result - cannot correct gasUsed"
+            );
+        }
+        
+        Ok((evm, result))
     }
 
     fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
@@ -507,6 +591,7 @@ where
             predeploys: self.predeploys.clone(),
             hooks: Default::default(),
             tx_state: Default::default(),
+            cumulative_gas_used: 0,
             _phantom: core::marker::PhantomData::<CS>,
         }
     }
