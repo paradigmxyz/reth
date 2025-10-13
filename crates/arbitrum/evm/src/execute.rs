@@ -33,6 +33,7 @@ pub struct ArbStartTxContext {
     pub max_submission_fee: Option<U256>,
     pub fee_refund_addr: Option<Address>,
     pub block_timestamp: u64,
+    pub data: Option<Vec<u8>>,
 }
 
 pub struct ArbGasChargingContext {
@@ -415,9 +416,52 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     };
                 }
                 
+                use crate::internal_tx::unpack_internal_tx_data_start_block;
                 
+                let data = ctx.data.as_deref().unwrap_or(&[]);
+                let internal_data = match unpack_internal_tx_data_start_block(data) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        tracing::error!("Failed to unpack internal tx data: {}", e);
+                        return StartTxHookResult {
+                            end_tx_now: true,
+                            gas_used: 0,
+                            error: Some(format!("invalid internal tx data: {}", e)),
+                        };
+                    }
+                };
                 
-                tracing::warn!("Internal tx (0x6A) handler not fully implemented - state updates missing!");
+                let blockhashes_storage = crate::storage::Storage::new(
+                    state_db as *mut _,
+                    crate::arbosstate::arbos_state_subspace(6),
+                );
+                let blockhashes = crate::blockhash::Blockhashes::open(blockhashes_storage);
+                
+                let old_l1_block_number = blockhashes.l1_block_number().unwrap_or(0);
+                let l1_block_number = internal_data.l1_block_number;
+                
+                if l1_block_number > old_l1_block_number {
+                    let prev_hash = B256::ZERO;
+                    
+                    if let Err(e) = blockhashes.record_new_l1_block(
+                        l1_block_number - 1,
+                        prev_hash,
+                        11,
+                    ) {
+                        tracing::error!("Failed to record new L1 block: {:?}", e);
+                    }
+                }
+                
+                let l2_pricing = crate::l2_pricing::L2PricingState::open(crate::storage::Storage::new(
+                    state_db as *mut _,
+                    crate::arbosstate::arbos_state_subspace(1),
+                ));
+                
+                let l2_base_fee = l2_pricing.get_base_fee_l2().unwrap_or(U256::ZERO);
+                
+                if let Err(e) = l2_pricing.update_pricing_model(l2_base_fee, internal_data.time_passed) {
+                    tracing::error!("Failed to update L2 pricing model: {:?}", e);
+                }
                 
                 StartTxHookResult {
                     end_tx_now: true,
