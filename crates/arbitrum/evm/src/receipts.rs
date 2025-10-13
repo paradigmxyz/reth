@@ -39,15 +39,39 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
         match ctx.tx.tx_type() {
             ArbTxType::Deposit => Err(ctx),
             ty => {
+                use alloy_eips::eip2718::Encodable2718;
+                let tx_hash = {
+                    let mut buf = Vec::new();
+                    ctx.tx.encode_2718(&mut buf);
+                    alloy_primitives::keccak256(&buf)
+                };
+                
                 let status_flag = ctx.result.is_success();
                 let gas_used = ctx.result.gas_used();
+                
+                let (actual_gas_used, cumulative_gas) = if let Some(early_gas) = crate::get_early_tx_gas(&tx_hash) {
+                    let gas_diff = early_gas as i64 - gas_used as i64;
+                    tracing::debug!(
+                        target: "arb-reth::receipt",
+                        tx_hash = ?tx_hash,
+                        early_gas = early_gas,
+                        evm_gas = gas_used,
+                        gas_diff = gas_diff,
+                        "Using early termination gas for receipt"
+                    );
+                    crate::clear_early_tx_gas(&tx_hash);
+                    crate::add_gas_adjustment(gas_diff);
+                    let cumulative = ctx.cumulative_gas_used - gas_used + early_gas;
+                    (early_gas, cumulative)
+                } else {
+                    (gas_used, ctx.cumulative_gas_used)
+                };
+                
                 let mut logs = ctx.result.into_logs();
                 let mut extra = crate::log_sink::take();
                 if !extra.is_empty() {
                     logs.append(&mut extra);
                 }
-                
-                let cumulative_gas = ctx.cumulative_gas_used;
                 
                 let receipt = AlloyReceipt {
                     status: Eip658Value::Eip658(status_flag),

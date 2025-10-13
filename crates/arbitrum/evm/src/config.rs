@@ -40,6 +40,21 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
 {
         let reth_execution_types::BlockExecutionResult { receipts, gas_used, .. } = input.output;
 
+        let gas_adjustment = crate::get_and_clear_gas_adjustment();
+        let adjusted_gas_used = if gas_adjustment != 0 {
+            let new_gas = (*gas_used as i64 + gas_adjustment) as u64;
+            reth_tracing::tracing::debug!(
+                target: "arb-evm::assemble",
+                original_gas = gas_used,
+                adjustment = gas_adjustment,
+                adjusted_gas = new_gas,
+                "Adjusting block gas_used for early-terminated transactions"
+            );
+            new_gas
+        } else {
+            *gas_used
+        };
+
         let transactions_root = alloy_consensus::proofs::calculate_transaction_root(&input.transactions);
         let receipts_root = alloy_consensus::proofs::calculate_receipt_root(&receipts);
         let logs_bloom = alloy_primitives::logs_bloom(receipts.iter().flat_map(|r| r.logs()));
@@ -60,7 +75,7 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             number: input.evm_env.block_env.number.saturating_to(),
             gas_limit: input.evm_env.block_env.gas_limit,
             difficulty: input.evm_env.block_env.difficulty,
-            gas_used: *gas_used,
+            gas_used: adjusted_gas_used,
             extra_data: alloy_primitives::Bytes::from(input.parent.extra_data.clone()),
             parent_beacon_block_root: input.execution_ctx.parent_beacon_block_root,
             blob_gas_used: None,

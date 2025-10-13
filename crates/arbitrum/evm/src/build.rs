@@ -248,14 +248,14 @@ where
                 tx_type = ?tx.tx().tx_type(),
                 gas_used = start_hook_result.gas_used,
                 error = ?start_hook_result.error,
-                "Transaction ended early by start_tx hook"
+                "Transaction will end early - storing gas for receipt builder"
             );
             
             if let Some(err_msg) = start_hook_result.error {
                 return Err(BlockExecutionError::msg(err_msg));
             }
             
-            return Ok(Some(start_hook_result.gas_used));
+            crate::set_early_tx_gas(tx_hash, start_hook_result.gas_used);
         }
 
         let tx_type = tx.tx().tx_type();

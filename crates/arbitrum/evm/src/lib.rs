@@ -45,6 +45,8 @@ mod arb_evm;
 pub use arb_evm::{ArbTransaction, ArbEvm, ArbEvmFactory};
 
 mod log_sink;
+mod early_tx_state;
+pub use early_tx_state::{set_early_tx_gas, get_early_tx_gas, clear_early_tx_gas, add_gas_adjustment, get_and_clear_gas_adjustment};
 pub mod storage;
 pub mod l1_pricing;
 pub mod l2_pricing;
