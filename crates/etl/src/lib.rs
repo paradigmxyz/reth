@@ -67,6 +67,31 @@ where
     /// Create a new collector with some capacity.
     ///
     /// Once the capacity (in bytes) is reached, the data is sorted and flushed to disk.
+    ///
+    /// # Parameters
+    ///
+    /// * `buffer_capacity_bytes` - Maximum buffer size in bytes before flushing to disk.
+    ///   Recommended range: 1MB to 1GB. See [`EtlConfig::default_file_size()`] for the default
+    ///   value (500MB). Values too small may cause frequent disk I/O, while values too large may
+    ///   consume excessive memory.
+    /// * `parent_dir` - Optional directory for temporary file storage. If `None`, uses system
+    ///   temporary directory.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use alloy_primitives::TxHash;
+    /// use reth_db_api::table::{Compress, Encode};
+    /// use reth_etl::Collector;
+    /// use std::path::PathBuf;
+    ///
+    /// // Use default recommended size
+    /// let collector: Collector<TxHash, u64> = Collector::new(500 * 1024 * 1024, None);
+    ///
+    /// // Use custom directory
+    /// let collector: Collector<TxHash, u64> =
+    ///     Collector::new(1024 * 1024, Some(PathBuf::from("/tmp/etl")));
+    /// ```
     pub const fn new(buffer_capacity_bytes: usize, parent_dir: Option<PathBuf>) -> Self {
         Self {
             parent_dir,
@@ -286,8 +311,13 @@ mod tests {
 
     #[test]
     fn etl_hashes() {
-        let mut entries: Vec<_> =
-            (0..10_000).map(|id| (TxHash::random(), id as TxNumber)).collect();
+        let mut entries: Vec<_> = (0..10_000u32)
+            .map(|id| {
+                let mut hash_bytes = [0u8; 32];
+                hash_bytes[0..4].copy_from_slice(&id.to_be_bytes());
+                (TxHash::from_slice(&hash_bytes), id as TxNumber)
+            })
+            .collect();
 
         let mut collector = Collector::new(1024, None);
         assert!(collector.dir.is_none());
