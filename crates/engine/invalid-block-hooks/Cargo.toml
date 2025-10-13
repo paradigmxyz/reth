@@ -18,8 +18,8 @@ revm-database.workspace = true
 reth-engine-primitives.workspace = true
 reth-evm.workspace = true
 reth-primitives-traits.workspace = true
-reth-provider = { workspace = true, features = ["test-utils"] }
-reth-revm = { workspace = true, features = ["serde", "test-utils"] }
+reth-provider.workspace = true
+reth-revm = { workspace = true, features = ["serde"] }
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-tracing.workspace = true
 reth-trie.workspace = true
@@ -45,5 +45,7 @@ alloy-eips.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm-ethereum.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-revm = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 tempfile.workspace = true
