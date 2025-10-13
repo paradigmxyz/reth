@@ -4,7 +4,7 @@ use alloy_primitives::{keccak256, Address, Bytes, U256, B256};
 use revm::Database;
 use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint, StorageBackedAddress};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct RetryableTicketId(pub [u8; 32]);
 
 #[derive(Clone)]
@@ -117,6 +117,8 @@ impl<D: Database> RetryableState<D> {
 
         let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
         let ticket_base_key = B256::from(keccak256(&ticket_id.0));
+        
+        tracing::info!(target: "arb-retryable", "CREATE: ticket_id={:?} base_key={:?}", ticket_id, ticket_base_key);
 
         let ticket = RetryableTicket {
             storage: ticket_storage,
@@ -135,6 +137,7 @@ impl<D: Database> RetryableState<D> {
         let timeout = current_time + RETRYABLE_LIFETIME_SECONDS;
         let call_data_hash = U256::from_be_bytes(keccak256(&params.call_data).0);
 
+        tracing::info!(target: "arb-retryable", "CREATE_RETRYABLE: ticket_id={:?} timeout={} active=1", ticket_id, timeout);
         let _ = ticket.escrowed.set(escrowed);
         let _ = ticket.beneficiary.set(params.beneficiary);
         let _ = ticket.from.set(params.sender);
@@ -142,6 +145,7 @@ impl<D: Database> RetryableState<D> {
         let _ = ticket.call_value.set(params.submission_fee);
         let _ = ticket.call_data.set(call_data_hash);
         let _ = ticket.timeout.set(timeout);
+        tracing::info!(target: "arb-retryable", "CREATE_RETRYABLE: set timeout={} for ticket_id={:?}", timeout, ticket_id);
         let _ = ticket.num_tries.set(0);
         let _ = ticket.active.set(1);
 
@@ -157,7 +161,10 @@ impl<D: Database> RetryableState<D> {
         let ticket_base_key = B256::from(keccak256(&ticket_id.0));
         let timeout_storage = StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET);
         
+        tracing::info!(target: "arb-retryable", "OPEN: ticket_id={:?} base_key={:?}", ticket_id, ticket_base_key);
+        tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: ticket_id={:?} current_time={}", ticket_id, current_time);
         if let Ok(timeout) = timeout_storage.get() {
+            tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: found timeout={} current_time={} valid={}", timeout, current_time, timeout > current_time);
             if timeout > current_time {
                 let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
                 
@@ -175,7 +182,10 @@ impl<D: Database> RetryableState<D> {
                     active: StorageBackedUint64::new(state, ticket_base_key, ACTIVE_OFFSET),
                 });
             }
+        } else {
+            tracing::warn!(target: "arb-retryable", "OPEN_RETRYABLE: timeout storage GET failed for ticket_id={:?}", ticket_id);
         }
+        tracing::warn!(target: "arb-retryable", "OPEN_RETRYABLE: returning None for ticket_id={:?}", ticket_id);
         None
     }
 }
