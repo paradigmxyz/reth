@@ -262,9 +262,14 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
+<<<<<<< HEAD
 version = "0.22.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24a48fa6a4a5a69ae8e46c0ae60851602c5016baa3379d076c76e4c2f3b889f7"
+=======
+version = "0.21.2"
+source = "git+https://github.com/alloy-rs/evm?rev=7d91329#7d9132967c4ada82b5245e8763e347a260b218eb"
+>>>>>>> 94a960055 (feat(jovian): track da footprint block limit. Update basefee calculation)
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -379,9 +384,14 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-evm"
+<<<<<<< HEAD
 version = "0.22.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1e0abe910a26d1b3686f4f6ad58287ce8c7fb85b08603d8c832869f02eb3d79"
+=======
+version = "0.21.2"
+source = "git+https://github.com/alloy-rs/evm?rev=7d91329#7d9132967c4ada82b5245e8763e347a260b218eb"
+>>>>>>> 94a960055 (feat(jovian): track da footprint block limit. Update basefee calculation)
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10949,9 +10959,14 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
+<<<<<<< HEAD
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce1228a7989cc3d9af84c0de2abe39680a252c265877e67d2f0fb4f392cb690"
+=======
+version = "0.30.0"
+source = "git+https://github.com/paradigmxyz/revm-inspectors?rev=5ad9715#5ad97159a5829145e951de9facbadbccb746b128"
+>>>>>>> 94a960055 (feat(jovian): track da footprint block limit. Update basefee calculation)
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",

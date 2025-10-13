@@ -728,7 +728,7 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
-# [patch.crates-io]
+[patch.crates-io]
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
@@ -763,10 +763,13 @@ vergen-git2 = "1.0.5"
 # op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-rpc-jsonrpsee = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 #
-# revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "5ad9715" }
 #
 # jsonrpsee = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-core = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-server = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-http-client = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-types = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "7d91329" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "7d91329" }
