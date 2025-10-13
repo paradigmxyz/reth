@@ -11,8 +11,10 @@ use reth_provider::{
     StageCheckpointWriter,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
-use reth_stages::{BoxedStage, ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
-use reth_stages_api::{MetricEvent, MetricEventsSender};
+use reth_stages_api::{
+    BoxedStage, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, StageError, UnwindInput,
+    UnwindOutput,
+};
 use std::{
     sync::mpsc::{Receiver, SendError, Sender},
     time::Instant,
