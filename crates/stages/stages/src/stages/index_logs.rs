@@ -15,8 +15,7 @@ use reth_log_index::{
     utils::{count_log_values_in_block, log_values_from_receipts},
 };
 use reth_log_index_common::{
-    FilterMapColumns, FilterMapMeta, FilterMapParams, LogValueIndex, MapRowIndex,
-    ProcessBatchResult,
+    FilterMapColumns, FilterMapMeta, LogIndexParams, LogValueIndex, MapRowIndex, ProcessBatchResult,
 };
 
 use reth_provider::{
@@ -41,7 +40,7 @@ pub struct IndexLogsStage {
     /// ETL configuration for buffering
     pub etl_config: EtlConfig,
     /// `FilterMap` parameters
-    pub params: FilterMapParams,
+    pub params: LogIndexParams,
     /// Prune mode configuration
     pub prune_mode: Option<PruneMode>,
 }
@@ -51,7 +50,7 @@ impl IndexLogsStage {
     pub const fn new(
         commit_threshold: u64,
         etl_config: EtlConfig,
-        params: FilterMapParams,
+        params: LogIndexParams,
         prune_mode: Option<PruneMode>,
     ) -> Self {
         Self { commit_threshold, etl_config, params, prune_mode }
@@ -130,7 +129,7 @@ impl Default for IndexLogsStage {
         Self {
             commit_threshold: 1000,
             etl_config: EtlConfig::default(),
-            params: FilterMapParams::default(),
+            params: LogIndexParams::default(),
             prune_mode: None,
         }
     }
@@ -640,7 +639,7 @@ mod tests {
         commit_threshold: u64,
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
-        params: FilterMapParams,
+        params: LogIndexParams,
     }
 
     impl Default for IndexLogsTestRunner {
@@ -650,7 +649,7 @@ mod tests {
                 commit_threshold: 100,
                 etl_config: EtlConfig::default(),
                 prune_mode: None,
-                params: FilterMapParams::default(),
+                params: LogIndexParams::default(),
             }
         }
     }

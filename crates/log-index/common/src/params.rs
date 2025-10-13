@@ -10,7 +10,7 @@ use core::hash::Hasher;
 use sha2::{Digest, Sha256};
 
 /// Default parameters used on mainnet
-const DEFAULT_PARAMS: FilterMapParams = FilterMapParams {
+const DEFAULT_PARAMS: LogIndexParams = LogIndexParams {
     log_map_height: 16,
     log_map_width: 24,
     log_maps_per_epoch: 10,
@@ -19,20 +19,11 @@ const DEFAULT_PARAMS: FilterMapParams = FilterMapParams {
     log_layer_diff: 4,
 };
 
-/// Test parameters that put one log value per epoch, ensuring block exact tail unindexing for
-/// testing
-const RANGE_TEST_PARAMS: FilterMapParams = FilterMapParams {
-    log_map_height: 4,
-    log_map_width: 24,
-    log_maps_per_epoch: 0,
-    log_values_per_map: 0,
-    base_row_length_ratio: 16, // baseRowLength >= 1
-    log_layer_diff: 4,
-};
-
-/// `FilterMaps` parameters based on EIP-7745
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FilterMapParams {
+/// `LogIndex` parameters based on EIP-7745
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct LogIndexParams {
     /// Log of map height (rows per map). Default: 16 (65,536 rows)
     pub log_map_height: u32,
     /// Log of map width (columns per row). Default: 24 (16,777,216 columns)
@@ -47,19 +38,13 @@ pub struct FilterMapParams {
     pub log_layer_diff: u32,
 }
 
-impl Default for FilterMapParams {
+impl Default for LogIndexParams {
     fn default() -> Self {
         DEFAULT_PARAMS
     }
 }
 
-impl FilterMapParams {
-    /// Test parameters that put one log value per epoch, ensuring block exact tail unindexing for
-    /// testing
-    pub const fn range_test() -> Self {
-        RANGE_TEST_PARAMS
-    }
-
+impl LogIndexParams {
     #[inline]
     /// Get the number of rows per map
     pub const fn map_height(&self) -> u32 {
@@ -267,11 +252,11 @@ impl FilterMapParams {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::b256;
+    use alloy_primitives::{b256, Log};
 
     #[test]
     fn test_row_index_distribution() {
-        let params = FilterMapParams::default();
+        let params = LogIndexParams::default();
         let value1 = b256!("0000000000000000000000000000000000000000000000000000000000000001");
         let value2 = b256!("0000000000000000000000000000000000000000000000000000000000000002");
 
@@ -306,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_column_index() {
-        let params = FilterMapParams::default();
+        let params = LogIndexParams::default();
         let value = b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
         // Column index should include position information
@@ -324,7 +309,7 @@ mod tests {
 
     // #[test]
     //     fn test_potential_matches() {
-    //         let params = FilterMapParams::default();
+    //         let params = LogIndexParams::default();
     //         let mut false_positives = 0;
 
     //         for _ in 0..TEST_PM_COUNT {

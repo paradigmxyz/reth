@@ -1,6 +1,6 @@
 use alloy_primitives::{map::HashMap, B256};
 use reth_log_index_common::{
-    CompletedMap, FilterError, FilterMapColumns, FilterMapParams, LogValueIndex, MapIndex,
+    CompletedMap, FilterError, FilterMapColumns, LogIndexParams, LogValueIndex, MapIndex,
     MapRowIndex, ProcessBatchResult, RowCell, MAX_LAYERS,
 };
 
@@ -15,8 +15,8 @@ const ROW_CACHE_CAP: usize = 64 * 1024;
 pub struct LogIndexer {
     /// Current log value index
     index: LogValueIndex,
-    /// Filter map parameters
-    params: FilterMapParams,
+    /// Log Index parameters
+    params: LogIndexParams,
     /// Fill levels per layer. layer -> `row_idx` -> count
     fills: Vec<HashMap<u32, Count>>,
     /// Cache for row calculation. (layer, value) -> `row_idx`
@@ -35,7 +35,7 @@ pub struct LogIndexer {
 
 impl LogIndexer {
     /// Create a new `LogIndexer` starting from the given index
-    pub fn new(starting_index: LogValueIndex, params: FilterMapParams) -> Self {
+    pub fn new(starting_index: LogValueIndex, params: LogIndexParams) -> Self {
         let current_map = (starting_index >> params.log_values_per_map) as u32;
         let current_map_start_index = (current_map as u64) << params.log_values_per_map;
 
@@ -55,7 +55,7 @@ impl LogIndexer {
     /// Create a `LogIndexer` resuming from existing state (checkpoint recovery)
     pub fn from_checkpoint(
         starting_index: LogValueIndex,
-        params: FilterMapParams,
+        params: LogIndexParams,
         pending_rows: HashMap<MapRowIndex, FilterMapColumns>,
     ) -> Self {
         let current_map = (starting_index >> params.log_values_per_map) as u32;

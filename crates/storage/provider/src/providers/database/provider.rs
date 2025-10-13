@@ -45,7 +45,7 @@ use reth_db_api::{
     BlockNumberList, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_log_index_common::{BlockBoundary, FilterMapMeta, FilterMapParams, MapValueRows};
+use reth_log_index_common::{BlockBoundary, FilterMapMeta, LogIndexParams, MapValueRows};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, GotExpected, RecoveredBlock, SealedHeader,
@@ -2892,7 +2892,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
         map_end: u32,
         value: &B256,
     ) -> ProviderResult<Vec<Vec<u32>>> {
-        let params = FilterMapParams::default();
+        let params = LogIndexParams::default();
 
         let total = (map_end - map_start + 1) as usize;
         let mut results = vec![Vec::new(); total];
@@ -2951,7 +2951,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
         map_index: u32,
         value: &B256,
     ) -> ProviderResult<Vec<Vec<u32>>> {
-        let params = FilterMapParams::default();
+        let params = LogIndexParams::default();
         let mut layers = Vec::new();
 
         for layer in 1..reth_log_index_common::MAX_LAYERS {
@@ -2989,7 +2989,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
 
             for (i, base_row) in base_rows.iter().enumerate() {
                 let map_index = map_start + i as u32;
-                let params = FilterMapParams::default();
+                let params = LogIndexParams::default();
                 let max_len = params.max_row_length(0) as usize;
 
                 let mut layers = vec![base_row.clone()];

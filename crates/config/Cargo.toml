@@ -15,6 +15,7 @@ workspace = true
 reth-network-types.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
+reth-log-index-common.workspace = true
 
 # serde
 serde = { workspace = true, optional = true }
@@ -36,6 +37,7 @@ serde = [
     "reth-network-types/serde",
     "reth-prune-types/serde",
     "reth-stages-types/serde",
+    "reth-log-index-common/serde",
     "alloy-primitives/serde",
     "url/serde",
 ]

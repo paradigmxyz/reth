@@ -1,4 +1,5 @@
 //! Configuration files.
+use reth_log_index_common::LogIndexParams;
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
@@ -126,7 +127,7 @@ pub struct StageConfig {
     /// Index Storage History stage configuration.
     pub index_storage_history: IndexHistoryConfig,
     /// Index Logs stage configuration.
-    pub index_logs: IndexHistoryConfig, // TODO: separate config with filter params?
+    pub index_logs: IndexLogsConfig,
     /// Common ETL related configuration.
     pub etl: EtlConfig,
 }
@@ -425,6 +426,23 @@ pub struct IndexHistoryConfig {
 impl Default for IndexHistoryConfig {
     fn default() -> Self {
         Self { commit_threshold: 100_000 }
+    }
+}
+
+/// Logs stage configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct IndexLogsConfig {
+    /// The maximum number of blocks to process before committing progress to the database.
+    pub commit_threshold: u64,
+    /// Parameters for the log index, based on EIP-7745.
+    pub params: LogIndexParams,
+}
+
+impl Default for IndexLogsConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 100_000, params: LogIndexParams::default() }
     }
 }
 

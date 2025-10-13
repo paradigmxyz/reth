@@ -16,7 +16,7 @@ use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_log_index::query::query_logs_in_block_range;
-use reth_log_index_common::FilterMapParams;
+use reth_log_index_common::LogIndexParams;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
@@ -677,7 +677,7 @@ where
         let chain_tip = self.provider().best_block_number()?;
 
         // TODO: figure out params passing
-        let params = FilterMapParams::default();
+        let params = LogIndexParams::default();
 
         let results =
             query_logs_in_block_range(self.provider(), &params, filter, from_block, to_block)?;

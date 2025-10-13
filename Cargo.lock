@@ -7574,6 +7574,7 @@ dependencies = [
  "alloy-primitives",
  "eyre",
  "humantime-serde",
+ "reth-log-index-common",
  "reth-network-peers",
  "reth-network-types",
  "reth-prune-types",

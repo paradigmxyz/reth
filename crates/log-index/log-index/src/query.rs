@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use crate::utils::{address_value, topic_value};
 use alloy_primitives::{map::HashMap, BlockNumber, B256};
 use alloy_rpc_types_eth::Filter;
-use reth_log_index_common::{BlockBoundary, FilterMapParams, MapValueRows};
+use reth_log_index_common::{BlockBoundary, LogIndexParams, MapValueRows};
 use reth_storage_api::LogIndexProvider;
 use reth_storage_errors::provider::ProviderResult;
 
@@ -96,7 +96,7 @@ fn fetch_filter_rows<P: LogIndexProvider>(
 
 /// Get all matches for a constraint value across multiple maps
 fn get_matches_for_constraint(
-    params: &FilterMapParams,
+    params: &LogIndexParams,
     value: &B256,
     map_start: u32,
     map_end: u32,
@@ -157,7 +157,7 @@ fn resolve_to_blocks(
 
 /// Query logs across a range of maps
 fn query_maps_range(
-    params: &FilterMapParams,
+    params: &LogIndexParams,
     map_start: u32,
     map_end: u32,
     filter: &Filter,
@@ -207,7 +207,7 @@ fn query_maps_range(
 /// Query logs from filter maps for a given block range
 pub fn query_logs_in_block_range<P>(
     provider: &P,
-    params: &FilterMapParams,
+    params: &LogIndexParams,
     filter: &Filter,
     from_block: u64,
     to_block: u64,

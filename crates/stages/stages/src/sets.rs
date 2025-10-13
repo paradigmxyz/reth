@@ -49,7 +49,7 @@ use alloy_primitives::B256;
 use reth_config::config::StageConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::ConfigureEvm;
-use reth_log_index_common::FilterMapParams;
+use reth_log_index_common::LogIndexParams;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives_traits::{Block, NodePrimitives};
 use reth_provider::HeaderSyncGapProvider;
@@ -456,7 +456,7 @@ where
             .add_stage(IndexLogsStage::new(
                 self.stages_config.index_logs.commit_threshold,
                 self.stages_config.etl,
-                FilterMapParams::default(),
+                LogIndexParams::default(),
                 None, // TODO: add prune mode
             ))
     }
