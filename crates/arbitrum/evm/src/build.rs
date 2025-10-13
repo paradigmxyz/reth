@@ -192,20 +192,20 @@ where
             alloy_primitives::keccak256(&buf)
         };
         
-        let (ticket_id, refund_to, gas_fee_cap_opt, max_refund, submission_fee_refund, deposit_value, retry_value, retry_to, retry_data, beneficiary, max_submission_fee, fee_refund_addr) = match &**tx.tx() {
+        let (ticket_id, refund_to, gas_fee_cap_opt, max_refund, submission_fee_refund, deposit_value, retry_value, retry_to, retry_data, beneficiary, max_submission_fee, fee_refund_addr, l1_base_fee_opt) = match &**tx.tx() {
             reth_arbitrum_primitives::ArbTypedTransaction::Retry(retry_tx) => {
-                (Some(retry_tx.ticket_id), Some(retry_tx.refund_to), Some(retry_tx.gas_fee_cap), Some(retry_tx.max_refund), Some(retry_tx.submission_fee_refund), None, None, None, None, None, None, None)
+                (Some(retry_tx.ticket_id), Some(retry_tx.refund_to), Some(retry_tx.gas_fee_cap), Some(retry_tx.max_refund), Some(retry_tx.submission_fee_refund), None, None, None, None, None, None, None, None)
             },
             reth_arbitrum_primitives::ArbTypedTransaction::SubmitRetryable(submit_tx) => {
-                (None, None, Some(submit_tx.gas_fee_cap), None, None, Some(submit_tx.deposit_value), Some(submit_tx.retry_value), submit_tx.retry_to, Some(submit_tx.retry_data.to_vec()), Some(submit_tx.beneficiary), Some(submit_tx.max_submission_fee), Some(submit_tx.fee_refund_addr))
+                (None, None, Some(submit_tx.gas_fee_cap), None, None, Some(submit_tx.deposit_value), Some(submit_tx.retry_value), submit_tx.retry_to, Some(submit_tx.retry_data.to_vec()), Some(submit_tx.beneficiary), Some(submit_tx.max_submission_fee), Some(submit_tx.fee_refund_addr), Some(submit_tx.l1_base_fee))
             },
-            _ => (None, None, None, None, None, None, None, None, None, None, None, None),
+            _ => (None, None, None, None, None, None, None, None, None, None, None, None, None),
         };
         
         let start_ctx = ArbStartTxContext {
             sender,
             nonce,
-            l1_base_fee: block_basefee,
+            l1_base_fee: l1_base_fee_opt.unwrap_or(block_basefee),
             calldata_len,
             coinbase: block_coinbase,
             executed_on_chain: true,
