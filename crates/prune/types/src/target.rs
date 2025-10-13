@@ -36,8 +36,13 @@ pub enum HistoryType {
     StorageHistory,
 }
 
+/// Default pruning mode for merkle changesets - aggressively prune to finalized block
+const fn default_merkle_changesets_mode() -> PruneMode {
+    PruneMode::Full
+}
+
 /// Pruning configuration for every segment of the data that can be pruned.
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "serde"), serde(default))]
 pub struct PruneModes {
@@ -84,6 +89,16 @@ pub struct PruneModes {
         )
     )]
     pub bodies_history: Option<PruneMode>,
+    /// Merkle Changesets pruning configuration for `AccountsTrieChangeSets` and
+    /// `StoragesTrieChangeSets`. Defaults to `PruneMode::Full` to prune up to the finalized block.
+    #[cfg_attr(
+        any(test, feature = "serde"),
+        serde(
+            default = "default_merkle_changesets_mode",
+            deserialize_with = "deserialize_prune_mode_with_min_blocks::<MINIMUM_PRUNING_DISTANCE, _>"
+        )
+    )]
+    pub merkle_changesets: PruneMode,
     /// Receipts pruning configuration by retaining only those receipts that contain logs emitted
     /// by the specified addresses, discarding others. This setting is overridden by `receipts`.
     ///
@@ -92,8 +107,23 @@ pub struct PruneModes {
     pub receipts_log_filter: ReceiptsLogPruneConfig,
 }
 
+impl Default for PruneModes {
+    fn default() -> Self {
+        Self {
+            sender_recovery: None,
+            transaction_lookup: None,
+            receipts: None,
+            account_history: None,
+            storage_history: None,
+            bodies_history: None,
+            merkle_changesets: PruneMode::Full,
+            receipts_log_filter: ReceiptsLogPruneConfig::default(),
+        }
+    }
+}
+
 impl PruneModes {
-    /// Sets pruning to no target.
+    /// Sets pruning to no target except for merkle changesets which defaults to Full.
     pub fn none() -> Self {
         Self::default()
     }
@@ -107,6 +137,7 @@ impl PruneModes {
             account_history: Some(PruneMode::Full),
             storage_history: Some(PruneMode::Full),
             bodies_history: Some(PruneMode::Full),
+            merkle_changesets: PruneMode::Full,
             receipts_log_filter: Default::default(),
         }
     }
@@ -167,6 +198,47 @@ impl PruneModes {
             }
         }
         Ok(())
+    }
+}
+
+/// Deserializes [`PruneMode`] and validates that the value is not less than the const
+/// generic parameter `MIN_BLOCKS`. This parameter represents the number of blocks that needs to be
+/// left in database after the pruning.
+///
+/// 1. For [`PruneMode::Full`], it fails if `MIN_BLOCKS > 0`.
+/// 2. For [`PruneMode::Distance`], it fails if `distance < MIN_BLOCKS + 1`. `+ 1` is needed because
+///    `PruneMode::Distance(0)` means that we leave zero blocks from the latest, meaning we have one
+///    block in the database.
+#[cfg(any(test, feature = "serde"))]
+fn deserialize_prune_mode_with_min_blocks<
+    'de,
+    const MIN_BLOCKS: u64,
+    D: serde::Deserializer<'de>,
+>(
+    deserializer: D,
+) -> Result<PruneMode, D::Error> {
+    use alloc::format;
+    use serde::Deserialize;
+    let prune_mode = PruneMode::deserialize(deserializer)?;
+
+    match prune_mode {
+        PruneMode::Full if MIN_BLOCKS > 0 => {
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Str("full"),
+                // This message should have "expected" wording
+                &format!("prune mode that leaves at least {MIN_BLOCKS} blocks in the database")
+                    .as_str(),
+            ))
+        }
+        PruneMode::Distance(distance) if distance < MIN_BLOCKS + 1 => {
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Unsigned(distance),
+                // This message should have "expected" wording
+                &format!("prune mode that leaves at least {MIN_BLOCKS} blocks in the database")
+                    .as_str(),
+            ))
+        }
+        _ => Ok(prune_mode),
     }
 }
 

@@ -1,7 +1,7 @@
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
+    BlockReader, ChainStateBlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory,
 };
 use reth_prune::{
@@ -42,6 +42,7 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
+        + ChainStateBlockReader
         + StaticFileProviderFactory<
             Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
         >,
@@ -133,6 +134,7 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
+        + ChainStateBlockReader
         + StaticFileProviderFactory<
             Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
         >,

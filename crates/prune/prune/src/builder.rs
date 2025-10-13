@@ -6,8 +6,8 @@ use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_exex_types::FinishedExExHeight;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderFactory,
-    NodePrimitivesProvider, PruneCheckpointReader, PruneCheckpointWriter,
+    providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
+    DatabaseProviderFactory, NodePrimitivesProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
@@ -83,6 +83,7 @@ impl PrunerBuilder {
                 ProviderRW: PruneCheckpointWriter
                                 + PruneCheckpointReader
                                 + BlockReader<Transaction: Encodable2718>
+                                + ChainStateBlockReader
                                 + StaticFileProviderFactory<
                     Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
                 >,
@@ -113,6 +114,7 @@ impl PrunerBuilder {
                 Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
             > + DBProvider<Tx: DbTxMut>
             + BlockReader<Transaction: Encodable2718>
+            + ChainStateBlockReader
             + PruneCheckpointWriter
             + PruneCheckpointReader,
     {
