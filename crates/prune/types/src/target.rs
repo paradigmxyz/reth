@@ -36,7 +36,7 @@ pub enum HistoryType {
     StorageHistory,
 }
 
-/// Default pruning mode for merkle changesets - aggressively prune to finalized block
+/// Default pruning mode for merkle changesets
 const fn default_merkle_changesets_mode() -> PruneMode {
     PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
 }
