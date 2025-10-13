@@ -98,6 +98,7 @@ impl<D: Database> RetryableState<D> {
     pub fn create_retryable(
         &self,
         state: *mut revm::database::State<D>,
+        ticket_id: RetryableTicketId,
         params: RetryableCreateParams,
         current_time: u64,
     ) -> RetryableTicket<D> {
@@ -107,13 +108,6 @@ impl<D: Database> RetryableState<D> {
             arb_alloy_util::retryables::retryable_submission_fee(calldata_len, l1_base_fee_wei);
         let submission_fee = U256::from(computed_submission_fee);
         let escrowed = submission_fee.min(params.max_submission_cost);
-
-        let mut preimage = Vec::with_capacity(20 + 20 + params.call_data.len());
-        preimage.extend_from_slice(params.sender.as_slice());
-        preimage.extend_from_slice(params.call_to.as_slice());
-        preimage.extend_from_slice(&params.call_data);
-        let id = keccak256(preimage);
-        let ticket_id = RetryableTicketId(id.0);
 
         let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
         let ticket_base_key = B256::from(keccak256(&ticket_id.0));
@@ -245,8 +239,14 @@ impl<D: Database> Default for DefaultRetryables<D> {
 
 impl<D: Database> Retryables for DefaultRetryables<D> {
     fn create_retryable(&mut self, params: RetryableCreateParams) -> RetryableAction {
-        let ticket = self.retryable_state.create_retryable(self.state, params.clone(), 0);
-        let ticket_id = ticket.ticket_id.clone();
+        let mut preimage = Vec::with_capacity(20 + 20 + params.call_data.len());
+        preimage.extend_from_slice(params.sender.as_slice());
+        preimage.extend_from_slice(params.call_to.as_slice());
+        preimage.extend_from_slice(&params.call_data);
+        let id = keccak256(preimage);
+        let ticket_id = RetryableTicketId(id.0);
+        
+        let ticket = self.retryable_state.create_retryable(self.state, ticket_id, params.clone(), 0);
         let escrowed = ticket.get_escrowed().unwrap_or_default();
 
         RetryableAction::Created {

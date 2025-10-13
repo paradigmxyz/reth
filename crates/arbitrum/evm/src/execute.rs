@@ -412,7 +412,7 @@ impl DefaultArbOsHooks {
         use alloy_primitives::B256;
         
         let retryable_state = RetryableState::new(state_db as *mut _, B256::ZERO);
-        let _ticket = retryable_state.create_retryable(state_db as *mut _, params, block_timestamp);
+        let _ticket = retryable_state.create_retryable(state_db as *mut _, ticket_id, params, block_timestamp);
         
         Ok(())
     }
@@ -774,8 +774,10 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     gas_price_bid: gas_fee_cap,
                 };
                 
+                let ticket_id_struct = crate::retryables::RetryableTicketId(ticket_id.0);
                 let _ticket = retryable_state.create_retryable(
                     state_db as *mut _,
+                    ticket_id_struct,
                     create_params,
                     ctx.block_timestamp,
                 );
