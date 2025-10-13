@@ -370,7 +370,7 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
             };
 
             if curr_account < next_account || (end_inclusive && curr_account == next_account) {
-                trace!(target: "trie::verify", account = ?curr_account, "Verying account has empty storage");
+                trace!(target: "trie::verify", account = ?curr_account, "Verifying account has empty storage");
 
                 let mut storage_cursor =
                     self.trie_cursor_factory.storage_trie_cursor(curr_account)?;
