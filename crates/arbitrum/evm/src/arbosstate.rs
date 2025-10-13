@@ -180,4 +180,34 @@ impl<D: Database> ArbosState<D> {
     pub fn set_infra_fee_account(&self, account: Address) -> Result<(), ()> {
         self.infra_fee_account.set(account)
     }
+    
+    pub fn upgrade_arbos_version_if_necessary<D2: Database>(
+        &mut self,
+        current_timestamp: u64,
+        _state_db: &mut revm::database::State<D2>,
+    ) -> Result<(), ()> {
+        let scheduled_upgrade_version = self.upgrade_version.get()?;
+        let scheduled_upgrade_timestamp = self.upgrade_timestamp.get()?;
+        
+        if scheduled_upgrade_version == 0 || current_timestamp < scheduled_upgrade_timestamp {
+            return Ok(());
+        }
+        
+        if scheduled_upgrade_version > self.arbos_version {
+            self.arbos_version = scheduled_upgrade_version;
+            
+            self.backing_storage.set_by_uint64(VERSION_OFFSET, B256::from(U256::from(self.arbos_version)))?;
+            
+            self.upgrade_version.set(0)?;
+            self.upgrade_timestamp.set(0)?;
+            
+            tracing::info!(
+                "ArbOS upgraded from version {} to version {}",
+                self.arbos_version,
+                scheduled_upgrade_version
+            );
+        }
+        
+        Ok(())
+    }
 }

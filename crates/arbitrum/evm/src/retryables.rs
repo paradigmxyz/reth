@@ -83,6 +83,17 @@ impl<D: Database> RetryableState<D> {
         let storage = Storage::new(state, base_key);
         Self { storage }
     }
+    
+    pub fn try_to_reap_one_retryable(&self, current_time: u64, state: *mut revm::database::State<D>) -> Result<bool, ()> {
+        let timeout_storage = StorageBackedUint64::new(state, self.storage.base_key, 0);
+        let oldest_timeout = timeout_storage.get().unwrap_or(u64::MAX);
+        
+        if oldest_timeout >= current_time {
+            return Ok(false);
+        }
+        
+        Ok(true)
+    }
 
     pub fn create_retryable(
         &self,
