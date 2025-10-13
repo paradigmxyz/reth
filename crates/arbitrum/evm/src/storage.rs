@@ -170,6 +170,14 @@ impl<D: Database> StorageBackedUint64<D> {
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
+            
+            if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
+                if let Some(slot_entry) = acc.storage.get(&self.slot) {
+                    let value_u64: u64 = slot_entry.present_value.try_into().unwrap_or(0);
+                    return Ok(value_u64);
+                }
+            }
+            
             match state.storage(arbos_addr, self.slot) {
                 Ok(value) => {
                     let value_u64: u64 = value.try_into().unwrap_or(0);
@@ -223,6 +231,13 @@ impl<D: Database> StorageBackedBigUint<D> {
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
+            
+            if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
+                if let Some(slot_entry) = acc.storage.get(&self.slot) {
+                    return Ok(slot_entry.present_value);
+                }
+            }
+            
             match state.storage(arbos_addr, self.slot) {
                 Ok(value) => Ok(value),
                 Err(_) => Err(()),
@@ -272,6 +287,15 @@ impl<D: Database> StorageBackedAddress<D> {
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
+            
+            if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
+                if let Some(slot_entry) = acc.storage.get(&self.slot) {
+                    let bytes = slot_entry.present_value.to_be_bytes::<32>();
+                    let addr_bytes: [u8; 20] = bytes[12..32].try_into().unwrap();
+                    return Ok(Address::from(addr_bytes));
+                }
+            }
+            
             match state.storage(arbos_addr, self.slot) {
                 Ok(value) => {
                     let bytes = value.to_be_bytes::<32>();
