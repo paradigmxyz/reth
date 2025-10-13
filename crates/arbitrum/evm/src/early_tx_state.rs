@@ -8,15 +8,30 @@ thread_local! {
 }
 
 pub fn set_early_tx_gas(tx_hash: B256, gas_used: u64, cumulative_gas: u64) {
+    tracing::info!(
+        target: "arb-reth::gas-tracking",
+        tx_hash = ?tx_hash,
+        gas_used = gas_used,
+        cumulative_gas = cumulative_gas,
+        "STORING early_tx_gas"
+    );
     EARLY_TX_GAS.with(|map| {
         map.borrow_mut().insert(tx_hash, (gas_used, cumulative_gas));
     });
 }
 
 pub fn get_early_tx_gas(tx_hash: &B256) -> Option<(u64, u64)> {
-    EARLY_TX_GAS.with(|map| {
+    let result = EARLY_TX_GAS.with(|map| {
         map.borrow().get(tx_hash).copied()
-    })
+    });
+    tracing::info!(
+        target: "arb-reth::gas-tracking",
+        tx_hash = ?tx_hash,
+        found = result.is_some(),
+        result = ?result,
+        "RETRIEVING early_tx_gas"
+    );
+    result
 }
 
 pub fn clear_early_tx_gas(tx_hash: &B256) {

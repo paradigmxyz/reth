@@ -243,24 +243,23 @@ where
             result
         };
 
-        if start_hook_result.end_tx_now {
+        let hook_gas_override = if start_hook_result.end_tx_now {
             tracing::debug!(
                 target: "arb-reth::executor",
                 tx_type = ?tx.tx().tx_type(),
                 gas_used = start_hook_result.gas_used,
                 error = ?start_hook_result.error,
-                "Transaction will end early - storing gas for receipt builder"
+                "Transaction ended early - will override EVM gas with hook gas"
             );
             
             if let Some(err_msg) = start_hook_result.error {
                 return Err(BlockExecutionError::msg(err_msg));
             }
             
-            self.cumulative_gas_used += start_hook_result.gas_used;
-            crate::set_early_tx_gas(tx_hash, start_hook_result.gas_used, self.cumulative_gas_used);
-            
-            return Ok(Some(start_hook_result.gas_used));
-        }
+            Some(start_hook_result.gas_used)
+        } else {
+            None
+        };
 
         let tx_type = tx.tx().tx_type();
         use reth_arbitrum_primitives::ArbTxType;
@@ -427,10 +426,30 @@ where
         evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
 
         let wrapped = WithTxEnv { tx_env, tx };
-        let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+        let result = self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
+            let evm_gas = exec_result.gas_used();
+            let actual_gas = hook_gas_override.unwrap_or(evm_gas);
+            let new_cumulative = self.cumulative_gas_used + actual_gas;
+            
+            tracing::debug!(
+                target: "arb-reth::executor",
+                tx_hash = ?tx_hash,
+                evm_gas = evm_gas,
+                actual_gas = actual_gas,
+                current_cumulative = self.cumulative_gas_used,
+                new_cumulative = new_cumulative,
+                is_override = hook_gas_override.is_some(),
+                "Storing cumulative gas before receipt creation"
+            );
+            
+            crate::set_early_tx_gas(tx_hash, actual_gas, new_cumulative);
+            
+            f(exec_result)
+        });
         
-        if let Ok(Some(gas_used)) = result {
-            self.cumulative_gas_used += gas_used;
+        if let Ok(Some(evm_gas)) = result {
+            let actual_gas = hook_gas_override.unwrap_or(evm_gas);
+            self.cumulative_gas_used += actual_gas;
         }
 
         let evm = self.inner.evm_mut();
