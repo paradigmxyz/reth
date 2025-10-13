@@ -54,6 +54,7 @@ pub struct ArbEndTxContext {
     pub gas_limit: u64,
     pub basefee: U256,
     pub tx_type: u8,
+    pub block_timestamp: u64,
 }
 
 pub struct StartTxHookResult {
@@ -964,7 +965,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     if let Some(retryable) = retryable_state.open_retryable(
                         state_db as *mut _,
                         &ticket_id_struct,
-                        0,
+                        ctx.block_timestamp,
                     ) {
                         use arb_alloy_util::retryables::escrow_address_from_ticket;
                         let escrow = Address::from_slice(&escrow_address_from_ticket(retry_data.ticket_id.0));

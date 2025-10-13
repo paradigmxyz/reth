@@ -501,6 +501,7 @@ where
             gas_limit,
             basefee: block_basefee,
             tx_type: tx_type_u8,
+            block_timestamp,
         };
         {
             let mut state = core::mem::take(&mut self.tx_state);
