@@ -1004,6 +1004,7 @@ receipts = 'full'
                 account_history: None,
                 storage_history: Some(PruneMode::Before(5000)),
                 bodies_history: None,
+                merkle_changesets: PruneMode::Before(0),
                 receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
                     Address::random(),
                     PruneMode::Full,
@@ -1020,6 +1021,7 @@ receipts = 'full'
                 account_history: Some(PruneMode::Distance(2000)),
                 storage_history: Some(PruneMode::Distance(3000)),
                 bodies_history: None,
+                merkle_changesets: PruneMode::Distance(10000),
                 receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([
                     (Address::random(), PruneMode::Distance(1000)),
                     (Address::random(), PruneMode::Before(2000)),
@@ -1038,6 +1040,7 @@ receipts = 'full'
         assert_eq!(config1.segments.receipts, Some(PruneMode::Distance(1000)));
         assert_eq!(config1.segments.account_history, Some(PruneMode::Distance(2000)));
         assert_eq!(config1.segments.storage_history, Some(PruneMode::Before(5000)));
+        assert_eq!(config1.segments.merkle_changesets, PruneMode::Distance(10000));
         assert_eq!(config1.segments.receipts_log_filter, original_filter);
     }
 

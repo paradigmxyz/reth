@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn test_unwind_target_unpruned() {
         // Test case 1: No pruning configured - should always succeed
-        let prune_modes = PruneModes::none();
+        let prune_modes = PruneModes::default();
         assert!(prune_modes.ensure_unwind_target_unpruned(1000, 500, &[]).is_ok());
         assert!(prune_modes.ensure_unwind_target_unpruned(1000, 0, &[]).is_ok());
 
