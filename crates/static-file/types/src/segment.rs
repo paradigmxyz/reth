@@ -218,17 +218,13 @@ impl SegmentHeader {
     /// Number of transactions.
     pub fn tx_len(&self) -> Option<u64> {
         // Use saturating arithmetic to avoid overflow when end == u64::MAX.
-        self.tx_range
-            .as_ref()
-            .map(|r| r.end().saturating_sub(r.start()).saturating_add(1))
+        self.tx_range.as_ref().map(|r| r.end().saturating_sub(r.start()).saturating_add(1))
     }
 
     /// Number of blocks.
     pub fn block_len(&self) -> Option<u64> {
         // Use saturating arithmetic to avoid overflow when end == u64::MAX.
-        self.block_range
-            .as_ref()
-            .map(|r| r.end().saturating_sub(r.start()).saturating_add(1))
+        self.block_range.as_ref().map(|r| r.end().saturating_sub(r.start()).saturating_add(1))
     }
 
     /// Increments block end range depending on segment
