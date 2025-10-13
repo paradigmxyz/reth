@@ -225,11 +225,12 @@ where
             deposit_value,
             retry_value,
             retry_to,
-            retry_data,
+            retry_data: retry_data.clone(),
             beneficiary,
             max_submission_fee,
             fee_refund_addr,
             block_timestamp,
+            data: Some(tx.tx().input().to_vec()),
         };
         
         let start_hook_result = {
@@ -355,20 +356,6 @@ where
             }
         };
 
-        if is_internal {
-            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-            let state_db: &mut revm::database::State<D> = *db_ref;
-            
-            let mut tx_state = core::mem::take(&mut self.tx_state);
-            
-            if let Err(e) = crate::internal_tx::apply_internal_tx_update(state_db, &mut tx_state, tx.tx()) {
-                tracing::error!(target: "arb-reth::executor", error = %e, "Failed to apply internal tx update");
-            } else {
-                tracing::info!(target: "arb-reth::executor", "Successfully applied internal tx update");
-            }
-            
-            self.tx_state = tx_state;
-        }
 
         let mut tx_env = tx.to_tx_env();
         if is_internal {
