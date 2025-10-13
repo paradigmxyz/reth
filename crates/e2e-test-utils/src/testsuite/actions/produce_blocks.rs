@@ -603,6 +603,7 @@ where
                         rpc_latest_header.inner.timestamp;
                     env.active_node_state_mut()?.latest_fork_choice_state.head_block_hash =
                         rpc_latest_header.hash;
+
                 }
             }
 
