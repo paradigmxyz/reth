@@ -38,7 +38,7 @@ pub enum HistoryType {
 
 /// Default pruning mode for merkle changesets - aggressively prune to finalized block
 const fn default_merkle_changesets_mode() -> PruneMode {
-    PruneMode::Full
+    PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
 }
 
 /// Pruning configuration for every segment of the data that can be pruned.
@@ -90,7 +90,7 @@ pub struct PruneModes {
     )]
     pub bodies_history: Option<PruneMode>,
     /// Merkle Changesets pruning configuration for `AccountsTrieChangeSets` and
-    /// `StoragesTrieChangeSets`. Defaults to `PruneMode::Full` to prune up to the finalized block.
+    /// `StoragesTrieChangeSets`.
     #[cfg_attr(
         any(test, feature = "serde"),
         serde(
@@ -116,18 +116,13 @@ impl Default for PruneModes {
             account_history: None,
             storage_history: None,
             bodies_history: None,
-            merkle_changesets: PruneMode::Full,
+            merkle_changesets: default_merkle_changesets_mode(),
             receipts_log_filter: ReceiptsLogPruneConfig::default(),
         }
     }
 }
 
 impl PruneModes {
-    /// Sets pruning to no target except for merkle changesets which defaults to Full.
-    pub fn none() -> Self {
-        Self::default()
-    }
-
     /// Sets pruning to all targets.
     pub fn all() -> Self {
         Self {
@@ -145,11 +140,6 @@ impl PruneModes {
     /// Returns whether there is any kind of receipt pruning configuration.
     pub fn has_receipts_pruning(&self) -> bool {
         self.receipts.is_some() || !self.receipts_log_filter.is_empty()
-    }
-
-    /// Returns true if all prune modes are set to [`None`].
-    pub fn is_empty(&self) -> bool {
-        self == &Self::none()
     }
 
     /// Returns an error if we can't unwind to the targeted block because the target block is
@@ -217,29 +207,10 @@ fn deserialize_prune_mode_with_min_blocks<
 >(
     deserializer: D,
 ) -> Result<PruneMode, D::Error> {
-    use alloc::format;
     use serde::Deserialize;
     let prune_mode = PruneMode::deserialize(deserializer)?;
-
-    match prune_mode {
-        PruneMode::Full if MIN_BLOCKS > 0 => {
-            Err(serde::de::Error::invalid_value(
-                serde::de::Unexpected::Str("full"),
-                // This message should have "expected" wording
-                &format!("prune mode that leaves at least {MIN_BLOCKS} blocks in the database")
-                    .as_str(),
-            ))
-        }
-        PruneMode::Distance(distance) if distance < MIN_BLOCKS + 1 => {
-            Err(serde::de::Error::invalid_value(
-                serde::de::Unexpected::Unsigned(distance),
-                // This message should have "expected" wording
-                &format!("prune mode that leaves at least {MIN_BLOCKS} blocks in the database")
-                    .as_str(),
-            ))
-        }
-        _ => Ok(prune_mode),
-    }
+    serde_deserialize_validate::<MIN_BLOCKS, D>(&prune_mode)?;
+    Ok(prune_mode)
 }
 
 /// Deserializes [`Option<PruneMode>`] and validates that the value is not less than the const
@@ -258,12 +229,21 @@ fn deserialize_opt_prune_mode_with_min_blocks<
 >(
     deserializer: D,
 ) -> Result<Option<PruneMode>, D::Error> {
-    use alloc::format;
     use serde::Deserialize;
     let prune_mode = Option::<PruneMode>::deserialize(deserializer)?;
+    if let Some(prune_mode) = prune_mode.as_ref() {
+        serde_deserialize_validate::<MIN_BLOCKS, D>(prune_mode)?;
+    }
+    Ok(prune_mode)
+}
 
+#[cfg(any(test, feature = "serde"))]
+fn serde_deserialize_validate<'a, 'de, const MIN_BLOCKS: u64, D: serde::Deserializer<'de>>(
+    prune_mode: &'a PruneMode,
+) -> Result<(), D::Error> {
+    use alloc::format;
     match prune_mode {
-        Some(PruneMode::Full) if MIN_BLOCKS > 0 => {
+        PruneMode::Full if MIN_BLOCKS > 0 => {
             Err(serde::de::Error::invalid_value(
                 serde::de::Unexpected::Str("full"),
                 // This message should have "expected" wording
@@ -271,15 +251,15 @@ fn deserialize_opt_prune_mode_with_min_blocks<
                     .as_str(),
             ))
         }
-        Some(PruneMode::Distance(distance)) if distance < MIN_BLOCKS => {
+        PruneMode::Distance(distance) if *distance < MIN_BLOCKS => {
             Err(serde::de::Error::invalid_value(
-                serde::de::Unexpected::Unsigned(distance),
+                serde::de::Unexpected::Unsigned(*distance),
                 // This message should have "expected" wording
                 &format!("prune mode that leaves at least {MIN_BLOCKS} blocks in the database")
                     .as_str(),
             ))
         }
-        _ => Ok(prune_mode),
+        _ => Ok(()),
     }
 }
 

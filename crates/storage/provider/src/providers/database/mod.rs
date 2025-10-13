@@ -84,7 +84,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
             db,
             chain_spec,
             static_file_provider,
-            prune_modes: PruneModes::none(),
+            prune_modes: PruneModes::default(),
             storage: Default::default(),
         }
     }
@@ -126,7 +126,7 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
             db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
-            prune_modes: PruneModes::none(),
+            prune_modes: PruneModes::default(),
             storage: Default::default(),
         })
     }

@@ -134,7 +134,7 @@ impl Default for PrunerBuilder {
     fn default() -> Self {
         Self {
             block_interval: 5,
-            segments: PruneModes::none(),
+            segments: PruneModes::default(),
             delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
             timeout: None,
             finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,

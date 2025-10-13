@@ -57,47 +57,11 @@ where
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
-        // Determine the prune target based on the configured mode
-        let prune_to_block = match self.mode {
-            PruneMode::Full => {
-                // For Full mode, aggressively prune up to the finalized block
-
-                // Prune everything at and before the finalized block
-                match provider.last_finalized_block_number()? {
-                    Some(num) => num,
-                    None => {
-                        trace!(target: "pruner", "No finalized block found, skipping merkle changesets pruning");
-                        return Ok(SegmentOutput::done())
-                    }
-                }
-            }
-            PruneMode::Distance(distance) => {
-                // For Distance mode, keep exactly the specified distance of blocks
-                // This respects the configured distance regardless of finalized block
-                input.to_block.saturating_sub(distance)
-            }
-            // For Before mode we prune up to, but not including, the specified block
-            PruneMode::Before(block_number) => block_number.saturating_sub(1),
+        let Some(block_range) = input.get_next_block_range() else {
+            trace!(target: "pruner", "No change sets to prune");
+            return Ok(SegmentOutput::done())
         };
 
-        // If there's nothing to prune (e.g., we're at genesis), return early
-        if prune_to_block == 0 {
-            trace!(target: "pruner", "Target block is at or near genesis, nothing to prune");
-            return Ok(SegmentOutput::done())
-        }
-
-        // Get the range to prune based on checkpoint and our calculated prune target
-        let from_block = input.get_start_next_block_range();
-        if from_block > prune_to_block {
-            trace!(target: "pruner",
-                from_block,
-                prune_to_block,
-                ?self.mode,
-                "Already pruned to target");
-            return Ok(SegmentOutput::done())
-        }
-
-        let block_range = from_block..=prune_to_block;
         let block_range_end = *block_range.end();
 
         trace!(target: "pruner",

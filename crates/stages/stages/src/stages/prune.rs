@@ -122,7 +122,7 @@ impl PruneSenderRecoveryStage {
     /// Create new prune sender recovery stage with the given prune mode and commit threshold.
     pub fn new(prune_mode: PruneMode, commit_threshold: usize) -> Self {
         Self(PruneStage::new(
-            PruneModes { sender_recovery: Some(prune_mode), ..PruneModes::none() },
+            PruneModes { sender_recovery: Some(prune_mode), ..PruneModes::default() },
             commit_threshold,
         ))
     }

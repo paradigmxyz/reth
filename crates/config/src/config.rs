@@ -440,7 +440,7 @@ pub struct PruneConfig {
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: DEFAULT_BLOCK_INTERVAL, segments: PruneModes::none() }
+        Self { block_interval: DEFAULT_BLOCK_INTERVAL, segments: PruneModes::default() }
     }
 }
 
