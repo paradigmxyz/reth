@@ -12,17 +12,6 @@ pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
 /// Minimum number of workers we allow configuring explicitly.
 pub const MIN_WORKER_COUNT: usize = 2;
 
-/// Clamps the worker count to the minimum allowed value.
-///
-/// Ensures that the worker count is at least [`MIN_WORKER_COUNT`].
-const fn clamp_worker_count(count: usize) -> usize {
-    if count >= MIN_WORKER_COUNT {
-        count
-    } else {
-        MIN_WORKER_COUNT
-    }
-}
-
 /// Returns the default number of storage worker threads based on available parallelism.
 fn default_storage_worker_count() -> usize {
     #[cfg(feature = "std")]
@@ -509,8 +498,8 @@ impl TreeConfig {
     }
 
     /// Setter for the number of storage proof worker threads.
-    pub const fn with_storage_worker_count(mut self, storage_worker_count: usize) -> Self {
-        self.storage_worker_count = clamp_worker_count(storage_worker_count);
+    pub fn with_storage_worker_count(mut self, storage_worker_count: usize) -> Self {
+        self.storage_worker_count = storage_worker_count.max(MIN_WORKER_COUNT);
         self
     }
 
@@ -520,8 +509,8 @@ impl TreeConfig {
     }
 
     /// Setter for the number of account proof worker threads.
-    pub const fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
-        self.account_worker_count = clamp_worker_count(account_worker_count);
+    pub fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
+        self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
         self
     }
 }
