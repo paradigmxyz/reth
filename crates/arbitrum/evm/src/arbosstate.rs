@@ -35,6 +35,22 @@ const PROGRAMS_SUBSPACE: &[u8] = &[8];
 const FEATURES_SUBSPACE: &[u8] = &[9];
 const NATIVE_TOKEN_OWNER_SUBSPACE: &[u8] = &[10];
 
+pub fn arbos_state_subspace(subspace_id: u8) -> B256 {
+    use alloy_primitives::keccak256;
+    
+    let arbos_addr = Address::new([
+        0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF,
+    ]);
+    
+    let mut preimage = Vec::with_capacity(20 + 1);
+    preimage.extend_from_slice(arbos_addr.as_slice());
+    preimage.push(subspace_id);
+    
+    keccak256(&preimage)
+}
+
 pub struct ArbosState<D> {
     pub arbos_version: u64,
     pub upgrade_version: StorageBackedUint64<D>,
