@@ -10,6 +10,16 @@ crates=($(cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name'
 exclude_crates=(
   # The following require investigation if they can be fixed
   reth-basic-payload-builder
+  reth-cli-util
+  reth-db
+  reth-db-api
+  reth-ecies
+  reth-network-api
+  reth-nippy-jar
+  reth-node-types
+  reth-rpc-server-types
+  reth-trie-db
+  reth-zstd-compressors
   reth-bench
   reth-cli
   reth-cli-commands

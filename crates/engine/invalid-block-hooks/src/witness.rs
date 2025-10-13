@@ -415,7 +415,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_revm::db::{BundleAccount, BundleState};
-    use revm_database::AccountRevert;
+    use revm_database::states::reverts::AccountRevert;
     use tempfile::TempDir;
 
     use reth_revm::test_utils::StateProviderTest;
