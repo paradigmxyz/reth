@@ -15,14 +15,6 @@ use reth_prune_types::{
 };
 use tracing::{instrument, trace};
 
-/// Pruning segment for Merkle trie changesets (`AccountsTrieChangeSets` and
-/// `StoragesTrieChangeSets`).
-///
-/// The pruning behavior depends on the configured mode:
-/// - `PruneMode::Full`: Aggressively prunes all changesets up to the finalized block, keeping only
-///   changesets from the finalized block onwards (for potential reorgs)
-/// - `PruneMode::Distance(n)`: Keeps exactly the last `n` blocks of changesets, regardless of the
-///   finalized block position
 #[derive(Debug)]
 pub struct MerkleChangeSets {
     mode: PruneMode,
@@ -63,11 +55,6 @@ where
         };
 
         let block_range_end = *block_range.end();
-
-        trace!(target: "pruner",
-            ?block_range,
-            ?self.mode,
-            "Pruning merkle changesets based on configured mode");
         let mut limiter = input.limiter;
 
         // Create range for StoragesTrieChangeSets which uses BlockNumberHashedAddress as key

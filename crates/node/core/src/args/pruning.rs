@@ -126,7 +126,7 @@ impl PruningArgs {
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     // TODO: set default to pre-merge block if available
                     bodies_history: None,
-                    merkle_changesets: PruneMode::Full,
+                    merkle_changesets: PruneMode::Distance(MINIMUM_PRUNING_DISTANCE),
                     receipts_log_filter: Default::default(),
                 },
             }
