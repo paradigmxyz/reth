@@ -492,13 +492,15 @@ where
                     ctx.state(),
                 ) {
                     Ok(result) => {
+                        let elapsed = root_time.elapsed();
                         info!(
                             target: "engine::tree",
                             block = ?block_num_hash,
                             regular_state_root = ?result.0,
+                            ?elapsed,
                             "Regular root task finished"
                         );
-                        maybe_state_root = Some((result.0, result.1, root_time.elapsed()));
+                        maybe_state_root = Some((result.0, result.1, elapsed));
                     }
                     Err(error) => {
                         debug!(target: "engine::tree", %error, "Parallel state root computation failed");
