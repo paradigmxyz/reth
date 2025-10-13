@@ -52,7 +52,6 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
@@ -839,14 +838,12 @@ impl ProofTaskCtx {
 /// The handle stores direct senders to both storage and account worker pools,
 /// eliminating the need for a routing thread. All handles share reference-counted
 /// channels, and workers shut down gracefully when all handles are dropped.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProofTaskManagerHandle {
     /// Direct sender to storage worker pool
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Direct sender to account worker pool
     account_work_tx: CrossbeamSender<AccountWorkerJob>,
-    /// Active handle reference count for auto-termination
-    active_handles: Arc<AtomicUsize>,
 }
 
 impl ProofTaskManagerHandle {
@@ -937,7 +934,7 @@ impl ProofTaskManagerHandle {
             );
         }
 
-        Ok(Self::new_handle(storage_work_tx, account_work_tx, Arc::new(AtomicUsize::new(0))))
+        Ok(Self::new_handle(storage_work_tx, account_work_tx))
     }
 
     /// Creates a new [`ProofTaskManagerHandle`] with direct access to worker pools.
@@ -946,10 +943,8 @@ impl ProofTaskManagerHandle {
     fn new_handle(
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         account_work_tx: CrossbeamSender<AccountWorkerJob>,
-        active_handles: Arc<AtomicUsize>,
     ) -> Self {
-        active_handles.fetch_add(1, Ordering::SeqCst);
-        Self { storage_work_tx, account_work_tx, active_handles }
+        Self { storage_work_tx, account_work_tx }
     }
 
     /// Queue a storage proof computation
@@ -1011,31 +1006,6 @@ impl ProofTaskManagerHandle {
             })?;
 
         Ok(rx)
-    }
-}
-
-impl Clone for ProofTaskManagerHandle {
-    fn clone(&self) -> Self {
-        Self::new_handle(
-            self.storage_work_tx.clone(),
-            self.account_work_tx.clone(),
-            self.active_handles.clone(),
-        )
-    }
-}
-
-impl Drop for ProofTaskManagerHandle {
-    fn drop(&mut self) {
-        // Decrement the number of active handles.
-        // When the last handle is dropped, the channels are dropped and workers shut down.
-        // atomically grab the current handle count and decrement it for Drop.
-        let previous_handles = self.active_handles.fetch_sub(1, Ordering::SeqCst);
-
-        debug_assert_ne!(
-            previous_handles, 0,
-            "active_handles underflow in ProofTaskManagerHandle::drop (previous={})",
-            previous_handles
-        );
     }
 }
 
