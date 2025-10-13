@@ -198,13 +198,15 @@ where
         // Cursor to unwind tx hash to number
         let mut tx_hash_number_cursor = tx.cursor_write::<tables::TransactionHashNumbers>()?;
         let static_file_provider = provider.static_file_provider();
-        let rev_walker = provider
-            .block_body_indices_range(range.clone())?
-            .into_iter()
-            .zip(range.collect::<Vec<_>>())
-            .rev();
+        let bodies = provider.block_body_indices_range(range.clone())?;
+        let range_start = *range.start();
+        let range_end = *range.end();
 
-        for (body, number) in rev_walker {
+        for (i, body) in bodies.into_iter().enumerate() {
+            let number = range_end - i as u64;
+            if number < range_start {
+                break;
+            }
             if number <= unwind_to {
                 break;
             }
