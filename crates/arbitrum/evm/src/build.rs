@@ -110,7 +110,19 @@ where
     type Evm = E;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.tx_state.brotli_compression_level = 0;
+        {
+            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+            let state_db: &mut revm::database::State<_> = *db_ref;
+            if let Ok(arbos_state) = crate::arbosstate::ArbosState::open(state_db as *mut _) {
+                if let Ok(level) = arbos_state.get_brotli_compression_level() {
+                    self.tx_state.brotli_compression_level = level as u32;
+                } else {
+                    self.tx_state.brotli_compression_level = 0;
+                }
+            } else {
+                self.tx_state.brotli_compression_level = 0;
+            }
+        }
         self.inner.apply_pre_execution_changes()
     }
 
@@ -225,11 +237,12 @@ where
             deposit_value,
             retry_value,
             retry_to,
-            retry_data,
+            retry_data: retry_data.clone(),
             beneficiary,
             max_submission_fee,
             fee_refund_addr,
             block_timestamp,
+            data: Some(tx.tx().input().to_vec()),
         };
         
         let start_hook_result = {
@@ -271,12 +284,24 @@ where
             buf
         };
         
+        let calldata_vec = tx.tx().input().to_vec();
+        
+        let poster = if block_coinbase == crate::l1_pricing::BATCH_POSTER_ADDRESS {
+            crate::l1_pricing::BATCH_POSTER_ADDRESS
+        } else {
+            Address::ZERO
+        };
+        
         let gas_ctx = ArbGasChargingContext {
             intrinsic_gas: 21_000,
-            calldata: tx_bytes,
+            calldata: calldata_vec,
+            tx_bytes,
             basefee: block_basefee,
             is_executed_on_chain: true,
             skip_l1_charging: false,
+            poster,
+            gas_remaining: tx.tx().gas_limit(),
+            is_ethcall: false,
         };
         {
             let mut state = core::mem::take(&mut self.tx_state);
@@ -342,7 +367,8 @@ where
             let mut retryables = DefaultRetryables::new(db as *mut _, alloy_primitives::B256::ZERO);
             
             if let Ok(mut reg) = self.predeploys.lock() {
-                let _ = reg.dispatch_with_emitter(&ctx, call_to, &calldata, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut retryables, &mut emitter);
+                let calldata_bytes = tx.tx().input().clone();
+                let _ = reg.dispatch_with_emitter(&ctx, call_to, &calldata_bytes, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut retryables, &mut emitter);
             }
         }
 
@@ -355,20 +381,6 @@ where
             }
         };
 
-        if is_internal {
-            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-            let state_db: &mut revm::database::State<D> = *db_ref;
-            
-            let mut tx_state = core::mem::take(&mut self.tx_state);
-            
-            if let Err(e) = crate::internal_tx::apply_internal_tx_update(state_db, &mut tx_state, tx.tx()) {
-                tracing::error!(target: "arb-reth::executor", error = %e, "Failed to apply internal tx update");
-            } else {
-                tracing::info!(target: "arb-reth::executor", "Successfully applied internal tx update");
-            }
-            
-            self.tx_state = tx_state;
-        }
 
         let mut tx_env = tx.to_tx_env();
         if is_internal {
@@ -489,6 +501,7 @@ where
             gas_limit,
             basefee: block_basefee,
             tx_type: tx_type_u8,
+            block_timestamp,
         };
         {
             let mut state = core::mem::take(&mut self.tx_state);

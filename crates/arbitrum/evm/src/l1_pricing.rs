@@ -2,6 +2,23 @@ use alloy_primitives::{Address, B256, U256};
 use revm::Database;
 use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint, StorageBackedAddress};
 
+fn compress_brotli(data: &[u8], level: u64) -> Result<u64, ()> {
+    use brotli::enc::BrotliEncoderParams;
+    
+    let quality = level.min(11) as u32;
+    
+    let mut params = BrotliEncoderParams::default();
+    params.quality = quality as i32;
+    
+    let mut compressed = Vec::new();
+    let mut cursor = std::io::Cursor::new(data);
+    
+    match brotli::BrotliCompress(&mut cursor, &mut compressed, &params) {
+        Ok(_) => Ok(compressed.len() as u64),
+        Err(_) => Err(()),
+    }
+}
+
 pub struct L1PricingState<D> {
     storage: Storage<D>,
     
@@ -235,6 +252,29 @@ impl<D: Database> L1PricingState<D> {
         self.l1_fees_available.set(current.saturating_add(amount))
     }
 
+    pub fn get_poster_data_cost(&self, tx_data: &[u8], poster: Address, brotli_level: u64) -> Result<(U256, u64), ()> {
+        if poster != BATCH_POSTER_ADDRESS {
+            return Ok((U256::ZERO, 0));
+        }
+        
+        let compressed_len = match compress_brotli(tx_data, brotli_level) {
+            Ok(len) => len,
+            Err(_) => {
+                tracing::error!("Failed to compress tx data with Brotli");
+                return Err(());
+            }
+        };
+        
+        const TX_DATA_NONZERO_GAS: u64 = 16;
+        let units = compressed_len.saturating_mul(TX_DATA_NONZERO_GAS);
+        
+        let price_per_unit = self.get_price_per_unit()?;
+        
+        let cost = price_per_unit.saturating_mul(U256::from(units));
+        
+        Ok((cost, units))
+    }
+    
     pub fn poster_data_cost(&self, calldata_units: u64) -> Result<U256, ()> {
         let price_per_unit = self.get_price_per_unit()?;
         let per_batch_gas_cost = self.get_per_batch_gas_cost()?;

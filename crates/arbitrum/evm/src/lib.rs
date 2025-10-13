@@ -58,7 +58,6 @@ pub mod features;
 pub mod programs;
 pub mod arbosstate;
 pub mod internal_tx;
-pub use internal_tx::create_internal_tx_start_block;
 
 
 pub struct ArbEvmConfig<ChainSpec = (), N = (), R = ArbRethReceiptBuilder>

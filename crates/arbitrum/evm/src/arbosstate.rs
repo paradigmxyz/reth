@@ -35,6 +35,22 @@ const PROGRAMS_SUBSPACE: &[u8] = &[8];
 const FEATURES_SUBSPACE: &[u8] = &[9];
 const NATIVE_TOKEN_OWNER_SUBSPACE: &[u8] = &[10];
 
+pub fn arbos_state_subspace(subspace_id: u8) -> B256 {
+    use alloy_primitives::keccak256;
+    
+    let arbos_addr = Address::new([
+        0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF,
+    ]);
+    
+    let mut preimage = Vec::with_capacity(20 + 1);
+    preimage.extend_from_slice(arbos_addr.as_slice());
+    preimage.push(subspace_id);
+    
+    keccak256(&preimage)
+}
+
 pub struct ArbosState<D> {
     pub arbos_version: u64,
     pub upgrade_version: StorageBackedUint64<D>,
@@ -163,5 +179,35 @@ impl<D: Database> ArbosState<D> {
 
     pub fn set_infra_fee_account(&self, account: Address) -> Result<(), ()> {
         self.infra_fee_account.set(account)
+    }
+    
+    pub fn upgrade_arbos_version_if_necessary<D2: Database>(
+        &mut self,
+        current_timestamp: u64,
+        _state_db: &mut revm::database::State<D2>,
+    ) -> Result<(), ()> {
+        let scheduled_upgrade_version = self.upgrade_version.get()?;
+        let scheduled_upgrade_timestamp = self.upgrade_timestamp.get()?;
+        
+        if scheduled_upgrade_version == 0 || current_timestamp < scheduled_upgrade_timestamp {
+            return Ok(());
+        }
+        
+        if scheduled_upgrade_version > self.arbos_version {
+            self.arbos_version = scheduled_upgrade_version;
+            
+            self.backing_storage.set_by_uint64(VERSION_OFFSET, B256::from(U256::from(self.arbos_version)))?;
+            
+            self.upgrade_version.set(0)?;
+            self.upgrade_timestamp.set(0)?;
+            
+            tracing::info!(
+                "ArbOS upgraded from version {} to version {}",
+                self.arbos_version,
+                scheduled_upgrade_version
+            );
+        }
+        
+        Ok(())
     }
 }

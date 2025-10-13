@@ -50,33 +50,43 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                 let gas_used = ctx.result.gas_used();
                 
                 let (actual_gas_used, cumulative_gas) = if let Some((early_gas, early_cumulative)) = crate::get_early_tx_gas(&tx_hash) {
-                    tracing::info!(
+                    tracing::warn!(
                         target: "arb-reth::receipt-builder",
                         tx_hash = ?tx_hash,
                         early_gas = early_gas,
                         early_cumulative = early_cumulative,
                         evm_gas = gas_used,
                         ctx_cumulative = ctx.cumulative_gas_used,
-                        "Using early termination gas for receipt - will use early_cumulative"
+                        "!!!! Using early termination gas for receipt - will use early_cumulative"
                     );
                     crate::clear_early_tx_gas(&tx_hash);
                     (early_gas, early_cumulative)
                 } else {
-                    tracing::info!(
+                    tracing::warn!(
                         target: "arb-reth::receipt-builder",
                         tx_hash = ?tx_hash,
                         evm_gas = gas_used,
                         ctx_cumulative = ctx.cumulative_gas_used,
-                        "No early gas found - using ctx cumulative"
+                        "!!!! No early gas found - using ctx cumulative"
                     );
                     (gas_used, ctx.cumulative_gas_used)
                 };
                 
                 let mut logs = ctx.result.into_logs();
+                let evm_log_count = logs.len();
                 let mut extra = crate::log_sink::take();
+                let predeploy_log_count = extra.len();
                 if !extra.is_empty() {
                     logs.append(&mut extra);
                 }
+                tracing::warn!(
+                    target: "arb-reth::receipt-builder",
+                    tx_hash = ?tx_hash,
+                    evm_logs = evm_log_count,
+                    predeploy_logs = predeploy_log_count,
+                    total_logs = logs.len(),
+                    "!!!! Merged logs for receipt"
+                );
                 
                 let receipt = AlloyReceipt {
                     status: Eip658Value::Eip658(status_flag),
