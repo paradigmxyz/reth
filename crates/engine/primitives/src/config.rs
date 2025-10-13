@@ -26,14 +26,12 @@ fn default_storage_worker_count() -> usize {
     }
 }
 
-/// Returns the default number of account worker threads optimized for I/O-bound coordination.
+/// Returns the default number of account worker threads.
 ///
-/// Account workers primarily coordinate storage proof collection and account trie traversal.
-/// They spend significant time blocked on `receiver.recv()` calls waiting for storage proofs,
-/// so we use higher concurrency (1.5x storage workers) to maximize throughput and overlap.
-/// While storage workers are CPU-bound, account workers are I/O-bound coordinators.
+/// Account workers coordinate storage proof collection and account trie traversal.
+/// They are set to the same count as storage workers for simplicity.
 fn default_account_worker_count() -> usize {
-    ((default_storage_worker_count() * 3) / 2).max(MIN_WORKER_COUNT)
+    default_storage_worker_count()
 }
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
