@@ -76,7 +76,7 @@ const TIMEOUT_OFFSET: u64 = 6;
 const NUM_TRIES_OFFSET: u64 = 7;
 const ACTIVE_OFFSET: u64 = 8;
 
-const RETRYABLE_LIFETIME_SECONDS: u64 = 7 * 24 * 60 * 60;
+pub const RETRYABLE_LIFETIME_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 impl<D: Database> RetryableState<D> {
     pub fn new(state: *mut revm::database::State<D>, base_key: B256) -> Self {

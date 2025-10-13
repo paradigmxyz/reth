@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, U256, B256};
+use alloy_primitives::{Address, U256, B256, Bytes};
 use arb_alloy_util::l1_pricing::L1PricingState as AlloyL1PricingState;
 use crate::retryables::{Retryables, DefaultRetryables, RetryableCreateParams, RetryableAction, RetryableTicketId};
 use reth_arbitrum_primitives::{ArbTxType, ArbTransactionSigned, ArbTypedTransaction};
@@ -964,7 +964,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     if let Some(retryable) = retryable_state.open_retryable(
                         state_db as *mut _,
                         &ticket_id_struct,
-                        ctx.block_timestamp,
+                        0,
                     ) {
                         use arb_alloy_util::retryables::escrow_address_from_ticket;
                         let escrow = Address::from_slice(&escrow_address_from_ticket(retry_data.ticket_id.0));
