@@ -1,29 +1,21 @@
 use reth_metrics::{metrics::Histogram, Metrics};
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
 
 /// Metrics for blinded node fetching by proof workers.
 #[derive(Clone, Debug, Default)]
 pub struct ProofTaskMetrics {
     /// The actual metrics for blinded nodes.
     pub task_metrics: ProofTaskTrieMetrics,
-    /// Count of storage proof requests (lock-free).
-    pub storage_proofs: Arc<AtomicU64>,
-    /// Count of account proof requests (lock-free).
-    pub account_proofs: Arc<AtomicU64>,
-    /// Count of blinded account node requests (lock-free).
-    pub account_nodes: Arc<AtomicU64>,
-    /// Count of blinded storage node requests (lock-free).
-    pub storage_nodes: Arc<AtomicU64>,
 }
 
 impl ProofTaskMetrics {
-    /// Record the blinded node counts into the histograms.
-    pub fn record(&self) {
-        self.task_metrics.record_account_nodes(self.account_nodes.load(Ordering::Relaxed) as usize);
-        self.task_metrics.record_storage_nodes(self.storage_nodes.load(Ordering::Relaxed) as usize);
+    /// Record the blinded account node count into the histogram.
+    pub fn record_account_nodes(&self, count: usize) {
+        self.task_metrics.record_account_nodes(count);
+    }
+
+    /// Record the blinded storage node count into the histogram.
+    pub fn record_storage_nodes(&self, count: usize) {
+        self.task_metrics.record_storage_nodes(count);
     }
 }
 
