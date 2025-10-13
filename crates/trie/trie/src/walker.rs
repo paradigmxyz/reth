@@ -121,11 +121,12 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
 
     /// Prints the current stack of trie nodes.
     pub fn print_stack(&self) {
-        println!("====================== STACK ======================");
+        // Use structured logging instead of stdout to make output level/target configurable.
+        tracing::debug!("====================== STACK ======================");
         for node in &self.stack {
-            println!("{node:?}");
+            tracing::debug!(?node, "walker stack node");
         }
-        println!("====================== END STACK ======================\n");
+        tracing::debug!("====================== END STACK ======================\n");
     }
 
     /// The current length of the removed keys.
