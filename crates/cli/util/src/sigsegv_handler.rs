@@ -126,8 +126,8 @@ pub fn install() {
         libc::sigaltstack(&raw const alt_stack, ptr::null_mut());
 
         let mut sa: libc::sigaction = mem::zeroed();
-        // Use sa_handler (no SA_SIGINFO) to match the handler's signature.
-        sa.sa_handler = Some(print_stack_trace);
+        // Use sa_sigaction for cross-platform compatibility; without SA_SIGINFO this is treated like sa_handler.
+        sa.sa_sigaction = print_stack_trace as libc::sighandler_t;
         sa.sa_flags = libc::SA_NODEFER | libc::SA_RESETHAND | libc::SA_ONSTACK;
         libc::sigemptyset(&raw mut sa.sa_mask);
         libc::sigaction(libc::SIGSEGV, &raw const sa, ptr::null_mut());
