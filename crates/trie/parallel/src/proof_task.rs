@@ -1080,27 +1080,18 @@ pub enum ProofTaskTrieNodeProvider {
 
 impl TrieNodeProvider for ProofTaskTrieNodeProvider {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
-        /// Helper to convert `ProviderError` to `SparseTrieError`
-        fn provider_err_to_trie_err(e: ProviderError) -> SparseTrieError {
-            SparseTrieErrorKind::Other(Box::new(e)).into()
-        }
-
-        /// Helper to convert channel recv error to `SparseTrieError`
-        fn recv_err_to_trie_err(_: std::sync::mpsc::RecvError) -> SparseTrieError {
-            SparseTrieErrorKind::Other(Box::new(std::io::Error::other("channel closed"))).into()
-        }
-
         match self {
             Self::AccountNode { handle } => {
-                let rx =
-                    handle.queue_blinded_account_node(*path).map_err(provider_err_to_trie_err)?;
-                rx.recv().map_err(recv_err_to_trie_err)?
+                let rx = handle
+                    .queue_blinded_account_node(*path)
+                    .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
+                rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
             Self::StorageNode { handle, account } => {
                 let rx = handle
                     .queue_blinded_storage_node(*account, *path)
-                    .map_err(provider_err_to_trie_err)?;
-                rx.recv().map_err(recv_err_to_trie_err)?
+                    .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
+                rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
         }
     }
