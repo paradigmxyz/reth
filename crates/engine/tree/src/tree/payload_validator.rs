@@ -1212,8 +1212,11 @@ where
         // Compute remaining gas after block execution
         let remaining = block.header().gas_limit().saturating_sub(block.gas_used());
 
+        // Total number of transactions in the inclusion list
+        let il_len = il.as_ref().len();
+
         // Check each inclusion-list transaction
-        for recovered in il.as_ref() {
+        for (idx, recovered) in il.as_ref().iter().enumerate() {
             let tx = recovered.inner();
             let h = tx.tx_hash();
 
@@ -1273,6 +1276,11 @@ where
             if account_balance >= max_cost {
                 // Transaction would still be valid - inclusion list violation
                 info!("Failed on TX: {:?}", recovered);
+
+                // Number of unchecked transactions plus the current tx
+                let unknown_count = (il_len - idx) as u64;
+                self.metrics.ef_excution.record_inclusion_list_transaction_excluded_unknown(unknown_count);
+                
                 return Err(BlockExecutionError::Validation(
                     BlockValidationError::InvalidInclusionList,
                 ));

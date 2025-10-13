@@ -222,6 +222,11 @@ impl EfExecutionMetrics {
     pub(crate) fn record_inclusion_list_transaction_excluded(&self, reason: &'static str) {
         metrics::counter!("ef_execution_inclusion_list_transactions_excluded_total", "reason" => reason).increment(1);
     }
+    
+    /// Record inclusion list transaction excluded that were not checked or should have been included (i.e. the tx is valid but not included)
+    pub(crate) fn record_inclusion_list_transaction_excluded_unknown(&self, count: u64) {
+        metrics::counter!("ef_execution_inclusion_list_transactions_excluded_total", "reason" => "unknown").increment(count);
+    }
 
     /// Record block validation time against inclusion list
     pub(crate) fn record_inclusion_list_block_validation_time(
