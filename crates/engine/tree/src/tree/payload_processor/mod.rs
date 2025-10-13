@@ -32,7 +32,7 @@ use reth_provider::{
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
 use reth_trie_parallel::{
-    proof_task::{spawn_proof_workers, ProofTaskCtx},
+    proof_task::{ProofTaskCtx, ProofTaskManagerHandle},
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
@@ -203,7 +203,7 @@ where
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
-        let proof_handle = match spawn_proof_workers(
+        let proof_handle = match ProofTaskManagerHandle::new(
             self.executor.handle().clone(),
             consistent_view,
             task_ctx,
