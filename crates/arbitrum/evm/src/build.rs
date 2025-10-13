@@ -504,7 +504,38 @@ where
     }
 
     fn finish(self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
-        self.inner.finish()
+        tracing::info!(
+            target: "arb-reth::executor",
+            "ArbBlockExecutor::finish() called"
+        );
+        
+        let (evm, mut result) = self.inner.finish()?;
+        
+        tracing::info!(
+            target: "arb-reth::executor",
+            receipts_count = result.receipts.len(),
+            inner_gas_used = result.gas_used,
+            "Got result from inner executor"
+        );
+        
+        if let Some(last_receipt) = result.receipts.last() {
+            use alloy_consensus::TxReceipt;
+            let correct_gas_used = last_receipt.cumulative_gas_used();
+            tracing::info!(
+                target: "arb-reth::executor",
+                inner_gas = result.gas_used,
+                correct_gas = correct_gas_used,
+                "Correcting block gasUsed from inner executor value to actual cumulative"
+            );
+            result.gas_used = correct_gas_used;
+        } else {
+            tracing::warn!(
+                target: "arb-reth::executor",
+                "No receipts in result - cannot correct gasUsed"
+            );
+        }
+        
+        Ok((evm, result))
     }
 
     fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
