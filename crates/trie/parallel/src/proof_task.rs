@@ -940,7 +940,7 @@ impl ProofTaskManagerHandle {
     /// Creates a new [`ProofTaskManagerHandle`] with direct access to worker pools.
     ///
     /// This is an internal constructor used for creating handles.
-    fn new_handle(
+    const fn new_handle(
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         account_work_tx: CrossbeamSender<AccountWorkerJob>,
     ) -> Self {
