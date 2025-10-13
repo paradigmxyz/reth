@@ -416,7 +416,6 @@ mod tests {
     use reth_provider::test_utils::MockEthProvider;
     use reth_revm::db::{BundleAccount, BundleState};
     use revm::state::AccountInfo;
-    use revm_database::{states::StorageSlot, AccountRevert, AccountStatus};
     use tempfile::TempDir;
 
     use reth_revm::test_utils::StateProviderTest;
