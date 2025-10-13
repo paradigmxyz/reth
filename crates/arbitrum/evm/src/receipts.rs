@@ -49,20 +49,17 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                 let status_flag = ctx.result.is_success();
                 let gas_used = ctx.result.gas_used();
                 
-                let (actual_gas_used, cumulative_gas) = if let Some(early_gas) = crate::get_early_tx_gas(&tx_hash) {
-                    let gas_diff = early_gas as i64 - gas_used as i64;
+                let (actual_gas_used, cumulative_gas) = if let Some((early_gas, early_cumulative)) = crate::get_early_tx_gas(&tx_hash) {
                     tracing::debug!(
                         target: "arb-reth::receipt",
                         tx_hash = ?tx_hash,
                         early_gas = early_gas,
+                        early_cumulative = early_cumulative,
                         evm_gas = gas_used,
-                        gas_diff = gas_diff,
                         "Using early termination gas for receipt"
                     );
                     crate::clear_early_tx_gas(&tx_hash);
-                    crate::add_gas_adjustment(gas_diff);
-                    let cumulative = ctx.cumulative_gas_used - gas_used + early_gas;
-                    (early_gas, cumulative)
+                    (early_gas, early_cumulative)
                 } else {
                     (gas_used, ctx.cumulative_gas_used)
                 };

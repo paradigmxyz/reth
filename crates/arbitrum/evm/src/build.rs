@@ -75,6 +75,7 @@ pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::Re
     predeploys: Arc<Mutex<PredeployRegistry>>,
     hooks: DefaultArbOsHooks,
     tx_state: ArbTxProcessorState,
+    cumulative_gas_used: u64,
     _phantom: PhantomData<CS>,
 }
 
@@ -255,7 +256,10 @@ where
                 return Err(BlockExecutionError::msg(err_msg));
             }
             
-            crate::set_early_tx_gas(tx_hash, start_hook_result.gas_used);
+            self.cumulative_gas_used += start_hook_result.gas_used;
+            crate::set_early_tx_gas(tx_hash, start_hook_result.gas_used, self.cumulative_gas_used);
+            
+            return Ok(Some(start_hook_result.gas_used));
         }
 
         let tx_type = tx.tx().tx_type();
@@ -424,6 +428,10 @@ where
 
         let wrapped = WithTxEnv { tx_env, tx };
         let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+        
+        if let Ok(Some(gas_used)) = result {
+            self.cumulative_gas_used += gas_used;
+        }
 
         let evm = self.inner.evm_mut();
         evm.cfg_mut().disable_balance_check = prev_disable;
@@ -533,6 +541,7 @@ where
             predeploys: self.predeploys.clone(),
             hooks: Default::default(),
             tx_state: Default::default(),
+            cumulative_gas_used: 0,
             _phantom: core::marker::PhantomData::<CS>,
         }
     }

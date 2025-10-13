@@ -3,17 +3,17 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 thread_local! {
-    static EARLY_TX_GAS: RefCell<HashMap<B256, u64>> = RefCell::new(HashMap::new());
+    static EARLY_TX_GAS: RefCell<HashMap<B256, (u64, u64)>> = RefCell::new(HashMap::new());
     static BLOCK_GAS_ADJUSTMENT: RefCell<i64> = RefCell::new(0);
 }
 
-pub fn set_early_tx_gas(tx_hash: B256, gas_used: u64) {
+pub fn set_early_tx_gas(tx_hash: B256, gas_used: u64, cumulative_gas: u64) {
     EARLY_TX_GAS.with(|map| {
-        map.borrow_mut().insert(tx_hash, gas_used);
+        map.borrow_mut().insert(tx_hash, (gas_used, cumulative_gas));
     });
 }
 
-pub fn get_early_tx_gas(tx_hash: &B256) -> Option<u64> {
+pub fn get_early_tx_gas(tx_hash: &B256) -> Option<(u64, u64)> {
     EARLY_TX_GAS.with(|map| {
         map.borrow().get(tx_hash).copied()
     })
