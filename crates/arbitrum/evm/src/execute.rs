@@ -594,7 +594,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 
                 StartTxHookResult {
                     end_tx_now: true,
-                    gas_used: 0,
+                    gas_used: usergas,  // Return the gas limit, not 0, to match Nitro behavior
                     error: None,
                 }
             }
