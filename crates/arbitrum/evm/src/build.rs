@@ -441,7 +441,7 @@ where
         let result = self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
             let evm_gas = exec_result.gas_used();
             let actual_gas = hook_gas_override.unwrap_or(evm_gas);
-            let new_cumulative = self.cumulative_gas_used + actual_gas;
+            let new_cumulative = self.cumulative_gas_used + evm_gas;
             
             tracing::debug!(
                 target: "arb-reth::executor",
