@@ -99,7 +99,14 @@ impl<R: RangeBounds<BlockNumber>> From<R> for BlockNumberAddressRange {
         };
 
         let end = match r.end_bound() {
-            Bound::Included(n) => Bound::Excluded(BlockNumberAddress((n + 1, Address::ZERO))),
+            // Avoid overflow if the inclusive end equals u64::MAX by treating it as unbounded.
+            Bound::Included(n) => {
+                if *n == u64::MAX {
+                    Bound::Unbounded
+                } else {
+                    Bound::Excluded(BlockNumberAddress((n + 1, Address::ZERO)))
+                }
+            }
             Bound::Excluded(n) => Bound::Excluded(BlockNumberAddress((*n, Address::ZERO))),
             Bound::Unbounded => Bound::Unbounded,
         };
