@@ -224,7 +224,7 @@ impl ParallelProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proof_task::{spawn_proof_workers, ProofTaskCtx};
+    use crate::proof_task::{ProofTaskCtx, ProofTaskManagerHandle};
     use alloy_primitives::{
         keccak256,
         map::{B256Set, DefaultHashBuilder, HashMap},
@@ -307,7 +307,8 @@ mod tests {
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
         let proof_task_handle =
-            spawn_proof_workers(rt.handle().clone(), consistent_view, task_ctx, 1, 1).unwrap();
+            ProofTaskManagerHandle::new(rt.handle().clone(), consistent_view, task_ctx, 1, 1)
+                .unwrap();
 
         let parallel_result = ParallelProof::new(
             Default::default(),

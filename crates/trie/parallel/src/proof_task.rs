@@ -90,82 +90,6 @@ enum StorageWorkerJob {
     },
 }
 
-/// Spawns storage and account worker pools with dedicated database transactions.
-///
-/// Returns a handle for submitting proof tasks to the worker pools.
-/// Workers run until the last handle is dropped.
-///
-/// # Parameters
-/// - `executor`: Tokio runtime handle for spawning blocking tasks
-/// - `view`: Consistent database view for creating transactions
-/// - `task_ctx`: Shared context with trie updates and prefix sets
-/// - `storage_worker_count`: Number of storage workers to spawn
-/// - `account_worker_count`: Number of account workers to spawn
-pub fn spawn_proof_workers<Factory>(
-    executor: Handle,
-    view: ConsistentDbView<Factory>,
-    task_ctx: ProofTaskCtx,
-    storage_worker_count: usize,
-    account_worker_count: usize,
-) -> ProviderResult<ProofTaskManagerHandle>
-where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>,
-{
-    let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
-    let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
-
-    tracing::info!(
-        target: "trie::proof_task",
-        storage_worker_count,
-        account_worker_count,
-        "Spawning proof worker pools"
-    );
-
-    // Spawn storage workers
-    for worker_id in 0..storage_worker_count {
-        let provider_ro = view.provider_ro()?;
-        let tx = provider_ro.into_tx();
-        let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
-        let work_rx_clone = storage_work_rx.clone();
-
-        executor
-            .spawn_blocking(move || storage_worker_loop(proof_task_tx, work_rx_clone, worker_id));
-
-        tracing::debug!(
-            target: "trie::proof_task",
-            worker_id,
-            "Storage worker spawned successfully"
-        );
-    }
-
-    // Spawn account workers
-    for worker_id in 0..account_worker_count {
-        let provider_ro = view.provider_ro()?;
-        let tx = provider_ro.into_tx();
-        let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
-        let work_rx_clone = account_work_rx.clone();
-        let storage_work_tx_clone = storage_work_tx.clone();
-
-        executor.spawn_blocking(move || {
-            account_worker_loop(proof_task_tx, work_rx_clone, storage_work_tx_clone, worker_id)
-        });
-
-        tracing::debug!(
-            target: "trie::proof_task",
-            worker_id,
-            "Account worker spawned successfully"
-        );
-    }
-
-    Ok(ProofTaskManagerHandle::new(
-        storage_work_tx,
-        account_work_tx,
-        Arc::new(AtomicUsize::new(0)),
-        #[cfg(feature = "metrics")]
-        Arc::new(ProofTaskMetrics::default()),
-    ))
-}
-
 /// Worker loop for storage trie operations.
 ///
 /// # Lifecycle
@@ -921,11 +845,87 @@ pub struct ProofTaskManagerHandle {
 }
 
 impl ProofTaskManagerHandle {
+    /// Spawns storage and account worker pools with dedicated database transactions.
+    ///
+    /// Returns a handle for submitting proof tasks to the worker pools.
+    /// Workers run until the last handle is dropped.
+    ///
+    /// # Parameters
+    /// - `executor`: Tokio runtime handle for spawning blocking tasks
+    /// - `view`: Consistent database view for creating transactions
+    /// - `task_ctx`: Shared context with trie updates and prefix sets
+    /// - `storage_worker_count`: Number of storage workers to spawn
+    /// - `account_worker_count`: Number of account workers to spawn
+    pub fn new<Factory>(
+        executor: Handle,
+        view: ConsistentDbView<Factory>,
+        task_ctx: ProofTaskCtx,
+        storage_worker_count: usize,
+        account_worker_count: usize,
+    ) -> ProviderResult<Self>
+    where
+        Factory: DatabaseProviderFactory<Provider: BlockReader>,
+    {
+        let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
+        let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
+
+        tracing::info!(
+            target: "trie::proof_task",
+            storage_worker_count,
+            account_worker_count,
+            "Spawning proof worker pools"
+        );
+
+        // Spawn storage workers
+        for worker_id in 0..storage_worker_count {
+            let provider_ro = view.provider_ro()?;
+            let tx = provider_ro.into_tx();
+            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let work_rx_clone = storage_work_rx.clone();
+
+            executor.spawn_blocking(move || {
+                storage_worker_loop(proof_task_tx, work_rx_clone, worker_id)
+            });
+
+            tracing::debug!(
+                target: "trie::proof_task",
+                worker_id,
+                "Storage worker spawned successfully"
+            );
+        }
+
+        // Spawn account workers
+        for worker_id in 0..account_worker_count {
+            let provider_ro = view.provider_ro()?;
+            let tx = provider_ro.into_tx();
+            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let work_rx_clone = account_work_rx.clone();
+            let storage_work_tx_clone = storage_work_tx.clone();
+
+            executor.spawn_blocking(move || {
+                account_worker_loop(proof_task_tx, work_rx_clone, storage_work_tx_clone, worker_id)
+            });
+
+            tracing::debug!(
+                target: "trie::proof_task",
+                worker_id,
+                "Account worker spawned successfully"
+            );
+        }
+
+        Ok(Self::new_handle(
+            storage_work_tx,
+            account_work_tx,
+            Arc::new(AtomicUsize::new(0)),
+            #[cfg(feature = "metrics")]
+            Arc::new(ProofTaskMetrics::default()),
+        ))
+    }
+
     /// Creates a new [`ProofTaskManagerHandle`] with direct access to worker pools.
     ///
-    /// This is an internal constructor used by `spawn_proof_workers`.
-    /// External users should call `spawn_proof_workers` to create handles.
-    fn new(
+    /// This is an internal constructor used for creating handles.
+    fn new_handle(
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         account_work_tx: CrossbeamSender<AccountWorkerJob>,
         active_handles: Arc<AtomicUsize>,
@@ -1017,7 +1017,7 @@ impl ProofTaskManagerHandle {
 
 impl Clone for ProofTaskManagerHandle {
     fn clone(&self) -> Self {
-        Self::new(
+        Self::new_handle(
             self.storage_work_tx.clone(),
             self.account_work_tx.clone(),
             self.active_handles.clone(),
@@ -1120,7 +1120,7 @@ mod tests {
         )
     }
 
-    /// Ensures `spawn_proof_workers` spawns workers correctly.
+    /// Ensures `ProofTaskManagerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
         let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
@@ -1130,7 +1130,8 @@ mod tests {
             let view = ConsistentDbView::new(factory, None);
             let ctx = test_ctx();
 
-            let proof_handle = spawn_proof_workers(handle.clone(), view, ctx, 5, 3).unwrap();
+            let proof_handle =
+                ProofTaskManagerHandle::new(handle.clone(), view, ctx, 5, 3).unwrap();
 
             // Verify handle can be cloned
             let _cloned_handle = proof_handle.clone();

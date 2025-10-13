@@ -1212,7 +1212,7 @@ mod tests {
         DatabaseProviderFactory,
     };
     use reth_trie::{MultiProof, TrieInput};
-    use reth_trie_parallel::proof_task::{spawn_proof_workers, ProofTaskCtx};
+    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofTaskManagerHandle};
     use revm_primitives::{B256, U256};
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
@@ -1228,7 +1228,7 @@ mod tests {
         );
         let consistent_view = ConsistentDbView::new(factory, None);
         let proof_handle =
-            spawn_proof_workers(executor.handle().clone(), consistent_view, task_ctx, 1, 1)
+            ProofTaskManagerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1)
                 .expect("Failed to spawn proof workers");
         let channel = channel();
 
