@@ -3031,7 +3031,7 @@ mod tests {
                             state.clone(),
                             trie_cursor.account_trie_cursor().unwrap(),
                             Default::default(),
-                            state.keys().copied().collect::<Vec<_>>(),
+                            state.keys().copied(),
                         );
 
                     // Extract account nodes before moving hash_builder_updates
@@ -3076,7 +3076,7 @@ mod tests {
                                 .iter()
                                 .map(|nibbles| B256::from_slice(&nibbles.pack()))
                                 .collect(),
-                            state.keys().copied().collect::<Vec<_>>(),
+                            state.keys().copied(),
                         );
 
                     // Extract account nodes before moving hash_builder_updates
