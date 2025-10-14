@@ -715,9 +715,11 @@ where
             let inner = self.clone();
             let filter = filter_arc.clone();
             let boundaries = log_value_indices.clone();
-            let (tx, rx) = oneshot::channel();
-            self.task_spawner.spawn_blocking(Box::pin(async move {
-                let res: Result<(u32, Vec<Log>), ProviderError> = (|| {
+            let params = params;
+            let chunk_task = Box::pin(async move {
+                let map_start = map_start;
+                let map_end = map_end;
+                let result = tokio::task::spawn_blocking(move || -> Result<(u32, Vec<Log>), ProviderError> {
                     let provider = inner.provider().clone();
                     let candidates =
                         query_maps_range(&provider, &params, map_start, map_end, &filter)?;
@@ -735,25 +737,22 @@ where
 
                     let mut logs = Vec::new();
                     for block_number in blocks {
-                        let header =
-                            match provider.sealed_header(block_number)? {
-                                Some(h) => h,
-                                None => continue,
-                            };
+                        let header = match provider.sealed_header(block_number)? {
+                            Some(h) => h,
+                            None => continue,
+                        };
 
-                        let receipts = match provider
-                            .receipts_by_block(block_number.into())?
-                        {
+                        let receipts = match provider.receipts_by_block(block_number.into())? {
                             Some(receipts) => receipts,
                             None => continue,
                         };
 
-                        let num_hash = header.num_hash();
+                        let block_num_hash = header.num_hash();
                         append_matching_block_logs(
                             &mut logs,
                             ProviderOrBlock::Provider(&provider),
                             &filter,
-                            num_hash,
+                            block_num_hash,
                             &receipts,
                             false,
                             header.timestamp(),
@@ -761,15 +760,20 @@ where
                     }
 
                     Ok((map_start, logs))
-                })();
-                let _ = tx.send(res);
-            }));
+                })
+                .await;
 
-            pending.push_back(Box::pin(async move {
-                rx.await
-                    .map_err(|_| EthFilterError::InternalError)?
-                    .map_err(EthFilterError::from)
-            }));
+                match result {
+                    Ok(Ok(value)) => Ok(value),
+                    Ok(Err(err)) => Err(EthFilterError::from(err)),
+                    Err(join_err) => {
+                        trace!(target: "rpc::eth::filter", error = ?join_err, "Task join error");
+                        Err(EthFilterError::InternalError)
+                    }
+                }
+            });
+
+            pending.push_back(chunk_task);
 
             if pending.len() >= LOG_INDEX_MAX_PARALLEL_EPOCHS {
                 if let Some(res) = pending.next().await {
