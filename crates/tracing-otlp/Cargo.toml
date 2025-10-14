@@ -12,7 +12,7 @@ exclude.workspace = true
 # obs
 opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
-opentelemetry-otlp = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true, features = ["grpc-tonic"] }
 opentelemetry-semantic-conventions = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber.workspace = true
@@ -20,6 +20,7 @@ tracing.workspace = true
 
 # misc
 eyre.workspace = true
+serde.workspace = true
 url.workspace = true
 
 [lints]
