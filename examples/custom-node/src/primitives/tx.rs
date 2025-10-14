@@ -33,7 +33,9 @@ impl RlpBincode for CustomTransaction {}
 impl reth_codecs::alloy::transaction::Envelope for CustomTransaction {
     fn signature(&self) -> &Signature {
         match self {
-            CustomTransaction::Op(tx) => tx.signature(),
+            CustomTransaction::Op(tx) => {
+                tx.signature().expect("no signature present. transaction is a deposit")
+            }
             CustomTransaction::Payment(tx) => tx.signature(),
         }
     }

@@ -22,7 +22,7 @@ use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
     TxTy,
 };
-use revm_context::{Block as _, BlockEnv, CfgEnv, TxEnv};
+use revm_context::{BlockEnv, CfgEnv, TxEnv};
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
