@@ -1,7 +1,7 @@
-//! MDBX implementation for reth's database abstraction layer.
+//! Database implementations for reth's database abstraction layer.
 //!
-//! This crate is an implementation of `reth-db-api` for MDBX, as well as a few other common
-//! database types.
+//! This crate provides implementations of `reth-db-api` for multiple database backends,
+//! including MDBX and RocksDB.
 //!
 //! # Overview
 //!
@@ -15,24 +15,42 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+pub mod database;
 mod implementation;
 pub mod lockfile;
-#[cfg(feature = "mdbx")]
+#[cfg(any(feature = "mdbx", feature = "rocksdb"))]
 mod metrics;
 pub mod static_file;
-#[cfg(feature = "mdbx")]
+#[cfg(all(feature = "mdbx", not(feature = "rocksdb")))]
 mod utils;
 pub mod version;
 
-#[cfg(feature = "mdbx")]
-pub mod mdbx;
+// Backend-specific modules are now handled through the unified database module
+pub mod generic;
+
+#[cfg(all(feature = "rocksdb", not(feature = "mdbx")))]
+use reth_trie_common as _;
 
 pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
-#[cfg(feature = "mdbx")]
+#[cfg(all(feature = "mdbx", not(feature = "rocksdb")))]
 pub use utils::is_database_empty;
 
-#[cfg(feature = "mdbx")]
-pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind};
+pub use generic::{create_db, init_db, open_db, open_db_read_only};
+
+// Re-export backend-specific types based on enabled features
+// MDBX and RocksDB are mutually exclusive features
+#[cfg(all(feature = "mdbx", not(feature = "rocksdb")))]
+pub use crate::implementation::mdbx::*;
+
+#[cfg(all(feature = "rocksdb", not(feature = "mdbx")))]
+pub use crate::implementation::rocksdb::*;
+
+// When both features are enabled, prefer rocksdb
+#[cfg(all(feature = "mdbx", feature = "rocksdb"))]
+pub use crate::implementation::rocksdb::*;
+
+// Re-export shared types and constants from database module
+pub use crate::database::{TableStats, GIGABYTE, KILOBYTE, MEGABYTE, TERABYTE};
 
 pub use models::ClientVersion;
 pub use reth_db_api::*;
@@ -41,7 +59,7 @@ pub use reth_db_api::*;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use crate::mdbx::DatabaseArguments;
+    use crate::implementation::mdbx::DatabaseArguments;
     use parking_lot::RwLock;
     use reth_db_api::{
         database::Database, database_metrics::DatabaseMetrics, models::ClientVersion,
@@ -212,9 +230,8 @@ pub mod test_utils {
 #[cfg(test)]
 mod tests {
     use crate::{
-        init_db,
-        mdbx::DatabaseArguments,
-        open_db, tables,
+        implementation::mdbx::DatabaseArguments,
+        init_db, open_db, tables,
         version::{db_version_file_path, DatabaseVersionError},
     };
     use assert_matches::assert_matches;

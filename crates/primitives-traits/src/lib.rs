@@ -237,3 +237,9 @@ pub mod test_utils {
     #[cfg(any(test, feature = "test-utils"))]
     pub use crate::{block::TestBlock, header::test_utils::TestHeader};
 }
+
+/// Value that containes subkey
+pub trait SubkeyContainedValue {
+    /// Return the length of compressed subkey
+    fn subkey_length(&self) -> Option<usize>;
+}

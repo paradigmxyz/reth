@@ -31,7 +31,7 @@ workspace = true
 reth-ethereum-cli.workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
-reth-db = { workspace = true, features = ["mdbx"] }
+reth-db = { workspace = true }
 reth-provider.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
@@ -84,6 +84,9 @@ tempfile.workspace = true
 default = ["jemalloc", "reth-revm/portable"]
 
 dev = ["reth-ethereum-cli/dev"]
+
+rocksdb = ["reth-db/rocksdb"]
+mdbx = ["reth-db/mdbx"]
 
 asm-keccak = [
     "reth-node-core/asm-keccak",

@@ -1,14 +1,14 @@
-use super::tui::DbListTUI;
 use alloy_primitives::hex;
 use clap::Parser;
-use eyre::WrapErr;
 use reth_chainspec::EthereumHardforks;
 use reth_db::DatabaseEnv;
-use reth_db_api::{database::Database, table::Table, RawValue, TableViewer, Tables};
+use reth_db_api::{
+    cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, DatabaseError,
+    TableViewer, Tables,
+};
 use reth_db_common::{DbTool, ListFilter};
 use reth_node_builder::{NodeTypes, NodeTypesWithDBAdapter};
-use std::{cell::RefCell, sync::Arc};
-use tracing::error;
+use std::sync::Arc;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db list` command
@@ -95,45 +95,34 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
-        self.tool.provider_factory.db_ref().view(|tx| {
-            let table_db = tx.inner.open_db(Some(self.args.table.name())).wrap_err("Could not open db.")?;
-            let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", self.args.table.name()))?;
-            let total_entries = stats.entries();
-            let final_entry_idx = total_entries.saturating_sub(1);
-            if self.args.skip > final_entry_idx {
-                error!(
-                    target: "reth::cli",
-                    "Start index {start} is greater than the final entry index ({final_entry_idx}) in the table {table}",
-                    start = self.args.skip,
-                    final_entry_idx = final_entry_idx,
-                    table = self.args.table.name()
-                );
-                return Ok(())
-            }
+        let _ = self.tool.provider_factory.db_ref().view(|tx| {
+            let mut cursor = tx.cursor_read::<T>()?;
+            let mut entries = Vec::new();
+            let mut current_idx = 0;
 
-
-            let list_filter = self.args.list_filter();
-
-            if self.args.json || self.args.count {
-                let (list, count) = self.tool.list::<T>(&list_filter)?;
-
-                if self.args.count {
-                    println!("{count} entries found.")
-                } else if self.args.raw {
-                    let list = list.into_iter().map(|row| (row.0, RawValue::new(row.1).into_value())).collect::<Vec<_>>();
-                    println!("{}", serde_json::to_string_pretty(&list)?);
-                } else {
-                    println!("{}", serde_json::to_string_pretty(&list)?);
+            if let Some((key, value)) = cursor.first()? {
+                if current_idx >= self.args.skip {
+                    entries.push((key, value));
                 }
-                Ok(())
-            } else {
-                let list_filter = RefCell::new(list_filter);
-                DbListTUI::<_, T>::new(|skip, len| {
-                    list_filter.borrow_mut().update_page(skip, len);
-                    self.tool.list::<T>(&list_filter.borrow()).unwrap().0
-                }, self.args.skip, self.args.len, total_entries, self.args.raw).run()
+                current_idx += 1;
+                while entries.len() < self.args.len as usize {
+                    if let Some((key, value)) = cursor.next()? {
+                        if current_idx >= self.args.skip {
+                            entries.push((key, value));
+                        }
+                        current_idx += 1;
+                    } else {
+                        break;
+                    }
+                }
             }
-        })??;
+
+            for (key, value) in entries {
+                println!("{:?}: {:?}", key, value);
+            }
+
+            Ok::<(), DatabaseError>(())
+        })?;
 
         Ok(())
     }

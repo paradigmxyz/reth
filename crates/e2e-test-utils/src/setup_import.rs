@@ -273,7 +273,7 @@ mod tests {
     use super::*;
     use crate::test_rlp_utils::{create_fcu_json, generate_test_blocks, write_blocks_to_rlp};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_db::mdbx::DatabaseArguments;
+    use reth_db::DatabaseArguments;
     use reth_payload_builder::EthPayloadBuilderAttributes;
     use reth_primitives::SealedBlock;
     use reth_provider::{

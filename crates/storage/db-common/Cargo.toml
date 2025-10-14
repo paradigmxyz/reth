@@ -42,7 +42,7 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-reth-db = { workspace = true, features = ["mdbx"] }
+reth-db = { workspace = true }
 reth-provider = { workspace = true, features = ["test-utils"] }
 
 [lints]
