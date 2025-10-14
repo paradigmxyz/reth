@@ -1533,7 +1533,9 @@ where
             &mut new_txs,
             SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
         ) {
-            Poll::Ready(count) => count > 0,
+            Poll::Ready(count) => {
+                count == SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE
+            }
             Poll::Pending => false,
         };
         if !new_txs.is_empty() {
