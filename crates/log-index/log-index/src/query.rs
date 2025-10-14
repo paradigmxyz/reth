@@ -39,7 +39,7 @@ pub fn calculate_map_range(
 }
 
 /// Resolve log indices to blocks with metadata
-fn resolve_to_blocks(
+pub fn resolve_to_blocks(
     log_indices: Vec<u64>,
     log_value_indices: &[BlockBoundary],
     from_block: u64,
@@ -79,7 +79,7 @@ fn resolve_to_blocks(
 }
 
 /// Query logs across a range of maps
-fn query_maps_range<P: LogIndexProvider>(
+pub fn query_maps_range<P: LogIndexProvider>(
     provider: &P,
     params: &LogIndexParams,
     map_start: u32,
@@ -102,7 +102,14 @@ fn query_maps_range<P: LogIndexProvider>(
 
         let layer_results = instance.get_matches_for_layer(layer)?;
         for result in layer_results {
-            results.entry(result.map_index).or_insert(result.matches);
+            results
+                .entry(result.map_index)
+                .and_modify(|existing| {
+                    if result.matches.is_none() {
+                        *existing = None;
+                    }
+                })
+                .or_insert(result.matches);
         }
     }
 

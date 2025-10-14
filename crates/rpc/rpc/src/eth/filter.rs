@@ -15,7 +15,7 @@ use futures::{
 use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
-use reth_log_index::query::query_logs_in_block_range;
+use reth_log_index::query::{calculate_map_range, query_maps_range, resolve_to_blocks};
 use reth_log_index_common::LogIndexParams;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
@@ -46,7 +46,7 @@ use tokio::{
     sync::{mpsc::Receiver, oneshot, Mutex},
     time::MissedTickBehavior,
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 impl<Eth> EngineEthFilter for EthFilter<Eth>
 where
@@ -83,6 +83,8 @@ const PARALLEL_PROCESSING_THRESHOLD: usize = 1000;
 
 /// Default concurrency for parallel processing
 const DEFAULT_PARALLEL_CONCURRENCY: usize = 4;
+/// Maximum number of concurrent log index epoch workers.
+const LOG_INDEX_MAX_PARALLEL_EPOCHS: usize = 4;
 
 /// `Eth` filter RPC implementation.
 ///
@@ -679,8 +681,73 @@ where
         // TODO: figure out params passing
         let params = LogIndexParams::default();
 
-        let results =
-            query_logs_in_block_range(self.provider(), &params, filter, from_block, to_block)?;
+        let log_value_indices =
+            self.provider().get_log_value_indices_range(from_block..=to_block)?;
+        let (first_map, last_map) =
+            match calculate_map_range(&log_value_indices, params.log_values_per_map) {
+                Some(range) => range,
+                None => return Ok(Vec::new()),
+            };
+
+        let map_ranges = {
+            let mut ranges = Vec::new();
+            let mut current = first_map;
+            while current <= last_map {
+                let epoch = params.map_epoch(current);
+                let epoch_last = params.last_epoch_map(epoch).min(last_map);
+                ranges.push((current, epoch_last));
+                match epoch_last.checked_add(1) {
+                    Some(next) if next <= last_map => current = next,
+                    _ => break,
+                }
+            }
+            if ranges.is_empty() {
+                vec![(first_map, last_map)]
+            } else {
+                ranges
+            }
+        };
+
+        let filter_arc = Arc::new(filter.clone());
+        let mut pending: FuturesOrdered<
+            Pin<Box<dyn Future<Output = Result<Vec<u64>, EthFilterError>> + Send>>
+        > = FuturesOrdered::new();
+        let mut candidates = Vec::new();
+
+        for (map_start, map_end) in map_ranges.into_iter() {
+            let inner = self.clone();
+            let filter = filter_arc.clone();
+            let (tx, rx) = oneshot::channel();
+            self.task_spawner.spawn_blocking(Box::pin(async move {
+                let res: Result<Vec<u64>, ProviderError> = (|| {
+                    let provider = inner.provider().clone();
+                    query_maps_range(&provider, &params, map_start, map_end, &filter)
+                })();
+                let _ = tx.send(res);
+            }));
+
+            pending.push_back(Box::pin(async move {
+                rx.await
+                    .map_err(|_| EthFilterError::InternalError)?
+                    .map_err(EthFilterError::from)
+            }));
+
+            if pending.len() >= LOG_INDEX_MAX_PARALLEL_EPOCHS {
+                if let Some(res) = pending.next().await {
+                    candidates.extend(res?);
+                }
+            }
+        }
+
+        while let Some(res) = pending.next().await {
+            candidates.extend(res?);
+        }
+
+        candidates.sort_unstable();
+        candidates.dedup();
+        info!("Got matches: {:?}", candidates.len());
+
+        let results = resolve_to_blocks(candidates, &log_value_indices, from_block, to_block);
 
         let mut matching_headers = Vec::new();
 
