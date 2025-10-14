@@ -322,7 +322,7 @@ where
     /// - Block execution
     /// - State root computation
     /// - Fork detection
-    #[instrument(target = "engine::tree", skip_all)]
+    #[instrument(level = "trace", target = "engine::tree", skip_all)]
     pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &mut self,
         input: BlockOrPayload<T>,
@@ -629,7 +629,7 @@ where
     }
 
     /// Executes a block with the given state provider
-    #[instrument(target = "engine::tree", skip_all)]
+    #[instrument(level = "trace", target = "engine::tree", skip_all)]
     fn execute_block<S, Err, T>(
         &mut self,
         state_provider: S,
@@ -696,7 +696,7 @@ where
     /// Returns `Err(_)` if error was encountered during computation.
     /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
     /// should be used instead.
-    #[instrument(target = "engine::tree", skip_all)]
+    #[instrument(level = "trace", target = "engine::tree", skip_all)]
     fn compute_state_root_parallel(
         &self,
         persisting_kind: PersistingKind,
@@ -832,7 +832,7 @@ where
     /// The method handles strategy fallbacks if the preferred approach fails, ensuring
     /// block execution always completes with a valid state root.
     #[allow(clippy::too_many_arguments)]
-    #[instrument(target = "engine::tree", skip_all, fields(strategy))]
+    #[instrument(level = "trace", target = "engine::tree", skip_all, fields(strategy))]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -1002,7 +1002,7 @@ where
     }
 
     /// Determines the state root computation strategy based on persistence state and configuration.
-    #[instrument(target = "engine::tree", skip_all)]
+    #[instrument(level = "trace", target = "engine::tree", skip_all)]
     fn plan_state_root_computation<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &BlockOrPayload<T>,
@@ -1085,7 +1085,7 @@ where
     ///    block.
     /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
     ///    [`HashedPostState`] from them.
-    #[instrument(target = "engine::tree", skip_all, fields(persisting_kind))]
+    #[instrument(level = "trace", target = "engine::tree", skip_all, fields(persisting_kind))]
     fn compute_trie_input<TP: DBProvider + BlockNumReader>(
         &self,
         persisting_kind: PersistingKind,
