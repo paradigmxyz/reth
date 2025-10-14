@@ -1,9 +1,3 @@
-//! In-memory implementation of `OpProofsStorage` for testing purposes.
-//!
-//! This module provides a complete in-memory implementation of the [`OpProofsStorage`] trait
-//! that can be used for testing and development. The implementation uses tokio async `RwLock`
-//! for thread-safe concurrent access and stores all data in memory using `BTreeMap` collections.
-
 use alloy_primitives::{map::HashMap, B256, U256};
 use async_trait::async_trait;
 use reth_primitives_traits::Account;
@@ -11,7 +5,7 @@ use reth_trie::{updates::TrieUpdates, BranchNodeCompact, HashedPostState, Nibble
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::RwLock;
 
-use super::storage::{
+use crate::storage::{
     BlockStateDiff, OpProofsHashedCursor, OpProofsStorage, OpProofsStorageError,
     OpProofsStorageResult, OpProofsTrieCursor,
 };

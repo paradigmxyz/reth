@@ -2,12 +2,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        in_memory::InMemoryProofsStorage,
-        storage::{
-            BlockStateDiff, OpProofsHashedCursor, OpProofsStorage, OpProofsStorageError,
-            OpProofsTrieCursor,
-        },
+    use crate::storage::{
+        in_memory::InMemoryProofsStorage, BlockStateDiff, OpProofsHashedCursor, OpProofsStorage,
+        OpProofsStorageError, OpProofsTrieCursor,
     };
     use alloy_primitives::{map::HashMap, B256, U256};
     use reth_primitives_traits::Account;
