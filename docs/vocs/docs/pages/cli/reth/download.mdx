@@ -169,4 +169,13 @@ Tracing:
           If no value provided, defaults to `http://localhost:4318/v1/traces`.
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
+
+      --tracing-otlp-level <LEVEL>
+          Set the minimum log level for OTLP traces.
+
+          Valid values: ERROR, WARN, INFO, DEBUG, TRACE
+
+          Defaults to TRACE if not specified.
+
+          [default: TRACE]
 ```
