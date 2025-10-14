@@ -17,7 +17,7 @@ reth-cli-commands.workspace = true
 reth-consensus.workspace = true
 reth-rpc-server-types.workspace = true
 reth-primitives-traits.workspace = true
-reth-db = { workspace = true, features = ["mdbx", "op"] }
+reth-db = { workspace = true, features = ["op"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders.workspace = true

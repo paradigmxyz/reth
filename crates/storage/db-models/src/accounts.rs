@@ -1,5 +1,5 @@
 use alloy_primitives::Address;
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, SubkeyContainedValue};
 
 /// Account as it is saved in the database.
 ///
@@ -13,6 +13,12 @@ pub struct AccountBeforeTx {
     pub address: Address,
     /// Account state before the transaction.
     pub info: Option<Account>,
+}
+
+impl SubkeyContainedValue for AccountBeforeTx {
+    fn subkey_length(&self) -> Option<usize> {
+        Some(20)
+    }
 }
 
 // NOTE: Removing reth_codec and manually encode subkey

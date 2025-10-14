@@ -18,7 +18,7 @@ reth-network = { workspace = true, optional = true }
 reth-network-api = { workspace = true, optional = true }
 reth-eth-wire = { workspace = true, optional = true }
 reth-provider = { workspace = true, optional = true }
-reth-db = { workspace = true, optional = true, features = ["mdbx", "op"] }
+reth-db = { workspace = true, optional = true, features = ["op"] }
 reth-codecs = { workspace = true, optional = true }
 reth-storage-api = { workspace = true, optional = true }
 reth-node-api = { workspace = true, optional = true }

@@ -14,11 +14,13 @@ workspace = true
 [dependencies]
 # reth
 reth-db-api.workspace = true
+reth-codecs.workspace = true
 reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
 reth-tracing.workspace = true
 reth-static-file-types.workspace = true
+reth-trie-common = { workspace = true, optional = true }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -26,6 +28,9 @@ alloy-primitives.workspace = true
 # mdbx
 reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed", "read-tx-timeouts"] }
 eyre = { workspace = true, optional = true }
+
+# rocksdb
+rocksdb = { version = "0.22.0", optional = true, default-features = true }
 
 # metrics
 reth-metrics = { workspace = true, optional = true }
@@ -64,7 +69,7 @@ proptest.workspace = true
 assert_matches.workspace = true
 
 [features]
-default = ["mdbx"]
+default = []
 mdbx = [
     "dep:reth-libmdbx",
     "dep:eyre",
@@ -73,12 +78,28 @@ mdbx = [
     "dep:metrics",
     "dep:strum",
     "dep:rustc-hash",
+    "reth-storage-errors/std",
+    "alloy-primitives/std",
+]
+rocksdb = [
+    "dep:rocksdb",
+    "dep:eyre",
+    "dep:parking_lot",
+    "reth-metrics",
+    "dep:metrics",
+    "dep:strum",
+    "dep:rustc-hash",
+    "reth-storage-errors/std",
+    "alloy-primitives/std",
+    "dep:reth-trie-common",
+    "reth-trie-common/std",
+    "reth-trie-common/rayon",
 ]
 test-utils = [
     "dep:tempfile",
     "mdbx",
     "arbitrary",
-    "parking_lot",
+    "dep:parking_lot",
     "reth-db-api/test-utils",
     "reth-nippy-jar/test-utils",
     "reth-primitives-traits/test-utils",

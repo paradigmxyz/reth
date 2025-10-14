@@ -20,7 +20,7 @@ reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-consensus.workspace = true
-reth-db = { workspace = true, features = ["mdbx", "test-utils", "disable-lock"] }
+reth-db = { workspace = true, features = ["test-utils", "disable-lock"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }

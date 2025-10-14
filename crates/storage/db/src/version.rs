@@ -9,7 +9,10 @@ use std::{
 pub const DB_VERSION_FILE_NAME: &str = "database.version";
 /// The version of the database stored in the [`DB_VERSION_FILE_NAME`] file in the same directory as
 /// database.
-pub const DB_VERSION: u64 = 2;
+pub const DB_VERSION: u64 = match cfg!(feature = "rocksdb") {
+    true => 3,  // RocksDB
+    false => 2, // MDBX
+};
 
 /// Error when checking a database version using [`check_db_version_file`]
 #[derive(thiserror::Error, Debug)]

@@ -331,6 +331,7 @@ panic = "abort"
 codegen-units = 1
 incremental = false
 
+
 [workspace.dependencies]
 # reth
 op-reth = { path = "crates/optimism/bin" }
@@ -350,7 +351,7 @@ reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
 reth-consensus-debug-client = { path = "crates/consensus/debug-client" }
-reth-db = { path = "crates/storage/db", default-features = false }
+reth-db = { path = "crates/storage/db" }
 reth-db-api = { path = "crates/storage/db-api" }
 reth-db-common = { path = "crates/storage/db-common" }
 reth-db-models = { path = "crates/storage/db-models", default-features = false }

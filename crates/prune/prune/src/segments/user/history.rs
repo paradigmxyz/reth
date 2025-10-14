@@ -82,7 +82,7 @@ fn prune_shard<C, T, SK>(
     key: T::Key,
     raw_blocks: RawValue<T::Value>,
     to_block: BlockNumber,
-    key_matches: impl Fn(&T::Key, &T::Key) -> bool,
+    _key_matches: impl Fn(&T::Key, &T::Key) -> bool,
 ) -> Result<PruneShardOutcome, DatabaseError>
 where
     C: DbCursorRO<RawTable<T>> + DbCursorRW<RawTable<T>>,
@@ -112,41 +112,11 @@ where
         // If there will be no more blocks in the shard after pruning blocks below target
         // block, we need to remove it, as empty shards are not allowed.
         if higher_blocks.is_empty() {
-            if key.as_ref().highest_block_number == u64::MAX {
-                let prev_row = cursor
-                    .prev()?
-                    .map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v)))
-                    .transpose()?;
-                match prev_row {
-                    // If current shard is the last shard for the sharded key that
-                    // has previous shards, replace it with the previous shard.
-                    Some((prev_key, prev_value)) if key_matches(&prev_key, &key) => {
-                        cursor.delete_current()?;
-                        // Upsert will replace the last shard for this sharded key with
-                        // the previous value.
-                        cursor.upsert(RawKey::new(key), &prev_value)?;
-                        Ok(PruneShardOutcome::Updated)
-                    }
-                    // If there's no previous shard for this sharded key,
-                    // just delete last shard completely.
-                    _ => {
-                        // If we successfully moved the cursor to a previous row,
-                        // jump to the original last shard.
-                        if prev_row.is_some() {
-                            cursor.next()?;
-                        }
-                        // Delete shard.
-                        cursor.delete_current()?;
-                        Ok(PruneShardOutcome::Deleted)
-                    }
-                }
-            }
-            // If current shard is not the last shard for this sharded key,
-            // just delete it.
-            else {
-                cursor.delete_current()?;
-                Ok(PruneShardOutcome::Deleted)
-            }
+            // Current shard is empty after pruning. Since `prune_history_indices` processes
+            // shards sequentially via `cursor.next()`, if current shard is empty, all previous
+            // shards must also be empty, so no need to merge privous shard.
+            cursor.delete_current()?;
+            Ok(PruneShardOutcome::Deleted)
         } else {
             cursor.upsert(
                 RawKey::new(key),

@@ -18,7 +18,7 @@ reth-cli-util.workspace = true
 reth-codecs.workspace = true
 reth-config = { workspace = true, features = ["serde"] }
 reth-consensus.workspace = true
-reth-db = { workspace = true, features = ["mdbx"] }
+reth-db = { workspace = true }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders = { workspace = true, features = ["file-client"] }

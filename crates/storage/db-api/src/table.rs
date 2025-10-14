@@ -33,6 +33,11 @@ pub trait Compress: Send + Sync + Sized + Debug {
 
     /// Compresses data to a given buffer.
     fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B);
+
+    /// Return the compressed length of prefix subkey
+    fn subkey_compress_length(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// Trait that will transform the data to be read from the DB.

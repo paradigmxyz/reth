@@ -8,7 +8,7 @@ use clap::{
     error::ErrorKind,
     Arg, Args, Command, Error,
 };
-use reth_db::{mdbx::MaxReadTransactionDuration, ClientVersion};
+use reth_db::ClientVersion;
 use reth_storage_errors::db::LogLevel;
 
 /// Parameters for database configuration
@@ -38,26 +38,20 @@ pub struct DatabaseArgs {
 
 impl DatabaseArgs {
     /// Returns default database arguments with configured log level and client version.
-    pub fn database_args(&self) -> reth_db::mdbx::DatabaseArguments {
+    pub fn database_args(&self) -> reth_db::DatabaseArguments {
         self.get_database_args(default_client_version())
     }
 
     /// Returns the database arguments with configured log level, client version,
     /// max read transaction duration, and geometry.
-    pub fn get_database_args(
-        &self,
-        client_version: ClientVersion,
-    ) -> reth_db::mdbx::DatabaseArguments {
-        let max_read_transaction_duration = match self.read_transaction_timeout {
-            None => None, // if not specified, use default value
-            Some(0) => Some(MaxReadTransactionDuration::Unbounded), // if 0, disable timeout
-            Some(secs) => Some(MaxReadTransactionDuration::Set(Duration::from_secs(secs))),
-        };
-
-        reth_db::mdbx::DatabaseArguments::new(client_version)
+    pub fn get_database_args(&self, client_version: ClientVersion) -> reth_db::DatabaseArguments {
+        // Create base arguments with common fields
+        reth_db::DatabaseArguments::new(client_version)
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
-            .with_max_read_transaction_duration(max_read_transaction_duration)
+            .with_max_read_transaction_duration2(
+                self.read_transaction_timeout.map(|d| Duration::from_secs(d)),
+            )
             .with_geometry_max_size(self.max_size)
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
@@ -179,7 +173,7 @@ fn parse_byte_size(s: &str) -> Result<usize, String> {
 mod tests {
     use super::*;
     use clap::Parser;
-    use reth_db::mdbx::{GIGABYTE, KILOBYTE, MEGABYTE, TERABYTE};
+    use reth_db::database::{GIGABYTE, KILOBYTE, MEGABYTE, TERABYTE};
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]

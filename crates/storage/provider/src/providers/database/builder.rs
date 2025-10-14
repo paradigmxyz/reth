@@ -4,10 +4,7 @@
 //! up to the intended build target.
 
 use crate::{providers::StaticFileProvider, ProviderFactory};
-use reth_db::{
-    mdbx::{DatabaseArguments, MaxReadTransactionDuration},
-    open_db_read_only, DatabaseEnv,
-};
+use reth_db::{open_db_read_only, DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
 use std::{
@@ -159,8 +156,8 @@ impl ReadOnlyConfig {
     ///
     /// Caution: Keeping database transaction open indefinitely can cause the free list to grow if
     /// changes to the database are made.
-    pub const fn disable_long_read_transaction_safety(mut self) -> Self {
-        self.db_args.max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
+    pub fn disable_long_read_transaction_safety(mut self) -> Self {
+        self.db_args = self.db_args.with_max_read_transaction_duration_unbounded();
         self
     }
 
