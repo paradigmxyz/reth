@@ -14,3 +14,5 @@ pub mod query;
 
 /// Utility functions
 pub mod utils;
+
+mod constraints;

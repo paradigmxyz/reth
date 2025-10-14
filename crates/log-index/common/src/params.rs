@@ -195,24 +195,17 @@ impl LogIndexParams {
     /// pattern matching of the outputs of individual log value matchers and this
     /// pattern matcher assumes a sorted and duplicate-free list of indices, we
     /// should ensure these properties here.
-    pub fn potential_matches(
-        &self,
-        rows: &[Vec<u32>],
-        map_index: u32,
-        log_value: &B256,
-    ) -> Vec<u64> {
+    pub fn potential_matches(&self, row: Vec<u32>, map_index: u32, log_value: &B256) -> Vec<u64> {
         let mut results = Vec::new();
         let map_first = (map_index as u64) << self.log_values_per_map;
 
-        for row in rows {
-            for col in row {
-                // potentialMatch := mapFirst + uint64(row[i]>>(logMapWidth-logValuesPerMap))
-                let potential =
-                    map_first + ((*col as u64) >> (self.log_map_width - self.log_values_per_map));
-                // row[i] == columnIndex(potentialMatch, logValue)
-                if *col == self.column_index(potential, log_value) {
-                    results.push(potential);
-                }
+        for col in row {
+            // potentialMatch := mapFirst + uint64(row[i]>>(logMapWidth-logValuesPerMap))
+            let potential =
+                map_first + ((col as u64) >> (self.log_map_width - self.log_values_per_map));
+            // row[i] == columnIndex(potentialMatch, logValue)
+            if col == self.column_index(potential, log_value) {
+                results.push(potential);
             }
         }
 
