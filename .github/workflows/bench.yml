@@ -33,6 +33,10 @@ jobs:
         run: ./.github/scripts/codspeed-build.sh
       - name: Run the benchmarks
         uses: CodSpeedHQ/action@v4
+        env:
+          CODSPEED_TOKEN: ${{ secrets.CODSPEED_TOKEN }}
+        # op-reth does not have a codspeed token
+        if: ${{ env.CODSPEED_TOKEN != '' }}
         with:
           run: cargo codspeed run --workspace
           mode: instrumentation
