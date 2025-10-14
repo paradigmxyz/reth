@@ -531,7 +531,7 @@ pub enum ChainStateKey {
     /// Last finalized block key
     LastFinalizedBlock,
     /// Last safe block key
-    LastSafeBlockBlock,
+     LastSafeBlock,
 }
 
 impl Encode for ChainStateKey {
@@ -540,7 +540,7 @@ impl Encode for ChainStateKey {
     fn encode(self) -> Self::Encoded {
         match self {
             Self::LastFinalizedBlock => [0],
-            Self::LastSafeBlockBlock => [1],
+            Self::LastSafeBlock => [1],
         }
     }
 }
@@ -549,7 +549,7 @@ impl Decode for ChainStateKey {
     fn decode(value: &[u8]) -> Result<Self, crate::DatabaseError> {
         match value {
             [0] => Ok(Self::LastFinalizedBlock),
-            [1] => Ok(Self::LastSafeBlockBlock),
+            [1] => Ok(Self::LastSafeBlock),
             _ => Err(crate::DatabaseError::Decode),
         }
     }
