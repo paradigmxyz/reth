@@ -122,6 +122,10 @@ pub(crate) struct TreeMetrics {
     pub reorgs: Counter,
     /// The latest reorg depth
     pub latest_reorg_depth: Gauge,
+    /// The current safe block height (this is required by optimism)
+    pub safe_block_height: Gauge,
+    /// The current finalized block height (this is required by optimism)
+    pub finalized_block_height: Gauge,
 }
 
 /// Metrics for the `EngineApi`.
