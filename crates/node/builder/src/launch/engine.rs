@@ -268,7 +268,10 @@ impl EngineNodeLauncher {
         ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
+                // network_handle's sync state is already initialized at Syncing
                 engine_service.orchestrator_mut().start_backfill_sync(initial_target);
+            } else {
+                network_handle.update_sync_state(SyncState::Idle);
             }
 
             let mut res = Ok(());
@@ -291,6 +294,7 @@ impl EngineNodeLauncher {
                                     debug!(target: "reth::cli", "Terminating after initial backfill");
                                     break
                                 }
+                                network_handle.update_sync_state(SyncState::Idle);
                             }
                             ChainEvent::BackfillSyncStarted => {
                                 network_handle.update_sync_state(SyncState::Syncing);
