@@ -334,7 +334,7 @@ where
             let _ = fs::remove_file(&tmp_path);
             return Err(FsPathError::Write {
                 source: Error::other(err.into()),
-                path: tmp_path.clone(),
+                path: tmp_path,
             });
         }
     }
