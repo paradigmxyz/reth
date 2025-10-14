@@ -468,13 +468,17 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 let selector = &data[0..4];
                 
                 use crate::internal_tx::{
-                    INTERNAL_TX_START_BLOCK_METHOD_ID,
-                    INTERNAL_TX_BATCH_POSTING_REPORT_METHOD_ID,
+                    get_start_block_method_id,
+                    get_batch_posting_report_method_id,
+                    identify_internal_tx_type,
                     unpack_internal_tx_data_start_block,
                     unpack_internal_tx_data_batch_posting_report,
                 };
                 
-                if selector == INTERNAL_TX_START_BLOCK_METHOD_ID {
+                let start_block_id = get_start_block_method_id();
+                let batch_report_id = get_batch_posting_report_method_id();
+                
+                if selector == start_block_id.as_slice() {
                     let internal_data = match unpack_internal_tx_data_start_block(data) {
                         Ok(d) => d,
                         Err(e) => {
@@ -561,7 +565,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                         gas_used: 0,
                         error: None,
                     }
-                } else if selector == INTERNAL_TX_BATCH_POSTING_REPORT_METHOD_ID {
+                } else if selector == batch_report_id.as_slice() {
                     let report_data = match unpack_internal_tx_data_batch_posting_report(data) {
                         Ok(d) => d,
                         Err(e) => {
@@ -603,12 +607,24 @@ impl ArbOsHooks for DefaultArbOsHooks {
                         gas_used: 0,
                         error: None,
                     }
-                }else {
-                    tracing::error!("Unknown internal tx method selector: {:?}", selector);
+                } else {
+                    if let Some(tx_type) = identify_internal_tx_type(data) {
+                        tracing::warn!(
+                            "Internal tx type '{}' recognized but not handled (selector: {:?})",
+                            tx_type,
+                            selector
+                        );
+                    } else {
+                        tracing::warn!(
+                            "Unknown internal tx method selector: {:?} - skipping gracefully",
+                            selector
+                        );
+                    }
+                    
                     StartTxHookResult {
                         end_tx_now: true,
                         gas_used: 0,
-                        error: Some(format!("unknown internal tx method selector: {:?}", selector)),
+                        error: None,
                     }
                 }
             }
