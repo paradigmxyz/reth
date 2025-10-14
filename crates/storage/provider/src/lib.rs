@@ -12,9 +12,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-// reth_evm is used in other modules and exposed through trait bounds
-use reth_evm as _;
-
 /// Various provider traits.
 mod traits;
 pub use traits::*;
