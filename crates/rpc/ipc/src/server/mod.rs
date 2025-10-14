@@ -991,7 +991,6 @@ mod tests {
         let (tx, _rx) = broadcast::channel::<usize>(16);
 
         let mut module = RpcModule::new(tx.clone());
-        std::thread::spawn(move || produce_items(tx));
 
         module
             .register_subscription(
@@ -1014,6 +1013,9 @@ mod tests {
         let sub: Subscription<usize> =
             client.subscribe("subscribe_hello", rpc_params![], "unsubscribe_hello").await.unwrap();
 
+        // Start producer after subscription is active to avoid timing-related flakiness.
+        std::thread::spawn(move || produce_items(tx));
+        
         let items = sub.take(16).collect::<Vec<_>>().await;
         assert_eq!(items.len(), 16);
     }
