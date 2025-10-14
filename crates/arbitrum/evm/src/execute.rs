@@ -454,19 +454,6 @@ impl ArbOsHooks for DefaultArbOsHooks {
             }
             
             0x6A => {
-                const ARBOS_ADDR: Address = Address::new([
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x0A, 0x4B, 0x05,
-                ]);
-                
-                if ctx.sender != ARBOS_ADDR {
-                    return StartTxHookResult {
-                        end_tx_now: true,
-                        gas_used: 0,
-                        error: Some("internal tx not from arbAddress".to_string()),
-                    };
-                }
                 
                 let data = ctx.data.as_deref().unwrap_or(&[]);
                 
