@@ -1,7 +1,7 @@
 //! Core types used by the `FilterMaps` implementation.
 
 use alloc::{boxed::Box, string::String, vec::Vec};
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::BlockNumber;
 use thiserror::Error;
 
 /// Type alias for Map Index
@@ -157,9 +157,9 @@ pub enum FilterError {
 pub struct MatcherResult {
     /// The map index this result is for
     pub map_index: u32,
-    /// The potential matches found for this map
-    /// None = wildcard (matches all), Some(vec) = specific matches
-    pub matches: Vec<u64>,
+    /// The potential matches found for this map.
+    /// `None` denotes a wildcard (all indices), `Some(vec)` carries exact matches.
+    pub matches: Option<Vec<u64>>,
 }
 
 /// Represents a storage-ready log value with its position in the filter maps.

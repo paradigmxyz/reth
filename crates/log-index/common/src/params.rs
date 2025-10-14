@@ -158,9 +158,10 @@ impl LogIndexParams {
     }
 
     /// columnIndex: FNV-1a( LE(lvIndex) || logValue ), folded to u32
+    #[inline]
     pub fn column_index(&self, lv_index: u64, log_value: &B256) -> u32 {
         let mut hasher = FnvHasher::default();
-        hasher.write(&lv_index.to_le_bytes()); // Geth: LittleEndian
+        hasher.write(&lv_index.to_le_bytes());
         hasher.write(log_value.as_slice());
         let hash = hasher.finish();
 
@@ -195,17 +196,36 @@ impl LogIndexParams {
     /// pattern matching of the outputs of individual log value matchers and this
     /// pattern matcher assumes a sorted and duplicate-free list of indices, we
     /// should ensure these properties here.
-    pub fn potential_matches(&self, row: Vec<u32>, map_index: u32, log_value: &B256) -> Vec<u64> {
+    #[inline]
+    pub fn potential_matches(
+        &self,
+        rows: &[Vec<u32>],
+        map_index: u32,
+        log_value: &B256,
+    ) -> Vec<u64> {
         let mut results = Vec::new();
         let map_first = (map_index as u64) << self.log_values_per_map;
 
-        for col in row {
-            // potentialMatch := mapFirst + uint64(row[i]>>(logMapWidth-logValuesPerMap))
-            let potential =
-                map_first + ((col as u64) >> (self.log_map_width - self.log_values_per_map));
-            // row[i] == columnIndex(potentialMatch, logValue)
-            if col == self.column_index(potential, log_value) {
-                results.push(potential);
+        for (layer_idx, row) in rows.iter().enumerate() {
+            if row.is_empty() {
+                break;
+            }
+
+            let max_len = self.max_row_length(layer_idx as u32) as usize;
+            let limit = row.len().min(max_len);
+
+            for col in row.iter().take(limit) {
+                // potentialMatch := mapFirst + uint64(row[i]>>(logMapWidth-logValuesPerMap))
+                let potential =
+                    map_first + ((*col as u64) >> (self.log_map_width - self.log_values_per_map));
+                // row[i] == columnIndex(potentialMatch, logValue)
+                if *col == self.column_index(potential, log_value) {
+                    results.push(potential);
+                }
+            }
+
+            if row.len() < max_len {
+                break;
             }
         }
 
@@ -213,6 +233,65 @@ impl LogIndexParams {
         results.sort_unstable();
         results.dedup();
         results
+    }
+
+    /// Combine base and next matcher results with a positional offset, mirroring
+    /// go-ethereum's `matchResults` behaviour.
+    pub fn match_results(
+        &self,
+        map_index: u32,
+        offset: u64,
+        base_res: Option<&[u64]>,
+        next_res: Option<&[u64]>,
+    ) -> Option<Vec<u64>> {
+        match (base_res, next_res) {
+            (Some(base), None) => Some(base.to_vec()),
+            (None, None) => None,
+            (None, Some(next)) => {
+                if next.is_empty() {
+                    Some(Vec::new())
+                } else {
+                    let min = ((map_index as u64) << self.log_values_per_map) + offset;
+                    let mut result = Vec::with_capacity(next.len());
+                    for &v in next {
+                        if v >= min {
+                            result.push(v - offset);
+                        }
+                    }
+                    Some(result)
+                }
+            }
+            (Some(base), Some(next)) => {
+                if next.is_empty() {
+                    return Some(Vec::new());
+                }
+                if base.is_empty() {
+                    return Some(Vec::new());
+                }
+
+                let mut base_idx = 0usize;
+                let mut next_idx = 0usize;
+                let mut matched = Vec::new();
+
+                while base_idx < base.len() && next_idx < next.len() {
+                    let base_val = base[base_idx];
+                    let next_val = next[next_idx];
+                    let target = base_val + offset;
+
+                    if next_val > target {
+                        base_idx += 1;
+                    } else if next_val < target {
+                        next_idx += 1;
+                    } else {
+                        matched.push(base_val);
+                        base_idx += 1;
+                        next_idx += 1;
+                    }
+                }
+
+                Some(matched)
+            }
+        }
     }
 
     /// Extract the row index from a `map_row_index`.

@@ -1,10 +1,10 @@
 use crate::constraints::Constraints;
-use std::collections::HashSet;
 use alloy_primitives::BlockNumber;
 use alloy_rpc_types_eth::Filter;
-use reth_log_index_common::{BlockBoundary, LogIndexParams};
+use reth_log_index_common::{BlockBoundary, LogIndexParams, MAX_LAYERS};
 use reth_storage_api::LogIndexProvider;
 use reth_storage_errors::provider::ProviderResult;
+use std::collections::HashMap;
 use tracing::info;
 
 /// Fetch log indices for the block range
@@ -87,207 +87,40 @@ fn query_maps_range<P: LogIndexProvider>(
     filter: &Filter,
 ) -> ProviderResult<Vec<u64>> {
     let constraints = Constraints::from_filter(filter);
+    let active_maps: Vec<u32> = (map_start..=map_end).collect();
+    if active_maps.is_empty() {
+        return Ok(Vec::new());
+    }
 
-    let mut active_maps: Vec<u32> = (map_start..=map_end).collect();
-    let mut candidates: Vec<u64> = Vec::new();
-    let mut first_offset: Option<u64> = None;
+    let mut instance = constraints.new_instance(provider, params, active_maps.clone());
+    let mut results: HashMap<u32, Option<Vec<u64>>> = HashMap::with_capacity(active_maps.len());
 
-    for constraint in constraints.iter() {
-        info!("Processing constraint: {:?}", constraint);
+    for layer in 0..MAX_LAYERS as u32 {
+        if results.len() == active_maps.len() || !instance.has_pending() {
+            break;
+        }
 
-        let mut layer_iter = constraint.layers(provider, params, active_maps.clone());
-        let previous_offset = first_offset;
-        let previous_candidates = first_offset.map(|_| candidates.as_slice());
-        let mut constraint_matches: Vec<u64> = Vec::new();
-        let mut aligned_candidates: Vec<u64> = Vec::new();
+        let layer_results = instance.get_matches_for_layer(layer)?;
+        for result in layer_results {
+            results.entry(result.map_index).or_insert(result.matches);
+        }
+    }
 
-        while let Some(result) = layer_iter.next() {
-            let (overflow_maps, matches) = result?;
-            info!(
-                "Got result with matches: {:?}, overflow maps: {:?}",
-                matches.len(),
-                overflow_maps.len()
-            );
-            if matches.is_empty() && overflow_maps.is_empty() {
-                info!("No matches found for constraint");
+    let mut candidates = Vec::new();
+    for map_index in active_maps {
+        match results.get(&map_index) {
+            Some(Some(matches)) => candidates.extend(matches.iter().copied()),
+            Some(None) => {
+                info!("Wildcard constraint detected; returning empty candidate set");
                 return Ok(Vec::new());
             }
-
-            constraint_matches = union_sorted(&constraint_matches, &matches);
-
-            if let Some(offset) = previous_offset {
-                let delta = constraint.offset() as i64 - offset as i64;
-                if delta == 0 {
-                    info!("Unioning matches for constraint offset {}", constraint.offset());
-                } else {
-                    info!("Intersecting layer candidates with offset {}", delta);
-                }
-
-                if let Some(prev_candidates) = previous_candidates {
-                    let aligned = intersect_with_offset_slice(prev_candidates, &matches, delta);
-                    if aligned.is_empty() {
-                        info!("Layer candidates empty after intersecting; continuing to next layer");
-                    } else {
-                        aligned_candidates = union_sorted(&aligned_candidates, &aligned);
-                    }
-                }
-            }
-
-            if overflow_maps.is_empty() {
-                info!("No overflow maps found for constraint");
-                break;
-            }
-
-            if overflow_maps.is_empty() {
-                info!("No overflow maps remain for constraint");
-                break;
-            }
-
-            let mut next_maps = overflow_maps;
-
-            if let Some(prev_candidates) = previous_candidates {
-                if prev_candidates.is_empty() {
-                    info!("No previous candidates available to pursue overflow maps");
-                    break;
-                }
-
-                let prev_map_set: HashSet<u32> = prev_candidates
-                    .iter()
-                    .map(|&idx| (idx >> params.log_values_per_map) as u32)
-                    .collect();
-
-                next_maps.retain(|map| prev_map_set.contains(map));
-
-                if next_maps.is_empty() {
-                    info!("Overflow maps do not intersect with previous candidates");
-                    break;
-                }
-            }
-
-            layer_iter.set_maps(next_maps);
-
+            None => {}
         }
-
-        let updated_candidates =
-            if previous_offset.is_some() { aligned_candidates } else { constraint_matches };
-
-        if updated_candidates.is_empty() {
-            info!("No matches found for constraint at the end");
-            return Ok(Vec::new());
-        }
-
-        if let Some(offset) = previous_offset {
-            let delta = constraint.offset() as i64 - offset as i64;
-            if delta == 0 {
-                info!("Unioning matches for constraint offset {}", constraint.offset());
-            } else {
-                info!("Intersecting with offset {}", delta);
-            }
-            candidates = updated_candidates;
-        } else {
-            candidates = updated_candidates;
-            first_offset = Some(constraint.offset());
-        }
-
-        active_maps =
-            candidates.iter().map(|&idx| (idx >> params.log_values_per_map) as u32).collect();
-        active_maps.sort_unstable();
-        active_maps.dedup();
     }
 
+    candidates.sort_unstable();
+    candidates.dedup();
     Ok(candidates)
-}
-
-fn intersect_with_offset_slice(candidates: &[u64], matches: &[u64], delta: i64) -> Vec<u64> {
-    if candidates.is_empty() || matches.is_empty() {
-        return Vec::new();
-    }
-
-    let mut result = Vec::new();
-    let mut i = 0usize;
-    let mut j = 0usize;
-
-    while i < candidates.len() && j < matches.len() {
-        let shifted = if delta >= 0 {
-            candidates[i].checked_add(delta as u64)
-        } else {
-            let diff = (-delta) as u64;
-            candidates[i].checked_sub(diff)
-        };
-
-        let Some(shifted) = shifted else {
-            i += 1;
-            continue;
-        };
-
-        match shifted.cmp(&matches[j]) {
-            std::cmp::Ordering::Less => {
-                i += 1;
-            }
-            std::cmp::Ordering::Greater => {
-                j += 1;
-            }
-            std::cmp::Ordering::Equal => {
-                result.push(candidates[i]);
-                i += 1;
-                j += 1;
-            }
-        }
-    }
-
-    result
-}
-
-fn union_sorted(a: &[u64], b: &[u64]) -> Vec<u64> {
-    if a.is_empty() {
-        return b.to_vec();
-    }
-    if b.is_empty() {
-        return a.to_vec();
-    }
-
-    let mut result = Vec::with_capacity(a.len() + b.len());
-    let mut i = 0usize;
-    let mut j = 0usize;
-
-    while i < a.len() && j < b.len() {
-        let value = if a[i] < b[j] {
-            let v = a[i];
-            i += 1;
-            v
-        } else if b[j] < a[i] {
-            let v = b[j];
-            j += 1;
-            v
-        } else {
-            let v = a[i];
-            i += 1;
-            j += 1;
-            v
-        };
-
-        if result.last().copied() != Some(value) {
-            result.push(value);
-        }
-    }
-
-    while i < a.len() {
-        let value = a[i];
-        i += 1;
-        if result.last().copied() != Some(value) {
-            result.push(value);
-        }
-    }
-
-    while j < b.len() {
-        let value = b[j];
-        j += 1;
-        if result.last().copied() != Some(value) {
-            result.push(value);
-        }
-    }
-
-    result
 }
 
 /// Query logs from filter maps for a given block range
