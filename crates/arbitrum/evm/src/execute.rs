@@ -34,6 +34,8 @@ pub struct ArbStartTxContext {
     pub fee_refund_addr: Option<Address>,
     pub block_timestamp: u64,
     pub data: Option<Vec<u8>>,
+    pub block_number: u64,
+    pub parent_hash: Option<B256>,
 }
 
 pub struct ArbGasChargingContext {
@@ -504,7 +506,11 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     11
                 };
                 
-                let prev_hash = B256::ZERO;
+                let prev_hash = if ctx.block_number > 0 {
+                    ctx.parent_hash.unwrap_or(B256::ZERO)
+                } else {
+                    B256::ZERO
+                };
                 
                 if arbos_version >= 40 {
                     Self::process_parent_block_hash(state_db, prev_hash);
@@ -517,7 +523,11 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 let blockhashes = crate::blockhash::Blockhashes::open(blockhashes_storage);
                 
                 let old_l1_block_number = blockhashes.l1_block_number().unwrap_or(0);
-                let l1_block_number = internal_data.l1_block_number;
+                let mut l1_block_number = internal_data.l1_block_number;
+                
+                if arbos_version < 8 {
+                    l1_block_number += 1;
+                }
                 
                 if l1_block_number > old_l1_block_number {
                     if let Err(e) = blockhashes.record_new_l1_block(
@@ -1458,6 +1468,9 @@ mod tests {
             max_submission_fee: None,
             fee_refund_addr: None,
             block_timestamp: 0,
+            data: None,
+            block_number: 1,
+            parent_hash: Some(B256::ZERO),
         };
         hooks.start_tx(&mut evm, &mut state, &ctx);
         assert!(state.delayed_inbox);
