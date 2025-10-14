@@ -2,10 +2,11 @@
 
 use clap::Parser;
 use eyre::{ensure, WrapErr};
+use tracing::Level;
 use url::Url;
 
 /// CLI arguments for configuring `Opentelemetry` trace and span export.
-#[derive(Debug, Clone, Default, Parser)]
+#[derive(Debug, Clone, Parser)]
 pub struct TraceArgs {
     /// Enable `Opentelemetry` tracing export to an OTLP endpoint.
     ///
@@ -23,6 +24,26 @@ pub struct TraceArgs {
         help_heading = "Tracing"
     )]
     pub otlp: Option<Url>,
+
+    /// Set the minimum log level for OTLP traces.
+    ///
+    /// Valid values: ERROR, WARN, INFO, DEBUG, TRACE
+    ///
+    /// Defaults to TRACE if not specified.
+    #[arg(
+        long = "tracing-otlp-level",
+        global = true,
+        value_name = "LEVEL",
+        default_value = "TRACE",
+        help_heading = "Tracing"
+    )]
+    pub otlp_level: Level,
+}
+
+impl Default for TraceArgs {
+    fn default() -> Self {
+        Self { otlp: None, otlp_level: Level::TRACE }
+    }
 }
 
 // Parses and validates an OTLP endpoint url.
