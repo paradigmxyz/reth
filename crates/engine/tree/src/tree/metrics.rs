@@ -314,6 +314,7 @@ mod tests {
                     receipts: vec![],
                     requests: Requests::default(),
                     gas_used: 1000,
+                    blob_gas_used: 0,
                 },
             ))
         }

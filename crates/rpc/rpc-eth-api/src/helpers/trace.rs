@@ -19,7 +19,7 @@ use reth_rpc_eth_types::{
     EthApiError,
 };
 use reth_storage_api::{ProviderBlock, ProviderTx};
-use revm::{context_interface::result::ResultAndState, DatabaseCommit};
+use revm::{context::Block, context_interface::result::ResultAndState, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 
@@ -301,8 +301,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
                 let state_at = block.parent_hash();
                 let block_hash = block.hash();
 
-                let block_number = evm_env.block_env.number.saturating_to();
-                let base_fee = evm_env.block_env.basefee;
+                let block_number = evm_env.block_env.number().saturating_to();
+                let base_fee = evm_env.block_env.basefee();
 
                 // now get the state
                 let state = this.state_at_block_id(state_at.into()).await?;

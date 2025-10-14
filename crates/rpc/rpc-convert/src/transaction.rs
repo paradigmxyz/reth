@@ -17,7 +17,7 @@ use core::error;
 use dyn_clone::DynClone;
 use reth_evm::{
     revm::context_interface::{either::Either, Block},
-    ConfigureEvm, SpecFor, TxEnvFor,
+    BlockEnvFor, ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
@@ -123,18 +123,15 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
-    /// Associated upper layer JSON-RPC API network requests and responses to convert from and into
-    /// types of [`Self::Primitives`].
-    type Network: RpcTypes + Send + Sync + Unpin + Clone + Debug;
+    /// The EVM configuration.
+    type Evm: ConfigureEvm<Primitives = Self::Primitives>;
 
-    /// A set of variables for executing a transaction.
-    type TxEnv;
+    /// Associated upper layer JSON-RPC API network requests and responses to convert from and into
+    /// types of [`N`].
+    type Network: RpcTypes + Send + Sync + Unpin + Clone + Debug;
 
     /// An associated RPC conversion error.
     type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
-
-    /// The EVM specification identifier.
-    type Spec;
 
     /// Wrapper for `fill()` with default `TransactionInfo`
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
@@ -169,9 +166,8 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     fn tx_env(
         &self,
         request: RpcTxReq<Self::Network>,
-        cfg_env: &CfgEnv<Self::Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<Self::TxEnv, Self::Error>;
+        evm_env: &EvmEnvFor<Self::Evm>,
+    ) -> Result<TxEnvFor<Self::Evm>, Self::Error>;
 
     /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
     /// receipts are from the same block.
@@ -199,8 +195,8 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
 }
 
 dyn_clone::clone_trait_object!(
-    <Primitives, Network, Error, TxEnv, Spec>
-    RpcConvert<Primitives = Primitives, Network = Network, Error = Error, TxEnv = TxEnv, Spec = Spec>
+    <Primitives, Network, Error, Evm>
+    RpcConvert<Primitives = Primitives, Network = Network, Error = Error, Evm = Evm>
 );
 
 /// Converts `self` into `T`. The opposite of [`FromConsensusTx`].
@@ -439,7 +435,7 @@ impl TryIntoSimTx<EthereumTxEnvelope<TxEip4844>> for TransactionRequest {
 /// implementation for free, thanks to the blanket implementation, unless the conversion requires
 /// more context. For example, some configuration parameters or access handles to database, network,
 /// etc.
-pub trait TxEnvConverter<TxReq, TxEnv, Spec>:
+pub trait TxEnvConverter<TxReq, Evm: ConfigureEvm>:
     Debug + Send + Sync + Unpin + Clone + 'static
 {
     /// An associated error that can occur during conversion.
@@ -451,31 +447,30 @@ pub trait TxEnvConverter<TxReq, TxEnv, Spec>:
     fn convert_tx_env(
         &self,
         tx_req: TxReq,
-        cfg_env: &CfgEnv<Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<TxEnv, Self::Error>;
+        evm_env: &EvmEnvFor<Evm>,
+    ) -> Result<TxEnvFor<Evm>, Self::Error>;
 }
 
-impl<TxReq, TxEnv, Spec> TxEnvConverter<TxReq, TxEnv, Spec> for ()
+impl<TxReq, Evm> TxEnvConverter<TxReq, Evm> for ()
 where
-    TxReq: TryIntoTxEnv<TxEnv>,
+    TxReq: TryIntoTxEnv<TxEnvFor<Evm>, BlockEnvFor<Evm>>,
+    Evm: ConfigureEvm,
 {
     type Error = TxReq::Err;
 
     fn convert_tx_env(
         &self,
         tx_req: TxReq,
-        cfg_env: &CfgEnv<Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<TxEnv, Self::Error> {
-        tx_req.try_into_tx_env(cfg_env, block_env)
+        evm_env: &EvmEnvFor<Evm>,
+    ) -> Result<TxEnvFor<Evm>, Self::Error> {
+        tx_req.try_into_tx_env(&evm_env.cfg_env, &evm_env.block_env)
     }
 }
 
 /// Converts rpc transaction requests into transaction environment using a closure.
-impl<F, TxReq, TxEnv, E, Spec> TxEnvConverter<TxReq, TxEnv, Spec> for F
+impl<F, TxReq, E, Evm> TxEnvConverter<TxReq, Evm> for F
 where
-    F: Fn(TxReq, &CfgEnv<Spec>, &BlockEnv) -> Result<TxEnv, E>
+    F: Fn(TxReq, &EvmEnvFor<Evm>) -> Result<TxEnvFor<Evm>, E>
         + Debug
         + Send
         + Sync
@@ -483,6 +478,7 @@ where
         + Clone
         + 'static,
     TxReq: Clone,
+    Evm: ConfigureEvm,
     E: error::Error + Send + Sync + 'static,
 {
     type Error = E;
@@ -490,17 +486,16 @@ where
     fn convert_tx_env(
         &self,
         tx_req: TxReq,
-        cfg_env: &CfgEnv<Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<TxEnv, Self::Error> {
-        self(tx_req, cfg_env, block_env)
+        evm_env: &EvmEnvFor<Evm>,
+    ) -> Result<TxEnvFor<Evm>, Self::Error> {
+        self(tx_req, evm_env)
     }
 }
 
 /// Converts `self` into `T`.
 ///
 /// Should create an executable transaction environment using [`TransactionRequest`].
-pub trait TryIntoTxEnv<T> {
+pub trait TryIntoTxEnv<T, BlockEnv = reth_evm::revm::context::BlockEnv> {
     /// An associated error that can occur during the conversion.
     type Err;
 
@@ -836,7 +831,6 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
     }
 
     /// Converts `self` into a boxed converter.
-    #[expect(clippy::type_complexity)]
     pub fn erased(
         self,
     ) -> Box<
@@ -844,8 +838,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
             Primitives = <Self as RpcConvert>::Primitives,
             Network = <Self as RpcConvert>::Network,
             Error = <Self as RpcConvert>::Error,
-            TxEnv = <Self as RpcConvert>::TxEnv,
-            Spec = <Self as RpcConvert>::Spec,
+            Evm = <Self as RpcConvert>::Evm,
         >,
     >
     where
@@ -933,13 +926,12 @@ where
     SimTx: SimTxConverter<RpcTxReq<Network>, TxTy<N>>,
     RpcTx:
         RpcTxConverter<TxTy<N>, Network::TransactionResponse, <Map as TxInfoMapper<TxTy<N>>>::Out>,
-    TxEnv: TxEnvConverter<RpcTxReq<Network>, TxEnvFor<Evm>, SpecFor<Evm>>,
+    TxEnv: TxEnvConverter<RpcTxReq<Network>, Evm>,
 {
     type Primitives = N;
+    type Evm = Evm;
     type Network = Network;
-    type TxEnv = TxEnvFor<Evm>;
     type Error = Receipt::Error;
-    type Spec = SpecFor<Evm>;
 
     fn fill(
         &self,
@@ -965,10 +957,9 @@ where
     fn tx_env(
         &self,
         request: RpcTxReq<Network>,
-        cfg_env: &CfgEnv<SpecFor<Evm>>,
-        block_env: &BlockEnv,
-    ) -> Result<Self::TxEnv, Self::Error> {
-        self.tx_env_converter.convert_tx_env(request, cfg_env, block_env).map_err(Into::into)
+        evm_env: &EvmEnvFor<Evm>,
+    ) -> Result<TxEnvFor<Evm>, Self::Error> {
+        self.tx_env_converter.convert_tx_env(request, evm_env).map_err(Into::into)
     }
 
     fn convert_receipts(
