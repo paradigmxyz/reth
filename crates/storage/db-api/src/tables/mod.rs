@@ -531,7 +531,7 @@ pub enum ChainStateKey {
     /// Last finalized block key
     LastFinalizedBlock,
     /// Last safe block key
-     LastSafeBlock,
+    LastSafeBlock,
 }
 
 impl Encode for ChainStateKey {
