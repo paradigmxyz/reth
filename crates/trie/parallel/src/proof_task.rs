@@ -6,7 +6,7 @@
 //! - **Worker Pools**: Pre-spawned workers with dedicated database transactions
 //!   - Storage pool: Handles storage proofs and blinded storage node requests
 //!   - Account pool: Handles account multiproofs and blinded account node requests
-//! - **Direct Channel Access**: [`ProofTaskManagerHandle`] provides type-safe queue methods with
+//! - **Direct Channel Access**: [`ProofTaskManagerHandle`] provides type-safe dispatch methods with
 //!   direct access to worker channels, eliminating routing overhead
 //! - **Automatic Shutdown**: Workers terminate gracefully when all handles are dropped
 //!
@@ -308,7 +308,7 @@ fn account_worker_loop<Tx>(
                 );
                 tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-                let storage_proof_receivers = match queue_storage_proofs(
+                let storage_proof_receivers = match dispatch_storage_proofs(
                     &storage_work_tx,
                     &input.targets,
                     &mut storage_prefix_sets,
@@ -561,14 +561,14 @@ where
     })
 }
 
-/// Queues storage proofs for all accounts in the targets and returns receivers.
+/// Dispatches storage proofs for all accounts in the targets and returns receivers.
 ///
-/// This function queues all storage proof tasks to the worker pool but returns immediately
+/// This function dispatches all storage proof tasks to the worker pool but returns immediately
 /// with receivers, allowing the account trie walk to proceed in parallel with storage proof
 /// computation. This enables interleaved parallelism for better performance.
 ///
-/// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
-fn queue_storage_proofs(
+/// Propagates errors up if dispatching fails. Receivers must be consumed by the caller.
+fn dispatch_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     targets: &MultiProofTargets,
     storage_prefix_sets: &mut B256Map<PrefixSet>,
@@ -578,11 +578,11 @@ fn queue_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
 
-    // Queue all storage proofs to worker pool
+    // Dispatch all storage proofs to worker pool
     for (hashed_address, target_slots) in targets.iter() {
         let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
 
-        // Always queue a storage proof so we obtain the storage root even when no slots are
+        // Always dispatch a storage proof so we obtain the storage root even when no slots are
         // requested.
         let input = StorageProofInput::new(
             *hashed_address,
@@ -594,12 +594,12 @@ fn queue_storage_proofs(
 
         let (sender, receiver) = channel();
 
-        // If queuing fails, propagate error up (no fallback)
+        // If dispatching fails, propagate error up (no fallback)
         storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, result_sender: sender })
             .map_err(|_| {
                 ParallelStateRootError::Other(format!(
-                    "Failed to queue storage proof for {}: storage worker pool unavailable",
+                    "Failed to dispatch storage proof for {}: storage worker pool unavailable",
                     hashed_address
                 ))
             })?;
@@ -947,8 +947,8 @@ impl ProofTaskManagerHandle {
         Self { storage_work_tx, account_work_tx }
     }
 
-    /// Queue a storage proof computation
-    pub fn queue_storage_proof(
+    /// Dispatch a storage proof computation
+    pub fn dispatch_storage_proof(
         &self,
         input: StorageProofInput,
     ) -> Result<Receiver<StorageProofResult>, ProviderError> {
@@ -962,8 +962,8 @@ impl ProofTaskManagerHandle {
         Ok(rx)
     }
 
-    /// Queue an account multiproof computation
-    pub fn queue_account_multiproof(
+    /// Dispatch an account multiproof computation
+    pub fn dispatch_account_multiproof(
         &self,
         input: AccountMultiproofInput,
     ) -> Result<Receiver<AccountMultiproofResult>, ProviderError> {
@@ -977,8 +977,8 @@ impl ProofTaskManagerHandle {
         Ok(rx)
     }
 
-    /// Internal: Queue blinded storage node request
-    fn queue_blinded_storage_node(
+    /// Internal: Dispatch blinded storage node request
+    fn dispatch_blinded_storage_node(
         &self,
         account: B256,
         path: Nibbles,
@@ -993,8 +993,8 @@ impl ProofTaskManagerHandle {
         Ok(rx)
     }
 
-    /// Internal: Queue blinded account node request
-    fn queue_blinded_account_node(
+    /// Internal: Dispatch blinded account node request
+    fn dispatch_blinded_account_node(
         &self,
         path: Nibbles,
     ) -> Result<Receiver<TrieNodeProviderResult>, ProviderError> {
@@ -1044,13 +1044,13 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
         match self {
             Self::AccountNode { handle } => {
                 let rx = handle
-                    .queue_blinded_account_node(*path)
+                    .dispatch_blinded_account_node(*path)
                     .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
                 rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
             Self::StorageNode { handle, account } => {
                 let rx = handle
-                    .queue_blinded_storage_node(*account, *path)
+                    .dispatch_blinded_storage_node(*account, *path)
                     .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
                 rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }

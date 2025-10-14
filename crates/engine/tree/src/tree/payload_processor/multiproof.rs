@@ -542,7 +542,7 @@ impl MultiproofManager {
             let frozen_prefix_sets =
                 ParallelProof::extend_prefix_sets_with_targets(&config.prefix_sets, &proof_targets);
 
-            // Queue account multiproof to worker pool
+            // Dispatch account multiproof to worker pool
             let input = AccountMultiproofInput {
                 targets: proof_targets,
                 prefix_sets: frozen_prefix_sets,
@@ -553,7 +553,7 @@ impl MultiproofManager {
 
             let proof_result: Result<DecodedMultiProof, ParallelStateRootError> = (|| {
                 let receiver = account_proof_task_handle
-                    .queue_account_multiproof(input)
+                    .dispatch_account_multiproof(input)
                     .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
                 receiver

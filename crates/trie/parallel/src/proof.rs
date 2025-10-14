@@ -82,8 +82,8 @@ impl ParallelProof {
         self.multi_added_removed_keys = multi_added_removed_keys;
         self
     }
-    /// Queues a storage proof task and returns a receiver for the result.
-    fn queue_storage_proof(
+    /// Dispatches a storage proof task and returns a receiver for the result.
+    fn dispatch_storage_proof(
         &self,
         hashed_address: B256,
         prefix_set: PrefixSet,
@@ -100,9 +100,9 @@ impl ParallelProof {
             self.multi_added_removed_keys.clone(),
         );
 
-        self.proof_task_handle
-            .queue_storage_proof(input)
-            .map_err(|e| ParallelStateRootError::Other(e.to_string()))
+        self.proof_task_handle.dispatch_storage_proof(input).map_err(|e| {
+            ParallelStateRootError::Other(e.to_string())
+        })
     }
 
     /// Generate a storage multiproof according to the specified targets and hashed address.
@@ -122,7 +122,7 @@ impl ParallelProof {
             "Starting storage proof generation"
         );
 
-        let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots)?;
+        let receiver = self.dispatch_storage_proof(hashed_address, prefix_set, target_slots)?;
         let proof_result = receiver.recv().map_err(|_| {
             ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
                 format!("channel closed for {hashed_address}"),
@@ -193,7 +193,7 @@ impl ParallelProof {
 
         let receiver = self
             .proof_task_handle
-            .queue_account_multiproof(input)
+            .dispatch_account_multiproof(input)
             .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
         // Wait for account multiproof result from worker
