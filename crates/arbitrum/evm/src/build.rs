@@ -76,6 +76,7 @@ pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::Re
     hooks: DefaultArbOsHooks,
     tx_state: ArbTxProcessorState,
     cumulative_gas_used: u64,
+    exec_ctx: ArbBlockExecutionCtx,
     _phantom: PhantomData<CS>,
 }
 
@@ -215,6 +216,9 @@ where
             _ => (None, None, None, None, None, None, None, None, None, None, None, None, None),
         };
         
+        let block_number = alloy_evm::Evm::block(self.evm()).number.try_into().unwrap_or(0);
+        let parent_hash = self.exec_ctx.parent_hash;
+        
         let start_ctx = ArbStartTxContext {
             sender,
             nonce,
@@ -243,6 +247,8 @@ where
             fee_refund_addr,
             block_timestamp,
             data: Some(tx.tx().input().to_vec()),
+            block_number,
+            parent_hash: Some(parent_hash),
         };
         
         let start_hook_result = {
@@ -605,6 +611,7 @@ where
             hooks: Default::default(),
             tx_state: Default::default(),
             cumulative_gas_used: 0,
+            exec_ctx: ctx,
             _phantom: core::marker::PhantomData::<CS>,
         }
     }
