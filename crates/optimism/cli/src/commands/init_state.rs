@@ -12,7 +12,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives_traits::SealedHeader;
 use reth_provider::{
-    BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
+    BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter
 };
 use std::{io::BufReader, str::FromStr, sync::Arc};
 use tracing::info;
@@ -61,12 +61,14 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
             let header_hash = self
                 .init_state
                 .header_hash
+                .or_else(|| Some(header.hash_slow().to_string()))
                 .ok_or_else(|| eyre::eyre!("Header hash must be provided"))?;
             let header_hash = B256::from_str(&header_hash)?;
 
             let total_difficulty = self
                 .init_state
                 .total_difficulty
+                .or_else(|| Some(header.difficulty.to_string()))
                 .ok_or_else(|| eyre::eyre!("Total difficulty must be provided"))?;
             let total_difficulty = U256::from_str(&total_difficulty)?;
 

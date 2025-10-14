@@ -338,7 +338,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.7.0"
-source = "git+https://github.com/mantle-xyz/evm?tag=v2.0.0#89e323e07144b2416b936df6e492ff16e558c685"
+source = "git+https://github.com/mantle-xyz/evm?tag=v2.0.1#d8c600f278d14f271fd5df120708737eb2ef2483"
 dependencies = [
  "alloy-consensus 0.15.11",
  "alloy-eips 0.15.11",
@@ -461,7 +461,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.7.0"
-source = "git+https://github.com/mantle-xyz/evm?tag=v2.0.0#89e323e07144b2416b936df6e492ff16e558c685"
+source = "git+https://github.com/mantle-xyz/evm?tag=v2.0.1#d8c600f278d14f271fd5df120708737eb2ef2483"
 dependencies = [
  "alloy-consensus 0.15.11",
  "alloy-eips 0.15.11",
@@ -3094,7 +3094,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3366,7 +3366,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4600,7 +4600,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.0",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -6166,7 +6166,7 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 [[package]]
 name = "op-alloy-consensus"
 version = "0.15.4"
-source = "git+https://github.com/mantle-xyz/op-alloy?tag=v2.0.0#da4e2190e9bdddcee078c0d39060a21ca82d6a04"
+source = "git+https://github.com/mantle-xyz/op-alloy?tag=v2.0.1#66375676a7c10acf6ab521e776b2e8d1728f7225"
 dependencies = [
  "alloy-consensus 0.15.11",
  "alloy-eips 0.15.11",
@@ -6191,7 +6191,7 @@ checksum = "a79f352fc3893dcd670172e615afef993a41798a1d3fc0db88a3e60ef2e70ecc"
 [[package]]
 name = "op-alloy-network"
 version = "0.15.4"
-source = "git+https://github.com/mantle-xyz/op-alloy?tag=v2.0.0#da4e2190e9bdddcee078c0d39060a21ca82d6a04"
+source = "git+https://github.com/mantle-xyz/op-alloy?tag=v2.0.1#66375676a7c10acf6ab521e776b2e8d1728f7225"
 dependencies = [
  "alloy-consensus 0.15.11",
  "alloy-network",
@@ -6205,7 +6205,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-jsonrpsee"
 version = "0.15.4"
-source = "git+https://github.com/mantle-xyz/op-alloy?tag=v2.0.0#da4e2190e9bdddcee078c0d39060a21ca82d6a04"
+source = "git+https://github.com/mantle-xyz/op-alloy?tag=v2.0.1#66375676a7c10acf6ab521e776b2e8d1728f7225"
 dependencies = [
  "alloy-primitives",
  "jsonrpsee",
@@ -6214,7 +6214,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types"
 version = "0.15.4"
-source = "git+https://github.com/mantle-xyz/op-alloy?tag=v2.0.0#da4e2190e9bdddcee078c0d39060a21ca82d6a04"
+source = "git+https://github.com/mantle-xyz/op-alloy?tag=v2.0.1#66375676a7c10acf6ab521e776b2e8d1728f7225"
 dependencies = [
  "alloy-consensus 0.15.11",
  "alloy-eips 0.15.11",
@@ -6231,7 +6231,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types-engine"
 version = "0.15.4"
-source = "git+https://github.com/mantle-xyz/op-alloy?tag=v2.0.0#da4e2190e9bdddcee078c0d39060a21ca82d6a04"
+source = "git+https://github.com/mantle-xyz/op-alloy?tag=v2.0.1#66375676a7c10acf6ab521e776b2e8d1728f7225"
 dependencies = [
  "alloy-consensus 0.15.11",
  "alloy-eips 0.15.11",
@@ -11025,7 +11025,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11862,7 +11862,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.61.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -13072,7 +13072,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -13159,19 +13159,6 @@ dependencies = [
  "windows-link 0.1.3",
  "windows-result 0.3.4",
  "windows-strings 0.4.2",
-]
-
-[[package]]
-name = "windows-core"
-version = "0.62.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57fe7168f7de578d2d8a05b07fd61870d2e73b4020e9f49aa00da8471723497c"
-dependencies = [
- "windows-implement 0.60.0",
- "windows-interface 0.59.1",
- "windows-link 0.2.0",
- "windows-result 0.4.0",
- "windows-strings 0.5.0",
 ]
 
 [[package]]
@@ -13301,15 +13288,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "windows-result"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7084dcc306f89883455a206237404d3eaf961e5bd7e0f312f7c91f57eb44167f"
-dependencies = [
- "windows-link 0.2.0",
-]
-
-[[package]]
 name = "windows-strings"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13326,15 +13304,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56e6c93f3a0c3b36176cb1327a4958a0353d5d166c2a35cb268ace15e91d3b57"
 dependencies = [
  "windows-link 0.1.3",
-]
-
-[[package]]
-name = "windows-strings"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7218c655a553b0bed4426cf54b20d7ba363ef543b52d515b3e48d7fd55318dda"
-dependencies = [
- "windows-link 0.2.0",
 ]
 
 [[package]]

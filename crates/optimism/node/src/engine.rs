@@ -18,7 +18,7 @@ use reth_node_api::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::isthmus;
-use reth_optimism_forks::{OpHardfork, OpHardforks};
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{OpExecutionPayloadValidator, OpPayloadTypes};
 use reth_optimism_primitives::{OpBlock, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};

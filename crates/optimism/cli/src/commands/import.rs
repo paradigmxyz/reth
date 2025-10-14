@@ -14,12 +14,12 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpExecutorProvider;
 use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives};
-use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderProvider, StageCheckpointReader};
+use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderProvider, StageCheckpointReader, ChainStateBlockWriter};
 use reth_prune::PruneModes;
 use reth_stages::StageId;
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
-use tracing::{debug, error, info};
+use tracing::{debug, info, warn};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
@@ -101,7 +101,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
                 &consensus,
                 Arc::new(file_client),
                 StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
-                true,
+                false,
                 OpExecutorProvider::optimism(provider_factory.chain_spec()),
             )?;
 
@@ -127,15 +127,15 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
                 .expect("should have genesis");
         }
 
-        let provider = provider_factory.provider()?;
+        let provider_rw = provider_factory.provider_rw()?;
 
-        let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
-        let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+        let total_imported_blocks = provider_rw.tx_ref().entries::<tables::HeaderNumbers>()?;
+        let total_imported_txns = provider_rw.tx_ref().entries::<tables::TransactionHashNumbers>()?;
 
         if total_decoded_blocks != total_imported_blocks ||
             total_decoded_txns != total_imported_txns + total_filtered_out_dup_txns
         {
-            error!(target: "reth::cli",
+            warn!(target: "reth::cli",
                 total_decoded_blocks,
                 total_imported_blocks,
                 total_decoded_txns,
@@ -153,6 +153,13 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
             total_filtered_out_dup_txns,
             "Chain file imported"
         );
+
+        // Set safe and finalized blocks to the same block as the latest block
+        let block = provider_rw.last_block_number()?;
+        info!(target: "reth::cli", "Setting safe and finalized blocks to latest block number {}", block);
+        provider_rw.save_safe_block_number(block)?;
+        provider_rw.save_finalized_block_number(block)?;
+        provider_rw.commit()?;
 
         Ok(())
     }

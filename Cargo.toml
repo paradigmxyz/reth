@@ -464,7 +464,7 @@ revm-inspectors = { git = "https://github.com/mantle-xyz/revm-inspectors", tag =
 alloy-chains = { version = "0.2.0", default-features = false }
 alloy-dyn-abi = "1.1.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.0.0", default-features = false }
+alloy-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.0.1", default-features = false }
 alloy-primitives = { version = "1.1.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.1.0"
@@ -503,12 +503,12 @@ alloy-transport-ws = { version = "0.15.10", default-features = false }
 
 # op
 alloy-op-hardforks = "0.2.0"
-alloy-op-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.0.0", default-features = false }
-op-alloy-rpc-types = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.0.0", default-features = false }
-op-alloy-rpc-types-engine = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.0.0", default-features = false }
-op-alloy-network = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.0.0", default-features = false }
-op-alloy-consensus = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.0.0", default-features = false }
-op-alloy-rpc-jsonrpsee = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.0.0", default-features = false }
+alloy-op-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.0.1", default-features = false }
+op-alloy-rpc-types = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.0.1", default-features = false }
+op-alloy-rpc-types-engine = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.0.1", default-features = false }
+op-alloy-network = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.0.1", default-features = false }
+op-alloy-consensus = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.0.1", default-features = false }
+op-alloy-rpc-jsonrpsee = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.0.1", default-features = false }
 op-alloy-flz = { version = "0.13.0", default-features = false }
 
 # misc
