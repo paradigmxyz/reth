@@ -246,11 +246,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
-    fn as_ref(&self) -> &Self {
-        self
-    }
-}
+// NOTE: Removed redundant `AsRef<Self>` impl; borrowing `&DatabaseProvider` needs no trait.
 
 impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Writes executed blocks and state to storage.
