@@ -525,7 +525,7 @@ pub trait Call:
         Ok(res)
     }
 
-    /// Executes the [`EvmEnv`] against the given [Database] without committing state
+    /// Executes the [`EvmEnvFor`] against the given [Database] without committing state
     /// changes.
     fn transact_with_inspector<DB, I>(
         &self,
@@ -579,7 +579,7 @@ pub trait Call:
     /// Prepares the state and env for the given [`RpcTxReq`] at the given [`BlockId`] and
     /// executes the closure on a new task returning the result of the closure.
     ///
-    /// This returns the configured [`EvmEnv`] for the given [`RpcTxReq`] at
+    /// This returns the configured [`EvmEnvFor`] for the given [`RpcTxReq`] at
     /// the given [`BlockId`] and with configured call settings: `prepare_call_env`.
     ///
     /// This is primarily used by `eth_call`.
@@ -717,7 +717,7 @@ pub trait Call:
 
     ///
     /// All `TxEnv` fields are derived from the given [`RpcTxReq`], if fields are
-    /// `None`, they fall back to the [`EvmEnv`]'s settings.
+    /// `None`, they fall back to the [`EvmEnvFor`]'s settings.
     fn create_txn_env(
         &self,
         evm_env: &EvmEnvFor<Self::Evm>,
@@ -736,7 +736,7 @@ pub trait Call:
         Ok(self.tx_resp_builder().tx_env(request, evm_env)?)
     }
 
-    /// Prepares the [`EvmEnv`] for execution of calls.
+    /// Prepares the [`EvmEnvFor`] for execution of calls.
     ///
     /// Does not commit any changes to the underlying database.
     ///
