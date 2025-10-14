@@ -355,6 +355,8 @@ impl ExecutionCache {
 
     /// Invalidates the storage for all addresses in the set
     pub(crate) fn invalidate_storages(&self, addresses: HashSet<&Address>) {
+        // NOTE: this must collect because the invalidate function should not be called while we
+        // hold an iter for it
         let storage_entries = self
             .storage_cache
             .iter()
