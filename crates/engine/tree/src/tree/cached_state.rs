@@ -302,7 +302,8 @@ pub(crate) struct ExecutionCache {
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: Cache<B256, Option<Bytecode>>,
 
-    /// Flattened storage cache: composite key of (`Address`, `StorageKey`) maps directly to values.
+    /// Flattened storage cache: composite key of (`Address`, `StorageKey`) maps directly to
+    /// values.
     storage_cache: Cache<(Address, StorageKey), Option<StorageValue>>,
 
     /// Cache for basic account information (nonce, balance, code hash).
@@ -357,7 +358,8 @@ impl ExecutionCache {
         let storage_entries = self
             .storage_cache
             .iter()
-            .filter_map(|entry| addresses.contains(&entry.key().0).then_some(*entry.key()));
+            .filter_map(|entry| addresses.contains(&entry.key().0).then_some(*entry.key()))
+            .collect::<Vec<_>>();
         for key in storage_entries {
             self.storage_cache.invalidate(&key)
         }
@@ -427,7 +429,7 @@ impl ExecutionCache {
             self.account_cache.insert(*addr, Some(Account::from(account_info)));
         }
 
-        // invalidate storage for all destroyed acocunts
+        // invalidate storage for all destroyed accounts
         self.invalidate_storages(invalidated_accounts);
 
         Ok(())
