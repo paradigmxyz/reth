@@ -127,7 +127,7 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     type Evm: ConfigureEvm<Primitives = Self::Primitives>;
 
     /// Associated upper layer JSON-RPC API network requests and responses to convert from and into
-    /// types of [`N`].
+    /// types of [`Self::Primitives`].
     type Network: RpcTypes + Send + Sync + Unpin + Clone + Debug;
 
     /// An associated RPC conversion error.
