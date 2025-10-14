@@ -1015,7 +1015,7 @@ mod tests {
 
         // Start producer after subscription is active to avoid timing-related flakiness.
         std::thread::spawn(move || produce_items(tx));
-        
+
         let items = sub.take(16).collect::<Vec<_>>().await;
         assert_eq!(items.len(), 16);
     }
