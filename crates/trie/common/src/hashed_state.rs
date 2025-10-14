@@ -64,7 +64,12 @@ impl HashedPostState {
         let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         for (address, (account, storage)) in hashed {
-            accounts.insert(address, account);
+            // CONSENSUS-CRITICAL: Only insert non-None accounts to match go-ethereum's
+            // IntermediateRoot(deleteEmptyObjects=true) behavior for Arbitrum and other chains.
+            // Empty accounts (None) must not be included in the state trie.
+            if account.is_some() {
+                accounts.insert(address, account);
+            }
             if !storage.is_empty() {
                 storages.insert(address, storage);
             }
@@ -95,7 +100,12 @@ impl HashedPostState {
         let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         for (address, (account, storage)) in hashed {
-            accounts.insert(address, account);
+            // CONSENSUS-CRITICAL: Only insert non-None accounts to match go-ethereum's
+            // IntermediateRoot(deleteEmptyObjects=true) behavior for Arbitrum and other chains.
+            // Empty accounts (None) must not be included in the state trie.
+            if account.is_some() {
+                accounts.insert(address, account);
+            }
             if !storage.is_empty() {
                 storages.insert(address, storage);
             }
