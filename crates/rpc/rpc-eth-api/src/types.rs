@@ -5,7 +5,7 @@ use alloy_rpc_types_eth::Block;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_rpc_convert::RpcConvert;
 pub use reth_rpc_convert::{RpcTransaction, RpcTxReq, RpcTypes};
-use reth_storage_api::{ProviderTx, ReceiptProvider, TransactionsProvider};
+use reth_storage_api::{LogIndexProvider, ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{
     error::Error,
@@ -53,7 +53,10 @@ pub type RpcError<T> = <T as EthApiTypes>::Error;
 pub trait FullEthApiTypes
 where
     Self: RpcNodeCore<
-            Provider: TransactionsProvider + ReceiptProvider + CanonStateSubscriptions,
+            Provider: TransactionsProvider
+                          + ReceiptProvider
+                          + CanonStateSubscriptions
+                          + LogIndexProvider,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
@@ -69,7 +72,10 @@ where
 
 impl<T> FullEthApiTypes for T where
     T: RpcNodeCore<
-            Provider: TransactionsProvider + ReceiptProvider + CanonStateSubscriptions,
+            Provider: TransactionsProvider
+                          + ReceiptProvider
+                          + CanonStateSubscriptions
+                          + LogIndexProvider,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,

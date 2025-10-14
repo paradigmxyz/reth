@@ -13,10 +13,10 @@ use crate::{
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
     DBProvider, HashingWriter, HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider,
     HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
-    StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
-    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieWriter,
+    LogIndexProvider, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, RevertsInit, StageCheckpointReader, StateProviderBox, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -45,6 +45,7 @@ use reth_db_api::{
     BlockNumberList, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_log_index_common::{BlockBoundary, FilterMapMeta, FilterMapParams, MapValueRows};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, GotExpected, RecoveredBlock, SealedHeader,
@@ -2886,6 +2887,152 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastSafeBlockBlock, block_number)?)
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX, N> {
+    fn get_metadata(&self) -> ProviderResult<Option<FilterMapMeta>> {
+        self.tx_ref()
+            .get::<tables::FilterMapMeta>(tables::FilterMapMetaKey)
+            .map_err(ProviderError::Database)
+    }
+
+    fn get_base_layer_rows_for_value(
+        &self,
+        map_start: u32,
+        map_end: u32,
+        value: &B256,
+    ) -> ProviderResult<Vec<Vec<u32>>> {
+        let params = FilterMapParams::default();
+
+        let total = (map_end - map_start + 1) as usize;
+        let mut results = vec![Vec::new(); total];
+
+        let mut cursor = self
+            .tx_ref()
+            .cursor_read::<tables::FilterMapRows>()
+            .map_err(ProviderError::Database)?;
+
+        // Epoch geometry
+        let epoch_size: u32 = 1u32 << params.log_maps_per_epoch;
+
+        // Walk the requested range by epoch-aligned segments.
+        let mut seg_start = map_start;
+        while seg_start <= map_end {
+            let epoch = params.map_epoch(seg_start);
+            let first_epoch = params.first_epoch_map(epoch);
+            let seg_end = std::cmp::min(map_end, first_epoch + epoch_size - 1);
+
+            // For the base layer, the row index is keyed to the *first map of this epoch*.
+            let row_index = params.row_index(seg_start, 0, value);
+
+            // Scan only the row for this (epoch, value) across the segment.
+            let start_key = params.map_row_index(seg_start, row_index);
+            let end_key = params.map_row_index(seg_end, row_index);
+
+            for entry in cursor.walk_range(start_key..=end_key).map_err(ProviderError::Database)? {
+                let (map_row_idx, columns) = entry.map_err(ProviderError::Database)?;
+
+                // Decode map index within this epoch, then rebase to absolute map index.
+                let in_epoch_mask = (1u64 << params.log_maps_per_epoch) - 1;
+                let map_in_epoch = (map_row_idx & in_epoch_mask) as u32;
+                let map_index = first_epoch + map_in_epoch;
+
+                // Sanity (should always hold if keys are well-formed)
+                if map_index < seg_start || map_index > seg_end {
+                    continue;
+                }
+
+                // Place into the result slot for this absolute map.
+                let pos = (map_index - map_start) as usize;
+                if pos < results.len() {
+                    results[pos] = columns.indices;
+                }
+            }
+
+            // Advance to next epoch slice
+            seg_start = seg_end.saturating_add(1);
+        }
+
+        Ok(results)
+    }
+
+    fn fetch_more_layers_for_map(
+        &self,
+        map_index: u32,
+        value: &B256,
+    ) -> ProviderResult<Vec<Vec<u32>>> {
+        let params = FilterMapParams::default();
+        let mut layers = Vec::new();
+
+        for layer in 1..reth_log_index_common::MAX_LAYERS {
+            let row_index = params.row_index(map_index, layer as u32, value);
+            let map_row_index = params.map_row_index(map_index, row_index);
+            let max_len = params.max_row_length(layer as u32) as usize;
+
+            let columns = self
+                .tx_ref()
+                .get::<tables::FilterMapRows>(map_row_index)
+                .map_err(ProviderError::Database)?
+                .unwrap_or_default();
+
+            if columns.indices.len() < max_len {
+                layers.push(columns.indices);
+                break;
+            }
+
+            layers.push(columns.indices);
+        }
+
+        Ok(layers)
+    }
+
+    fn get_rows_until_short_row(
+        &self,
+        map_start: u32,
+        map_end: u32,
+        values: &[B256],
+    ) -> ProviderResult<Vec<MapValueRows>> {
+        let mut results = Vec::new();
+
+        for value in values {
+            let base_rows = self.get_base_layer_rows_for_value(map_start, map_end, value)?;
+
+            for (i, base_row) in base_rows.iter().enumerate() {
+                let map_index = map_start + i as u32;
+                let params = FilterMapParams::default();
+                let max_len = params.max_row_length(0) as usize;
+
+                let mut layers = vec![base_row.clone()];
+
+                if base_row.len() >= max_len {
+                    let more_layers = self.fetch_more_layers_for_map(map_index, value)?;
+                    layers.extend(more_layers);
+                }
+
+                results.push(MapValueRows { map_index, value: *value, layers });
+            }
+        }
+
+        Ok(results)
+    }
+
+    fn get_log_value_indices_range(
+        &self,
+        block_range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockBoundary>> {
+        let mut cursor = self
+            .tx_ref()
+            .cursor_read::<tables::LogValueIndices>()
+            .map_err(ProviderError::Database)?;
+        let mut boundaries = Vec::new();
+
+        for entry in cursor.walk_range(block_range).map_err(ProviderError::Database)? {
+            let (block_number, log_value_index) = entry.map_err(ProviderError::Database)?;
+            boundaries.push(BlockBoundary { block_number, log_value_index });
+        }
+
+        Ok(boundaries)
     }
 }
 

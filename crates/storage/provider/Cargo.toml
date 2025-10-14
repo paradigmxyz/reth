@@ -33,6 +33,7 @@ reth-evm.workspace = true
 reth-chain-state.workspace = true
 reth-node-types.workspace = true
 reth-static-file-types.workspace = true
+reth-log-index-common.workspace = true
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
@@ -99,4 +100,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "revm-state",
     "tokio",
+    "reth-log-index-common/test-utils",
 ]

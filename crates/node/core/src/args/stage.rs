@@ -50,4 +50,8 @@ pub enum StageEnum {
     ///
     /// Manages historical data related to storage.
     StorageHistory,
+    /// The Logs Indexing stage within the pipeline.
+    ///
+    /// Handles indexing of logs.
+    IndexLogs,
 }

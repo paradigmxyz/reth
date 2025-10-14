@@ -1,7 +1,10 @@
 use super::StageId;
 use alloc::{format, string::String, vec::Vec};
-use alloy_primitives::{Address, BlockNumber, B256, U256};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, B256, U256};
 use core::ops::RangeInclusive;
+use reth_log_index_common::{
+    BlockBoundary, FilterMapColumns, FilterMapRow, LogValueIndex, MapRowIndex,
+};
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
 
 /// Saves the progress of Merkle stage.
@@ -287,6 +290,47 @@ pub struct IndexHistoryCheckpoint {
     pub progress: EntitiesCheckpoint,
 }
 
+/// Saves the progress of Index Logs stage.
+/// TODO: Doesnt implement Copy because of the Vecs.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct IndexLogsCheckpoint {
+    /// Current map being processed
+    pub current_map: u32,
+    /// Pending rows not yet written (`map_row_index` -> column indices)
+    pub pending_rows: Vec<FilterMapRow>,
+    /// Pending block boundaries
+    pub pending_boundaries: Vec<BlockBoundary>,
+    /// Next log value index to process
+    pub next_log_value_index: u64,
+}
+
+impl IndexLogsCheckpoint {
+    /// Creates a new `IndexLogsCheckpoint` from the given state.
+    pub fn new(
+        current_map: u32,
+        next_log_value_index: u64,
+        pending_rows: HashMap<MapRowIndex, FilterMapColumns>,
+        pending_boundaries: Vec<(BlockNumber, LogValueIndex)>,
+    ) -> Self {
+        Self {
+            current_map,
+            next_log_value_index,
+            pending_rows: pending_rows
+                .into_iter()
+                .map(|(map_row_index, columns)| FilterMapRow { map_row_index, columns })
+                .collect(),
+            pending_boundaries: pending_boundaries
+                .into_iter()
+                .map(|(block_number, log_value_index)| BlockBoundary {
+                    block_number,
+                    log_value_index,
+                })
+                .collect(),
+        }
+    }
+}
 /// Saves the progress of abstract stage iterating over or downloading entities.
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]

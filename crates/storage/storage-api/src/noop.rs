@@ -3,10 +3,10 @@
 use crate::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader,
-    HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider,
+    HashedPostStateProvider, HeaderProvider, LogIndexProvider, NodePrimitivesProvider,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
+    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -28,6 +28,7 @@ use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
+use reth_log_index_common::{BlockBoundary, FilterMapMeta, MapValueRows};
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
@@ -615,6 +616,45 @@ impl<C: Send + Sync, N: Send + Sync> BlockBodyIndicesProvider for NoopProvider<C
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        Ok(Vec::new())
+    }
+}
+
+impl<C: Send + Sync, N: Send + Sync> LogIndexProvider for NoopProvider<C, N> {
+    fn get_metadata(&self) -> ProviderResult<Option<FilterMapMeta>> {
+        Ok(None)
+    }
+
+    fn get_base_layer_rows_for_value(
+        &self,
+        _map_start: u32,
+        _map_end: u32,
+        _value: &B256,
+    ) -> ProviderResult<Vec<Vec<u32>>> {
+        Ok(Vec::new())
+    }
+
+    fn get_log_value_indices_range(
+        &self,
+        _block_range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockBoundary>> {
+        Ok(Vec::new())
+    }
+
+    fn get_rows_until_short_row(
+        &self,
+        _map_start: u32,
+        _map_end: u32,
+        _values: &[B256],
+    ) -> ProviderResult<Vec<MapValueRows>> {
+        Ok(Vec::new())
+    }
+
+    fn fetch_more_layers_for_map(
+        &self,
+        _map_index: u32,
+        _value: &B256,
+    ) -> ProviderResult<Vec<Vec<u32>>> {
         Ok(Vec::new())
     }
 }

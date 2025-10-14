@@ -29,6 +29,9 @@ use crate::{
 use alloy_consensus::Header;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_log_index_common::{
+    FilterMapColumns, FilterMapMeta as FilterMapMetadata, LogValueIndex, MapRowIndex,
+};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
@@ -522,6 +525,51 @@ tables! {
     table ChainState {
         type Key = ChainStateKey;
         type Value = BlockNumber;
+    }
+
+    /// Stores filter map metadata tracking the state of log indexing.
+    table FilterMapMeta {
+        type Key = FilterMapMetaKey;
+        type Value = FilterMapMetadata;
+    }
+
+    /// Stores filter map rows containing column indices for log values.
+    /// Key is `map_row_index` (epoch-based organization for efficient access).
+    table FilterMapRows {
+        type Key = MapRowIndex;
+        type Value = FilterMapColumns;
+    }
+
+    /// Stores log value indices for block boundaries.
+    /// Maps block number to the starting log value index for that block.
+    table LogValueIndices {
+        type Key = BlockNumber;
+        type Value = LogValueIndex;
+    }
+
+    // table FilterMapBlockIndices {
+    //     type Key = u32;
+    //     type Value = (BlockNumber, BlockHash);
+    // }
+}
+
+/// Singleton key for the `FilterMapMeta` table.
+#[derive(
+    Clone, Copy, Debug, Default, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize, Hash,
+)]
+pub struct FilterMapMetaKey;
+
+impl Encode for FilterMapMetaKey {
+    type Encoded = [u8; 0];
+
+    fn encode(self) -> Self::Encoded {
+        []
+    }
+}
+
+impl Decode for FilterMapMetaKey {
+    fn decode(_: &[u8]) -> Result<Self, crate::DatabaseError> {
+        Ok(Self)
     }
 }
 

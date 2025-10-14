@@ -4,10 +4,10 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
     ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProvider,
-    DatabaseProviderFactory, FullProvider, HashedPostStateProvider, HeaderProvider, ProviderError,
-    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    DatabaseProviderFactory, FullProvider, HashedPostStateProvider, HeaderProvider,
+    LogIndexProvider, ProviderError, ProviderFactory, PruneCheckpointReader, ReceiptProvider,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{
@@ -29,6 +29,7 @@ use reth_db_api::{
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_execution_types::ExecutionOutcome;
+use reth_log_index_common::{BlockBoundary, FilterMapMeta, MapValueRows};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
@@ -750,6 +751,45 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
         StateReader::get_state(&self.consistent_provider()?, block)
+    }
+}
+
+impl<N: ProviderNodeTypes> LogIndexProvider for BlockchainProvider<N> {
+    fn get_metadata(&self) -> ProviderResult<Option<FilterMapMeta>> {
+        self.consistent_provider()?.get_metadata()
+    }
+
+    fn get_base_layer_rows_for_value(
+        &self,
+        map_start: u32,
+        map_end: u32,
+        value: &B256,
+    ) -> ProviderResult<Vec<Vec<u32>>> {
+        self.consistent_provider()?.get_base_layer_rows_for_value(map_start, map_end, value)
+    }
+
+    fn get_log_value_indices_range(
+        &self,
+        block_range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockBoundary>> {
+        self.consistent_provider()?.get_log_value_indices_range(block_range)
+    }
+
+    fn get_rows_until_short_row(
+        &self,
+        map_start: u32,
+        map_end: u32,
+        values: &[B256],
+    ) -> ProviderResult<Vec<MapValueRows>> {
+        self.consistent_provider()?.get_rows_until_short_row(map_start, map_end, values)
+    }
+
+    fn fetch_more_layers_for_map(
+        &self,
+        map_index: u32,
+        value: &B256,
+    ) -> ProviderResult<Vec<Vec<u32>>> {
+        self.consistent_provider()?.fetch_more_layers_for_map(map_index, value)
     }
 }
 

@@ -154,6 +154,13 @@ impl<C: ChainSpecParser> Command<C> {
                 reset_stage_checkpoint(tx, StageId::TransactionLookup)?;
                 insert_genesis_header(&provider_rw, &self.env.chain)?;
             }
+            StageEnum::IndexLogs => {
+                tx.clear::<tables::LogValueIndices>()?;
+                tx.clear::<tables::FilterMapRows>()?;
+                tx.clear::<tables::FilterMapMeta>()?;
+
+                reset_stage_checkpoint(tx, StageId::IndexLogs)?;
+            }
         }
 
         tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;

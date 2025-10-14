@@ -175,7 +175,7 @@ macro_rules! impl_uint_compact {
     };
 }
 
-impl_uint_compact!(u8, u64, u128);
+impl_uint_compact!(u8, u32, u64, u128);
 
 impl<T> Compact for Vec<T>
 where

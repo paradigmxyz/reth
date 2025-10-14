@@ -42,6 +42,8 @@ members = [
     "crates/ethereum/payload/",
     "crates/ethereum/primitives/",
     "crates/ethereum/reth/",
+    "crates/log-index/log-index",
+    "crates/log-index/common",
     "crates/etl/",
     "crates/evm/evm",
     "crates/evm/execution-errors",
@@ -466,6 +468,8 @@ reth-trie-sparse-parallel = { path = "crates/trie/sparse-parallel" }
 reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-features = false }
 reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
+reth-log-index = { path = "crates/log-index/log-index" }
+reth-log-index-common = { path = "crates/log-index/common", default-features = false }
 
 # revm
 revm = { version = "29.0.1", default-features = false }
@@ -550,6 +554,7 @@ dirs-next = "2.0.0"
 dyn-clone = "1.0.17"
 eyre = "0.6"
 fdlimit = "0.3.0"
+fnv = { version = "1.0.7", default-features = false }
 generic-array = "0.14"
 humantime = "2.1"
 humantime-serde = "1.1"
