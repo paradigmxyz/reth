@@ -1126,10 +1126,7 @@ Merge hard forks:
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
 - Cancun                           @1710338135
-- Prague                           @1746612311
-- Osaka                            @1764798551
-- Bpo1                             @1765978199
-- Bpo2                             @1767747671"
+- Prague                           @1746612311"
         );
     }
 
