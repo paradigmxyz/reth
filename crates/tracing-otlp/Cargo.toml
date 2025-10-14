@@ -20,7 +20,6 @@ tracing.workspace = true
 
 # misc
 eyre.workspace = true
-serde.workspace = true
 url.workspace = true
 
 [lints]

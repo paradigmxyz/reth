@@ -10604,7 +10604,6 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
- "serde",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber 0.3.20",
