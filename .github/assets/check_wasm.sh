@@ -75,6 +75,8 @@ exclude_crates=(
   reth-trie-parallel # tokio
   reth-trie-sparse-parallel # rayon
   reth-testing-utils
+  reth-optimism-exex # reth-exex and reth-optimism-trie
+  reth-optimism-trie # reth-trie
   reth-optimism-txpool # reth-transaction-pool
   reth-era-downloader # tokio
   reth-era-utils # tokio
