@@ -867,7 +867,7 @@ impl ProofTaskManagerHandle {
         account_worker_count: usize,
     ) -> ProviderResult<Self>
     where
-        Factory: DatabaseProviderFactory<Provider: BlockReader>,
+        Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
@@ -895,12 +895,20 @@ impl ProofTaskManagerHandle {
                         tracing::error!(
                             target: "trie::proof_task",
                             worker_id,
+                            worker_type = "storage",
                             %error,
-                            "Failed to initialize storage worker"
+                            "Failed to initialize worker"
                         );
                         return;
                     }
                 };
+
+                tracing::debug!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    worker_type = "storage",
+                    "Worker started"
+                );
 
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
@@ -913,13 +921,13 @@ impl ProofTaskManagerHandle {
                     metrics,
                 )
             });
-
-            tracing::debug!(
-                target: "trie::proof_task",
-                worker_id,
-                "Storage worker initialization dispatched"
-            );
         }
+
+        tracing::debug!(
+            target: "trie::proof_task",
+            storage_worker_count,
+            "Storage workers dispatched"
+        );
 
         // Spawn account workers
         for worker_id in 0..account_worker_count {
@@ -938,12 +946,20 @@ impl ProofTaskManagerHandle {
                         tracing::error!(
                             target: "trie::proof_task",
                             worker_id,
+                            worker_type = "account",
                             %error,
-                            "Failed to initialize account worker"
+                            "Failed to initialize worker"
                         );
                         return;
                     }
                 };
+
+                tracing::debug!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    worker_type = "account",
+                    "Worker started"
+                );
 
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
@@ -957,13 +973,13 @@ impl ProofTaskManagerHandle {
                     metrics,
                 )
             });
-
-            tracing::debug!(
-                target: "trie::proof_task",
-                worker_id,
-                "Account worker initialization dispatched"
-            );
         }
+
+        tracing::debug!(
+            target: "trie::proof_task",
+            account_worker_count,
+            "Account workers dispatched"
+        );
 
         Ok(Self::new_handle(storage_work_tx, account_work_tx))
     }
