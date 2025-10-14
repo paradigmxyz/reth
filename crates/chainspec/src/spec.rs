@@ -3,7 +3,7 @@ use alloy_evm::eth::spec::EthExecutorSpec;
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
-    holesky, hoodi, mainnet, sepolia, EthChainSpec,
+    holesky, hoodi, sepolia, EthChainSpec,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
@@ -108,10 +108,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         deposit_contract: Some(MAINNET_DEPOSIT_CONTRACT),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
-        blob_params: BlobScheduleBlobParams::default().with_scheduled([
-            (mainnet::MAINNET_BPO1_TIMESTAMP, BlobParams::bpo1()),
-            (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
-        ]),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -1376,10 +1373,7 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     EthereumHardfork::Prague,
-                    ForkId {
-                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
-                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
-                    },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -1523,22 +1517,12 @@ Post-merge hard forks (timestamp based):
                 // First Prague block
                 (
                     Head { number: 20000002, timestamp: 1746612311, ..Default::default() },
-                    ForkId {
-                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
-                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
-                    },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
-                // Osaka block
+                // Future Prague block
                 (
-                    Head {
-                        number: 20000002,
-                        timestamp: mainnet::MAINNET_OSAKA_TIMESTAMP,
-                        ..Default::default()
-                    },
-                    ForkId {
-                        hash: ForkHash(hex!("0x5167e2a6")),
-                        next: mainnet::MAINNET_BPO1_TIMESTAMP,
-                    },
+                    Head { number: 20000002, timestamp: 2000000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -1847,22 +1831,11 @@ Post-merge hard forks (timestamp based):
                 ), // First Prague block
                 (
                     Head { number: 20000004, timestamp: 1746612311, ..Default::default() },
-                    ForkId {
-                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
-                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
-                    },
-                ),
-                // Osaka block
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                ), // Future Prague block
                 (
-                    Head {
-                        number: 20000004,
-                        timestamp: mainnet::MAINNET_OSAKA_TIMESTAMP,
-                        ..Default::default()
-                    },
-                    ForkId {
-                        hash: ForkHash(hex!("0x5167e2a6")),
-                        next: mainnet::MAINNET_BPO1_TIMESTAMP,
-                    },
+                    Head { number: 20000004, timestamp: 2000000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -2519,8 +2492,10 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn latest_eth_mainnet_fork_id() {
-        // BPO2
-        assert_eq!(ForkId { hash: ForkHash(hex!("0xfd414558")), next: 0 }, MAINNET.latest_fork_id())
+        assert_eq!(
+            ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+            MAINNET.latest_fork_id()
+        )
     }
 
     #[test]
