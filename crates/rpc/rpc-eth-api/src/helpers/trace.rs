@@ -25,8 +25,8 @@ use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
 pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
-    /// Executes the [`TxEnvFor`] with [`EvmEnvFor`] against the given [Database] without committing
-    /// state changes.
+    /// Executes the [`TxEnvFor`] with [`reth_evm::EvmEnv`] against the given [Database] without
+    /// committing state changes.
     fn inspect<DB, I>(
         &self,
         db: DB,
