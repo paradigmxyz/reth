@@ -71,7 +71,7 @@ impl AccountHashingStage {
     {
         use alloy_primitives::U256;
         use reth_db_api::models::AccountBeforeTx;
-        use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
+        use reth_provider::{BlockWriter, StaticFileProviderFactory, StaticFileWriter};
         use reth_testing_utils::{
             generators,
             generators::{random_block_range, random_eoa_accounts, BlockRangeParams},
@@ -86,7 +86,7 @@ impl AccountHashingStage {
         );
 
         for block in blocks {
-            provider.insert_historical_block(block.try_recover().unwrap()).unwrap();
+            provider.insert_block(block.try_recover().unwrap()).unwrap();
         }
         provider
             .static_file_provider()
@@ -344,7 +344,7 @@ mod tests {
                 done: true,
             }) if block_number == previous_stage &&
                 processed == total &&
-                total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
+                total == runner.db.count_entries::<tables::PlainAccountState>().unwrap() as u64
         );
 
         // Validate the stage execution
@@ -453,7 +453,7 @@ mod tests {
                 let provider = self.db.factory.database_provider_rw()?;
                 let res = Ok(AccountHashingStage::seed(
                     &provider,
-                    SeedOpts { blocks: 1..=input.target(), accounts: 10, txs: 0..3 },
+                    SeedOpts { blocks: 0..=input.target(), accounts: 10, txs: 0..3 },
                 )
                 .unwrap());
                 provider.commit().expect("failed to commit");

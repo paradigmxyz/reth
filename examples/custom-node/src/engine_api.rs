@@ -35,7 +35,7 @@ impl From<OpBuiltPayload<CustomNodePrimitives>> for CustomExecutionPayloadEnvelo
         let block = sealed_block.into_block();
 
         Self {
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(hash, &block.clone()),
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(hash, &block),
             extension,
         }
     }

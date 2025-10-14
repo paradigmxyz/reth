@@ -107,15 +107,8 @@ impl TrieUpdates {
     }
 
     /// Converts trie updates into [`TrieUpdatesSorted`].
-    pub fn into_sorted(self) -> TrieUpdatesSorted {
-        let mut account_nodes = Vec::from_iter(self.account_nodes);
-        account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let storage_tries = self
-            .storage_tries
-            .into_iter()
-            .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
-            .collect();
-        TrieUpdatesSorted { removed_nodes: self.removed_nodes, account_nodes, storage_tries }
+    pub fn into_sorted(mut self) -> TrieUpdatesSorted {
+        self.drain_into_sorted()
     }
 
     /// Converts trie updates into [`TrieUpdatesSorted`], but keeping the maps allocated by
@@ -126,7 +119,17 @@ impl TrieUpdates {
     /// This allows us to reuse the allocated space. This allocates new space for the sorted
     /// updates, like `into_sorted`.
     pub fn drain_into_sorted(&mut self) -> TrieUpdatesSorted {
-        let mut account_nodes = self.account_nodes.drain().collect::<Vec<_>>();
+        let mut account_nodes = self
+            .account_nodes
+            .drain()
+            .map(|(path, node)| {
+                // Updated nodes take precedence over removed nodes.
+                self.removed_nodes.remove(&path);
+                (path, Some(node))
+            })
+            .collect::<Vec<_>>();
+
+        account_nodes.extend(self.removed_nodes.drain().map(|path| (path, None)));
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         let storage_tries = self
@@ -134,12 +137,7 @@ impl TrieUpdates {
             .drain()
             .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
             .collect();
-
-        TrieUpdatesSorted {
-            removed_nodes: self.removed_nodes.clone(),
-            account_nodes,
-            storage_tries,
-        }
+        TrieUpdatesSorted { account_nodes, storage_tries }
     }
 
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
@@ -266,14 +264,21 @@ impl StorageTrieUpdates {
     }
 
     /// Convert storage trie updates into [`StorageTrieUpdatesSorted`].
-    pub fn into_sorted(self) -> StorageTrieUpdatesSorted {
-        let mut storage_nodes = Vec::from_iter(self.storage_nodes);
+    pub fn into_sorted(mut self) -> StorageTrieUpdatesSorted {
+        let mut storage_nodes = self
+            .storage_nodes
+            .into_iter()
+            .map(|(path, node)| {
+                // Updated nodes take precedence over removed nodes.
+                self.removed_nodes.remove(&path);
+                (path, Some(node))
+            })
+            .collect::<Vec<_>>();
+
+        storage_nodes.extend(self.removed_nodes.into_iter().map(|path| (path, None)));
         storage_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        StorageTrieUpdatesSorted {
-            is_deleted: self.is_deleted,
-            removed_nodes: self.removed_nodes,
-            storage_nodes,
-        }
+
+        StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }
     }
 
     /// Convert storage trie updates into [`StorageTrieUpdatesSortedRef`].
@@ -425,28 +430,28 @@ pub struct TrieUpdatesSortedRef<'a> {
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieUpdatesSorted {
-    /// Sorted collection of updated state nodes with corresponding paths.
-    pub account_nodes: Vec<(Nibbles, BranchNodeCompact)>,
-    /// The set of removed state node keys.
-    pub removed_nodes: HashSet<Nibbles>,
+    /// Sorted collection of updated state nodes with corresponding paths. None indicates that a
+    /// node was removed.
+    pub account_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
     /// Storage tries stored by hashed address of the account the trie belongs to.
     pub storage_tries: B256Map<StorageTrieUpdatesSorted>,
 }
 
 impl TrieUpdatesSorted {
     /// Returns reference to updated account nodes.
-    pub fn account_nodes_ref(&self) -> &[(Nibbles, BranchNodeCompact)] {
+    pub fn account_nodes_ref(&self) -> &[(Nibbles, Option<BranchNodeCompact>)] {
         &self.account_nodes
-    }
-
-    /// Returns reference to removed account nodes.
-    pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
-        &self.removed_nodes
     }
 
     /// Returns reference to updated storage tries.
     pub const fn storage_tries_ref(&self) -> &B256Map<StorageTrieUpdatesSorted> {
         &self.storage_tries
+    }
+}
+
+impl AsRef<Self> for TrieUpdatesSorted {
+    fn as_ref(&self) -> &Self {
+        self
     }
 }
 
@@ -468,10 +473,9 @@ pub struct StorageTrieUpdatesSortedRef<'a> {
 pub struct StorageTrieUpdatesSorted {
     /// Flag indicating whether the trie has been deleted/wiped.
     pub is_deleted: bool,
-    /// Sorted collection of updated storage nodes with corresponding paths.
-    pub storage_nodes: Vec<(Nibbles, BranchNodeCompact)>,
-    /// The set of removed storage node keys.
-    pub removed_nodes: HashSet<Nibbles>,
+    /// Sorted collection of updated storage nodes with corresponding paths. None indicates a node
+    /// is removed.
+    pub storage_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
 }
 
 impl StorageTrieUpdatesSorted {
@@ -481,13 +485,8 @@ impl StorageTrieUpdatesSorted {
     }
 
     /// Returns reference to updated storage nodes.
-    pub fn storage_nodes_ref(&self) -> &[(Nibbles, BranchNodeCompact)] {
+    pub fn storage_nodes_ref(&self) -> &[(Nibbles, Option<BranchNodeCompact>)] {
         &self.storage_nodes
-    }
-
-    /// Returns reference to removed storage nodes.
-    pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
-        &self.removed_nodes
     }
 }
 

@@ -21,7 +21,8 @@ use tracing::debug;
 ///
 /// This is a wrapper around [`BestTransactions`] that also enforces a specific basefee.
 ///
-/// This iterator guarantees that all transaction it returns satisfy both the base fee and blob fee!
+/// This iterator guarantees that all transactions it returns satisfy both the base fee and blob
+/// fee!
 pub(crate) struct BestTransactionsWithFees<T: TransactionOrdering> {
     pub(crate) best: BestTransactions<T>,
     pub(crate) base_fee: u64,
@@ -98,14 +99,14 @@ pub struct BestTransactions<T: TransactionOrdering> {
     pub(crate) new_transaction_receiver: Option<Receiver<PendingTransaction<T>>>,
     /// The priority value of most recently yielded transaction.
     ///
-    /// This is required if we new pending transactions are fed in while it yields new values.
+    /// This is required if new pending transactions are fed in while it yields new values.
     pub(crate) last_priority: Option<Priority<T::PriorityValue>>,
     /// Flag to control whether to skip blob transactions (EIP4844).
     pub(crate) skip_blobs: bool,
 }
 
 impl<T: TransactionOrdering> BestTransactions<T> {
-    /// Mark the transaction and it's descendants as invalid.
+    /// Mark the transaction and its descendants as invalid.
     pub(crate) fn mark_invalid(
         &mut self,
         tx: &Arc<ValidPoolTransaction<T::Transaction>>,
@@ -117,7 +118,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
     ///
     /// Note: for a transaction with nonce higher than the current on chain nonce this will always
-    /// return an ancestor since all transaction in this pool are gapless.
+    /// return an ancestor since all transactions in this pool are gapless.
     pub(crate) fn ancestor(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
         self.all.get(&id.unchecked_ancestor()?)
     }
@@ -127,12 +128,12 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         loop {
             match self.new_transaction_receiver.as_mut()?.try_recv() {
                 Ok(tx) => {
-                    if let Some(last_priority) = &self.last_priority {
-                        if &tx.priority > last_priority {
-                            // we skip transactions if we already yielded a transaction with lower
-                            // priority
-                            return None
-                        }
+                    if let Some(last_priority) = &self.last_priority &&
+                        &tx.priority > last_priority
+                    {
+                        // we skip transactions if we already yielded a transaction with lower
+                        // priority
+                        return None
                     }
                     return Some(tx)
                 }
@@ -394,7 +395,6 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
         BestTransactions, Priority,
     };
-    use alloy_primitives::U256;
 
     #[test]
     fn test_best_iter() {
@@ -665,7 +665,7 @@ mod tests {
         let pending_tx = PendingTransaction {
             submission_id: 10,
             transaction: Arc::new(valid_new_tx.clone()),
-            priority: Priority::Value(U256::from(1000)),
+            priority: Priority::Value(1000),
         };
         tx_sender.send(pending_tx.clone()).unwrap();
 
@@ -712,7 +712,7 @@ mod tests {
         let pending_tx1 = PendingTransaction {
             submission_id: 10,
             transaction: Arc::new(valid_new_tx1.clone()),
-            priority: Priority::Value(U256::from(1000)),
+            priority: Priority::Value(1000),
         };
         tx_sender.send(pending_tx1.clone()).unwrap();
 
@@ -735,7 +735,7 @@ mod tests {
         let pending_tx2 = PendingTransaction {
             submission_id: 11, // Different submission ID
             transaction: Arc::new(valid_new_tx2.clone()),
-            priority: Priority::Value(U256::from(1000)),
+            priority: Priority::Value(1000),
         };
         tx_sender.send(pending_tx2.clone()).unwrap();
 
@@ -819,7 +819,7 @@ mod tests {
             assert_eq!(iter.next().unwrap().max_fee_per_gas(), (gas_price + 1) * 10);
         }
 
-        // Due to the gas limit, the transaction from second prioritized sender was not
+        // Due to the gas limit, the transaction from second-prioritized sender was not
         // prioritized.
         let top_of_block_tx2 = iter.next().unwrap();
         assert_eq!(top_of_block_tx2.max_fee_per_gas(), 3);
@@ -981,7 +981,7 @@ mod tests {
         let pending_tx = PendingTransaction {
             submission_id: 10,
             transaction: Arc::new(valid_new_higher_fee_tx.clone()),
-            priority: Priority::Value(U256::from(u64::MAX)),
+            priority: Priority::Value(u128::MAX),
         };
         tx_sender.send(pending_tx).unwrap();
 

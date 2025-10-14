@@ -203,6 +203,9 @@ Networking:
 
           [default: sqrt]
 
+      --required-block-hashes <REQUIRED_BLOCK_HASHES>
+          Comma separated list of required block hashes. Peers that don't have these blocks will be filtered out
+
 Datadir:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
@@ -314,4 +317,21 @@ Display:
 
   -q, --quiet
           Silence all log output
+
+Tracing:
+      --tracing-otlp[=<URL>]
+          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+
+          If no value provided, defaults to `http://localhost:4318/v1/traces`.
+
+          Example: --tracing-otlp=http://collector:4318/v1/traces
+
+      --tracing-otlp-level <LEVEL>
+          Set the minimum log level for OTLP traces.
+
+          Valid values: ERROR, WARN, INFO, DEBUG, TRACE
+
+          Defaults to TRACE if not specified.
+
+          [default: TRACE]
 ```

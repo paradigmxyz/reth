@@ -1,8 +1,12 @@
+use alloy_consensus::BlockHeader;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
+use alloy_primitives::{bytes, Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types_engine::PayloadId;
+use derive_more::Deref;
+use reth_node_api::NodePrimitives;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_primitives::OpReceipt;
+use reth_rpc_eth_types::PendingBlock;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -36,6 +40,19 @@ impl FlashBlock {
     /// Returns the first parent hash of this flashblock.
     pub fn parent_hash(&self) -> Option<B256> {
         Some(self.base.as_ref()?.parent_hash)
+    }
+}
+
+/// A trait for decoding flashblocks from bytes.
+pub trait FlashBlockDecoder: Send + 'static {
+    /// Decodes `bytes` into a [`FlashBlock`].
+    fn decode(&self, bytes: bytes::Bytes) -> eyre::Result<FlashBlock>;
+}
+
+/// Default implementation of the decoder.
+impl FlashBlockDecoder for () {
+    fn decode(&self, bytes: bytes::Bytes) -> eyre::Result<FlashBlock> {
+        FlashBlock::decode(bytes)
     }
 }
 
@@ -117,5 +134,37 @@ impl From<ExecutionPayloadBaseV1> for OpNextBlockEnvAttributes {
             parent_beacon_block_root: Some(value.parent_beacon_block_root),
             extra_data: value.extra_data,
         }
+    }
+}
+
+/// The pending block built with all received Flashblocks alongside the metadata for the last added
+/// Flashblock.
+#[derive(Debug, Clone, Deref)]
+pub struct PendingFlashBlock<N: NodePrimitives> {
+    /// The complete pending block built out of all received Flashblocks.
+    #[deref]
+    pub pending: PendingBlock<N>,
+    /// A sequential index that identifies the last Flashblock added to this block.
+    pub last_flashblock_index: u64,
+    /// The last Flashblock block hash,
+    pub last_flashblock_hash: B256,
+    /// Whether the [`PendingBlock`] has a properly computed stateroot.
+    pub has_computed_state_root: bool,
+}
+
+impl<N: NodePrimitives> PendingFlashBlock<N> {
+    /// Create new pending flashblock.
+    pub const fn new(
+        pending: PendingBlock<N>,
+        last_flashblock_index: u64,
+        last_flashblock_hash: B256,
+        has_computed_state_root: bool,
+    ) -> Self {
+        Self { pending, last_flashblock_index, last_flashblock_hash, has_computed_state_root }
+    }
+
+    /// Returns the properly calculated state root for that block if it was computed.
+    pub fn computed_state_root(&self) -> Option<B256> {
+        self.has_computed_state_root.then_some(self.pending.block().state_root())
     }
 }

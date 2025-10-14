@@ -957,9 +957,7 @@ where
         debug!(target: "reth::cli", "Spawned txpool maintenance task");
 
         // The Op txpool maintenance task is only spawned when interop is active
-        if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) &&
-            self.supervisor_http == DEFAULT_SUPERVISOR_URL
-        {
+        if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) {
             // spawn the Op txpool maintenance task
             let chain_events = ctx.provider().canonical_state_stream();
             ctx.task_executor().spawn_critical(
@@ -1201,7 +1199,12 @@ pub struct OpEngineValidatorBuilder;
 
 impl<Node> PayloadValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
-    Node: FullNodeComponents<Types: OpNodeTypes>,
+    Node: FullNodeComponents<
+        Types: NodeTypes<
+            ChainSpec: OpHardforks,
+            Payload: PayloadTypes<ExecutionData = OpExecutionData>,
+        >,
+    >,
 {
     type Validator = OpEngineValidator<
         Node::Provider,

@@ -413,7 +413,7 @@ where
     /// Handler for: `eth_accounts`
     fn accounts(&self) -> RpcResult<Vec<Address>> {
         trace!(target: "rpc::eth", "Serving eth_accounts");
-        Ok(EthApiSpec::accounts(self))
+        Ok(EthTransactions::accounts(self))
     }
 
     /// Handler for: `eth_blockNumber`

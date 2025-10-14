@@ -251,11 +251,11 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
     /// Launches the node with the given launcher.
-    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
+    pub fn launch_with<L>(self, launcher: L) -> L::Future
     where
         L: LaunchNode<Self>,
     {
-        launcher.launch_node(self).await
+        launcher.launch_node(self)
     }
 
     /// Sets the hook that is run once the rpc server is started.

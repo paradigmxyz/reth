@@ -204,7 +204,12 @@ where
 
             SparseStateTrieResult::Ok((address, storage_trie))
         })
-        .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
+        .for_each_init(
+            || tx.clone(),
+            |tx, result| {
+                let _ = tx.send(result);
+            },
+        );
     drop(tx);
 
     // Defer leaf removals until after updates/additions, so that we don't delete an intermediate
@@ -248,7 +253,7 @@ where
 
     // Remove accounts
     for address in removed_accounts {
-        trace!(target: "trie::sparse", ?address, "Removing account");
+        trace!(target: "engine::root::sparse", ?address, "Removing account");
         let nibbles = Nibbles::unpack(address);
         trie.remove_account_leaf(&nibbles, blinded_provider_factory)?;
     }

@@ -508,7 +508,8 @@ where
         trace!(target: "engine::tree", "invoked new payload");
         self.metrics.engine.new_payload_messages.increment(1);
 
-        let validation_start = Instant::now();
+        // start timing for the new payload process
+        let start = Instant::now();
 
         // Ensures that the given payload does not violate any consensus rules that concern the
         // block's layout, like:
@@ -535,89 +536,32 @@ where
         //      null}` if the expected and the actual arrays don't match.
         //
         // This validation **MUST** be instantly run in all cases even during active sync process.
-        let parent_hash = payload.parent_hash();
-
-        self.metrics
-            .block_validation
-            .record_payload_validation(validation_start.elapsed().as_secs_f64());
 
         let num_hash = payload.num_hash();
         let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         let block_hash = num_hash.hash;
-        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
-        if lowest_buffered_ancestor == block_hash {
-            lowest_buffered_ancestor = parent_hash;
+
+        // Check for invalid ancestors
+        if let Some(invalid) = self.find_invalid_ancestor(&payload) {
+            let status = self.handle_invalid_ancestor_payload(payload, invalid)?;
+            return Ok(TreeOutcome::new(status));
         }
 
-        // now check if the block has an invalid ancestor
-        if let Some(invalid) = self.state.invalid_headers.get(&lowest_buffered_ancestor) {
-            // Here we might have 2 cases
-            // 1. the block is well formed and indeed links to an invalid header, meaning we should
-            //    remember it as invalid
-            // 2. the block is not well formed (i.e block hash is incorrect), and we should just
-            //    return an error and forget it
-            let block = match self.payload_validator.ensure_well_formed_payload(payload) {
-                Ok(block) => block,
-                Err(error) => {
-                    let status = self.on_new_payload_error(error, parent_hash)?;
-                    return Ok(TreeOutcome::new(status))
-                }
-            };
-
-            let status = self.on_invalid_new_payload(block.into_sealed_block(), invalid)?;
-            return Ok(TreeOutcome::new(status))
-        }
+        // record pre-execution phase duration
+        self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
         let status = if self.backfill_sync_state.is_idle() {
-            let mut latest_valid_hash = None;
-            match self.insert_payload(payload) {
-                Ok(status) => {
-                    let status = match status {
-                        InsertPayloadOk::Inserted(BlockStatus::Valid) => {
-                            latest_valid_hash = Some(block_hash);
-                            self.try_connect_buffered_blocks(num_hash)?;
-                            PayloadStatusEnum::Valid
-                        }
-                        InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
-                            latest_valid_hash = Some(block_hash);
-                            PayloadStatusEnum::Valid
-                        }
-                        InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
-                        InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
-                            // not known to be invalid, but we don't know anything else
-                            PayloadStatusEnum::Syncing
-                        }
-                    };
-
-                    PayloadStatus::new(status, latest_valid_hash)
-                }
-                Err(error) => match error {
-                    InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
-                    InsertPayloadError::Payload(error) => {
-                        self.on_new_payload_error(error, parent_hash)?
-                    }
-                },
-            }
+            self.try_insert_payload(payload)?
         } else {
-            match self.payload_validator.ensure_well_formed_payload(payload) {
-                // if the block is well-formed, buffer it for later
-                Ok(block) => {
-                    if let Err(error) = self.buffer_block(block) {
-                        self.on_insert_block_error(error)?
-                    } else {
-                        PayloadStatus::from_status(PayloadStatusEnum::Syncing)
-                    }
-                }
-                Err(error) => self.on_new_payload_error(error, parent_hash)?,
-            }
+            self.try_buffer_payload(payload)?
         };
 
         let mut outcome = TreeOutcome::new(status);
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
-            // but only if it isn't already the canonical head
+            // Only create the canonical event if this block isn't already the canonical head
             if self.state.tree_state.canonical_block_hash() != block_hash {
                 outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
                     sync_target_head: block_hash,
@@ -625,7 +569,82 @@ where
             }
         }
 
+        // record total newPayload duration
+        self.metrics.block_validation.total_duration.record(start.elapsed().as_secs_f64());
+
         Ok(outcome)
+    }
+
+    /// Processes a payload during normal sync operation.
+    ///
+    /// Returns:
+    /// - `Valid`: Payload successfully validated and inserted
+    /// - `Syncing`: Parent missing, payload buffered for later
+    /// - Error status: Payload is invalid
+    fn try_insert_payload(
+        &mut self,
+        payload: T::ExecutionData,
+    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        let block_hash = payload.block_hash();
+        let num_hash = payload.num_hash();
+        let parent_hash = payload.parent_hash();
+        let mut latest_valid_hash = None;
+
+        match self.insert_payload(payload) {
+            Ok(status) => {
+                let status = match status {
+                    InsertPayloadOk::Inserted(BlockStatus::Valid) => {
+                        latest_valid_hash = Some(block_hash);
+                        self.try_connect_buffered_blocks(num_hash)?;
+                        PayloadStatusEnum::Valid
+                    }
+                    InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
+                        latest_valid_hash = Some(block_hash);
+                        PayloadStatusEnum::Valid
+                    }
+                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+                    InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
+                        // not known to be invalid, but we don't know anything else
+                        PayloadStatusEnum::Syncing
+                    }
+                };
+
+                Ok(PayloadStatus::new(status, latest_valid_hash))
+            }
+            Err(error) => match error {
+                InsertPayloadError::Block(error) => Ok(self.on_insert_block_error(error)?),
+                InsertPayloadError::Payload(error) => {
+                    Ok(self.on_new_payload_error(error, parent_hash)?)
+                }
+            },
+        }
+    }
+
+    /// Stores a payload for later processing during backfill sync.
+    ///
+    /// During backfill, the node lacks the state needed to validate payloads,
+    /// so they are buffered (stored in memory) until their parent blocks are synced.
+    ///
+    /// Returns:
+    /// - `Syncing`: Payload successfully buffered
+    /// - Error status: Payload is malformed or invalid
+    fn try_buffer_payload(
+        &mut self,
+        payload: T::ExecutionData,
+    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        let parent_hash = payload.parent_hash();
+
+        match self.payload_validator.ensure_well_formed_payload(payload) {
+            // if the block is well-formed, buffer it for later
+            Ok(block) => {
+                if let Err(error) = self.buffer_block(block) {
+                    Ok(self.on_insert_block_error(error)?)
+                } else {
+                    Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
+                }
+            }
+            Err(error) => Ok(self.on_new_payload_error(error, parent_hash)?),
+        }
     }
 
     /// Returns the new chain for the given head.
@@ -663,7 +682,7 @@ where
                 warn!(target: "engine::tree", current_hash=?current_hash, "Sidechain block not found in TreeState");
                 // This should never happen as we're walking back a chain that should connect to
                 // the canonical chain
-                return Ok(None);
+                return Ok(None)
             }
         }
 
@@ -673,7 +692,7 @@ where
             new_chain.reverse();
 
             // Simple extension of the current chain
-            return Ok(Some(NewCanonicalChain::Commit { new: new_chain }));
+            return Ok(Some(NewCanonicalChain::Commit { new: new_chain }))
         }
 
         // We have a reorg. Walk back both chains to find the fork point.
@@ -690,7 +709,7 @@ where
             } else {
                 // This shouldn't happen as we're walking back the canonical chain
                 warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
-                return Ok(None);
+                return Ok(None)
             }
         }
 
@@ -706,7 +725,7 @@ where
             } else {
                 // This shouldn't happen as we're walking back the canonical chain
                 warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
-                return Ok(None);
+                return Ok(None)
             }
 
             if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
@@ -716,7 +735,7 @@ where
             } else {
                 // This shouldn't happen as we've already walked this path
                 warn!(target: "engine::tree", invalid_hash=?current_hash, "New chain block not found in TreeState");
-                return Ok(None);
+                return Ok(None)
             }
         }
         new_chain.reverse();
@@ -996,23 +1015,79 @@ where
         version: EngineApiMessageVersion,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
+
+        // Record metrics
+        self.record_forkchoice_metrics(&attrs);
+
+        // Pre-validation of forkchoice state
+        if let Some(early_result) = self.validate_forkchoice_state(state)? {
+            return Ok(TreeOutcome::new(early_result));
+        }
+
+        // Return early if we are on the correct fork
+        if let Some(result) = self.handle_canonical_head(state, &attrs, version)? {
+            return Ok(result);
+        }
+
+        // Attempt to apply a chain update when the head differs from our canonical chain.
+        // This handles reorgs and chain extensions by making the specified head canonical.
+        if let Some(result) = self.apply_chain_update(state, &attrs, version)? {
+            return Ok(result);
+        }
+
+        // Fallback that ensures to catch up to the network's state.
+        self.handle_missing_block(state)
+    }
+
+    /// Records metrics for forkchoice updated calls
+    fn record_forkchoice_metrics(&self, attrs: &Option<T::PayloadAttributes>) {
         self.metrics.engine.forkchoice_updated_messages.increment(1);
         if attrs.is_some() {
             self.metrics.engine.forkchoice_with_attributes_updated_messages.increment(1);
         }
         self.canonical_in_memory_state.on_forkchoice_update_received();
+    }
 
-        if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
-            return Ok(TreeOutcome::new(on_updated))
+    /// Pre-validates the forkchoice state and returns early if validation fails.
+    ///
+    /// Returns `Some(OnForkChoiceUpdated)` if validation fails and an early response should be
+    /// returned. Returns `None` if validation passes and processing should continue.
+    fn validate_forkchoice_state(
+        &mut self,
+        state: ForkchoiceState,
+    ) -> ProviderResult<Option<OnForkChoiceUpdated>> {
+        if state.head_block_hash.is_zero() {
+            return Ok(Some(OnForkChoiceUpdated::invalid_state()));
         }
 
-        let valid_outcome = |head| {
-            TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
-                PayloadStatusEnum::Valid,
-                Some(head),
-            )))
-        };
+        // Check if the new head hash is connected to any ancestor that we previously marked as
+        // invalid
+        let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
+        if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu)? {
+            return Ok(Some(OnForkChoiceUpdated::with_invalid(status)));
+        }
 
+        if !self.backfill_sync_state.is_idle() {
+            // We can only process new forkchoice updates if the pipeline is idle, since it requires
+            // exclusive access to the database
+            trace!(target: "engine::tree", "Pipeline is syncing, skipping forkchoice update");
+            return Ok(Some(OnForkChoiceUpdated::syncing()));
+        }
+
+        Ok(None)
+    }
+
+    /// Handles the case where the forkchoice head is already canonical.
+    ///
+    /// Returns `Some(TreeOutcome<OnForkChoiceUpdated>)` if the head is already canonical and
+    /// processing is complete. Returns `None` if the head is not canonical and processing
+    /// should continue.
+    fn handle_canonical_head(
+        &self,
+        state: ForkchoiceState,
+        attrs: &Option<T::PayloadAttributes>, // Changed to reference
+        version: EngineApiMessageVersion,
+    ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
         // Process the forkchoice update by trying to make the head block canonical
         //
         // We can only process this forkchoice update if:
@@ -1027,34 +1102,58 @@ where
         // - emitting a canonicalization event for the new chain (including reorg)
         // - if we have payload attributes, delegate them to the payload service
 
-        // 1. ensure we have a new head block
-        if self.state.tree_state.canonical_block_hash() == state.head_block_hash {
-            trace!(target: "engine::tree", "fcu head hash is already canonical");
-
-            // update the safe and finalized blocks and ensure their values are valid
-            if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
-                // safe or finalized hashes are invalid
-                return Ok(TreeOutcome::new(outcome))
-            }
-
-            // we still need to process payload attributes if the head is already canonical
-            if let Some(attr) = attrs {
-                let tip = self
-                    .sealed_header_by_hash(self.state.tree_state.canonical_block_hash())?
-                    .ok_or_else(|| {
-                        // If we can't find the canonical block, then something is wrong and we need
-                        // to return an error
-                        ProviderError::HeaderNotFound(state.head_block_hash.into())
-                    })?;
-                let updated = self.process_payload_attributes(attr, &tip, state, version);
-                return Ok(TreeOutcome::new(updated))
-            }
-
-            // the head block is already canonical
-            return Ok(valid_outcome(state.head_block_hash))
+        if self.state.tree_state.canonical_block_hash() != state.head_block_hash {
+            return Ok(None);
         }
 
-        // 2. check if the head is already part of the canonical chain
+        trace!(target: "engine::tree", "fcu head hash is already canonical");
+
+        // Update the safe and finalized blocks and ensure their values are valid
+        if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
+            // safe or finalized hashes are invalid
+            return Ok(Some(TreeOutcome::new(outcome)));
+        }
+
+        // Process payload attributes if the head is already canonical
+        if let Some(attr) = attrs {
+            let tip = self
+                .sealed_header_by_hash(self.state.tree_state.canonical_block_hash())?
+                .ok_or_else(|| {
+                    // If we can't find the canonical block, then something is wrong and we need
+                    // to return an error
+                    ProviderError::HeaderNotFound(state.head_block_hash.into())
+                })?;
+            // Clone only when we actually need to process the attributes
+            let updated = self.process_payload_attributes(attr.clone(), &tip, state, version);
+            return Ok(Some(TreeOutcome::new(updated)));
+        }
+
+        // The head block is already canonical
+        let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
+            PayloadStatusEnum::Valid,
+            Some(state.head_block_hash),
+        )));
+        Ok(Some(outcome))
+    }
+
+    /// Applies chain update for the new head block and processes payload attributes.
+    ///
+    /// This method handles the case where the forkchoice head differs from our current canonical
+    /// head. It attempts to make the specified head block canonical by:
+    /// - Checking if the head is already part of the canonical chain
+    /// - Applying chain reorganizations (reorgs) if necessary
+    /// - Processing payload attributes if provided
+    /// - Returning the appropriate forkchoice update response
+    ///
+    /// Returns `Some(TreeOutcome<OnForkChoiceUpdated>)` if a chain update was successfully applied.
+    /// Returns `None` if no chain update was needed or possible.
+    fn apply_chain_update(
+        &mut self,
+        state: ForkchoiceState,
+        attrs: &Option<T::PayloadAttributes>,
+        version: EngineApiMessageVersion,
+    ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
+        // Check if the head is already part of the canonical chain
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
             debug!(target: "engine::tree", head = canonical_header.number(), "fcu head block is already canonical");
 
@@ -1065,9 +1164,14 @@ where
             {
                 if let Some(attr) = attrs {
                     debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
-                    let updated =
-                        self.process_payload_attributes(attr, &canonical_header, state, version);
-                    return Ok(TreeOutcome::new(updated))
+                    // Clone only when we actually need to process the attributes
+                    let updated = self.process_payload_attributes(
+                        attr.clone(),
+                        &canonical_header,
+                        state,
+                        version,
+                    );
+                    return Ok(Some(TreeOutcome::new(updated)));
                 }
 
                 // At this point, no alternative block has been triggered, so we need effectively
@@ -1076,50 +1180,75 @@ where
                 // canonical ancestor. This ensures that state providers and the
                 // transaction pool operate with the correct chain state after
                 // forkchoice update processing.
-                self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+
+                if self.config.unwind_canonical_header() {
+                    self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+                }
             }
 
-            // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
-            //    payload build process if `forkchoiceState.headBlockHash` references a `VALID`
-            //    ancestor of the head of canonical chain, i.e. the ancestor passed payload
-            //    validation process and deemed `VALID`. In the case of such an event, client
-            //    software MUST return `{payloadStatus: {status: VALID, latestValidHash:
-            //    forkchoiceState.headBlockHash, validationError: null}, payloadId: null}`
+            // According to the Engine API specification, client software MAY skip an update of the
+            // forkchoice state and MUST NOT begin a payload build process if
+            // `forkchoiceState.headBlockHash` references a `VALID` ancestor of the head
+            // of canonical chain, i.e. the ancestor passed payload validation process
+            // and deemed `VALID`. In the case of such an event, client software MUST
+            // return `{payloadStatus: {status: VALID, latestValidHash:
+            // forkchoiceState.headBlockHash, validationError: null}, payloadId: null}`
 
-            // the head block is already canonical, so we're not triggering a payload job and can
-            // return right away
-            return Ok(valid_outcome(state.head_block_hash))
+            // The head block is already canonical and we're not processing payload attributes,
+            // so we're not triggering a payload job and can return right away
+
+            let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
+                PayloadStatusEnum::Valid,
+                Some(state.head_block_hash),
+            )));
+            return Ok(Some(outcome));
         }
 
-        // 3. ensure we can apply a new chain update for the head block
+        // Ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
             let tip = chain_update.tip().clone_sealed_header();
             self.on_canonical_chain_update(chain_update);
 
-            // update the safe and finalized blocks and ensure their values are valid
+            // Update the safe and finalized blocks and ensure their values are valid
             if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
                 // safe or finalized hashes are invalid
-                return Ok(TreeOutcome::new(outcome))
+                return Ok(Some(TreeOutcome::new(outcome)));
             }
 
             if let Some(attr) = attrs {
-                let updated = self.process_payload_attributes(attr, &tip, state, version);
-                return Ok(TreeOutcome::new(updated))
+                // Clone only when we actually need to process the attributes
+                let updated = self.process_payload_attributes(attr.clone(), &tip, state, version);
+                return Ok(Some(TreeOutcome::new(updated)));
             }
 
-            return Ok(valid_outcome(state.head_block_hash))
+            let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
+                PayloadStatusEnum::Valid,
+                Some(state.head_block_hash),
+            )));
+            return Ok(Some(outcome));
         }
 
-        // 4. we don't have the block to perform the update
-        // we assume the FCU is valid and at least the head is missing,
+        Ok(None)
+    }
+
+    /// Handles the case where the head block is missing and needs to be downloaded.
+    ///
+    /// This is the fallback case when all other forkchoice update scenarios have been exhausted.
+    /// Returns a `TreeOutcome` with syncing status and download event.
+    fn handle_missing_block(
+        &self,
+        state: ForkchoiceState,
+    ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
+        // We don't have the block to perform the forkchoice update
+        // We assume the FCU is valid and at least the head is missing,
         // so we need to start syncing to it
         //
         // find the appropriate target to sync to, if we don't have the safe block hash then we
         // start syncing to the safe block via backfill first
         let target = if self.state.forkchoice_state_tracker.is_empty() &&
-            // check that safe block is valid and missing
-            !state.safe_block_hash.is_zero() &&
-            self.find_canonical_header(state.safe_block_hash).ok().flatten().is_none()
+        // check that safe block is valid and missing
+        !state.safe_block_hash.is_zero() &&
+        self.find_canonical_header(state.safe_block_hash).ok().flatten().is_none()
         {
             debug!(target: "engine::tree", "missing safe block on initial FCU, downloading safe block");
             state.safe_block_hash
@@ -1797,10 +1926,10 @@ where
     fn prepare_invalid_response(&mut self, mut parent_hash: B256) -> ProviderResult<PayloadStatus> {
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
-        if let Some(parent) = self.sealed_header_by_hash(parent_hash)? {
-            if !parent.difficulty().is_zero() {
-                parent_hash = B256::ZERO;
-            }
+        if let Some(parent) = self.sealed_header_by_hash(parent_hash)? &&
+            !parent.difficulty().is_zero()
+        {
+            parent_hash = B256::ZERO;
         }
 
         let valid_parent_hash = self.latest_valid_hash_for_invalid_payload(parent_hash)?;
@@ -1852,13 +1981,74 @@ where
         Ok(status)
     }
 
+    /// Finds any invalid ancestor for the given payload.
+    ///
+    /// This function walks up the chain of buffered ancestors from the payload's block
+    /// hash and checks if any ancestor is marked as invalid in the tree state.
+    ///
+    /// The check works by:
+    /// 1. Finding the lowest buffered ancestor for the given block hash
+    /// 2. If the ancestor is the same as the block hash itself, using the parent hash instead
+    /// 3. Checking if this ancestor is in the `invalid_headers` map
+    ///
+    /// Returns the invalid ancestor block info if found, or None if no invalid ancestor exists.
+    fn find_invalid_ancestor(&mut self, payload: &T::ExecutionData) -> Option<BlockWithParent> {
+        let parent_hash = payload.parent_hash();
+        let block_hash = payload.block_hash();
+        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
+        if lowest_buffered_ancestor == block_hash {
+            lowest_buffered_ancestor = parent_hash;
+        }
+
+        // Check if the block has an invalid ancestor
+        self.state.invalid_headers.get(&lowest_buffered_ancestor)
+    }
+
+    /// Handles a payload that has an invalid ancestor.
+    ///
+    /// This function validates the payload and processes it according to whether it's
+    /// well-formed or malformed:
+    /// 1. **Well-formed payload**: The payload is marked as invalid since it descends from a
+    ///    known-bad block, which violates consensus rules
+    /// 2. **Malformed payload**: Returns an appropriate error status since the payload cannot be
+    ///    validated due to its own structural issues
+    fn handle_invalid_ancestor_payload(
+        &mut self,
+        payload: T::ExecutionData,
+        invalid: BlockWithParent,
+    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        let parent_hash = payload.parent_hash();
+
+        // Here we might have 2 cases
+        // 1. the block is well formed and indeed links to an invalid header, meaning we should
+        //    remember it as invalid
+        // 2. the block is not well formed (i.e block hash is incorrect), and we should just return
+        //    an error and forget it
+        let block = match self.payload_validator.ensure_well_formed_payload(payload) {
+            Ok(block) => block,
+            Err(error) => return Ok(self.on_new_payload_error(error, parent_hash)?),
+        };
+
+        Ok(self.on_invalid_new_payload(block.into_sealed_block(), invalid)?)
+    }
+
     /// Checks if the given `head` points to an invalid header, which requires a specific response
     /// to a forkchoice update.
     fn check_invalid_ancestor(&mut self, head: B256) -> ProviderResult<Option<PayloadStatus>> {
         // check if the head was previously marked as invalid
         let Some(header) = self.state.invalid_headers.get(&head) else { return Ok(None) };
-        // populate the latest valid hash field
-        Ok(Some(self.prepare_invalid_response(header.parent)?))
+
+        // Try to prepare invalid response, but handle errors gracefully
+        match self.prepare_invalid_response(header.parent) {
+            Ok(status) => Ok(Some(status)),
+            Err(err) => {
+                debug!(target: "engine::tree", %err, "Failed to prepare invalid response for ancestor check");
+                // Return a basic invalid status without latest valid hash
+                Ok(Some(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                    validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+                })))
+            }
+        }
     }
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
@@ -1966,62 +2156,65 @@ where
         let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
 
         // check if the downloaded block is the tracked finalized block
-        let mut exceeds_backfill_threshold = if let Some(buffered_finalized) = sync_target_state
-            .as_ref()
-            .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
-        {
-            // if we have buffered the finalized block, we should check how far
-            // we're off
-            self.exceeds_backfill_run_threshold(canonical_tip_num, buffered_finalized.number())
-        } else {
-            // check if the distance exceeds the threshold for backfill sync
-            self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
-        };
-
-        // If this is invoked after we downloaded a block we can check if this block is the
-        // finalized block
-        if let (Some(downloaded_block), Some(ref state)) = (downloaded_block, sync_target_state) {
-            if downloaded_block.hash == state.finalized_block_hash {
-                // we downloaded the finalized block and can now check how far we're off
-                exceeds_backfill_threshold =
-                    self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number);
-            }
-        }
+        let exceeds_backfill_threshold =
+            match (downloaded_block.as_ref(), sync_target_state.as_ref()) {
+                // if we downloaded the finalized block we can now check how far we're off
+                (Some(downloaded_block), Some(state))
+                    if downloaded_block.hash == state.finalized_block_hash =>
+                {
+                    self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number)
+                }
+                _ => match sync_target_state
+                    .as_ref()
+                    .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
+                {
+                    Some(buffered_finalized) => {
+                        // if we have buffered the finalized block, we should check how far we're
+                        // off
+                        self.exceeds_backfill_run_threshold(
+                            canonical_tip_num,
+                            buffered_finalized.number(),
+                        )
+                    }
+                    None => {
+                        // check if the distance exceeds the threshold for backfill sync
+                        self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
+                    }
+                },
+            };
 
         // if the number of missing blocks is greater than the max, trigger backfill
-        if exceeds_backfill_threshold {
-            if let Some(state) = sync_target_state {
-                // if we have already canonicalized the finalized block, we should skip backfill
-                match self.provider.header_by_hash_or_number(state.finalized_block_hash.into()) {
-                    Err(err) => {
-                        warn!(target: "engine::tree", %err, "Failed to get finalized block header");
+        if exceeds_backfill_threshold && let Some(state) = sync_target_state {
+            // if we have already canonicalized the finalized block, we should skip backfill
+            match self.provider.header_by_hash_or_number(state.finalized_block_hash.into()) {
+                Err(err) => {
+                    warn!(target: "engine::tree", %err, "Failed to get finalized block header");
+                }
+                Ok(None) => {
+                    // ensure the finalized block is known (not the zero hash)
+                    if !state.finalized_block_hash.is_zero() {
+                        // we don't have the block yet and the distance exceeds the allowed
+                        // threshold
+                        return Some(state.finalized_block_hash)
                     }
-                    Ok(None) => {
-                        // ensure the finalized block is known (not the zero hash)
-                        if !state.finalized_block_hash.is_zero() {
-                            // we don't have the block yet and the distance exceeds the allowed
-                            // threshold
-                            return Some(state.finalized_block_hash)
-                        }
 
-                        // OPTIMISTIC SYNCING
-                        //
-                        // It can happen when the node is doing an
-                        // optimistic sync, where the CL has no knowledge of the finalized hash,
-                        // but is expecting the EL to sync as high
-                        // as possible before finalizing.
-                        //
-                        // This usually doesn't happen on ETH mainnet since CLs use the more
-                        // secure checkpoint syncing.
-                        //
-                        // However, optimism chains will do this. The risk of a reorg is however
-                        // low.
-                        debug!(target: "engine::tree", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
-                        return Some(state.head_block_hash)
-                    }
-                    Ok(Some(_)) => {
-                        // we're fully synced to the finalized block
-                    }
+                    // OPTIMISTIC SYNCING
+                    //
+                    // It can happen when the node is doing an
+                    // optimistic sync, where the CL has no knowledge of the finalized hash,
+                    // but is expecting the EL to sync as high
+                    // as possible before finalizing.
+                    //
+                    // This usually doesn't happen on ETH mainnet since CLs use the more
+                    // secure checkpoint syncing.
+                    //
+                    // However, optimism chains will do this. The risk of a reorg is however
+                    // low.
+                    debug!(target: "engine::tree", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
+                    return Some(state.head_block_hash)
+                }
+                Ok(Some(_)) => {
+                    // we're fully synced to the finalized block
                 }
             }
         }
@@ -2260,6 +2453,14 @@ where
         Ok(None)
     }
 
+    /// Inserts a payload into the tree and executes it.
+    ///
+    /// This function validates the payload's basic structure, then executes it using the
+    /// payload validator. The execution includes running all transactions in the payload
+    /// and validating the resulting state transitions.
+    ///
+    /// Returns `InsertPayloadOk` if the payload was successfully inserted and executed,
+    /// or `InsertPayloadError` if validation or execution failed.
     fn insert_payload(
         &mut self,
         payload: T::ExecutionData,
@@ -2284,6 +2485,22 @@ where
         )
     }
 
+    /// Inserts a block or payload into the blockchain tree with full execution.
+    ///
+    /// This is a generic function that handles both blocks and payloads by accepting
+    /// a block identifier, input data, and execution/validation functions. It performs
+    /// comprehensive checks and execution:
+    ///
+    /// - Validates that the block doesn't already exist in the tree
+    /// - Ensures parent state is available, buffering if necessary
+    /// - Executes the block/payload using the provided execute function
+    /// - Handles both canonical and fork chain insertions
+    /// - Updates pending block state when appropriate
+    /// - Emits consensus engine events and records metrics
+    ///
+    /// Returns `InsertPayloadOk::Inserted(BlockStatus::Valid)` on successful execution,
+    /// `InsertPayloadOk::AlreadySeen` if the block already exists, or
+    /// `InsertPayloadOk::Inserted(BlockStatus::Disconnected)` if parent state is missing.
     fn insert_block_or_payload<Input, Err>(
         &mut self,
         block_id: BlockWithParent,
@@ -2467,7 +2684,7 @@ where
         } else {
             let revert_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
                 provider.tx_ref(),
-                block_number + 1,
+                block_number + 1..,
             )
             .map_err(ProviderError::from)?;
             debug!(
@@ -2522,15 +2739,9 @@ where
         self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
             Box::new(block),
         )));
-        // Temporary fix for EIP-7623 test compatibility:
-        // Map "gas floor" errors to "call gas cost" for compatibility with test expectations
-        let mut error_str = validation_err.to_string();
-        if error_str.contains("gas floor") && error_str.contains("exceeds the gas limit") {
-            error_str = error_str.replace("gas floor", "call gas cost");
-        }
 
         Ok(PayloadStatus::new(
-            PayloadStatusEnum::Invalid { validation_error: error_str },
+            PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
         ))
     }
@@ -2566,7 +2777,7 @@ where
         let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
 
         if canonical.is_none() {
-            canonical = self.provider.header(&hash)?.map(|header| SealedHeader::new(header, hash));
+            canonical = self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
         }
 
         Ok(canonical)
@@ -2658,35 +2869,6 @@ where
         // This ensures that the safe block is consistent with the head block, i.e. the safe
         // block is an ancestor of the head block.
         self.update_safe_block(state.safe_block_hash)
-    }
-
-    /// Pre-validate forkchoice update and check whether it can be processed.
-    ///
-    /// This method returns the update outcome if validation fails or
-    /// the node is syncing and the update cannot be processed at the moment.
-    fn pre_validate_forkchoice_update(
-        &mut self,
-        state: ForkchoiceState,
-    ) -> ProviderResult<Option<OnForkChoiceUpdated>> {
-        if state.head_block_hash.is_zero() {
-            return Ok(Some(OnForkChoiceUpdated::invalid_state()))
-        }
-
-        // check if the new head hash is connected to any ancestor that we previously marked as
-        // invalid
-        let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
-        if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu)? {
-            return Ok(Some(OnForkChoiceUpdated::with_invalid(status)))
-        }
-
-        if !self.backfill_sync_state.is_idle() {
-            // We can only process new forkchoice updates if the pipeline is idle, since it requires
-            // exclusive access to the database
-            trace!(target: "engine::tree", "Pipeline is syncing, skipping forkchoice update");
-            return Ok(Some(OnForkChoiceUpdated::syncing()))
-        }
-
-        Ok(None)
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
@@ -2790,7 +2972,7 @@ where
         }
 
         // Check if the block is persisted
-        if let Some(header) = self.provider.header(&hash)? {
+        if let Some(header) = self.provider.header(hash)? {
             debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database

@@ -1,4 +1,4 @@
-use crate::{DBProvider, StorageLocation};
+use crate::DBProvider;
 use alloc::vec::Vec;
 use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
@@ -29,7 +29,6 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
         &self,
         provider: &Provider,
         bodies: Vec<(BlockNumber, Option<Body>)>,
-        write_to: StorageLocation,
     ) -> ProviderResult<()>;
 
     /// Removes all block bodies above the given block number from the database.
@@ -37,7 +36,6 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
         &self,
         provider: &Provider,
         block: BlockNumber,
-        remove_from: StorageLocation,
     ) -> ProviderResult<()>;
 }
 
@@ -105,7 +103,6 @@ where
         &self,
         provider: &Provider,
         bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
-        _write_to: StorageLocation,
     ) -> ProviderResult<()> {
         let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers<H>>()?;
         let mut withdrawals_cursor =
@@ -120,11 +117,10 @@ where
             }
 
             // Write withdrawals if any
-            if let Some(withdrawals) = body.withdrawals {
-                if !withdrawals.is_empty() {
-                    withdrawals_cursor
-                        .append(block_number, &StoredBlockWithdrawals { withdrawals })?;
-                }
+            if let Some(withdrawals) = body.withdrawals &&
+                !withdrawals.is_empty()
+            {
+                withdrawals_cursor.append(block_number, &StoredBlockWithdrawals { withdrawals })?;
             }
         }
 
@@ -135,10 +131,9 @@ where
         &self,
         provider: &Provider,
         block: BlockNumber,
-        _remove_from: StorageLocation,
     ) -> ProviderResult<()> {
         provider.tx_ref().unwind_table_by_num::<tables::BlockWithdrawals>(block)?;
-        provider.tx_ref().unwind_table_by_num::<tables::BlockOmmers>(block)?;
+        provider.tx_ref().unwind_table_by_num::<tables::BlockOmmers<H>>(block)?;
 
         Ok(())
     }
@@ -191,5 +186,74 @@ where
         }
 
         Ok(bodies)
+    }
+}
+
+/// A noop storage for chains that don’t have custom body storage.
+///
+/// This will never read nor write additional body content such as withdrawals or ommers.
+/// But will respect the optionality of withdrawals if activated and fill them if the corresponding
+/// hardfork is activated.
+#[derive(Debug, Clone, Copy)]
+pub struct EmptyBodyStorage<T, H>(PhantomData<(T, H)>);
+
+impl<T, H> Default for EmptyBodyStorage<T, H> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>>
+    for EmptyBodyStorage<T, H>
+where
+    T: SignedTransaction,
+    H: FullBlockHeader,
+{
+    fn write_block_bodies(
+        &self,
+        _provider: &Provider,
+        _bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
+    ) -> ProviderResult<()> {
+        // noop
+        Ok(())
+    }
+
+    fn remove_block_bodies_above(
+        &self,
+        _provider: &Provider,
+        _block: BlockNumber,
+    ) -> ProviderResult<()> {
+        // noop
+        Ok(())
+    }
+}
+
+impl<Provider, T, H> BlockBodyReader<Provider> for EmptyBodyStorage<T, H>
+where
+    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    T: SignedTransaction,
+    H: FullBlockHeader,
+{
+    type Block = alloy_consensus::Block<T, H>;
+
+    fn read_block_bodies(
+        &self,
+        provider: &Provider,
+        inputs: Vec<ReadBodyInput<'_, Self::Block>>,
+    ) -> ProviderResult<Vec<<Self::Block as Block>::Body>> {
+        let chain_spec = provider.chain_spec();
+
+        Ok(inputs
+            .into_iter()
+            .map(|(header, transactions)| {
+                alloy_consensus::BlockBody {
+                    transactions,
+                    ommers: vec![], // Empty storage never has ommers
+                    withdrawals: chain_spec
+                        .is_shanghai_active_at_timestamp(header.timestamp())
+                        .then(Default::default),
+                }
+            })
+            .collect())
     }
 }

@@ -536,10 +536,10 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
 
         // If the transaction number is less than the first in-memory transaction number, make a
         // database lookup
-        if let HashOrNumber::Number(id) = id {
-            if id < in_memory_tx_num {
-                return fetch_from_db(provider)
-            }
+        if let HashOrNumber::Number(id) = id &&
+            id < in_memory_tx_num
+        {
+            return fetch_from_db(provider)
         }
 
         // Iterate from the lowest block to the highest
@@ -646,9 +646,9 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for ConsistentProvider<N> {
 impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
     type Header = HeaderTy<N>;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         self.get_in_memory_or_storage_by_block(
-            (*block_hash).into(),
+            block_hash.into(),
             |db_provider| db_provider.header(block_hash),
             |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_header())),
         )
@@ -662,8 +662,8 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         )
     }
 
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        if let Some(num) = self.block_number(*hash)? {
+    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
+        if let Some(num) = self.block_number(hash)? {
             self.header_td_by_number(num)
         } else {
             Ok(None)
@@ -816,14 +816,14 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         hash: B256,
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>> {
-        if matches!(source, BlockSource::Canonical | BlockSource::Any) {
-            if let Some(block) = self.get_in_memory_or_storage_by_block(
+        if matches!(source, BlockSource::Canonical | BlockSource::Any) &&
+            let Some(block) = self.get_in_memory_or_storage_by_block(
                 hash.into(),
                 |db_provider| db_provider.find_block_by_hash(hash, BlockSource::Canonical),
                 |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
-            )? {
-                return Ok(Some(block))
-            }
+            )?
+        {
+            return Ok(Some(block))
         }
 
         if matches!(source, BlockSource::Pending | BlockSource::Any) {
@@ -915,6 +915,14 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
             |db_provider, range, _| db_provider.recovered_block_range(range),
             |block_state, _| Some(block_state.block().recovered_block().clone()),
             |_| true,
+        )
+    }
+
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        self.get_in_memory_or_storage_by_tx(
+            id.into(),
+            |db_provider| db_provider.block_by_transaction_id(id),
+            |_, _, block_state| Ok(Some(block_state.number())),
         )
     }
 }
@@ -1133,14 +1141,14 @@ impl<N: ProviderNodeTypes> ReceiptProviderIdExt for ConsistentProvider<N> {
         match block {
             BlockId::Hash(rpc_block_hash) => {
                 let mut receipts = self.receipts_by_block(rpc_block_hash.block_hash.into())?;
-                if receipts.is_none() && !rpc_block_hash.require_canonical.unwrap_or(false) {
-                    if let Some(state) = self
+                if receipts.is_none() &&
+                    !rpc_block_hash.require_canonical.unwrap_or(false) &&
+                    let Some(state) = self
                         .head_block
                         .as_ref()
                         .and_then(|b| b.block_on_chain(rpc_block_hash.block_hash.into()))
-                    {
-                        receipts = Some(state.executed_block_receipts());
-                    }
+                {
+                    receipts = Some(state.executed_block_receipts());
                 }
                 Ok(receipts)
             }
@@ -1305,14 +1313,14 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
     ) -> ProviderResult<Option<SealedHeader<HeaderTy<N>>>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(SealedHeader::seal_slow),
+            BlockId::Hash(hash) => self.header(hash.block_hash)?.map(SealedHeader::seal_slow),
         })
     }
 
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<HeaderTy<N>>> {
         Ok(match id {
             BlockId::Number(num) => self.header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(&hash.block_hash)?,
+            BlockId::Hash(hash) => self.header(hash.block_hash)?,
         })
     }
 }
@@ -1412,6 +1420,52 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             }
 
             self.storage_provider.account_block_changeset(block_number)
+        }
+    }
+
+    fn get_account_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
+        if let Some(state) =
+            self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
+        {
+            // Search in-memory state for the account changeset
+            let changeset = state
+                .block_ref()
+                .execution_output
+                .bundle
+                .reverts
+                .clone()
+                .to_plain_state_reverts()
+                .accounts
+                .into_iter()
+                .flatten()
+                .find(|(addr, _)| addr == &address)
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) });
+            Ok(changeset)
+        } else {
+            // Perform checks on whether or not changesets exist for the block.
+            // No prune checkpoint means history should exist and we should `unwrap_or(true)`
+            let account_history_exists = self
+                .storage_provider
+                .get_prune_checkpoint(PruneSegment::AccountHistory)?
+                .and_then(|checkpoint| {
+                    // return true if the block number is ahead of the prune checkpoint.
+                    //
+                    // The checkpoint stores the highest pruned block number, so we should make
+                    // sure the block_number is strictly greater.
+                    checkpoint.block_number.map(|checkpoint| block_number > checkpoint)
+                })
+                .unwrap_or(true);
+
+            if !account_history_exists {
+                return Err(ProviderError::StateAtBlockPruned(block_number))
+            }
+
+            // Delegate to the storage provider for database lookups
+            self.storage_provider.get_account_before_block(block_number, address)
         }
     }
 }
@@ -1529,7 +1583,7 @@ mod tests {
         // Insert first 5 blocks into the database
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
-            provider_rw.insert_historical_block(
+            provider_rw.insert_block(
                 block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
@@ -1646,7 +1700,7 @@ mod tests {
         // Insert first 5 blocks into the database
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
-            provider_rw.insert_historical_block(
+            provider_rw.insert_block(
                 block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
@@ -1768,7 +1822,6 @@ mod tests {
                 first_block: first_database_block,
                 ..Default::default()
             },
-            Default::default(),
             Default::default(),
         )?;
         provider_rw.commit()?;

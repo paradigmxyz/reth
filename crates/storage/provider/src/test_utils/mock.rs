@@ -5,7 +5,11 @@ use crate::{
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
     TransactionsProvider,
 };
-use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, BlockHeader};
+use alloy_consensus::{
+    constants::EMPTY_ROOT_HASH,
+    transaction::{TransactionMeta, TxHashRef},
+    BlockHeader,
+};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
@@ -14,6 +18,7 @@ use alloy_primitives::{
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, EthChainSpec};
+use reth_db::transaction::DbTx;
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
@@ -22,7 +27,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
-    SignedTransaction, SignerRecoverable,
+    SignerRecoverable,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -262,6 +267,10 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
         self.tx
     }
 
+    fn commit(self) -> ProviderResult<bool> {
+        Ok(self.tx.commit()?)
+    }
+
     fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
@@ -272,9 +281,9 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderP
 {
     type Header = <T::Block as Block>::Header;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         let lock = self.headers.lock();
-        Ok(lock.get(block_hash).cloned())
+        Ok(lock.get(&block_hash).cloned())
     }
 
     fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
@@ -282,9 +291,9 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderP
         Ok(lock.values().find(|h| h.number() == num).cloned())
     }
 
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
+    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
         let lock = self.headers.lock();
-        Ok(lock.get(hash).map(|target| {
+        Ok(lock.get(&hash).map(|target| {
             lock.values()
                 .filter(|h| h.number() < target.number())
                 .fold(target.difficulty(), |td, h| td + h.difficulty())
@@ -709,6 +718,10 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         Ok(vec![])
     }
+
+    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
 }
 
 impl<T, ChainSpec> BlockReaderIdExt for MockEthProvider<T, ChainSpec>
@@ -970,6 +983,14 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
         _block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
+    }
+
+    fn get_account_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
+        Ok(None)
     }
 }
 

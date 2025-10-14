@@ -10,6 +10,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
+use dashmap::DashMap;
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
@@ -34,7 +35,7 @@ use reth_trie_common::{
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::{mpsc::Receiver, Arc};
-use tracing::debug;
+use tracing::trace;
 
 /// Parallel proof calculator.
 ///
@@ -59,6 +60,9 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    /// Cached storage proof roots for missed leaves; this maps
+    /// hashed (missed) addresses to their storage proof roots.
+    missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
@@ -70,6 +74,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
+        missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
         storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     ) -> Self {
         Self {
@@ -77,6 +82,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
             nodes_sorted,
             state_sorted,
             prefix_sets,
+            missed_leaves_storage_roots,
             collect_branch_node_masks: false,
             multi_added_removed_keys: None,
             storage_proof_task_handle,
@@ -106,8 +112,8 @@ impl<Factory> ParallelProof<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
-    /// Spawns a storage proof on the storage proof task and returns a receiver for the result.
-    fn spawn_storage_proof(
+    /// Queues a storage proof task and returns a receiver for the result.
+    fn queue_storage_proof(
         &self,
         hashed_address: B256,
         prefix_set: PrefixSet,
@@ -137,21 +143,21 @@ where
         let prefix_set = PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack));
         let prefix_set = prefix_set.freeze();
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets,
             ?hashed_address,
             "Starting storage proof generation"
         );
 
-        let receiver = self.spawn_storage_proof(hashed_address, prefix_set, target_slots);
+        let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots);
         let proof_result = receiver.recv().map_err(|_| {
             ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
                 format!("channel closed for {hashed_address}"),
             )))
         })?;
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets,
             ?hashed_address,
@@ -159,16 +165,6 @@ where
         );
 
         proof_result
-    }
-
-    /// Generate a [`DecodedStorageMultiProof`] for the given proof by first calling
-    /// `storage_proof`, then decoding the proof nodes.
-    pub fn decoded_storage_proof(
-        self,
-        hashed_address: B256,
-        target_slots: B256Set,
-    ) -> Result<DecodedStorageMultiProof, ParallelStateRootError> {
-        self.storage_proof(hashed_address, target_slots)
     }
 
     /// Generate a state multiproof according to specified targets.
@@ -199,7 +195,7 @@ where
         );
         let storage_root_targets_len = storage_root_targets.len();
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
             "Starting parallel proof generation"
@@ -217,7 +213,7 @@ where
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
             let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
-            let receiver = self.spawn_storage_proof(hashed_address, prefix_set, target_slots);
+            let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots);
 
             // store the receiver for that result with the hashed address so we can await this in
             // place when we iterate over the trie
@@ -272,52 +268,58 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let decoded_storage_multiproof = match storage_proof_receivers
-                        .remove(&hashed_address)
-                    {
-                        Some(rx) => rx.recv().map_err(|e| {
-                            ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                DatabaseError::Other(format!(
-                                    "channel closed for {hashed_address}: {e}"
-                                )),
-                            ))
-                        })??,
+                    let root = match storage_proof_receivers.remove(&hashed_address) {
+                        Some(rx) => {
+                            let decoded_storage_multiproof = rx.recv().map_err(|e| {
+                                ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                                    DatabaseError::Other(format!(
+                                        "channel closed for {hashed_address}: {e}"
+                                    )),
+                                ))
+                            })??;
+                            let root = decoded_storage_multiproof.root;
+                            collected_decoded_storages
+                                .insert(hashed_address, decoded_storage_multiproof);
+                            root
+                        }
                         // Since we do not store all intermediate nodes in the database, there might
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
                             tracker.inc_missed_leaves();
 
-                            let raw_fallback_proof = StorageProof::new_hashed(
-                                trie_cursor_factory.clone(),
-                                hashed_cursor_factory.clone(),
-                                hashed_address,
-                            )
-                            .with_prefix_set_mut(Default::default())
-                            .storage_multiproof(
-                                targets.get(&hashed_address).cloned().unwrap_or_default(),
-                            )
-                            .map_err(|e| {
-                                ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                    DatabaseError::Other(e.to_string()),
-                                ))
-                            })?;
-
-                            raw_fallback_proof.try_into()?
+                            match self.missed_leaves_storage_roots.entry(hashed_address) {
+                                dashmap::Entry::Occupied(occ) => *occ.get(),
+                                dashmap::Entry::Vacant(vac) => {
+                                    let root = StorageProof::new_hashed(
+                                        trie_cursor_factory.clone(),
+                                        hashed_cursor_factory.clone(),
+                                        hashed_address,
+                                    )
+                                    .with_prefix_set_mut(Default::default())
+                                    .storage_multiproof(
+                                        targets.get(&hashed_address).cloned().unwrap_or_default(),
+                                    )
+                                    .map_err(|e| {
+                                        ParallelStateRootError::StorageRoot(
+                                            StorageRootError::Database(DatabaseError::Other(
+                                                e.to_string(),
+                                            )),
+                                        )
+                                    })?
+                                    .root;
+                                    vac.insert(root);
+                                    root
+                                }
+                            }
                         }
                     };
 
                     // Encode account
                     account_rlp.clear();
-                    let account = account.into_trie_account(decoded_storage_multiproof.root);
+                    let account = account.into_trie_account(root);
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
-
-                    // We might be adding leaves that are not necessarily our proof targets.
-                    if targets.contains_key(&hashed_address) {
-                        collected_decoded_storages
-                            .insert(hashed_address, decoded_storage_multiproof);
-                    }
                 }
             }
         }
@@ -343,7 +345,7 @@ where
             (HashMap::default(), HashMap::default())
         };
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
             duration = ?stats.duration(),
@@ -446,7 +448,8 @@ mod tests {
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
         let proof_task =
-            ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
+            ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1, 1)
+                .unwrap();
         let proof_task_handle = proof_task.handle();
 
         // keep the join handle around to make sure it does not return any errors
@@ -455,6 +458,7 @@ mod tests {
 
         let parallel_result = ParallelProof::new(
             consistent_view,
+            Default::default(),
             Default::default(),
             Default::default(),
             Default::default(),

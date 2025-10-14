@@ -5,7 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -293,7 +293,9 @@ impl EthChainSpec for OpChainSpec {
     }
 
     fn next_block_base_fee(&self, parent: &Header, target_timestamp: u64) -> Option<u64> {
-        if self.is_holocene_active_at_timestamp(parent.timestamp()) {
+        if self.is_jovian_active_at_timestamp(parent.timestamp()) {
+            compute_jovian_base_fee(self, parent, target_timestamp).ok()
+        } else if self.is_holocene_active_at_timestamp(parent.timestamp()) {
             decode_holocene_base_fee(self, parent, target_timestamp).ok()
         } else {
             self.inner.next_block_base_fee(parent, target_timestamp)
@@ -457,33 +459,33 @@ impl OpGenesisInfo {
             .unwrap_or_default(),
             ..Default::default()
         };
-        if let Some(optimism_base_fee_info) = &info.optimism_chain_info.base_fee_info {
-            if let (Some(elasticity), Some(denominator)) = (
+        if let Some(optimism_base_fee_info) = &info.optimism_chain_info.base_fee_info &&
+            let (Some(elasticity), Some(denominator)) = (
                 optimism_base_fee_info.eip1559_elasticity,
                 optimism_base_fee_info.eip1559_denominator,
-            ) {
-                let base_fee_params = if let Some(canyon_denominator) =
-                    optimism_base_fee_info.eip1559_denominator_canyon
-                {
-                    BaseFeeParamsKind::Variable(
-                        vec![
-                            (
-                                EthereumHardfork::London.boxed(),
-                                BaseFeeParams::new(denominator as u128, elasticity as u128),
-                            ),
-                            (
-                                OpHardfork::Canyon.boxed(),
-                                BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
-                            ),
-                        ]
-                        .into(),
-                    )
-                } else {
-                    BaseFeeParams::new(denominator as u128, elasticity as u128).into()
-                };
+            )
+        {
+            let base_fee_params = if let Some(canyon_denominator) =
+                optimism_base_fee_info.eip1559_denominator_canyon
+            {
+                BaseFeeParamsKind::Variable(
+                    vec![
+                        (
+                            EthereumHardfork::London.boxed(),
+                            BaseFeeParams::new(denominator as u128, elasticity as u128),
+                        ),
+                        (
+                            OpHardfork::Canyon.boxed(),
+                            BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
+                        ),
+                    ]
+                    .into(),
+                )
+            } else {
+                BaseFeeParams::new(denominator as u128, elasticity as u128).into()
+            };
 
-                info.base_fee_params = base_fee_params;
-            }
+            info.base_fee_params = base_fee_params;
         }
 
         info
@@ -496,19 +498,18 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
 
     // If Isthmus is active, overwrite the withdrawals root with the storage root of predeploy
     // `L2ToL1MessagePasser.sol`
-    if hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(header.timestamp) {
-        if let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
-            if let Some(storage) = &predeploy.storage {
-                header.withdrawals_root =
-                    Some(storage_root_unhashed(storage.iter().filter_map(|(k, v)| {
-                        if v.is_zero() {
-                            None
-                        } else {
-                            Some((*k, (*v).into()))
-                        }
-                    })));
-            }
-        }
+    if hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(header.timestamp) &&
+        let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) &&
+        let Some(storage) = &predeploy.storage
+    {
+        header.withdrawals_root =
+            Some(storage_root_unhashed(storage.iter().filter_map(|(k, v)| {
+                if v.is_zero() {
+                    None
+                } else {
+                    Some((*k, (*v).into()))
+                }
+            })));
     }
 
     header

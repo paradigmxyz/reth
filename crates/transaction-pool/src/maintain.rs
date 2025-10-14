@@ -7,7 +7,7 @@ use crate::{
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind, TransactionOrigin,
 };
-use alloy_consensus::{BlockHeader, Typed2718};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
 use alloy_eips::{BlockNumberOrTag, Decodable2718, Encodable2718};
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use alloy_rlp::{Bytes, Encodable};
@@ -229,21 +229,19 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
         // check if we have a new finalized block
         if let Some(finalized) =
-            last_finalized_block.update(client.finalized_block_number().ok().flatten())
-        {
-            if let BlobStoreUpdates::Finalized(blobs) =
+            last_finalized_block.update(client.finalized_block_number().ok().flatten()) &&
+            let BlobStoreUpdates::Finalized(blobs) =
                 blob_store_tracker.on_finalized_block(finalized)
-            {
-                metrics.inc_deleted_tracked_blobs(blobs.len());
-                // remove all finalized blobs from the blob store
-                pool.delete_blobs(blobs);
-                // and also do periodic cleanup
-                let pool = pool.clone();
-                task_spawner.spawn_blocking(Box::pin(async move {
-                    debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
-                    pool.cleanup_blobs();
-                }));
-            }
+        {
+            metrics.inc_deleted_tracked_blobs(blobs.len());
+            // remove all finalized blobs from the blob store
+            pool.delete_blobs(blobs);
+            // and also do periodic cleanup
+            let pool = pool.clone();
+            task_spawner.spawn_blocking(Box::pin(async move {
+                debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
+                pool.cleanup_blobs();
+            }));
         }
 
         // outcomes of the futures we are waiting on
@@ -628,10 +626,11 @@ where
             tx_backups
                 .into_iter()
                 .filter_map(|backup| {
-                    let tx_signed = <P::Transaction as PoolTransaction>::Consensus::decode_2718(
-                        &mut backup.rlp.as_ref(),
-                    )
-                    .ok()?;
+                    let tx_signed =
+                        <P::Transaction as PoolTransaction>::Consensus::decode_2718_exact(
+                            backup.rlp.as_ref(),
+                        )
+                        .ok()?;
                     let recovered = tx_signed.try_into_recovered().ok()?;
                     let pool_tx =
                         <P::Transaction as PoolTransaction>::try_from_consensus(recovered).ok()?;

@@ -234,57 +234,41 @@ impl<N: ProviderNodeTypes> HeaderSyncGapProvider for ProviderFactory<N> {
 impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
     type Header = HeaderTy<N>;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         self.provider()?.header(block_hash)
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            num,
-            |static_file| static_file.header_by_number(num),
-            || self.provider()?.header_by_number(num),
-        )
+        self.static_file_provider.header_by_number(num)
     }
 
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
+    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
         self.provider()?.header_td(hash)
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.provider()?.header_td_by_number(number)
+        self.static_file_provider.header_td_by_number(number)
     }
 
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Self::Header>> {
-        self.static_file_provider.get_range_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            to_range(range),
-            |static_file, range, _| static_file.headers_range(range),
-            |range, _| self.provider()?.headers_range(range),
-            |_| true,
-        )
+        self.static_file_provider.headers_range(range)
     }
 
     fn sealed_header(
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            number,
-            |static_file| static_file.sealed_header(number),
-            || self.provider()?.sealed_header(number),
-        )
+        self.static_file_provider.sealed_header(number)
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
-        self.sealed_headers_while(range, |_| true)
+        self.static_file_provider.sealed_headers_range(range)
     }
 
     fn sealed_headers_while(
@@ -292,24 +276,13 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
-        self.static_file_provider.get_range_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            to_range(range),
-            |static_file, range, predicate| static_file.sealed_headers_while(range, predicate),
-            |range, predicate| self.provider()?.sealed_headers_while(range, predicate),
-            predicate,
-        )
+        self.static_file_provider.sealed_headers_while(range, predicate)
     }
 }
 
 impl<N: ProviderNodeTypes> BlockHashReader for ProviderFactory<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            number,
-            |static_file| static_file.block_hash(number),
-            || self.provider()?.block_hash(number),
-        )
+        self.static_file_provider.block_hash(number)
     }
 
     fn canonical_hashes_range(
@@ -317,13 +290,7 @@ impl<N: ProviderNodeTypes> BlockHashReader for ProviderFactory<N> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.static_file_provider.get_range_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            start..end,
-            |static_file, range, _| static_file.canonical_hashes_range(range.start, range.end),
-            |range, _| self.provider()?.canonical_hashes_range(range.start, range.end),
-            |_| true,
-        )
+        self.static_file_provider.canonical_hashes_range(start, end)
     }
 }
 
@@ -337,7 +304,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.provider()?.last_block_number()
+        self.static_file_provider.last_block_number()
     }
 
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
@@ -409,6 +376,10 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         self.provider()?.recovered_block_range(range)
     }
+
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        self.provider()?.block_by_transaction_id(id)
+    }
 }
 
 impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
@@ -419,24 +390,14 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Transactions,
-            id,
-            |static_file| static_file.transaction_by_id(id),
-            || self.provider()?.transaction_by_id(id),
-        )
+        self.static_file_provider.transaction_by_id(id)
     }
 
     fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<Self::Transaction>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Transactions,
-            id,
-            |static_file| static_file.transaction_by_id_unhashed(id),
-            || self.provider()?.transaction_by_id_unhashed(id),
-        )
+        self.static_file_provider.transaction_by_id_unhashed(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
@@ -472,7 +433,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Transaction>> {
-        self.provider()?.transactions_by_tx_range(range)
+        self.static_file_provider.transactions_by_tx_range(range)
     }
 
     fn senders_by_tx_range(
@@ -489,6 +450,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
 
 impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
     type Receipt = ReceiptTy<N>;
+
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Receipts,
@@ -621,7 +583,7 @@ mod tests {
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        StorageLocation, TransactionsProvider,
+        TransactionsProvider,
     };
     use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;
@@ -674,7 +636,6 @@ mod tests {
             StaticFileProvider::read_write(static_dir_path).unwrap(),
         )
         .unwrap();
-
         let provider = factory.provider().unwrap();
         provider.block_hash(0).unwrap();
         let provider_rw = factory.provider_rw().unwrap();
@@ -684,16 +645,12 @@ mod tests {
 
     #[test]
     fn insert_block_with_prune_modes() {
-        let factory = create_test_provider_factory();
-
         let block = TEST_BLOCK.clone();
+
         {
+            let factory = create_test_provider_factory();
             let provider = factory.provider_rw().unwrap();
-            assert_matches!(
-                provider
-                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
-                Ok(_)
-            );
+            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
                 if sender == block.body().transactions[0].recover_signer().unwrap()
@@ -710,12 +667,9 @@ mod tests {
                 transaction_lookup: Some(PruneMode::Full),
                 ..PruneModes::none()
             };
+            let factory = create_test_provider_factory();
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
-            assert_matches!(
-                provider
-                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
-                Ok(_)
-            );
+            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(provider.transaction_sender(0), Ok(None));
             assert_matches!(
                 provider.transaction_id(*block.body().transactions[0].tx_hash()),
@@ -726,21 +680,16 @@ mod tests {
 
     #[test]
     fn take_block_transaction_range_recover_senders() {
-        let factory = create_test_provider_factory();
-
         let mut rng = generators::rng();
         let block =
             random_block(&mut rng, 0, BlockParams { tx_count: Some(3), ..Default::default() });
 
         let tx_ranges: Vec<RangeInclusive<TxNumber>> = vec![0..=0, 1..=1, 2..=2, 0..=1, 1..=2];
         for range in tx_ranges {
+            let factory = create_test_provider_factory();
             let provider = factory.provider_rw().unwrap();
 
-            assert_matches!(
-                provider
-                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
-                Ok(_)
-            );
+            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
 
             let senders = provider.take::<tables::TransactionSenders>(range.clone());
             assert_eq!(
