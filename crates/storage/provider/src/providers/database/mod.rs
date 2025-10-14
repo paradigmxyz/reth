@@ -111,6 +111,11 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub fn into_db(self) -> N::DB {
         self.db
     }
+
+    /// Returns reference to the prune modes.
+    pub const fn prune_modes_ref(&self) -> &PruneModes {
+        &self.prune_modes
+    }
 }
 
 impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
