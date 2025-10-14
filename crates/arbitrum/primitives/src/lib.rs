@@ -712,7 +712,7 @@ impl alloy_consensus::transaction::SignerRecoverable for ArbTransactionSigned {
             ArbTypedTransaction::Contract(tx) => Ok(tx.from),
             ArbTypedTransaction::Retry(tx) => Ok(tx.from),
             ArbTypedTransaction::SubmitRetryable(tx) => Ok(tx.from),
-            ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")),
+            ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0x00000000000000000000000000000000000A4B05")),
             ArbTypedTransaction::Eip2930(tx) => {
                 let mut tmp = alloc::vec::Vec::new();
                 tx.encode_for_signing(&mut tmp);
@@ -753,7 +753,7 @@ impl alloy_consensus::transaction::SignerRecoverable for ArbTransactionSigned {
             ArbTypedTransaction::Contract(tx) => Ok(tx.from),
             ArbTypedTransaction::Retry(tx) => Ok(tx.from),
             ArbTypedTransaction::SubmitRetryable(tx) => Ok(tx.from),
-            ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")),
+            ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0x00000000000000000000000000000000000A4B05")),
             ArbTypedTransaction::Eip2930(tx) => {
                 let mut tmp = alloc::vec::Vec::new();
                 tx.encode_for_signing(&mut tmp);
