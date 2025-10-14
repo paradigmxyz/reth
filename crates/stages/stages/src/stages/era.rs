@@ -211,7 +211,7 @@ where
 
             height
         } else {
-            input.target()
+            input.checkpoint().block_number
         };
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(height), done: height == input.target() })
