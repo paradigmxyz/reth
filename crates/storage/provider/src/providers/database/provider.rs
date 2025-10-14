@@ -2883,9 +2883,7 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
     }
 
     fn save_safe_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
-        Ok(self
-            .tx
-            .put::<tables::ChainState>(tables::ChainStateKey::LastSafeBlock, block_number)?)
+        Ok(self.tx.put::<tables::ChainState>(tables::ChainStateKey::LastSafeBlock, block_number)?)
     }
 }
 
