@@ -1,4 +1,17 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, keccak256};
+
+fn compute_method_id(signature: &str) -> [u8; 4] {
+    let hash = keccak256(signature.as_bytes());
+    [hash[0], hash[1], hash[2], hash[3]]
+}
+
+pub fn get_start_block_method_id() -> [u8; 4] {
+    compute_method_id("startBlock(uint256,uint64,uint64,uint64)")
+}
+
+pub fn get_batch_posting_report_method_id() -> [u8; 4] {
+    compute_method_id("batchPostingReport(uint256,address,uint64,uint64,uint256)")
+}
 
 pub const INTERNAL_TX_START_BLOCK_METHOD_ID: [u8; 4] = [0x6b, 0xf6, 0xa4, 0x2d];
 pub const INTERNAL_TX_BATCH_POSTING_REPORT_METHOD_ID: [u8; 4] = [0xb6, 0x69, 0x37, 0x71];
@@ -20,14 +33,33 @@ pub struct InternalTxBatchPostingReportData {
     pub l1_base_fee_wei: U256,
 }
 
+pub fn identify_internal_tx_type(data: &[u8]) -> Option<&'static str> {
+    if data.len() < 4 {
+        return None;
+    }
+    
+    let selector = &data[0..4];
+    let start_block_id = get_start_block_method_id();
+    let batch_report_id = get_batch_posting_report_method_id();
+    
+    if selector == start_block_id {
+        Some("startBlock")
+    } else if selector == batch_report_id {
+        Some("batchPostingReport")
+    } else {
+        None
+    }
+}
+
 pub fn unpack_internal_tx_data_start_block(data: &[u8]) -> Result<InternalTxStartBlockData, String> {
     if data.len() < 4 {
         return Err("Data too short for method selector".to_string());
     }
     
     let selector = &data[0..4];
-    if selector != INTERNAL_TX_START_BLOCK_METHOD_ID {
-        return Err(format!("Invalid method selector: expected {:?}, got {:?}", INTERNAL_TX_START_BLOCK_METHOD_ID, selector));
+    let expected_selector = get_start_block_method_id();
+    if selector != expected_selector {
+        return Err(format!("Invalid method selector: expected {:?}, got {:?}", expected_selector, selector));
     }
     
     if data.len() < 132 {
@@ -58,8 +90,9 @@ pub fn unpack_internal_tx_data_batch_posting_report(data: &[u8]) -> Result<Inter
     }
     
     let selector = &data[0..4];
-    if selector != INTERNAL_TX_BATCH_POSTING_REPORT_METHOD_ID {
-        return Err(format!("Invalid method selector: expected {:?}, got {:?}", INTERNAL_TX_BATCH_POSTING_REPORT_METHOD_ID, selector));
+    let expected_selector = get_batch_posting_report_method_id();
+    if selector != expected_selector {
+        return Err(format!("Invalid method selector: expected {:?}, got {:?}", expected_selector, selector));
     }
     
     if data.len() < 164 {
