@@ -100,9 +100,9 @@ impl ParallelProof {
             self.multi_added_removed_keys.clone(),
         );
 
-        self.proof_task_handle.dispatch_storage_proof(input).map_err(|e| {
-            ParallelStateRootError::Other(e.to_string())
-        })
+        self.proof_task_handle
+            .dispatch_storage_proof(input)
+            .map_err(|e| ParallelStateRootError::Other(e.to_string()))
     }
 
     /// Generate a storage multiproof according to the specified targets and hashed address.

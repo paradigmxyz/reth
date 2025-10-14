@@ -849,8 +849,9 @@ pub struct ProofTaskManagerHandle {
 impl ProofTaskManagerHandle {
     /// Spawns storage and account worker pools with dedicated database transactions.
     ///
-    /// Returns a handle for submitting proof tasks to the worker pools.
-    /// Workers run until the last handle is dropped.
+    /// Worker initialization (opening read-only providers and transactions) happens inside
+    /// background tasks so this constructor returns the handle immediately. Workers run until the
+    /// last handle is dropped.
     ///
     /// # Parameters
     /// - `executor`: Tokio runtime handle for spawning blocking tasks
@@ -880,12 +881,27 @@ impl ProofTaskManagerHandle {
 
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
-            let provider_ro = view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let view_clone = view.clone();
+            let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = storage_work_rx.clone();
 
             executor.spawn_blocking(move || {
+                let proof_task_tx = match view_clone.provider_ro() {
+                    Ok(provider_ro) => {
+                        let tx = provider_ro.into_tx();
+                        ProofTaskTx::new(tx, task_ctx_clone, worker_id)
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            %error,
+                            "Failed to initialize storage worker"
+                        );
+                        return;
+                    }
+                };
+
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
 
@@ -901,19 +917,34 @@ impl ProofTaskManagerHandle {
             tracing::debug!(
                 target: "trie::proof_task",
                 worker_id,
-                "Storage worker spawned successfully"
+                "Storage worker initialization dispatched"
             );
         }
 
         // Spawn account workers
         for worker_id in 0..account_worker_count {
-            let provider_ro = view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let view_clone = view.clone();
+            let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = account_work_rx.clone();
             let storage_work_tx_clone = storage_work_tx.clone();
 
             executor.spawn_blocking(move || {
+                let proof_task_tx = match view_clone.provider_ro() {
+                    Ok(provider_ro) => {
+                        let tx = provider_ro.into_tx();
+                        ProofTaskTx::new(tx, task_ctx_clone, worker_id)
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            %error,
+                            "Failed to initialize account worker"
+                        );
+                        return;
+                    }
+                };
+
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
 
@@ -930,7 +961,7 @@ impl ProofTaskManagerHandle {
             tracing::debug!(
                 target: "trie::proof_task",
                 worker_id,
-                "Account worker spawned successfully"
+                "Account worker initialization dispatched"
             );
         }
 
