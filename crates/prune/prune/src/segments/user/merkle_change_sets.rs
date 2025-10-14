@@ -3,11 +3,12 @@ use crate::{
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_db_api::{models::BlockNumberAddress, table::Value, tables, transaction::DbTxMut};
+use alloy_primitives::B256;
+use reth_db_api::{models::BlockNumberHashedAddress, table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,
-    PruneCheckpointWriter, TransactionsProvider,
+    errors::provider::ProviderResult, BlockReader, ChainStateBlockReader, DBProvider,
+    NodePrimitivesProvider, PruneCheckpointWriter, TransactionsProvider,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
@@ -31,6 +32,7 @@ where
         + PruneCheckpointWriter
         + TransactionsProvider
         + BlockReader
+        + ChainStateBlockReader
         + NodePrimitivesProvider<Primitives: NodePrimitives<Receipt: Value>>,
 {
     fn segment(&self) -> PruneSegment {
@@ -55,13 +57,20 @@ where
         let block_range_end = *block_range.end();
         let mut limiter = input.limiter;
 
+        // Create range for StoragesTrieChangeSets which uses BlockNumberHashedAddress as key
+        let storage_range_start: BlockNumberHashedAddress =
+            (*block_range.start(), B256::ZERO).into();
+        let storage_range_end: BlockNumberHashedAddress =
+            (*block_range.end() + 1, B256::ZERO).into();
+        let storage_range = storage_range_start..storage_range_end;
+
         let mut last_storages_pruned_block = None;
         let (storages_pruned, done) =
-            provider.tx_ref().prune_table_with_range::<tables::StorageChangeSets>(
-                BlockNumberAddress::range(block_range.clone()),
+            provider.tx_ref().prune_table_with_range::<tables::StoragesTrieChangeSets>(
+                storage_range,
                 &mut limiter,
                 |_| false,
-                |(BlockNumberAddress((block_number, ..)), ..)| {
+                |(BlockNumberHashedAddress((block_number, _)), _)| {
                     last_storages_pruned_block = Some(block_number);
                 },
             )?;

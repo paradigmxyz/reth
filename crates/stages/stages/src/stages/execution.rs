@@ -896,7 +896,7 @@ mod tests {
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
-        let modes = [None, Some(PruneModes::none())];
+        let modes = [None, Some(PruneModes::default())];
         let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
             Address::random(),
             PruneMode::Distance(100000),
@@ -1033,7 +1033,7 @@ mod tests {
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
-        let modes = [None, Some(PruneModes::none())];
+        let modes = [None, Some(PruneModes::default())];
         let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
             Address::random(),
             PruneMode::Before(100000),

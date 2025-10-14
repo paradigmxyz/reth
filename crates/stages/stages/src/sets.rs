@@ -54,7 +54,7 @@ use reth_primitives_traits::{Block, NodePrimitives};
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
 use reth_stages_api::Stage;
-use std::{ops::Not, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::watch;
 
 /// A set containing all stages to run a fully syncing instance of reth.
@@ -337,12 +337,12 @@ where
                 stages_config: self.stages_config.clone(),
                 prune_modes: self.prune_modes.clone(),
             })
-            // If any prune modes are set, add the prune stage.
-            .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
-                // Prune stage should be added after all hashing stages, because otherwise it will
-                // delete
-                PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
-            }))
+            // Prune stage should be added after all hashing stages, because otherwise it will
+            // delete
+            .add_stage(PruneStage::new(
+                self.prune_modes.clone(),
+                self.stages_config.prune.commit_threshold,
+            ))
     }
 }
 

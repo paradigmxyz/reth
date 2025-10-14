@@ -228,7 +228,7 @@ mod tests {
 
         // In an unpruned configuration there is 1 receipt, 3 changed accounts and 1 changed
         // storage.
-        let mut prune = PruneModes::none();
+        let mut prune = PruneModes::default();
         check_pruning(test_db.factory.clone(), prune.clone(), 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Full);

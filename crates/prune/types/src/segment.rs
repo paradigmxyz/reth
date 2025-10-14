@@ -3,6 +3,9 @@ use derive_more::Display;
 use thiserror::Error;
 
 /// Segment of the data that can be pruned.
+///
+/// NOTE new variants must be added to the end of this enum. The variant index is encoded directly
+/// when writing to the `PruneCheckpoint` table, so changing the order here will corrupt the table.
 #[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
@@ -15,9 +18,6 @@ pub enum PruneSegment {
     TransactionLookup,
     /// Prune segment responsible for all rows in `Receipts` table.
     Receipts,
-    /// Prune segment responsible for all rows in `AccountsTrieChangeSets` and
-    /// `StoragesTrieChangeSets` table.
-    MerkleChangeSets,
     /// Prune segment responsible for some rows in `Receipts` table filtered by logs.
     ContractLogs,
     /// Prune segment responsible for the `AccountChangeSets` and `AccountsHistory` tables.
@@ -29,6 +29,9 @@ pub enum PruneSegment {
     Headers,
     /// Prune segment responsible for the `Transactions` table.
     Transactions,
+    /// Prune segment responsible for all rows in `AccountsTrieChangeSets` and
+    /// `StoragesTrieChangeSets` table.
+    MerkleChangeSets,
 }
 
 #[cfg(test)]

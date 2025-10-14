@@ -60,7 +60,7 @@ impl<ChainSpec, N> NoopProvider<ChainSpec, N> {
             #[cfg(feature = "db-api")]
             tx: TxMock::default(),
             #[cfg(feature = "db-api")]
-            prune_modes: PruneModes::none(),
+            prune_modes: PruneModes::default(),
             _phantom: Default::default(),
         }
     }
@@ -74,7 +74,7 @@ impl<ChainSpec> NoopProvider<ChainSpec> {
             #[cfg(feature = "db-api")]
             tx: TxMock::default(),
             #[cfg(feature = "db-api")]
-            prune_modes: PruneModes::none(),
+            prune_modes: PruneModes::default(),
             _phantom: Default::default(),
         }
     }
