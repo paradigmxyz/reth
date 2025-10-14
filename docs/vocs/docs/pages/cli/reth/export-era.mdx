@@ -172,9 +172,18 @@ Tracing:
       --tracing-otlp[=<URL>]
           Enable `Opentelemetry` tracing export to an OTLP endpoint.
 
-          If no value provided, defaults to `http://localhost:4318/v1/traces`.
+          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
+
+      --tracing-otlp-protocol <PROTOCOL>
+          OTLP transport protocol to use for exporting traces.
+
+          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
+
+          Defaults to HTTP if not specified.
+
+          [default: http]
 
       --tracing-otlp-level <LEVEL>
           Set the minimum log level for OTLP traces.
