@@ -337,7 +337,10 @@ impl MultiproofInput {
 /// concurrency, further calculation requests are queued and spawn later, after
 /// availability has been signaled.
 #[derive(Debug)]
-pub struct MultiproofManager {
+pub struct MultiproofManager<Factory>
+where
+    Factory: reth_provider::DatabaseProviderFactory,
+{
     /// Maximum number of concurrent calculations.
     max_concurrent: usize,
     /// Currently running calculations.
@@ -347,7 +350,7 @@ pub struct MultiproofManager {
     /// Executor for tasks
     executor: WorkloadExecutor,
     /// Handle to the proof worker pools (storage and account).
-    proof_task_handle: ProofTaskManagerHandle,
+    proof_task_handle: ProofTaskManagerHandle<Factory>,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     ///
@@ -364,12 +367,17 @@ pub struct MultiproofManager {
     metrics: MultiProofTaskMetrics,
 }
 
-impl MultiproofManager {
+impl<Factory> MultiproofManager<Factory>
+where
+    Factory: reth_provider::DatabaseProviderFactory<Provider: reth_provider::BlockReader>
+        + Clone
+        + 'static,
+{
     /// Creates a new [`MultiproofManager`].
     fn new(
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
-        proof_task_handle: ProofTaskManagerHandle,
+        proof_task_handle: ProofTaskManagerHandle<Factory>,
         max_concurrent: usize,
     ) -> Self {
         Self {
@@ -539,8 +547,10 @@ impl MultiproofManager {
             let start = Instant::now();
 
             // Extend prefix sets with targets
-            let frozen_prefix_sets =
-                ParallelProof::extend_prefix_sets_with_targets(&config.prefix_sets, &proof_targets);
+            let frozen_prefix_sets = ParallelProof::<Factory>::extend_prefix_sets_with_targets(
+                &config.prefix_sets,
+                &proof_targets,
+            );
 
             // Queue account multiproof to worker pool
             let input = AccountMultiproofInput {
@@ -653,7 +663,10 @@ pub(crate) struct MultiProofTaskMetrics {
 /// Then it updates relevant leaves according to the result of the transaction.
 /// This feeds updates to the sparse trie task.
 #[derive(Debug)]
-pub(super) struct MultiProofTask {
+pub(super) struct MultiProofTask<Factory>
+where
+    Factory: reth_provider::DatabaseProviderFactory,
+{
     /// The size of proof targets chunk to spawn in one calculation.
     ///
     /// If [`None`], then chunking is disabled.
@@ -673,17 +686,22 @@ pub(super) struct MultiProofTask {
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
-    multiproof_manager: MultiproofManager,
+    multiproof_manager: MultiproofManager<Factory>,
     /// multi proof task metrics
     metrics: MultiProofTaskMetrics,
 }
 
-impl MultiProofTask {
+impl<Factory> MultiProofTask<Factory>
+where
+    Factory: reth_provider::DatabaseProviderFactory<Provider: reth_provider::BlockReader>
+        + Clone
+        + 'static,
+{
     /// Creates a new multi proof task with the unified message channel
     pub(super) fn new(
         config: MultiProofConfig,
         executor: WorkloadExecutor,
-        proof_task_handle: ProofTaskManagerHandle,
+        proof_task_handle: ProofTaskManagerHandle<Factory>,
         to_sparse_trie: Sender<SparseTrieUpdate>,
         max_concurrency: usize,
         chunk_size: Option<usize>,
@@ -1215,7 +1233,7 @@ mod tests {
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofTaskManagerHandle};
     use revm_primitives::{B256, U256};
 
-    fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
+    fn create_test_state_root_task<F>(factory: F) -> MultiProofTask<F>
     where
         F: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {

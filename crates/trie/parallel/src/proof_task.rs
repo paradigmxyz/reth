@@ -52,8 +52,9 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
     sync::{
+        atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, Sender},
-        Arc,
+        Arc, Barrier,
     },
     time::Instant,
 };
@@ -68,9 +69,34 @@ type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 type AccountMultiproofResult =
     Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError>;
 
+/// RAII guard that tracks in-flight multiproof jobs.
+///
+/// Increments the counter on creation and decrements on drop,
+/// ensuring the counter is always accurate even if a job panics.
+#[derive(Debug)]
+struct ProofJobGuard {
+    /// Shared counter tracking the number of actively executing multiproof jobs across all
+    /// workers.
+    counter: Arc<AtomicUsize>,
+}
+
+impl ProofJobGuard {
+    /// Creates a new guard and increments the counter.
+    fn new(counter: Arc<AtomicUsize>) -> Self {
+        counter.fetch_add(1, Ordering::AcqRel);
+        Self { counter }
+    }
+}
+
+impl Drop for ProofJobGuard {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 /// Internal message for storage workers.
 #[derive(Debug)]
-enum StorageWorkerJob {
+enum StorageWorkerJob<Tx> {
     /// Storage proof computation request
     StorageProof {
         /// Storage proof input parameters
@@ -87,6 +113,17 @@ enum StorageWorkerJob {
         /// Channel to send result back to original caller
         result_sender: Sender<TrieNodeProviderResult>,
     },
+    /// Context refresh request - replaces worker's transaction and task context
+    RefreshContext {
+        /// New database transaction
+        tx: Tx,
+        /// New task context with updated trie state
+        task_ctx: ProofTaskCtx,
+        /// Barrier for acknowledgement - worker signals when ready
+        barrier: Arc<Barrier>,
+    },
+    /// Shutdown signal - causes worker to exit cleanly
+    Shutdown,
 }
 
 /// Worker loop for storage trie operations.
@@ -113,9 +150,10 @@ enum StorageWorkerJob {
 ///
 /// Worker shuts down when the crossbeam channel closes (all senders dropped).
 fn storage_worker_loop<Tx>(
-    proof_tx: ProofTaskTx<Tx>,
-    work_rx: CrossbeamReceiver<StorageWorkerJob>,
+    mut proof_tx: ProofTaskTx<Tx>,
+    work_rx: CrossbeamReceiver<StorageWorkerJob<Tx>>,
     worker_id: usize,
+    in_flight: Arc<AtomicUsize>,
     #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
 ) where
     Tx: DbTx,
@@ -127,10 +165,10 @@ fn storage_worker_loop<Tx>(
     );
 
     // Create factories once at worker startup to avoid recreation overhead.
-    let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
+    let (mut trie_cursor_factory, mut hashed_cursor_factory) = proof_tx.create_factories();
 
     // Create blinded provider factory once for all blinded node requests
-    let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
+    let mut blinded_provider_factory = ProofTrieNodeProviderFactory::new(
         trie_cursor_factory.clone(),
         hashed_cursor_factory.clone(),
         proof_tx.task_ctx.prefix_sets.clone(),
@@ -141,7 +179,54 @@ fn storage_worker_loop<Tx>(
 
     while let Ok(job) = work_rx.recv() {
         match job {
+            StorageWorkerJob::RefreshContext { tx, task_ctx, barrier } => {
+                tracing::debug!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    "Refreshing storage worker context"
+                );
+
+                // Replace transaction and task context
+                proof_tx.tx = tx;
+                proof_tx.task_ctx = task_ctx;
+
+                // Recreate cursor factories with new transaction
+                let factories = proof_tx.create_factories();
+                trie_cursor_factory = factories.0;
+                hashed_cursor_factory = factories.1;
+
+                // Recreate blinded provider factory
+                blinded_provider_factory = ProofTrieNodeProviderFactory::new(
+                    trie_cursor_factory.clone(),
+                    hashed_cursor_factory.clone(),
+                    proof_tx.task_ctx.prefix_sets.clone(),
+                );
+
+                // Signal that we're ready
+                barrier.wait();
+
+                tracing::debug!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    "Storage worker context refreshed"
+                );
+            }
+
+            StorageWorkerJob::Shutdown => {
+                tracing::debug!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    storage_proofs_processed,
+                    storage_nodes_processed,
+                    "Storage worker received shutdown signal"
+                );
+                break;
+            }
+
             StorageWorkerJob::StorageProof { input, result_sender } => {
+                // Track this job as in-flight
+                let _guard = ProofJobGuard::new(in_flight.clone());
+
                 let hashed_address = input.hashed_address;
 
                 trace!(
@@ -181,9 +266,13 @@ fn storage_worker_loop<Tx>(
                     total_processed = storage_proofs_processed,
                     "Storage proof completed"
                 );
+                // _guard drops here, decrementing in_flight counter
             }
 
             StorageWorkerJob::BlindedStorageNode { account, path, result_sender } => {
+                // Track this job as in-flight
+                let _guard = ProofJobGuard::new(in_flight.clone());
+
                 trace!(
                     target: "trie::proof_task",
                     worker_id,
@@ -219,6 +308,7 @@ fn storage_worker_loop<Tx>(
                     total_processed = storage_nodes_processed,
                     "Blinded storage node completed"
                 );
+                // _guard drops here, decrementing in_flight counter
             }
         }
     }
@@ -259,10 +349,11 @@ fn storage_worker_loop<Tx>(
 ///
 /// Worker shuts down when the crossbeam channel closes (all senders dropped).
 fn account_worker_loop<Tx>(
-    proof_tx: ProofTaskTx<Tx>,
-    work_rx: CrossbeamReceiver<AccountWorkerJob>,
-    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    mut proof_tx: ProofTaskTx<Tx>,
+    work_rx: CrossbeamReceiver<AccountWorkerJob<Tx>>,
+    storage_work_tx: CrossbeamSender<StorageWorkerJob<Tx>>,
     worker_id: usize,
+    in_flight: Arc<AtomicUsize>,
     #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
 ) where
     Tx: DbTx,
@@ -274,10 +365,10 @@ fn account_worker_loop<Tx>(
     );
 
     // Create factories once at worker startup to avoid recreation overhead.
-    let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
+    let (mut trie_cursor_factory, mut hashed_cursor_factory) = proof_tx.create_factories();
 
     // Create blinded provider factory once for all blinded node requests
-    let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
+    let mut blinded_provider_factory = ProofTrieNodeProviderFactory::new(
         trie_cursor_factory.clone(),
         hashed_cursor_factory.clone(),
         proof_tx.task_ctx.prefix_sets.clone(),
@@ -288,7 +379,54 @@ fn account_worker_loop<Tx>(
 
     while let Ok(job) = work_rx.recv() {
         match job {
+            AccountWorkerJob::RefreshContext { tx, task_ctx, barrier } => {
+                tracing::debug!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    "Refreshing account worker context"
+                );
+
+                // Replace transaction and task context
+                proof_tx.tx = tx;
+                proof_tx.task_ctx = task_ctx;
+
+                // Recreate cursor factories with new transaction
+                let factories = proof_tx.create_factories();
+                trie_cursor_factory = factories.0;
+                hashed_cursor_factory = factories.1;
+
+                // Recreate blinded provider factory
+                blinded_provider_factory = ProofTrieNodeProviderFactory::new(
+                    trie_cursor_factory.clone(),
+                    hashed_cursor_factory.clone(),
+                    proof_tx.task_ctx.prefix_sets.clone(),
+                );
+
+                // Signal that we're ready
+                barrier.wait();
+
+                tracing::debug!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    "Account worker context refreshed"
+                );
+            }
+
+            AccountWorkerJob::Shutdown => {
+                tracing::debug!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    account_proofs_processed,
+                    account_nodes_processed,
+                    "Account worker received shutdown signal"
+                );
+                break;
+            }
+
             AccountWorkerJob::AccountMultiproof { mut input, result_sender } => {
+                // Track this job as in-flight
+                let _guard = ProofJobGuard::new(in_flight.clone());
+
                 trace!(
                     target: "trie::proof_task",
                     worker_id,
@@ -367,6 +505,9 @@ fn account_worker_loop<Tx>(
             }
 
             AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
+                // Track this job as in-flight
+                let _guard = ProofJobGuard::new(in_flight.clone());
+
                 trace!(
                     target: "trie::proof_task",
                     worker_id,
@@ -398,6 +539,7 @@ fn account_worker_loop<Tx>(
                     total_processed = account_nodes_processed,
                     "Blinded account node completed"
                 );
+                // _guard drops here, decrementing in_flight counter
             }
         }
     }
@@ -568,8 +710,8 @@ where
 /// computation. This enables interleaved parallelism for better performance.
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
-fn queue_storage_proofs(
-    storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
+fn queue_storage_proofs<Tx>(
+    storage_work_tx: &CrossbeamSender<StorageWorkerJob<Tx>>,
     targets: &MultiProofTargets,
     storage_prefix_sets: &mut B256Map<PrefixSet>,
     with_branch_node_masks: bool,
@@ -791,7 +933,7 @@ struct AccountMultiproofParams<'a> {
 
 /// Internal message for account workers.
 #[derive(Debug)]
-enum AccountWorkerJob {
+enum AccountWorkerJob<Tx> {
     /// Account multiproof computation request
     AccountMultiproof {
         /// Account multiproof input parameters
@@ -806,6 +948,17 @@ enum AccountWorkerJob {
         /// Channel to send result back to original caller
         result_sender: Sender<TrieNodeProviderResult>,
     },
+    /// Context refresh request - replaces worker's transaction and task context
+    RefreshContext {
+        /// New database transaction
+        tx: Tx,
+        /// New task context with updated trie state
+        task_ctx: ProofTaskCtx,
+        /// Barrier for acknowledgement - worker signals when ready
+        barrier: Arc<Barrier>,
+    },
+    /// Shutdown signal - causes worker to exit cleanly
+    Shutdown,
 }
 
 /// Data used for initializing cursor factories that is shared across all storage proof instances.
@@ -839,14 +992,32 @@ impl ProofTaskCtx {
 /// eliminating the need for a routing thread. All handles share reference-counted
 /// channels, and workers shut down gracefully when all handles are dropped.
 #[derive(Debug, Clone)]
-pub struct ProofTaskManagerHandle {
+pub struct ProofTaskManagerHandle<Factory>
+where
+    Factory: DatabaseProviderFactory,
+{
     /// Direct sender to storage worker pool
-    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    storage_work_tx: CrossbeamSender<
+        StorageWorkerJob<<<Factory as DatabaseProviderFactory>::DB as reth_db_api::Database>::TX>,
+    >,
     /// Direct sender to account worker pool
-    account_work_tx: CrossbeamSender<AccountWorkerJob>,
+    account_work_tx: CrossbeamSender<
+        AccountWorkerJob<<<Factory as DatabaseProviderFactory>::DB as reth_db_api::Database>::TX>,
+    >,
+    /// Counter for tracking in-flight jobs across all workers
+    in_flight: Arc<AtomicUsize>,
+    /// Consistent database view for creating fresh transactions
+    consistent_view: ConsistentDbView<Factory>,
+    /// Number of storage workers
+    storage_worker_count: usize,
+    /// Number of account workers
+    account_worker_count: usize,
 }
 
-impl ProofTaskManagerHandle {
+impl<Factory> ProofTaskManagerHandle<Factory>
+where
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone,
+{
     /// Spawns storage and account worker pools with dedicated database transactions.
     ///
     /// Returns a handle for submitting proof tasks to the worker pools.
@@ -858,18 +1029,16 @@ impl ProofTaskManagerHandle {
     /// - `task_ctx`: Shared context with trie updates and prefix sets
     /// - `storage_worker_count`: Number of storage workers to spawn
     /// - `account_worker_count`: Number of account workers to spawn
-    pub fn new<Factory>(
+    pub fn new(
         executor: Handle,
         view: ConsistentDbView<Factory>,
         task_ctx: ProofTaskCtx,
         storage_worker_count: usize,
         account_worker_count: usize,
-    ) -> ProviderResult<Self>
-    where
-        Factory: DatabaseProviderFactory<Provider: BlockReader>,
-    {
-        let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
-        let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
+    ) -> ProviderResult<Self> {
+        let (storage_work_tx, storage_work_rx) = unbounded();
+        let (account_work_tx, account_work_rx) = unbounded();
+        let in_flight = Arc::new(AtomicUsize::new(0));
 
         tracing::info!(
             target: "trie::proof_task",
@@ -884,6 +1053,7 @@ impl ProofTaskManagerHandle {
             let tx = provider_ro.into_tx();
             let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
             let work_rx_clone = storage_work_rx.clone();
+            let in_flight_clone = in_flight.clone();
 
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
@@ -893,6 +1063,7 @@ impl ProofTaskManagerHandle {
                     proof_task_tx,
                     work_rx_clone,
                     worker_id,
+                    in_flight_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
                 )
@@ -912,6 +1083,7 @@ impl ProofTaskManagerHandle {
             let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
             let work_rx_clone = account_work_rx.clone();
             let storage_work_tx_clone = storage_work_tx.clone();
+            let in_flight_clone = in_flight.clone();
 
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
@@ -922,6 +1094,7 @@ impl ProofTaskManagerHandle {
                     work_rx_clone,
                     storage_work_tx_clone,
                     worker_id,
+                    in_flight_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
                 )
@@ -934,17 +1107,14 @@ impl ProofTaskManagerHandle {
             );
         }
 
-        Ok(Self::new_handle(storage_work_tx, account_work_tx))
-    }
-
-    /// Creates a new [`ProofTaskManagerHandle`] with direct access to worker pools.
-    ///
-    /// This is an internal constructor used for creating handles.
-    const fn new_handle(
-        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
-        account_work_tx: CrossbeamSender<AccountWorkerJob>,
-    ) -> Self {
-        Self { storage_work_tx, account_work_tx }
+        Ok(Self {
+            storage_work_tx,
+            account_work_tx,
+            in_flight,
+            consistent_view: view,
+            storage_worker_count,
+            account_worker_count,
+        })
     }
 
     /// Queue a storage proof computation
@@ -1007,11 +1177,132 @@ impl ProofTaskManagerHandle {
 
         Ok(rx)
     }
+
+    /// Returns the current number of in-flight jobs across all workers.
+    pub fn in_flight_count(&self) -> usize {
+        self.in_flight.load(Ordering::Acquire)
+    }
+
+    /// Waits until all in-flight jobs complete.
+    ///
+    /// Uses a spin-loop with yielding for minimal overhead.
+    /// Should be called before refreshing worker contexts.
+    fn wait_for_idle(&self) {
+        while self.in_flight.load(Ordering::Acquire) > 0 {
+            std::hint::spin_loop();
+            std::thread::yield_now();
+        }
+    }
+
+    /// Refreshes the database transaction and task context for all workers.
+    ///
+    /// This method:
+    /// 1. Waits for all in-flight jobs to complete
+    /// 2. Creates fresh transactions from the consistent view
+    /// 3. Sends `RefreshContext` messages to all workers
+    /// 4. Waits for all workers to acknowledge the refresh
+    ///
+    /// After this call, all workers will use the new transaction and context.
+    pub fn refresh_context(&self, task_ctx: ProofTaskCtx) -> ProviderResult<()> {
+        // Wait for all in-flight jobs to complete
+        self.wait_for_idle();
+
+        // Create barrier for acknowledgements (workers + 1 for us)
+        let total_workers = self.storage_worker_count + self.account_worker_count;
+        let barrier = Arc::new(Barrier::new(total_workers + 1));
+
+        tracing::debug!(
+            target: "trie::proof_task",
+            storage_workers = self.storage_worker_count,
+            account_workers = self.account_worker_count,
+            "Refreshing worker contexts"
+        );
+
+        // Send RefreshContext to all storage workers
+        for worker_id in 0..self.storage_worker_count {
+            let provider_ro = self.consistent_view.provider_ro()?;
+            let tx = provider_ro.into_tx();
+            self.storage_work_tx
+                .send(StorageWorkerJob::RefreshContext {
+                    tx,
+                    task_ctx: task_ctx.clone(),
+                    barrier: barrier.clone(),
+                })
+                .map_err(|_| {
+                    ProviderError::other(std::io::Error::other("storage workers unavailable"))
+                })?;
+
+            tracing::trace!(
+                target: "trie::proof_task",
+                worker_id,
+                "Sent RefreshContext to storage worker"
+            );
+        }
+
+        // Send RefreshContext to all account workers
+        for worker_id in 0..self.account_worker_count {
+            let provider_ro = self.consistent_view.provider_ro()?;
+            let tx = provider_ro.into_tx();
+            self.account_work_tx
+                .send(AccountWorkerJob::RefreshContext {
+                    tx,
+                    task_ctx: task_ctx.clone(),
+                    barrier: barrier.clone(),
+                })
+                .map_err(|_| {
+                    ProviderError::other(std::io::Error::other("account workers unavailable"))
+                })?;
+
+            tracing::trace!(
+                target: "trie::proof_task",
+                worker_id,
+                "Sent RefreshContext to account worker"
+            );
+        }
+
+        // Wait for all workers to acknowledge
+        barrier.wait();
+
+        tracing::debug!(
+            target: "trie::proof_task",
+            "All workers refreshed successfully"
+        );
+
+        Ok(())
+    }
+
+    /// Shuts down all workers gracefully.
+    ///
+    /// Waits for in-flight jobs to complete, then sends Shutdown signals.
+    /// Workers will exit their loops upon receiving the shutdown signal.
+    pub fn shutdown(&self) {
+        self.wait_for_idle();
+
+        tracing::info!(
+            target: "trie::proof_task",
+            storage_workers = self.storage_worker_count,
+            account_workers = self.account_worker_count,
+            "Shutting down proof workers"
+        );
+
+        // Send shutdown to all storage workers
+        for _ in 0..self.storage_worker_count {
+            let _ = self.storage_work_tx.send(StorageWorkerJob::Shutdown);
+        }
+
+        // Send shutdown to all account workers
+        for _ in 0..self.account_worker_count {
+            let _ = self.account_work_tx.send(AccountWorkerJob::Shutdown);
+        }
+    }
 }
 
-impl TrieNodeProviderFactory for ProofTaskManagerHandle {
-    type AccountNodeProvider = ProofTaskTrieNodeProvider;
-    type StorageNodeProvider = ProofTaskTrieNodeProvider;
+impl<Factory> TrieNodeProviderFactory for ProofTaskManagerHandle<Factory>
+where
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone,
+{
+    type AccountNodeProvider = ProofTaskTrieNodeProvider<Factory>;
+    type StorageNodeProvider = ProofTaskTrieNodeProvider<Factory>;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
         ProofTaskTrieNodeProvider::AccountNode { handle: self.clone() }
@@ -1024,22 +1315,28 @@ impl TrieNodeProviderFactory for ProofTaskManagerHandle {
 
 /// Trie node provider for retrieving trie nodes by path.
 #[derive(Debug)]
-pub enum ProofTaskTrieNodeProvider {
+pub enum ProofTaskTrieNodeProvider<Factory>
+where
+    Factory: DatabaseProviderFactory,
+{
     /// Blinded account trie node provider.
     AccountNode {
         /// Handle to the proof worker pools.
-        handle: ProofTaskManagerHandle,
+        handle: ProofTaskManagerHandle<Factory>,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
         /// Handle to the proof worker pools.
-        handle: ProofTaskManagerHandle,
+        handle: ProofTaskManagerHandle<Factory>,
     },
 }
 
-impl TrieNodeProvider for ProofTaskTrieNodeProvider {
+impl<Factory> TrieNodeProvider for ProofTaskTrieNodeProvider<Factory>
+where
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone,
+{
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         match self {
             Self::AccountNode { handle } => {

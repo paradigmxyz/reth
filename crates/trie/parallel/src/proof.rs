@@ -22,7 +22,10 @@ use tracing::trace;
 /// This can collect proof for many targets in parallel, spawning a task for each hashed address
 /// that has proof targets.
 #[derive(Debug)]
-pub struct ParallelProof {
+pub struct ParallelProof<Factory>
+where
+    Factory: reth_provider::DatabaseProviderFactory,
+{
     /// The sorted collection of cached in-memory intermediate trie nodes that
     /// can be reused for computation.
     pub nodes_sorted: Arc<TrieUpdatesSorted>,
@@ -37,7 +40,7 @@ pub struct ParallelProof {
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the proof worker pools.
-    proof_task_handle: ProofTaskManagerHandle,
+    proof_task_handle: ProofTaskManagerHandle<Factory>,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
@@ -45,14 +48,17 @@ pub struct ParallelProof {
     metrics: ParallelTrieMetrics,
 }
 
-impl ParallelProof {
+impl<Factory> ParallelProof<Factory>
+where
+    Factory: reth_provider::DatabaseProviderFactory<Provider: reth_provider::BlockReader> + Clone,
+{
     /// Create new state proof generator.
     pub fn new(
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
         missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-        proof_task_handle: ProofTaskManagerHandle,
+        proof_task_handle: ProofTaskManagerHandle<Factory>,
     ) -> Self {
         Self {
             nodes_sorted,
