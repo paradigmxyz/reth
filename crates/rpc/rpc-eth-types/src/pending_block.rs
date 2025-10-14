@@ -18,10 +18,10 @@ use reth_primitives_traits::{
     Block, BlockTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader,
 };
 
-/// Configured [`EvmEnv`] for a pending block.
+/// Configured [`reth_evm::EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
 pub struct PendingBlockEnv<Evm: ConfigureEvm> {
-    /// Configured [`EvmEnv`] for the pending block.
+    /// Configured [`reth_evm::EvmEnv`] for the pending block.
     pub evm_env: EvmEnvFor<Evm>,
     /// Origin block for the config
     pub origin: PendingBlockEnvOrigin<BlockTy<Evm::Primitives>, ReceiptTy<Evm::Primitives>>,
