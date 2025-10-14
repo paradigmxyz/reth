@@ -46,7 +46,7 @@ use tokio::{
     sync::{mpsc::Receiver, oneshot, Mutex},
     time::MissedTickBehavior,
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 impl<Eth> EngineEthFilter for EthFilter<Eth>
 where
@@ -676,13 +676,10 @@ where
         limits: QueryLimits,
     ) -> Result<Vec<alloy_rpc_types_eth::Log>, EthFilterError> {
         let mut all_logs = Vec::new();
-        let chain_tip = self.provider().best_block_number()?;
-
-        // TODO: figure out params passing
         let params = LogIndexParams::default();
-
-        let log_value_indices =
-            self.provider().get_log_value_indices_range(from_block..=to_block)?;
+        let log_value_indices = Arc::new(
+            self.provider().get_log_value_indices_range(from_block..=to_block)?,
+        );
         let (first_map, last_map) =
             match calculate_map_range(&log_value_indices, params.log_values_per_map) {
                 Some(range) => range,
@@ -710,18 +707,60 @@ where
 
         let filter_arc = Arc::new(filter.clone());
         let mut pending: FuturesOrdered<
-            Pin<Box<dyn Future<Output = Result<Vec<u64>, EthFilterError>> + Send>>
+            Pin<Box<dyn Future<Output = Result<(u32, Vec<Log>), EthFilterError>> + Send>>
         > = FuturesOrdered::new();
-        let mut candidates = Vec::new();
+        let mut epoch_logs = Vec::new();
 
         for (map_start, map_end) in map_ranges.into_iter() {
             let inner = self.clone();
             let filter = filter_arc.clone();
+            let boundaries = log_value_indices.clone();
             let (tx, rx) = oneshot::channel();
             self.task_spawner.spawn_blocking(Box::pin(async move {
-                let res: Result<Vec<u64>, ProviderError> = (|| {
+                let res: Result<(u32, Vec<Log>), ProviderError> = (|| {
                     let provider = inner.provider().clone();
-                    query_maps_range(&provider, &params, map_start, map_end, &filter)
+                    let candidates =
+                        query_maps_range(&provider, &params, map_start, map_end, &filter)?;
+
+                    if candidates.is_empty() {
+                        return Ok((map_start, Vec::new()));
+                    }
+
+                    let blocks = resolve_to_blocks(
+                        candidates,
+                        boundaries.as_ref(),
+                        from_block,
+                        to_block,
+                    );
+
+                    let mut logs = Vec::new();
+                    for block_number in blocks {
+                        let header =
+                            match provider.sealed_header(block_number)? {
+                                Some(h) => h,
+                                None => continue,
+                            };
+
+                        let receipts = match provider
+                            .receipts_by_block(block_number.into())?
+                        {
+                            Some(receipts) => receipts,
+                            None => continue,
+                        };
+
+                        let num_hash = header.num_hash();
+                        append_matching_block_logs(
+                            &mut logs,
+                            ProviderOrBlock::Provider(&provider),
+                            &filter,
+                            num_hash,
+                            &receipts,
+                            false,
+                            header.timestamp(),
+                        )?;
+                    }
+
+                    Ok((map_start, logs))
                 })();
                 let _ = tx.send(res);
             }));
@@ -734,78 +773,61 @@ where
 
             if pending.len() >= LOG_INDEX_MAX_PARALLEL_EPOCHS {
                 if let Some(res) = pending.next().await {
-                    candidates.extend(res?);
+                    epoch_logs.push(res?);
                 }
             }
         }
 
         while let Some(res) = pending.next().await {
-            candidates.extend(res?);
+            epoch_logs.push(res?);
         }
 
-        candidates.sort_unstable();
-        candidates.dedup();
-        info!("Got matches: {:?}", candidates.len());
+        epoch_logs.sort_by_key(|(start, _)| *start);
 
-        let results = resolve_to_blocks(candidates, &log_value_indices, from_block, to_block);
-
-        let mut matching_headers = Vec::new();
-
-        for block_number in results {
-            let sealed_header = match self.provider().sealed_header(block_number)? {
-                Some(h) => h,
-                None => continue,
-            };
-            matching_headers.push(sealed_header);
-        }
-        // initialize the appropriate range mode based on collected headers
-        let mut range_mode = RangeMode::new(
-            self.clone(),
-            matching_headers,
-            from_block,
-            to_block,
-            self.max_headers_range,
-            chain_tip,
-        );
-
-        // iterate through the range mode to get receipts and blocks
-        while let Some(ReceiptBlockResult { receipts, recovered_block, header }) =
-            range_mode.next().await?
-        {
-            let num_hash = header.num_hash();
-            append_matching_block_logs(
-                &mut all_logs,
-                recovered_block
-                    .map(ProviderOrBlock::Block)
-                    .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
-                filter,
-                num_hash,
-                &receipts,
-                false,
-                header.timestamp(),
-            )?;
-
-            // size check but only if range is multiple blocks, so we always return all
-            // logs of a single block
-            let is_multi_block_range = from_block != to_block;
-            if let Some(max_logs_per_response) = limits.max_logs_per_response &&
-                is_multi_block_range &&
-                all_logs.len() > max_logs_per_response
-            {
-                debug!(
-                    target: "rpc::eth::filter",
-                    logs_found = all_logs.len(),
-                    max_logs_per_response,
-                    from_block,
-                    to_block = num_hash.number.saturating_sub(1),
-                    "Query exceeded max logs per response limit"
-                );
-                return Err(EthFilterError::QueryExceedsMaxResults {
-                    max_logs: max_logs_per_response,
-                    from_block,
-                    to_block: num_hash.number.saturating_sub(1),
-                });
+        let mut remaining = limits.max_logs_per_response;
+        for (_, mut logs_chunk) in epoch_logs {
+            if logs_chunk.is_empty() {
+                continue;
             }
+
+            if let Some(rem) = remaining.as_mut() {
+                if logs_chunk.len() > *rem {
+                    logs_chunk.truncate(*rem);
+                }
+                *rem = rem.saturating_sub(logs_chunk.len());
+            }
+
+            all_logs.extend(logs_chunk);
+
+            if let Some(0) = remaining {
+                break;
+            }
+        }
+
+        // size check but only if range is multiple blocks, so we always return all
+        // logs of a single block
+        let is_multi_block_range = from_block != to_block;
+        if let Some(max_logs_per_response) = limits.max_logs_per_response &&
+            is_multi_block_range &&
+            all_logs.len() > max_logs_per_response
+        {
+            let last_number = all_logs
+                .last()
+                .and_then(|log| log.block_number)
+                .unwrap_or(to_block);
+            debug!(
+                target: "rpc::eth::filter",
+                logs_found = all_logs.len(),
+                max_logs_per_response,
+                from_block,
+                to_block = last_number,
+                "Query exceeded max logs per response limit"
+            );
+            return Err(EthFilterError::QueryExceedsMaxResults {
+                max_logs: max_logs_per_response,
+                from_block,
+                to_block: last_number,
+            });
         }
 
         Ok(all_logs)
