@@ -5,7 +5,7 @@ use thiserror::Error;
 /// Segment of the data that can be pruned.
 ///
 /// NOTE new variants must be added to the end of this enum. The variant index is encoded directly
-/// when writing to the P`runeCheckpoint` table, so changing the order here will corrupt the table.
+/// when writing to the `PruneCheckpoint` table, so changing the order here will corrupt the table.
 #[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
