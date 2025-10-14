@@ -37,7 +37,7 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::{FullNodePrimitives, NodePrimitives};
 use reth_primitives_traits::{RecoveredBlock, SealedHeader, SignedTransaction};
-use reth_stages_types::{PipelineTarget, StageId};
+use reth_stages_types::StageId;
 use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
     DEFAULT_BLOCKS_PER_STATIC_FILE,
@@ -731,15 +731,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// * its highest block should match the stage checkpoint block number if it's equal or higher
     ///   than the corresponding database table last entry.
     ///
-    /// Returns a [`Option`] of [`PipelineTarget::Unwind`] if any healing is further required.
+    /// Returns a [`Option`] with block number to unwind to if any healing is further required.
     ///
     /// WARNING: No static file writer should be held before calling this function, otherwise it
     /// will deadlock.
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,
-        has_receipt_pruning: bool,
-    ) -> ProviderResult<Option<PipelineTarget>>
+    ) -> ProviderResult<Option<BlockNumber>>
     where
         Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
         N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
@@ -776,7 +775,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         for segment in StaticFileSegment::iter() {
-            if has_receipt_pruning && segment.is_receipts() {
+            if provider.prune_modes_ref().has_receipts_pruning() && segment.is_receipts() {
                 // Pruned nodes (including full node) do not store receipts as static files.
                 continue
             }
@@ -887,7 +886,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
         }
 
-        Ok(unwind_target.map(PipelineTarget::Unwind))
+        Ok(unwind_target)
     }
 
     /// Checks consistency of the latest static file segment and throws an error if at fault.
