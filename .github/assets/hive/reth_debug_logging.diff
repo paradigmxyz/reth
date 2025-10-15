@@ -1,0 +1,10 @@
+diff --git a/clients/reth/reth.sh b/clients/reth/reth.sh
+index 1b4910a..758596f 100644
+--- a/clients/reth/reth.sh
++++ b/clients/reth/reth.sh
+@@ -170,4 +170,4 @@ FLAGS="$FLAGS --nat none"
+
+ # Launch the main client.
+ echo "Running reth with flags: $FLAGS"
+-RUST_LOG=info $reth node $FLAGS
++RUST_LOG=debug,providers::consistent=trace,engine::tree=trace $reth node $FLAGS

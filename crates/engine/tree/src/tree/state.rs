@@ -175,6 +175,26 @@ impl<N: NodePrimitives> TreeState<N> {
         Some((executed, children))
     }
 
+    /// Removes an invalid block and all its descendants from the tree.
+    ///
+    /// This is called when a block is marked as invalid to immediately clean up
+    /// the invalid fork from in-memory state, preventing it from being referenced
+    /// during state provider construction.
+    pub(crate) fn remove_invalid_chain(&mut self, invalid_block_hash: B256) {
+        let mut blocks_to_remove = VecDeque::from([invalid_block_hash]);
+
+        while let Some(hash) = blocks_to_remove.pop_front() {
+            if let Some((removed, children)) = self.remove_by_hash(hash) {
+                debug!(
+                    target: "engine::tree",
+                    num_hash=?removed.recovered_block().num_hash(),
+                    "Removed invalid block from tree"
+                );
+                blocks_to_remove.extend(children);
+            }
+        }
+    }
+
     /// Returns whether or not the hash is part of the canonical chain.
     pub(crate) fn is_canonical(&self, hash: B256) -> bool {
         let mut current_block = self.current_canonical_head.hash;
