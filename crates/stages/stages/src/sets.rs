@@ -135,30 +135,6 @@ where
     }
 }
 
-impl<P, H, B, E> DefaultStages<P, H, B, E>
-where
-    E: ConfigureEvm,
-    H: HeaderDownloader,
-    B: BodyDownloader,
-{
-    /// Appends the default offline stages and default finish stage to the given builder.
-    pub fn add_offline_stages<Provider>(
-        default_offline: StageSetBuilder<Provider>,
-        evm_config: E,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
-        stages_config: StageConfig,
-        prune_modes: PruneModes,
-    ) -> StageSetBuilder<Provider>
-    where
-        OfflineStages<E>: StageSet<Provider>,
-    {
-        StageSetBuilder::default()
-            .add_set(default_offline)
-            .add_set(OfflineStages::new(evm_config, consensus, stages_config, prune_modes))
-            .add_stage(FinishStage)
-    }
-}
-
 impl<P, H, B, E, Provider> StageSet<Provider> for DefaultStages<P, H, B, E>
 where
     P: HeaderSyncGapProvider + 'static,
@@ -169,13 +145,11 @@ where
     OfflineStages<E>: StageSet<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        Self::add_offline_stages(
-            self.online.builder(),
-            self.evm_config,
-            self.consensus,
-            self.stages_config.clone(),
-            self.prune_modes,
-        )
+        let Self { online, evm_config, consensus, stages_config, prune_modes } = self;
+        StageSetBuilder::default()
+            .add_set(online.builder())
+            .add_set(OfflineStages::new(evm_config, consensus, stages_config, prune_modes))
+            .add_stage(FinishStage)
     }
 }
 

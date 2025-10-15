@@ -16,11 +16,11 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_api::HeaderTy;
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
+use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
 use reth_stages::{
     prelude::DefaultStages,
     stages::{EraImportSource, ExecutionStage},
-    Pipeline, StageSet,
+    BoxedStage, Pipeline, StageId, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
@@ -42,6 +42,7 @@ pub fn build_networked_pipeline<N, Client, Evm>(
     evm_config: Evm,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
     era_import_source: Option<EraImportSource>,
+    extra_stages: Vec<BoxedStage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -70,6 +71,7 @@ where
         evm_config,
         exex_manager_handle,
         era_import_source,
+        extra_stages,
     )?;
 
     Ok(pipeline)
@@ -90,6 +92,7 @@ pub fn build_pipeline<N, H, B, Evm>(
     evm_config: Evm,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
     era_import_source: Option<EraImportSource>,
+    extra_stages: Vec<BoxedStage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -129,7 +132,8 @@ where
                 stage_config.execution.into(),
                 stage_config.execution_external_clean_threshold(),
                 exex_manager_handle,
-            )),
+            ))
+            .add_stages_before(extra_stages, StageId::Finish),
         )
         .build(provider_factory, static_file_producer);
 

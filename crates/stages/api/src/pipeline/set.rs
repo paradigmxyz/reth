@@ -172,6 +172,24 @@ impl<Provider> StageSetBuilder<Provider> {
         self
     }
 
+    /// Adds given [`Stage`]s before the stage with the given [`StageId`].
+    ///
+    /// If the stage was already in the group, it is removed from its previous place.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the dependency stage is not in this set.
+    pub fn add_stages_before<S: Stage<Provider> + 'static>(
+        mut self,
+        stages: Vec<S>,
+        before: StageId,
+    ) -> Self {
+        for stage in stages {
+            self = self.add_before(stage, before);
+        }
+        self
+    }
+
     /// Adds the given [`Stage`] after the stage with the given [`StageId`].
     ///
     /// If the stage was already in the group, it is removed from its previous place.

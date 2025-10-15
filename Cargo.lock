@@ -8899,6 +8899,7 @@ dependencies = [
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
  "reth-provider",
+ "reth-stages-api",
  "reth-tasks",
  "reth-tokio-util",
  "reth-transaction-pool",

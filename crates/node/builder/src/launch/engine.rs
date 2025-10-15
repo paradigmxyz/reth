@@ -151,6 +151,7 @@ impl EngineNodeLauncher {
             ctx.components().evm_config().clone(),
             maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
             ctx.era_import_source(),
+            add_ons.extra_stages(),
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
@@ -232,6 +233,7 @@ impl EngineNodeLauncher {
             engine_tree_config,
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
+            add_ons.extra_stages(),
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");
