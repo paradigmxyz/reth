@@ -121,8 +121,8 @@ fn storage_worker_loop<Factory>(
     Factory: DatabaseProviderFactory<Provider: BlockReader>,
 {
     // Create db transaction before entering work loop
-    let provider = view.provider_ro()
-        .expect("Storage worker failed to initialize: database unavailable");
+    let provider =
+        view.provider_ro().expect("Storage worker failed to initialize: database unavailable");
     let proof_tx = ProofTaskTx::new(provider.into_tx(), task_ctx, worker_id);
 
     tracing::debug!(
@@ -274,8 +274,8 @@ fn account_worker_loop<Factory>(
     Factory: DatabaseProviderFactory<Provider: BlockReader>,
 {
     // Create db transaction before entering work loop
-    let provider = view.provider_ro()
-        .expect("Account worker failed to initialize: database unavailable");
+    let provider =
+        view.provider_ro().expect("Account worker failed to initialize: database unavailable");
     let proof_tx = ProofTaskTx::new(provider.into_tx(), task_ctx, worker_id);
 
     tracing::debug!(
