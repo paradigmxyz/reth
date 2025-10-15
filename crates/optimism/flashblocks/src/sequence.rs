@@ -11,6 +11,15 @@ use tracing::{debug, trace, warn};
 /// The size of the broadcast channel for completed flashblock sequences.
 const FLASHBLOCK_SEQUENCE_CHANNEL_SIZE: usize = 128;
 
+impl<T> Default for FlashBlockPendingSequence<T>
+where
+    T: SignedTransaction,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// An ordered B-tree keeping the track of a sequence of [`FlashBlock`]s by their indices.
 #[derive(Debug)]
 pub struct FlashBlockPendingSequence<T> {
