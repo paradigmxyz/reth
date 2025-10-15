@@ -147,10 +147,15 @@ where
 
         headers
     }
-    
+
     /// Generic implementation for fetching response items.
     #[inline]
-    fn get_response_items<T, F>(&self, hashes: Vec<B256>, mut fetch_fn: F, max_items: usize) -> Vec<T>
+    fn get_response_items<T, F>(
+        &self,
+        hashes: Vec<B256>,
+        mut fetch_fn: F,
+        max_items: usize,
+    ) -> Vec<T>
     where
         F: FnMut(B256) -> Option<T>,
         T: Encodable,
@@ -195,10 +200,12 @@ where
         response: oneshot::Sender<RequestResult<BlockBodies<<C::Block as Block>::Body>>>,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
-        
+
         let bodies = self.get_response_items(
             request.0,
-            |hash| self.client.block_by_hash(hash).unwrap_or_default().map(|block| block.into_body()),
+            |hash| {
+                self.client.block_by_hash(hash).unwrap_or_default().map(|block| block.into_body())
+            },
             MAX_BODIES_SERVE,
         );
 
