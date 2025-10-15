@@ -924,7 +924,7 @@ mod test {
         let enr_with_opel = Enr::builder()
             .add_value_rlp(
                 NetworkStackId::OPEL,
-                alloy_rlp::encode(&EnrForkIdEntry::from(fork_id)).into(),
+                alloy_rlp::encode(EnrForkIdEntry::from(fork_id)).into(),
             )
             .build(&sk)
             .unwrap();
@@ -937,7 +937,7 @@ mod test {
         let enr_with_eth = Enr::builder()
             .add_value_rlp(
                 NetworkStackId::ETH,
-                alloy_rlp::encode(&EnrForkIdEntry::from(fork_id)).into(),
+                alloy_rlp::encode(EnrForkIdEntry::from(fork_id)).into(),
             )
             .build(&sk)
             .unwrap();
