@@ -10847,9 +10847,9 @@ dependencies = [
 
 [[package]]
 name = "revm-bytecode"
-version = "7.0.1"
+version = "7.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4e5fb816511743a8e27f1801085dc51885009abe250644758e837a26f96bf90"
+checksum = "451748b17ac78bd2b0748ec472a5392cd78fc0f7d19d528be44770fda28fd6f7"
 dependencies = [
  "bitvec",
  "phf 0.13.1",

@@ -469,7 +469,7 @@ reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
 revm = { version = "30.1.1", default-features = false }
-revm-bytecode = { version = "7.0.0", default-features = false }
+revm-bytecode = { version = "7.0.2", default-features = false }
 revm-database = { version = "9.0.0", default-features = false }
 revm-state = { version = "8.0.0", default-features = false }
 revm-primitives = { version = "21.0.0", default-features = false }
