@@ -666,7 +666,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let fork_filter = chain_spec.fork_filter(head);
 
         // get the chain id
-        let chain_id = if let Some(id) = network_id { id } else { chain_spec.chain().id() };
+        let chain_id = chain_spec.chain().id();
 
         // If default DNS config is used then we add the known dns network to bootstrap from
         if let Some(dns_networks) =
