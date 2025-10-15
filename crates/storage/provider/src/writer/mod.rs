@@ -110,6 +110,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::Created,
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
 
@@ -121,6 +122,7 @@ mod tests {
                 status: AccountStatus::Touched,
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
 
@@ -180,6 +182,7 @@ mod tests {
                 info: account_b_changed,
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
 
@@ -255,6 +258,7 @@ mod tests {
                         ),
                     ]),
                     transaction_id: 0,
+                    ..Default::default()
                 },
             ),
             (
@@ -272,6 +276,7 @@ mod tests {
                         },
                     )]),
                     transaction_id: 0,
+                    ..Default::default()
                 },
             ),
         ]));
@@ -374,6 +379,7 @@ mod tests {
                 info: RevmAccountInfo::default(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
 
@@ -441,6 +447,7 @@ mod tests {
                     ),
                 ]),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
@@ -474,6 +481,7 @@ mod tests {
                     },
                 )]),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -486,6 +494,7 @@ mod tests {
                 info: account_info.clone(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -498,6 +507,7 @@ mod tests {
                 info: account_info.clone(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -526,6 +536,7 @@ mod tests {
                     ),
                 ]),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -538,6 +549,7 @@ mod tests {
                 info: account_info.clone(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -550,6 +562,7 @@ mod tests {
                 info: account_info.clone(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.commit(HashMap::from_iter([(
@@ -563,6 +576,7 @@ mod tests {
                     EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
                 )]),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.commit(HashMap::from_iter([(
@@ -572,6 +586,7 @@ mod tests {
                 info: account_info.clone(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.commit(HashMap::from_iter([(
@@ -581,6 +596,7 @@ mod tests {
                 info: account_info.clone(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -597,6 +613,7 @@ mod tests {
                     EvmStorageSlot { present_value: U256::from(9), ..Default::default() },
                 )]),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
 
@@ -767,6 +784,7 @@ mod tests {
                     ),
                 ]),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
@@ -791,6 +809,7 @@ mod tests {
                 info: account1.clone(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
 
@@ -801,6 +820,7 @@ mod tests {
                 info: account1.clone(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
 
@@ -815,6 +835,7 @@ mod tests {
                     EvmStorageSlot { present_value: U256::from(5), ..Default::default() },
                 )]),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
 
@@ -942,6 +963,7 @@ mod tests {
                 info: RevmAccountInfo::default(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
@@ -975,6 +997,7 @@ mod tests {
                     ),
                 )]),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
@@ -993,6 +1016,7 @@ mod tests {
                 info: account3.0.into(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
@@ -1011,6 +1035,7 @@ mod tests {
                 info: account4.0.into(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
@@ -1027,6 +1052,7 @@ mod tests {
                 info: account1_new.into(),
                 storage: HashMap::default(),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
@@ -1047,6 +1073,7 @@ mod tests {
                     EvmStorageSlot::new_changed(U256::ZERO, account1_slot20_value, 0),
                 )]),
                 transaction_id: 0,
+                ..Default::default()
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);

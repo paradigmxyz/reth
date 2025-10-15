@@ -116,6 +116,17 @@ pub enum VersionSpecificValidationError {
     /// Shanghai
     #[error("withdrawals pre-Shanghai")]
     HasWithdrawalsPreShanghai,
+    /// Thrown if the pre-V6 `PayloadAttributes` or `ExecutionPayload` contains a block access list
+    #[error("block access list not before V6")]
+    BlockAccessListNotSupportedBeforeV6,
+    /// Thrown if  `engine_newPayload` contains no block access list
+    /// after Amsterdam
+    #[error("no block access list post-Amsterdam")]
+    NoBlockAccessListPostAmsterdam,
+    /// Thrown if  `engine_newPayload` contains block access list
+    /// before Amsterdam
+    #[error("block access list pre-Amsterdam")]
+    HasBlockAccessListPreAmsterdam,
     /// Thrown if the `PayloadAttributes` or `ExecutionPayload` contains no parent beacon block
     /// root after Cancun
     #[error("no parent beacon block root post-cancun")]

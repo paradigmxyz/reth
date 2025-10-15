@@ -5,6 +5,7 @@ use crate::{
     CustomNode,
 };
 use alloy_eips::eip2718::WithEncoded;
+use alloy_primitives::Bytes;
 use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_engine_primitives::EngineApiValidator;
@@ -52,6 +53,10 @@ impl ExecutionPayload for CustomExecutionData {
     }
 
     fn withdrawals(&self) -> Option<&Vec<alloy_eips::eip4895::Withdrawal>> {
+        None
+    }
+
+    fn block_access_list(&self) -> Option<&Bytes> {
         None
     }
 
