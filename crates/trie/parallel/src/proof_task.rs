@@ -29,7 +29,6 @@ use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
-    ProviderResult,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -112,14 +111,37 @@ enum StorageWorkerJob {
 /// # Shutdown
 ///
 /// Worker shuts down when the crossbeam channel closes (all senders dropped).
-fn storage_worker_loop<Tx>(
-    proof_tx: ProofTaskTx<Tx>,
+fn storage_worker_loop<Factory>(
+    view: ConsistentDbView<Factory>,
+    task_ctx: ProofTaskCtx,
     work_rx: CrossbeamReceiver<StorageWorkerJob>,
     worker_id: usize,
     #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
 ) where
-    Tx: DbTx,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>,
 {
+    // Create db transaction before entering work loop
+    let proof_tx = match view.provider_ro() {
+        Ok(provider) => {
+            let tx = provider.into_tx();
+            tracing::debug!(
+                target: "trie::proof_task",
+                worker_id,
+                "Storage worker initialized transaction successfully"
+            );
+            ProofTaskTx::new(tx, task_ctx, worker_id)
+        }
+        Err(e) => {
+            tracing::error!(
+                target: "trie::proof_task",
+                worker_id,
+                error = %e,
+                "Storage worker failed to initialize transaction, exiting"
+            );
+            return;
+        }
+    };
+
     tracing::debug!(
         target: "trie::proof_task",
         worker_id,
@@ -258,15 +280,38 @@ fn storage_worker_loop<Tx>(
 /// # Shutdown
 ///
 /// Worker shuts down when the crossbeam channel closes (all senders dropped).
-fn account_worker_loop<Tx>(
-    proof_tx: ProofTaskTx<Tx>,
+fn account_worker_loop<Factory>(
+    view: ConsistentDbView<Factory>,
+    task_ctx: ProofTaskCtx,
     work_rx: CrossbeamReceiver<AccountWorkerJob>,
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     worker_id: usize,
     #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
 ) where
-    Tx: DbTx,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>,
 {
+    // Create db transaction before entering work loop
+    let proof_tx = match view.provider_ro() {
+        Ok(provider) => {
+            let tx = provider.into_tx();
+            tracing::debug!(
+                target: "trie::proof_task",
+                worker_id,
+                "Account worker initialized transaction successfully"
+            );
+            ProofTaskTx::new(tx, task_ctx, worker_id)
+        }
+        Err(e) => {
+            tracing::error!(
+                target: "trie::proof_task",
+                worker_id,
+                error = %e,
+                "Account worker failed to initialize transaction, exiting"
+            );
+            return;
+        }
+    };
+
     tracing::debug!(
         target: "trie::proof_task",
         worker_id,
@@ -864,9 +909,9 @@ impl ProofWorkerHandle {
         task_ctx: ProofTaskCtx,
         storage_worker_count: usize,
         account_worker_count: usize,
-    ) -> ProviderResult<Self>
+    ) -> Self
     where
-        Factory: DatabaseProviderFactory<Provider: BlockReader>,
+        Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
@@ -880,9 +925,8 @@ impl ProofWorkerHandle {
 
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
-            let provider_ro = view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let view_clone = view.clone();
+            let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = storage_work_rx.clone();
 
             executor.spawn_blocking(move || {
@@ -890,7 +934,8 @@ impl ProofWorkerHandle {
                 let metrics = ProofTaskTrieMetrics::default();
 
                 storage_worker_loop(
-                    proof_task_tx,
+                    view_clone,
+                    task_ctx_clone,
                     work_rx_clone,
                     worker_id,
                     #[cfg(feature = "metrics")]
@@ -907,9 +952,8 @@ impl ProofWorkerHandle {
 
         // Spawn account workers
         for worker_id in 0..account_worker_count {
-            let provider_ro = view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let view_clone = view.clone();
+            let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = account_work_rx.clone();
             let storage_work_tx_clone = storage_work_tx.clone();
 
@@ -918,7 +962,8 @@ impl ProofWorkerHandle {
                 let metrics = ProofTaskTrieMetrics::default();
 
                 account_worker_loop(
-                    proof_task_tx,
+                    view_clone,
+                    task_ctx_clone,
                     work_rx_clone,
                     storage_work_tx_clone,
                     worker_id,
@@ -934,7 +979,7 @@ impl ProofWorkerHandle {
             );
         }
 
-        Ok(Self::new_handle(storage_work_tx, account_work_tx))
+        Self::new_handle(storage_work_tx, account_work_tx)
     }
 
     /// Creates a new [`ProofWorkerHandle`] with direct access to worker pools.
@@ -1091,7 +1136,7 @@ mod tests {
             let view = ConsistentDbView::new(factory, None);
             let ctx = test_ctx();
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), view, ctx, 5, 3).unwrap();
+            let proof_handle = ProofWorkerHandle::new(handle.clone(), view, ctx, 5, 3);
 
             // Verify handle can be cloned
             let _cloned_handle = proof_handle.clone();

@@ -1228,8 +1228,7 @@ mod tests {
         );
         let consistent_view = ConsistentDbView::new(factory, None);
         let proof_handle =
-            ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1)
-                .expect("Failed to spawn proof workers");
+            ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1);
         let channel = channel();
 
         MultiProofTask::new(config, executor, proof_handle, channel.0, 1, None)
