@@ -324,7 +324,7 @@ impl Command {
         let task_ctx = ProofTaskCtx::new(
             state_root_config.nodes_sorted.clone(),
             state_root_config.state_sorted.clone(),
-            state_root_config.prefix_sets.clone(),
+            Default::default(),
         );
         let storage_worker_count = tree_config.storage_worker_count();
         let account_worker_count = tree_config.account_worker_count();
