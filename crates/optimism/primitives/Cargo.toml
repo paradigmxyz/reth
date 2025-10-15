@@ -13,8 +13,8 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits = { workspace = true, features = ["op"] }
-reth-codecs = { workspace = true, optional = true, features = ["op"] }
+reth-primitives-traits.workspace = true
+reth-codecs = { workspace = true, optional = true }
 reth-zstd-compressors = { workspace = true, optional = true }
 
 # ethereum
@@ -37,6 +37,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 reth-codecs = { workspace = true, features = ["test-utils", "op"] }
+reth-primitives-traits = { workspace = true, features = ["op"] }
 
 rand.workspace = true
 arbitrary.workspace = true
@@ -70,6 +71,7 @@ alloy-compat = ["op-alloy-consensus/alloy-compat"]
 reth-codec = [
     "dep:reth-codecs",
     "std",
+    "op",
     "reth-primitives-traits/reth-codec",
     "reth-codecs?/op",
     "dep:bytes",
@@ -106,4 +108,8 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-eips/arbitrary",
+]
+op = [
+    "reth-primitives-traits/op",
+    "reth-codecs?/op",
 ]
