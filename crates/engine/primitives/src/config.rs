@@ -9,11 +9,14 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 /// Default maximum concurrency for on-demand proof tasks (blinded nodes)
 pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
 
+/// Minimum number of workers we allow configuring explicitly.
+pub const MIN_WORKER_COUNT: usize = 32;
+
 /// Returns the default number of storage worker threads based on available parallelism.
 fn default_storage_worker_count() -> usize {
     #[cfg(feature = "std")]
     {
-        std::thread::available_parallelism().map(|n| (n.get() * 2).clamp(2, 64)).unwrap_or(8)
+        std::thread::available_parallelism().map_or(8, |n| n.get() * 2).min(MIN_WORKER_COUNT)
     }
     #[cfg(not(feature = "std"))]
     {
@@ -491,8 +494,8 @@ impl TreeConfig {
     }
 
     /// Setter for the number of storage proof worker threads.
-    pub const fn with_storage_worker_count(mut self, storage_worker_count: usize) -> Self {
-        self.storage_worker_count = storage_worker_count;
+    pub fn with_storage_worker_count(mut self, storage_worker_count: usize) -> Self {
+        self.storage_worker_count = storage_worker_count.max(MIN_WORKER_COUNT);
         self
     }
 
@@ -502,8 +505,8 @@ impl TreeConfig {
     }
 
     /// Setter for the number of account proof worker threads.
-    pub const fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
-        self.account_worker_count = account_worker_count;
+    pub fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
+        self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
         self
     }
 }
