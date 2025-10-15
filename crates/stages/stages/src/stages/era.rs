@@ -211,10 +211,16 @@ where
 
             height
         } else {
-            input.target()
+            // It's possible for a pipeline sync to be executed with a None target, e.g. after a
+            // stage was manually dropped, and `reth node` is then called without a `--debug.tip`.
+            //
+            // In this case we don't want to simply default to zero, as that would overwrite the
+            // previously stored checkpoint block number. Instead we default to that previous
+            // checkpoint.
+            input.target.unwrap_or_else(|| input.checkpoint().block_number)
         };
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(height), done: height == input.target() })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(height), done: height >= input.target() })
     }
 
     fn unwind(

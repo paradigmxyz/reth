@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
+revm.workspace = true
 revm-bytecode.workspace = true
 revm-database.workspace = true
 reth-engine-primitives.workspace = true
@@ -38,3 +39,13 @@ jsonrpsee.workspace = true
 pretty_assertions.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+alloy-eips.workspace = true
+reth-chainspec.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-evm-ethereum.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-revm = { workspace = true, features = ["test-utils"] }
+reth-testing-utils.workspace = true
+tempfile.workspace = true
