@@ -388,7 +388,9 @@ impl ExecutionCache {
     /// Returns an error if the state updates are inconsistent and should be discarded.
     #[instrument(target = "engine::tree", skip_all)]
     pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
-        let _enter = info_span!("contracts", len = state_updates.contracts.len()).entered();
+        let _enter =
+            info_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
+                .entered();
         // Insert bytecodes
         for (code_hash, bytecode) in &state_updates.contracts {
             self.code_cache.insert(*code_hash, Some(Bytecode(bytecode.clone())));
@@ -396,6 +398,7 @@ impl ExecutionCache {
         drop(_enter);
 
         let _enter = info_span!(
+            target: "engine::tree",
             "accounts",
             accounts = state_updates.state.len(),
             storages =
@@ -444,8 +447,6 @@ impl ExecutionCache {
 
         // invalidate storage for all destroyed accounts
         self.invalidate_storages(invalidated_accounts);
-
-        drop(_enter);
 
         Ok(())
     }
