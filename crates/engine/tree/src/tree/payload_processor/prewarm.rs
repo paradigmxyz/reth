@@ -123,7 +123,7 @@ where
                 transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
-                span: tracing::Span::current(),
+                span: trace_span!("prewarm", max_concurrency, transaction_count_hint),
             },
             actions_tx,
         )
@@ -145,7 +145,7 @@ where
         let span = self.span.clone();
 
         self.executor.spawn_blocking(move || {
-            let _enter = span.enter();
+            let _enter = trace_span!(parent: span, "spawn_all").entered();
 
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0usize;
