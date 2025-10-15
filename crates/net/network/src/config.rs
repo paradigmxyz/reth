@@ -226,6 +226,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     handshake: Arc<dyn EthRlpxHandshake>,
     /// List of block hashes to check for required blocks.
     required_block_hashes: Vec<B256>,
+    /// Optional network id
+    network_id: Option<u64>,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -267,6 +269,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
             required_block_hashes: Vec::new(),
+            network_id: None,
         }
     }
 
@@ -586,6 +589,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self.handshake = handshake;
         self
     }
+    
+    /// Set the optional network id.
+    pub const fn network_id(mut self, network_id: Option<u64>) -> Self {
+        self.network_id = network_id;
+        self
+    }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
@@ -620,6 +629,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             nat,
             handshake,
             required_block_hashes,
+            network_id,
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
@@ -652,13 +662,17 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let fork_filter = chain_spec.fork_filter(head);
 
         // get the chain id
-        let chain_id = chain_spec.chain().id();
+        let chain_id = if let Some(id) = network_id {
+            id
+        } else {
+            chain_spec.chain().id()
+        };
 
         // If default DNS config is used then we add the known dns network to bootstrap from
         if let Some(dns_networks) =
-            dns_discovery_config.as_mut().and_then(|c| c.bootstrap_dns_networks.as_mut()) &&
-            dns_networks.is_empty() &&
-            let Some(link) = chain_spec.chain().public_dns_network_protocol()
+            dns_discovery_config.as_mut().and_then(|c| c.bootstrap_dns_networks.as_mut())
+            && dns_networks.is_empty()
+            && let Some(link) = chain_spec.chain().public_dns_network_protocol()
         {
             dns_networks.insert(link.parse().expect("is valid DNS link entry"));
         }
