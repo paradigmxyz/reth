@@ -245,11 +245,11 @@ where
         response: oneshot::Sender<RequestResult<Receipts69<C::Receipt>>>,
     ) {
         self.metrics.eth_receipts_requests_received_total.increment(1);
-        
+
         let receipts = self.get_response_items(
             request.0,
             |hash| self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default(),
-            MAX_RECEIPTS_SERVE
+            MAX_RECEIPTS_SERVE,
         );
 
         let _ = response.send(Ok(Receipts69(receipts)));
