@@ -66,7 +66,7 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    blobstore::BlobStore,
+    blobstore::{BlobSidecarConverter, BlobStore},
     error::{PoolError, PoolErrorKind, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     metrics::BlobStoreMetrics,
@@ -97,7 +97,15 @@ use reth_execution_types::ChangedAccount;
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, Typed2718};
 use reth_primitives_traits::Recovered;
 use rustc_hash::FxHashMap;
-use std::{collections::HashSet, fmt, sync::Arc, time::Instant};
+use std::{
+    collections::HashSet,
+    fmt,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 mod events;
@@ -126,6 +134,8 @@ pub const NEW_TX_LISTENER_BUFFER_SIZE: usize = 1024;
 
 const BLOB_SIDECAR_LISTENER_BUFFER_SIZE: usize = 512;
 
+const MAX_BLOB_SIDECAR_CONVERTER_CONCURRENCY: usize = 5;
+
 /// Transaction pool internals.
 pub struct PoolInner<V, T, S>
 where
@@ -151,6 +161,12 @@ where
     blob_transaction_sidecar_listener: Mutex<Vec<BlobTransactionSidecarListener>>,
     /// Metrics for the blob store
     blob_store_metrics: BlobStoreMetrics,
+
+    // TODO: remove below fields after Osaka hardfork
+    /// Converter for blob sidecars.
+    blob_sidecar_converter: BlobSidecarConverter,
+    /// Whether EIP-7594 is activated.
+    eip7594_activated: AtomicBool,
 }
 
 // === impl PoolInner ===
@@ -174,7 +190,21 @@ where
             config,
             blob_store,
             blob_store_metrics: Default::default(),
+            blob_sidecar_converter: BlobSidecarConverter::new(
+                MAX_BLOB_SIDECAR_CONVERTER_CONCURRENCY,
+            ),
+            eip7594_activated: Default::default(),
         }
+    }
+
+    /// Returns `true` if EIP-7594 is activated.
+    pub fn is_eip7594_activated(&self) -> bool {
+        self.eip7594_activated.load(Ordering::Relaxed)
+    }
+
+    /// Returns the blob sidecar converter.
+    pub const fn blob_sidecar_converter(&self) -> &BlobSidecarConverter {
+        &self.blob_sidecar_converter
     }
 
     /// Returns the configured blob store.
@@ -394,6 +424,10 @@ where
             new_tip, changed_accounts, mined_transactions, update_kind, ..
         } = update;
         self.validator.on_new_head_block(new_tip);
+
+        if update.eip7594_activated {
+            self.eip7594_activated.store(true, Ordering::Relaxed);
+        }
 
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
 

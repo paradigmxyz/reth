@@ -293,7 +293,7 @@ pub use crate::{
         TransactionValidator, ValidPoolTransaction,
     },
 };
-use crate::{identifier::TransactionId, pool::PoolInner};
+use crate::{identifier::TransactionId, pool::PoolInner, validate::ValidTransaction};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
@@ -469,8 +469,7 @@ where
 /// implements the `TransactionPool` interface for various transaction pool API consumers.
 impl<V, T, S> TransactionPool for Pool<V, T, S>
 where
-    V: TransactionValidator,
-    <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    V: TransactionValidator<Transaction: EthPoolTransaction> + 'static,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {
@@ -511,9 +510,40 @@ where
         if transactions.is_empty() {
             return Vec::new()
         }
-        let validated = self.validate_all(origin, transactions).await;
+        let validated =
+            self.validate_all(origin, transactions).await.into_iter().filter_map(|tx| match tx {
+                TransactionValidationOutcome::Valid {
+                    transaction:
+                        ValidTransaction::ValidWithSidecar {
+                            transaction,
+                            sidecar: BlobTransactionSidecarVariant::Eip4844(sidecar),
+                        },
+                    ..
+                } if self.pool.is_eip7594_activated() => {
+                    let this = self.clone();
+                    tokio::spawn(async move {
+                        let Some(converted) =
+                            this.pool.blob_sidecar_converter().convert(sidecar).await
+                        else {
+                            return
+                        };
 
-        self.pool.add_transactions(origin, validated.into_iter())
+                        let Some(tx) = V::Transaction::try_from_eip4844(
+                            transaction.into_consensus(),
+                            converted.into(),
+                        ) else {
+                            return
+                        };
+
+                        let _ = this.add_transaction(origin, tx).await;
+                    });
+
+                    None
+                }
+                tx => Some(tx),
+            });
+
+        self.pool.add_transactions(origin, validated)
     }
 
     async fn add_transactions_with_origins(
@@ -779,9 +809,8 @@ where
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
 where
-    V: TransactionValidator,
-    <V as TransactionValidator>::Transaction: EthPoolTransaction,
-    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    V: TransactionValidator<Transaction: EthPoolTransaction> + 'static,
+    T: TransactionOrdering<Transaction = V::Transaction>,
     S: BlobStore,
 {
     #[instrument(skip(self), target = "txpool")]

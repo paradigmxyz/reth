@@ -16,7 +16,7 @@ use futures_util::{
     FutureExt, Stream, StreamExt,
 };
 use reth_chain_state::CanonStateNotification;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives_traits::{
@@ -103,7 +103,7 @@ where
     N: NodePrimitives,
     Client: StateProviderFactory
         + BlockReaderIdExt<Header = N::BlockHeader>
-        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader>>
+        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
         + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
@@ -129,7 +129,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     N: NodePrimitives,
     Client: StateProviderFactory
         + BlockReaderIdExt<Header = N::BlockHeader>
-        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader>>
+        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
         + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
@@ -406,6 +406,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     // all transactions mined in the new chain need to be removed from the pool
                     mined_transactions: new_blocks.transaction_hashes().collect(),
                     update_kind: PoolUpdateKind::Reorg,
+                    eip7594_activated: chain_spec.is_osaka_active_at_timestamp(new_tip.timestamp()),
                 };
                 pool.on_canonical_state_change(update);
 
@@ -489,6 +490,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     changed_accounts,
                     mined_transactions,
                     update_kind: PoolUpdateKind::Commit,
+                    eip7594_activated: chain_spec.is_osaka_active_at_timestamp(tip.timestamp()),
                 };
                 pool.on_canonical_state_change(update);
 

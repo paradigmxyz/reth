@@ -134,6 +134,7 @@ fn canonical_state_change_bench(c: &mut Criterion) {
                             changed_accounts,
                             mined_transactions: vec![], // No transactions mined in this benchmark
                             update_kind: PoolUpdateKind::Commit,
+                            eip7594_activated: false,
                         };
 
                         (pool, update)

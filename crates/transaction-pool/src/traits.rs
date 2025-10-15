@@ -838,6 +838,8 @@ pub struct CanonicalStateUpdate<'a, B: Block> {
     pub mined_transactions: Vec<B256>,
     /// The kind of update to the canonical state.
     pub update_kind: PoolUpdateKind,
+    /// Whether EIP-7594 is activated at the tip block.
+    pub eip7594_activated: bool,
 }
 
 impl<B> CanonicalStateUpdate<'_, B>
