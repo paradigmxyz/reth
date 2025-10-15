@@ -132,6 +132,7 @@ where
                     + FromRecoveredTx<TransactionSigned>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,
+            BlockEnv = BlockEnv,
             Precompiles = PrecompilesMap,
         > + Clone
         + Debug
@@ -154,7 +155,7 @@ where
         &self.block_assembler
     }
 
-    fn evm_env(&self, header: &Header) -> Result<EvmEnv, Self::Error> {
+    fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
         Ok(EvmEnv::for_eth_block(
             header,
             self.chain_spec(),
@@ -217,6 +218,7 @@ where
                     + FromRecoveredTx<TransactionSigned>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,
+            BlockEnv = BlockEnv,
             Precompiles = PrecompilesMap,
         > + Clone
         + Debug

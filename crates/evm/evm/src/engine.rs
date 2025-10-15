@@ -2,7 +2,7 @@ use crate::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
-    /// Returns an [`EvmEnvFor`] for the given payload.
+    /// Returns an [`crate::EvmEnv`] for the given payload.
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error>;
 
     /// Returns an [`ExecutionCtxFor`] for the given payload.
