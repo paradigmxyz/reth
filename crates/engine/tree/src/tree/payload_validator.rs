@@ -892,13 +892,12 @@ where
                             (handle, StateRootStrategy::StateRootTask)
                         }
                         Err((error, txs, env, provider_builder)) => {
-                            // Failed to initialize proof task manager, fallback to parallel state
-                            // root
+                            // Failed to spawn proof workers, fallback to parallel state root
                             error!(
                                 target: "engine::tree",
                                 block=?block_num_hash,
                                 ?error,
-                                "Failed to initialize proof task manager, falling back to parallel state root"
+                                "Failed to spawn proof workers, falling back to parallel state root"
                             );
                             (
                                 self.payload_processor.spawn_cache_exclusive(
