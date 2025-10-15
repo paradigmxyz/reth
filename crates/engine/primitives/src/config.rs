@@ -10,15 +10,13 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
 
 /// Minimum number of workers we allow configuring explicitly.
-pub const MIN_WORKER_COUNT: usize = 2;
+pub const MIN_WORKER_COUNT: usize = 32;
 
 /// Returns the default number of storage worker threads based on available parallelism.
 fn default_storage_worker_count() -> usize {
     #[cfg(feature = "std")]
     {
-        std::thread::available_parallelism()
-            .map(|n| (n.get() * 2).clamp(MIN_WORKER_COUNT, 64))
-            .unwrap_or(8)
+        std::thread::available_parallelism().map_or(8, |n| n.get() * 2).min(MIN_WORKER_COUNT)
     }
     #[cfg(not(feature = "std"))]
     {

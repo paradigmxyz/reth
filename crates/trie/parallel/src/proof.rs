@@ -1,6 +1,6 @@
 use crate::{
     metrics::ParallelTrieMetrics,
-    proof_task::{AccountMultiproofInput, ProofTaskManagerHandle, StorageProofInput},
+    proof_task::{AccountMultiproofInput, ProofWorkerHandle, StorageProofInput},
     root::ParallelStateRootError,
     StorageRootTargets,
 };
@@ -37,7 +37,7 @@ pub struct ParallelProof {
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the proof worker pools.
-    proof_task_handle: ProofTaskManagerHandle,
+    proof_worker_handle: ProofWorkerHandle,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
@@ -52,7 +52,7 @@ impl ParallelProof {
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
         missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-        proof_task_handle: ProofTaskManagerHandle,
+        proof_worker_handle: ProofWorkerHandle,
     ) -> Self {
         Self {
             nodes_sorted,
@@ -61,7 +61,7 @@ impl ParallelProof {
             missed_leaves_storage_roots,
             collect_branch_node_masks: false,
             multi_added_removed_keys: None,
-            proof_task_handle,
+            proof_worker_handle,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
@@ -82,8 +82,8 @@ impl ParallelProof {
         self.multi_added_removed_keys = multi_added_removed_keys;
         self
     }
-    /// Dispatches a storage proof task and returns a receiver for the result.
-    fn dispatch_storage_proof(
+    /// Queues a storage proof task and returns a receiver for the result.
+    fn queue_storage_proof(
         &self,
         hashed_address: B256,
         prefix_set: PrefixSet,
@@ -100,8 +100,8 @@ impl ParallelProof {
             self.multi_added_removed_keys.clone(),
         );
 
-        self.proof_task_handle
-            .dispatch_storage_proof(input)
+        self.proof_worker_handle
+            .queue_storage_proof(input)
             .map_err(|e| ParallelStateRootError::Other(e.to_string()))
     }
 
@@ -122,7 +122,7 @@ impl ParallelProof {
             "Starting storage proof generation"
         );
 
-        let receiver = self.dispatch_storage_proof(hashed_address, prefix_set, target_slots)?;
+        let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots)?;
         let proof_result = receiver.recv().map_err(|_| {
             ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
                 format!("channel closed for {hashed_address}"),
@@ -170,16 +170,10 @@ impl ParallelProof {
         // Extend prefix sets with targets
         let prefix_sets = Self::extend_prefix_sets_with_targets(&self.prefix_sets, &targets);
 
-        // Compute total targets count for trace logs only
-        let total_targets = if tracing::enabled!(target: "trie::parallel_proof", tracing::Level::TRACE)
-        {
-            Some(StorageRootTargets::count(
-                &prefix_sets.account_prefix_set,
-                &prefix_sets.storage_prefix_sets,
-            ))
-        } else {
-            None
-        };
+        let storage_root_targets_len = StorageRootTargets::count(
+            &prefix_sets.account_prefix_set,
+            &prefix_sets.storage_prefix_sets,
+        );
 
         trace!(
             target: "trie::parallel_proof",
@@ -198,8 +192,8 @@ impl ParallelProof {
         };
 
         let receiver = self
-            .proof_task_handle
-            .dispatch_account_multiproof(input)
+            .proof_worker_handle
+            .queue_account_multiproof(input)
             .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
         // Wait for account multiproof result from worker
@@ -230,7 +224,7 @@ impl ParallelProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proof_task::{ProofTaskCtx, ProofTaskManagerHandle};
+    use crate::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use alloy_primitives::{
         keccak256,
         map::{B256Set, DefaultHashBuilder, HashMap},
@@ -312,16 +306,15 @@ mod tests {
 
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_task_handle =
-            ProofTaskManagerHandle::new(rt.handle().clone(), consistent_view, task_ctx, 1, 1)
-                .unwrap();
+        let proof_worker_handle =
+            ProofWorkerHandle::new(rt.handle().clone(), consistent_view, task_ctx, 1, 1).unwrap();
 
         let parallel_result = ParallelProof::new(
             Default::default(),
             Default::default(),
             Default::default(),
             Default::default(),
-            proof_task_handle.clone(),
+            proof_worker_handle.clone(),
         )
         .decoded_multiproof(targets.clone())
         .unwrap();
@@ -350,6 +343,6 @@ mod tests {
         assert_eq!(parallel_result, sequential_result_decoded);
 
         // Workers shut down automatically when handle is dropped
-        drop(proof_task_handle);
+        drop(proof_worker_handle);
     }
 }

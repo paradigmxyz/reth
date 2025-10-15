@@ -32,7 +32,7 @@ use reth_provider::{
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
 use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofTaskManagerHandle},
+    proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
@@ -203,7 +203,7 @@ where
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
-        let proof_handle = match ProofTaskManagerHandle::new(
+        let proof_handle = match ProofWorkerHandle::new(
             self.executor.handle().clone(),
             consistent_view,
             task_ctx,
@@ -393,7 +393,7 @@ where
     fn spawn_sparse_trie_task<BPF>(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
-        proof_task_handle: BPF,
+        proof_worker_handle: BPF,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
     ) where
         BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
@@ -423,7 +423,7 @@ where
         let task =
             SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
                 sparse_trie_rx,
-                proof_task_handle,
+                proof_worker_handle,
                 self.trie_metrics.clone(),
                 sparse_state_trie,
             );
