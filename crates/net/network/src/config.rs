@@ -656,8 +656,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         hello_message.port = listener_addr.port();
 
         // set the status
-        let status = UnifiedStatus::spec_builder(&chain_spec, &head);
-
+        let mut status = UnifiedStatus::spec_builder(&chain_spec, &head);
+        
+        if let Some(id) = network_id {
+            status.chain = id.into();
+        }
+        
         // set a fork filter based on the chain spec and head
         let fork_filter = chain_spec.fork_filter(head);
 
