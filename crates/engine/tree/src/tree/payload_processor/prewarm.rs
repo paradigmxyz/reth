@@ -39,7 +39,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, instrument, trace, trace_span, warn};
+use tracing::{debug, info_span, instrument, trace, warn};
 
 /// A wrapper for transactions that includes their index in the block.
 #[derive(Clone)]
@@ -123,7 +123,7 @@ where
                 transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
-                span: trace_span!("prewarm", max_concurrency, transaction_count_hint),
+                span: info_span!("prewarm", max_concurrency, transaction_count_hint),
             },
             actions_tx,
         )
@@ -145,7 +145,7 @@ where
         let span = self.span.clone();
 
         self.executor.spawn_blocking(move || {
-            let _enter = trace_span!(parent: span, "spawn_all").entered();
+            let _enter = info_span!(parent: span, "spawn_all").entered();
 
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0usize;
@@ -450,7 +450,7 @@ where
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
         while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
-            let _enter = trace_span!("prewarm tx", index, tx_hash=%tx.tx().tx_hash()).entered();
+            let _enter = info_span!("prewarm tx", index, tx_hash=%tx.tx().tx_hash()).entered();
 
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
@@ -507,7 +507,7 @@ where
     {
         let (tx, rx) = mpsc::channel();
         let ctx = self.clone();
-        let span = trace_span!("prewarm worker", idx);
+        let span = info_span!("prewarm worker", idx);
 
         executor.spawn_blocking(move || {
             let _enter = span.enter();

@@ -44,7 +44,7 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInpu
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use tracing::{debug, error, info, instrument, trace, trace_span, warn};
+use tracing::{debug, error, info, info_span, instrument, trace, warn};
 
 /// Context providing access to tree state during validation.
 ///
@@ -366,7 +366,7 @@ where
         let block_num_hash = input.num_hash();
 
         trace!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Fetching block state provider");
-        let _span = trace_span!("state provider").entered();
+        let _span = info_span!("state provider").entered();
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
@@ -390,7 +390,7 @@ where
             .into())
         };
 
-        let evm_env = trace_span!("evm env")
+        let evm_env = info_span!("evm env")
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 

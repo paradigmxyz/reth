@@ -15,7 +15,7 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-use tracing::{debug, trace, trace_span};
+use tracing::{debug, info_span, trace};
 
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
@@ -162,7 +162,7 @@ where
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
         .par_bridge()
         .map(|(address, storage, storage_trie)| {
-            let span = trace_span!(target: "engine::root::sparse", "Storage trie", ?address);
+            let span = info_span!(target: "engine::root::sparse", "Storage trie", ?address);
             let _enter = span.enter();
             trace!(target: "engine::root::sparse", "Updating storage");
             let storage_provider = blinded_provider_factory.storage_node_provider(address);
