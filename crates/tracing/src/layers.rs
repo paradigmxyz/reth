@@ -6,10 +6,8 @@ use std::{
     fmt,
     path::{Path, PathBuf},
 };
-use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
-use url::Url;
 
 /// A worker guard returned by the file layer.
 ///
@@ -131,14 +129,14 @@ impl Layers {
     pub fn with_span_layer(
         &mut self,
         service_name: String,
-        endpoint_exporter: Url,
+        endpoint_exporter: url::Url,
         level: tracing::Level,
     ) -> eyre::Result<()> {
         // Create the span provider
 
         let span_layer = span_layer(service_name, &endpoint_exporter)
             .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?
-            .with_filter(LevelFilter::from_level(level));
+            .with_filter(tracing::level_filters::LevelFilter::from_level(level));
 
         self.add_layer(span_layer);
 
