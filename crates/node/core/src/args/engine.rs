@@ -108,6 +108,16 @@ pub struct EngineArgs {
     /// See `TreeConfig::unwind_canonical_header` for more details.
     #[arg(long = "engine.allow-unwind-canonical-header", default_value = "false")]
     pub allow_unwind_canonical_header: bool,
+
+    /// Configure the number of storage proof workers in the Tokio blocking pool.
+    /// If not specified, defaults to 2x available parallelism, clamped between 2 and 64.
+    #[arg(long = "engine.storage-worker-count")]
+    pub storage_worker_count: Option<usize>,
+
+    /// Configure the number of account proof workers in the Tokio blocking pool.
+    /// If not specified, defaults to the same count as storage workers.
+    #[arg(long = "engine.account-worker-count")]
+    pub account_worker_count: Option<usize>,
 }
 
 #[allow(deprecated)]
@@ -134,6 +144,8 @@ impl Default for EngineArgs {
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
+            storage_worker_count: None,
+            account_worker_count: None,
         }
     }
 }
@@ -141,7 +153,7 @@ impl Default for EngineArgs {
 impl EngineArgs {
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
-        TreeConfig::default()
+        let mut config = TreeConfig::default()
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
@@ -159,7 +171,17 @@ impl EngineArgs {
             .with_always_process_payload_attributes_on_canonical_head(
                 self.always_process_payload_attributes_on_canonical_head,
             )
-            .with_unwind_canonical_header(self.allow_unwind_canonical_header)
+            .with_unwind_canonical_header(self.allow_unwind_canonical_header);
+
+        if let Some(count) = self.storage_worker_count {
+            config = config.with_storage_worker_count(count);
+        }
+
+        if let Some(count) = self.account_worker_count {
+            config = config.with_account_worker_count(count);
+        }
+
+        config
     }
 }
 

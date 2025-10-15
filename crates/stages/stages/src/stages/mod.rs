@@ -72,9 +72,7 @@ mod tests {
         StaticFileProviderFactory, StorageReader,
     };
     use reth_prune_types::{PruneMode, PruneModes};
-    use reth_stages_api::{
-        ExecInput, ExecutionStageThresholds, PipelineTarget, Stage, StageCheckpoint, StageId,
-    };
+    use reth_stages_api::{ExecInput, ExecutionStageThresholds, Stage, StageCheckpoint, StageId};
     use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_receipt, BlockRangeParams,
@@ -301,7 +299,7 @@ mod tests {
         prune_count: usize,
         segment: StaticFileSegment,
         is_full_node: bool,
-        expected: Option<PipelineTarget>,
+        expected: Option<u64>,
     ) {
         // We recreate the static file provider, since consistency heals are done on fetching the
         // writer for the first time.
@@ -323,11 +321,18 @@ mod tests {
 
         // We recreate the static file provider, since consistency heals are done on fetching the
         // writer for the first time.
+        let mut provider = db.factory.database_provider_ro().unwrap();
+        if is_full_node {
+            provider.set_prune_modes(PruneModes {
+                receipts: Some(PruneMode::Full),
+                ..Default::default()
+            });
+        }
         let mut static_file_provider = db.factory.static_file_provider();
         static_file_provider = StaticFileProvider::read_write(static_file_provider.path()).unwrap();
         assert!(matches!(
             static_file_provider
-                .check_consistency(&db.factory.database_provider_ro().unwrap(), is_full_node,),
+                .check_consistency(&provider),
             Ok(e) if e == expected
         ));
     }
@@ -338,7 +343,7 @@ mod tests {
         db: &TestStageDB,
         stage_id: StageId,
         checkpoint_block_number: BlockNumber,
-        expected: Option<PipelineTarget>,
+        expected: Option<u64>,
     ) {
         let provider_rw = db.factory.provider_rw().unwrap();
         provider_rw
@@ -349,18 +354,15 @@ mod tests {
         assert!(matches!(
             db.factory
                 .static_file_provider()
-                .check_consistency(&db.factory.database_provider_ro().unwrap(), false,),
+                .check_consistency(&db.factory.database_provider_ro().unwrap()),
             Ok(e) if e == expected
         ));
     }
 
     /// Inserts a dummy value at key and compare the check consistency result against the expected
     /// one.
-    fn update_db_and_check<T: Table<Key = u64>>(
-        db: &TestStageDB,
-        key: u64,
-        expected: Option<PipelineTarget>,
-    ) where
+    fn update_db_and_check<T: Table<Key = u64>>(db: &TestStageDB, key: u64, expected: Option<u64>)
+    where
         <T as Table>::Value: Default,
     {
         update_db_with_and_check::<T>(db, key, expected, &Default::default());
@@ -371,7 +373,7 @@ mod tests {
     fn update_db_with_and_check<T: Table<Key = u64>>(
         db: &TestStageDB,
         key: u64,
-        expected: Option<PipelineTarget>,
+        expected: Option<u64>,
         value: &T::Value,
     ) {
         let provider_rw = db.factory.provider_rw().unwrap();
@@ -382,7 +384,7 @@ mod tests {
         assert!(matches!(
             db.factory
                 .static_file_provider()
-                .check_consistency(&db.factory.database_provider_ro().unwrap(), false),
+                .check_consistency(&db.factory.database_provider_ro().unwrap()),
             Ok(e) if e == expected
         ));
     }
@@ -393,7 +395,7 @@ mod tests {
         let db_provider = db.factory.database_provider_ro().unwrap();
 
         assert!(matches!(
-            db.factory.static_file_provider().check_consistency(&db_provider, false),
+            db.factory.static_file_provider().check_consistency(&db_provider),
             Ok(None)
         ));
     }
@@ -415,7 +417,7 @@ mod tests {
             1,
             StaticFileSegment::Receipts,
             archive_node,
-            Some(PipelineTarget::Unwind(88)),
+            Some(88),
         );
 
         simulate_behind_checkpoint_corruption(
@@ -423,7 +425,7 @@ mod tests {
             3,
             StaticFileSegment::Headers,
             archive_node,
-            Some(PipelineTarget::Unwind(86)),
+            Some(86),
         );
     }
 
@@ -472,7 +474,7 @@ mod tests {
         );
 
         // When a checkpoint is ahead, we request a pipeline unwind.
-        save_checkpoint_and_check(&db, StageId::Headers, 91, Some(PipelineTarget::Unwind(block)));
+        save_checkpoint_and_check(&db, StageId::Headers, 91, Some(block));
     }
 
     #[test]
@@ -485,7 +487,7 @@ mod tests {
             .unwrap();
 
         // Creates a gap of one header: static_file <missing> db
-        update_db_and_check::<tables::Headers>(&db, current + 2, Some(PipelineTarget::Unwind(89)));
+        update_db_and_check::<tables::Headers>(&db, current + 2, Some(89));
 
         // Fill the gap, and ensure no unwind is necessary.
         update_db_and_check::<tables::Headers>(&db, current + 1, None);
@@ -504,7 +506,7 @@ mod tests {
         update_db_with_and_check::<tables::Transactions>(
             &db,
             current + 2,
-            Some(PipelineTarget::Unwind(89)),
+            Some(89),
             &TxLegacy::default().into_signed(Signature::test_signature()).into(),
         );
 
@@ -527,7 +529,7 @@ mod tests {
             .unwrap();
 
         // Creates a gap of one receipt: static_file <missing> db
-        update_db_and_check::<tables::Receipts>(&db, current + 2, Some(PipelineTarget::Unwind(89)));
+        update_db_and_check::<tables::Receipts>(&db, current + 2, Some(89));
 
         // Fill the gap, and ensure no unwind is necessary.
         update_db_and_check::<tables::Receipts>(&db, current + 1, None);

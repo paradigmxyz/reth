@@ -52,7 +52,7 @@ engine-auth:
 # 7002 related tests - post-fork test, should fix for spec compliance but not
 # realistic on mainnet
 # 7251 related tests - modified contract, not necessarily practical on mainnet,
-# 7594: https://github.com/paradigmxyz/reth/issues/18471
+# 7594: https://github.com/paradigmxyz/reth/issues/18975
 # worth re-visiting when more of these related tests are passing
 eest/consume-engine:
   - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test_engine-zero_nonce]-reth

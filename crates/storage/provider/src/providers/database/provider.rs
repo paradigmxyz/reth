@@ -939,6 +939,19 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
             })
             .collect()
     }
+
+    fn get_account_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
+        self.tx
+            .cursor_dup_read::<tables::AccountChangeSets>()?
+            .seek_by_key_subkey(block_number, address)?
+            .filter(|acc| acc.address == address)
+            .map(Ok)
+            .transpose()
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
@@ -1968,7 +1981,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                 let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
                 // delete previous value
-                // TODO: This does not use dupsort features
                 if plain_storage_cursor
                     .seek_by_key_subkey(*address, *storage_key)?
                     .filter(|s| s.key == *storage_key)
@@ -2067,7 +2079,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                 let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
                 // delete previous value
-                // TODO: This does not use dupsort features
                 if plain_storage_cursor
                     .seek_by_key_subkey(*address, *storage_key)?
                     .filter(|s| s.key == *storage_key)
@@ -2855,7 +2866,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> ChainStateBlockReader for DatabaseProvide
         let mut finalized_blocks = self
             .tx
             .cursor_read::<tables::ChainState>()?
-            .walk(Some(tables::ChainStateKey::LastSafeBlockBlock))?
+            .walk(Some(tables::ChainStateKey::LastSafeBlock))?
             .take(1)
             .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
 
@@ -2872,9 +2883,7 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
     }
 
     fn save_safe_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
-        Ok(self
-            .tx
-            .put::<tables::ChainState>(tables::ChainStateKey::LastSafeBlockBlock, block_number)?)
+        Ok(self.tx.put::<tables::ChainState>(tables::ChainStateKey::LastSafeBlock, block_number)?)
     }
 }
 
