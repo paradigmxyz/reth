@@ -21,6 +21,14 @@ fn default_storage_worker_count() -> usize {
     }
 }
 
+/// Returns the default number of account worker threads.
+///
+/// Account workers coordinate storage proof collection and account trie traversal.
+/// They are set to the same count as storage workers for simplicity.
+fn default_account_worker_count() -> usize {
+    default_storage_worker_count()
+}
+
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 10;
 
@@ -123,6 +131,8 @@ pub struct TreeConfig {
     allow_unwind_canonical_header: bool,
     /// Number of storage proof worker threads.
     storage_worker_count: usize,
+    /// Number of account proof worker threads.
+    account_worker_count: usize,
 }
 
 impl Default for TreeConfig {
@@ -150,6 +160,7 @@ impl Default for TreeConfig {
             prewarm_max_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
+            account_worker_count: default_account_worker_count(),
         }
     }
 }
@@ -180,6 +191,7 @@ impl TreeConfig {
         prewarm_max_concurrency: usize,
         allow_unwind_canonical_header: bool,
         storage_worker_count: usize,
+        account_worker_count: usize,
     ) -> Self {
         assert!(max_proof_task_concurrency > 0, "max_proof_task_concurrency must be at least 1");
         Self {
@@ -205,6 +217,7 @@ impl TreeConfig {
             prewarm_max_concurrency,
             allow_unwind_canonical_header,
             storage_worker_count,
+            account_worker_count,
         }
     }
 
@@ -480,6 +493,17 @@ impl TreeConfig {
     /// Setter for the number of storage proof worker threads.
     pub const fn with_storage_worker_count(mut self, storage_worker_count: usize) -> Self {
         self.storage_worker_count = storage_worker_count;
+        self
+    }
+
+    /// Return the number of account proof worker threads.
+    pub const fn account_worker_count(&self) -> usize {
+        self.account_worker_count
+    }
+
+    /// Setter for the number of account proof worker threads.
+    pub const fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
+        self.account_worker_count = account_worker_count;
         self
     }
 }
