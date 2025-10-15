@@ -260,35 +260,33 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
         &self,
         basefee: u64,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let ids = self.satisfy_base_fee_ids(basefee as u128);
-        let mut txs = Vec::with_capacity(ids.len());
-        for id in ids {
-            txs.push(self.get(&id).expect("transaction exists").transaction.clone().into());
-        }
+        let mut txs = Vec::new();
+        self.satisfy_base_fee_ids(basefee as u128, |tx| {
+            txs.push(tx.clone());
+        });
         txs
     }
 
     /// Returns all transactions that satisfy the given basefee.
-    fn satisfy_base_fee_ids(&self, basefee: u128) -> Vec<TransactionId> {
-        let mut transactions = Vec::new();
-        {
-            let mut iter = self.by_id.iter().peekable();
+    fn satisfy_base_fee_ids<F>(&self, basefee: u128, mut tx_handler: F)
+    where
+        F: FnMut(&Arc<ValidPoolTransaction<T>>),
+    {
+        let mut iter = self.by_id.iter().peekable();
 
-            while let Some((id, tx)) = iter.next() {
-                if tx.transaction.transaction.max_fee_per_gas() < basefee {
-                    // still parked -> skip descendant transactions
-                    'this: while let Some((peek, _)) = iter.peek() {
-                        if peek.sender != id.sender {
-                            break 'this
-                        }
-                        iter.next();
+        while let Some((id, tx)) = iter.next() {
+            if tx.transaction.transaction.max_fee_per_gas() < basefee {
+                // still parked -> skip descendant transactions
+                'this: while let Some((peek, _)) = iter.peek() {
+                    if peek.sender != id.sender {
+                        break 'this
                     }
-                } else {
-                    transactions.push(*id);
+                    iter.next();
                 }
+            } else {
+                tx_handler(&tx.transaction);
             }
         }
-        transactions
     }
 
     /// Removes all transactions from this subpool that can afford the given basefee,
@@ -306,7 +304,10 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     where
         F: FnMut(Arc<ValidPoolTransaction<T>>),
     {
-        let to_remove = self.satisfy_base_fee_ids(basefee as u128);
+        let mut to_remove = Vec::new();
+        self.satisfy_base_fee_ids(basefee as u128, |tx| {
+            to_remove.push(*tx.id());
+        });
 
         for id in to_remove {
             if let Some(tx) = self.remove_transaction(&id) {

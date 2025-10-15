@@ -6,8 +6,31 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
-/// Default maximum concurrency for proof tasks
+/// Default maximum concurrency for on-demand proof tasks (blinded nodes)
 pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
+
+/// Minimum number of workers we allow configuring explicitly.
+pub const MIN_WORKER_COUNT: usize = 32;
+
+/// Returns the default number of storage worker threads based on available parallelism.
+fn default_storage_worker_count() -> usize {
+    #[cfg(feature = "std")]
+    {
+        std::thread::available_parallelism().map_or(8, |n| n.get() * 2).min(MIN_WORKER_COUNT)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        8
+    }
+}
+
+/// Returns the default number of account worker threads.
+///
+/// Account workers coordinate storage proof collection and account trie traversal.
+/// They are set to the same count as storage workers for simplicity.
+fn default_account_worker_count() -> usize {
+    default_storage_worker_count()
+}
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 10;
@@ -109,6 +132,10 @@ pub struct TreeConfig {
     prewarm_max_concurrency: usize,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
+    /// Number of storage proof worker threads.
+    storage_worker_count: usize,
+    /// Number of account proof worker threads.
+    account_worker_count: usize,
 }
 
 impl Default for TreeConfig {
@@ -135,6 +162,8 @@ impl Default for TreeConfig {
             always_process_payload_attributes_on_canonical_head: false,
             prewarm_max_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
             allow_unwind_canonical_header: false,
+            storage_worker_count: default_storage_worker_count(),
+            account_worker_count: default_account_worker_count(),
         }
     }
 }
@@ -164,7 +193,10 @@ impl TreeConfig {
         always_process_payload_attributes_on_canonical_head: bool,
         prewarm_max_concurrency: usize,
         allow_unwind_canonical_header: bool,
+        storage_worker_count: usize,
+        account_worker_count: usize,
     ) -> Self {
+        assert!(max_proof_task_concurrency > 0, "max_proof_task_concurrency must be at least 1");
         Self {
             persistence_threshold,
             memory_block_buffer_target,
@@ -187,6 +219,8 @@ impl TreeConfig {
             always_process_payload_attributes_on_canonical_head,
             prewarm_max_concurrency,
             allow_unwind_canonical_header,
+            storage_worker_count,
+            account_worker_count,
         }
     }
 
@@ -394,6 +428,7 @@ impl TreeConfig {
         mut self,
         max_proof_task_concurrency: u64,
     ) -> Self {
+        assert!(max_proof_task_concurrency > 0, "max_proof_task_concurrency must be at least 1");
         self.max_proof_task_concurrency = max_proof_task_concurrency;
         self
     }
@@ -451,5 +486,27 @@ impl TreeConfig {
     /// Return the prewarm max concurrency.
     pub const fn prewarm_max_concurrency(&self) -> usize {
         self.prewarm_max_concurrency
+    }
+
+    /// Return the number of storage proof worker threads.
+    pub const fn storage_worker_count(&self) -> usize {
+        self.storage_worker_count
+    }
+
+    /// Setter for the number of storage proof worker threads.
+    pub fn with_storage_worker_count(mut self, storage_worker_count: usize) -> Self {
+        self.storage_worker_count = storage_worker_count.max(MIN_WORKER_COUNT);
+        self
+    }
+
+    /// Return the number of account proof worker threads.
+    pub const fn account_worker_count(&self) -> usize {
+        self.account_worker_count
+    }
+
+    /// Setter for the number of account proof worker threads.
+    pub fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
+        self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
+        self
     }
 }

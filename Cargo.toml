@@ -325,6 +325,12 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 
+[profile.reproducible]
+inherits = "release"
+panic = "abort"
+codegen-units = 1
+incremental = false
+
 [workspace.dependencies]
 # reth
 op-reth = { path = "crates/optimism/bin" }
@@ -448,7 +454,8 @@ reth-storage-errors = { path = "crates/storage/errors", default-features = false
 reth-tasks = { path = "crates/tasks" }
 reth-testing-utils = { path = "testing/testing-utils" }
 reth-tokio-util = { path = "crates/tokio-util" }
-reth-tracing = { path = "crates/tracing" }
+reth-tracing = { path = "crates/tracing", default-features = false }
+reth-tracing-otlp = { path = "crates/tracing-otlp" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie/trie" }
 reth-trie-common = { path = "crates/trie/common", default-features = false }
@@ -642,6 +649,13 @@ c-kzg = "2.1.4"
 
 # config
 toml = "0.8"
+
+# otlp obs
+opentelemetry_sdk = "0.31"
+opentelemetry = "0.31"
+opentelemetry-otlp = "0.31"
+opentelemetry-semantic-conventions = "0.31"
+tracing-opentelemetry = "0.32"
 
 # misc-testing
 arbitrary = "1.3"

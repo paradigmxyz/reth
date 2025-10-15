@@ -211,6 +211,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
     use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_consensus_common::validation::validate_against_parent_gas_limit;
@@ -230,7 +231,7 @@ mod tests {
         let child = header_with_gas_limit((parent.gas_limit + 5) as u64);
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
             Ok(())
         );
     }
@@ -241,7 +242,7 @@ mod tests {
         let child = header_with_gas_limit(MINIMUM_GAS_LIMIT - 1);
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
             Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit as u64 })
         );
     }
@@ -254,7 +255,7 @@ mod tests {
         );
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
             Err(ConsensusError::GasLimitInvalidIncrease {
                 parent_gas_limit: parent.gas_limit,
                 child_gas_limit: child.gas_limit,
@@ -268,7 +269,7 @@ mod tests {
         let child = header_with_gas_limit(parent.gas_limit - 5);
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
             Ok(())
         );
     }
@@ -281,7 +282,7 @@ mod tests {
         );
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
             Err(ConsensusError::GasLimitInvalidDecrease {
                 parent_gas_limit: parent.gas_limit,
                 child_gas_limit: child.gas_limit,

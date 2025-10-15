@@ -1,48 +1,34 @@
-#![allow(unused)]
 use crate::{
     providers::{ConsistentProvider, ProviderNodeTypes, StaticFileProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
-    ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProvider,
-    DatabaseProviderFactory, FullProvider, HashedPostStateProvider, HeaderProvider, ProviderError,
-    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProviderFactory,
+    HashedPostStateProvider, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
+    StateProviderFactory, StateReader, StaticFileProviderFactory, TransactionVariant,
+    TransactionsProvider,
 };
-use alloy_consensus::{transaction::TransactionMeta, Header};
-use alloy_eips::{
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
-};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
+use alloy_consensus::transaction::TransactionMeta;
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
     MemoryOverlayStateProvider,
 };
-use reth_chainspec::{ChainInfo, EthereumHardforks};
-use reth_db_api::{
-    models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices},
-    transaction::DbTx,
-    Database,
-};
-use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
-use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_chainspec::ChainInfo;
+use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_primitives_traits::{
-    Account, BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
-};
+use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{
-    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, StorageChangeSetReader,
-};
+use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{HashedPostState, KeccakKeyHasher};
 use revm_database::BundleState;
 use std::{
-    ops::{Add, RangeBounds, RangeInclusive, Sub},
+    ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
@@ -182,7 +168,7 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
 impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
     type Header = HeaderTy<N>;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         self.consistent_provider()?.header(block_hash)
     }
 
@@ -190,7 +176,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
         self.consistent_provider()?.header_by_number(num)
     }
 
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
+    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
         self.consistent_provider()?.header_td(hash)
     }
 
@@ -341,6 +327,10 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         self.consistent_provider()?.recovered_block_range(range)
+    }
+
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        self.consistent_provider()?.block_by_transaction_id(id)
     }
 }
 
@@ -712,6 +702,14 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         self.consistent_provider()?.account_block_changeset(block_number)
     }
+
+    fn get_account_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
+        self.consistent_provider()?.get_account_before_block(block_number, address)
+    }
 }
 
 impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
@@ -749,8 +747,7 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        BlockWriter, CanonChainTracker, ProviderFactory, StaticFileProviderFactory,
-        StaticFileWriter,
+        BlockWriter, CanonChainTracker, ProviderFactory,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
@@ -761,22 +758,12 @@ mod tests {
         CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
         NewCanonicalChain,
     };
-    use reth_chainspec::{
-        ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
-    };
-    use reth_db_api::{
-        cursor::DbCursorRO,
-        models::{AccountBeforeTx, StoredBlockBodyIndices},
-        tables,
-        transaction::DbTx,
-    };
+    use reth_chainspec::{ChainSpec, MAINNET};
+    use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
-    use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
+    use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives_traits::{
-        BlockBody, RecoveredBlock, SealedBlock, SignedTransaction, SignerRecoverable,
-    };
-    use reth_static_file_types::StaticFileSegment;
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
@@ -789,9 +776,8 @@ mod tests {
     };
     use revm_database::{BundleState, OriginalValuesKnown};
     use std::{
-        ops::{Bound, Deref, Range, RangeBounds},
+        ops::{Bound, Range, RangeBounds},
         sync::Arc,
-        time::Instant,
     };
 
     const TEST_BLOCKS_COUNT: usize = 5;
@@ -2268,7 +2254,7 @@ mod tests {
 
             // Invalid/Non-existent argument should return `None`
             {
-                call_method!($arg_count, provider, $method, |_,_,_,_| ( ($invalid_args, None)), tx_num, tx_hash, &in_memory_blocks[0], &receipts);
+                call_method!($arg_count, provider, $method, |_,_,_,_|  ($invalid_args, None), tx_num, tx_hash, &in_memory_blocks[0], &receipts);
             }
 
             // Check that the item is only in memory and not in database
@@ -2279,7 +2265,7 @@ mod tests {
                 call_method!($arg_count, provider, $method, |_,_,_,_| (args.clone(), expected_item), tx_num, tx_hash, last_mem_block, &receipts);
 
                 // Ensure the item is not in storage
-                call_method!($arg_count, provider.database, $method, |_,_,_,_| ( (args, None)), tx_num, tx_hash, last_mem_block, &receipts);
+                call_method!($arg_count, provider.database, $method, |_,_,_,_|  (args, None), tx_num, tx_hash, last_mem_block, &receipts);
             }
         )*
     }};
@@ -2290,13 +2276,15 @@ mod tests {
         let test_tx_index = 0;
 
         test_non_range!([
-            // TODO: header should use B256 like others instead of &B256
-            // (
-            //     ONE,
-            //     header,
-            //     |block: &SealedBlock, tx_num: TxNumber, tx_hash: B256, receipts: &Vec<Vec<Receipt>>| (&block.hash(), Some(block.header.header().clone())),
-            //     (&B256::random())
-            // ),
+            (
+                ONE,
+                header,
+                |block: &SealedBlock<Block>, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.hash(),
+                    Some(block.header().clone())
+                ),
+                B256::random()
+            ),
             (
                 ONE,
                 header_by_number,
@@ -2580,14 +2568,15 @@ mod tests {
             persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[1].number);
             let to_be_persisted_tx = in_memory_blocks[1].body().transactions[0].clone();
 
-            assert!(matches!(
+            assert_eq!(
                 correct_transaction_hash_fn(
                     *to_be_persisted_tx.tx_hash(),
                     provider.canonical_in_memory_state(),
                     provider.database
-                ),
-                Ok(Some(to_be_persisted_tx))
-            ));
+                )
+                .unwrap(),
+                Some(to_be_persisted_tx)
+            );
         }
 
         Ok(())

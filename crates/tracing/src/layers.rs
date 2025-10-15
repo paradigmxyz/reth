@@ -1,13 +1,15 @@
+use crate::formatter::LogFormat;
+#[cfg(feature = "otlp")]
+use reth_tracing_otlp::span_layer;
+use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
     fmt,
     path::{Path, PathBuf},
 };
-
-use rolling_file::{RollingConditionBasic, RollingFileAppender};
+use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
-
-use crate::formatter::LogFormat;
+use url::Url;
 
 /// A worker guard returned by the file layer.
 ///
@@ -122,6 +124,25 @@ impl Layers {
         let layer = format.apply(file_filter, None, Some(writer));
         self.add_layer(layer);
         Ok(guard)
+    }
+
+    /// Add OTLP spans layer to the layer collection
+    #[cfg(feature = "otlp")]
+    pub fn with_span_layer(
+        &mut self,
+        service_name: String,
+        endpoint_exporter: Url,
+        level: tracing::Level,
+    ) -> eyre::Result<()> {
+        // Create the span provider
+
+        let span_layer = span_layer(service_name, &endpoint_exporter)
+            .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?
+            .with_filter(LevelFilter::from_level(level));
+
+        self.add_layer(span_layer);
+
+        Ok(())
     }
 }
 

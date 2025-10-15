@@ -921,8 +921,7 @@ mod tests {
         assert!(removed.is_empty());
 
         // Verify that retrieving transactions from an empty pool yields nothing
-        let all_txs: Vec<_> = pool.all().collect();
-        assert!(all_txs.is_empty());
+        assert!(pool.all().next().is_none());
     }
 
     #[test]

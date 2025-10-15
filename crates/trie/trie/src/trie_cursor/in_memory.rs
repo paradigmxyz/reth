@@ -6,27 +6,31 @@ use reth_trie_common::{BranchNodeCompact, Nibbles};
 
 /// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
-pub struct InMemoryTrieCursorFactory<'a, CF> {
+pub struct InMemoryTrieCursorFactory<CF, T> {
     /// Underlying trie cursor factory.
     cursor_factory: CF,
     /// Reference to sorted trie updates.
-    trie_updates: &'a TrieUpdatesSorted,
+    trie_updates: T,
 }
 
-impl<'a, CF> InMemoryTrieCursorFactory<'a, CF> {
+impl<CF, T> InMemoryTrieCursorFactory<CF, T> {
     /// Create a new trie cursor factory.
-    pub const fn new(cursor_factory: CF, trie_updates: &'a TrieUpdatesSorted) -> Self {
+    pub const fn new(cursor_factory: CF, trie_updates: T) -> Self {
         Self { cursor_factory, trie_updates }
     }
 }
 
-impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<'a, CF> {
+impl<'a, CF, T> TrieCursorFactory for InMemoryTrieCursorFactory<CF, &'a T>
+where
+    CF: TrieCursorFactory,
+    T: AsRef<TrieUpdatesSorted>,
+{
     type AccountTrieCursor = InMemoryTrieCursor<'a, CF::AccountTrieCursor>;
     type StorageTrieCursor = InMemoryTrieCursor<'a, CF::StorageTrieCursor>;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
         let cursor = self.cursor_factory.account_trie_cursor()?;
-        Ok(InMemoryTrieCursor::new(Some(cursor), self.trie_updates.account_nodes_ref()))
+        Ok(InMemoryTrieCursor::new(Some(cursor), self.trie_updates.as_ref().account_nodes_ref()))
     }
 
     fn storage_trie_cursor(
@@ -36,7 +40,7 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<
         // if the storage trie has no updates then we use this as the in-memory overlay.
         static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
 
-        let storage_trie_updates = self.trie_updates.storage_tries.get(&hashed_address);
+        let storage_trie_updates = self.trie_updates.as_ref().storage_tries.get(&hashed_address);
         let (storage_nodes, cleared) = storage_trie_updates
             .map(|u| (u.storage_nodes_ref(), u.is_deleted()))
             .unwrap_or((&EMPTY_UPDATES, false));

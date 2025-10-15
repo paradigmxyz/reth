@@ -449,6 +449,12 @@ impl TrieUpdatesSorted {
     }
 }
 
+impl AsRef<Self> for TrieUpdatesSorted {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 /// Sorted storage trie updates reference used for serializing to file.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
