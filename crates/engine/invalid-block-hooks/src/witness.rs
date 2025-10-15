@@ -839,6 +839,7 @@ mod tests {
                 receipts: vec![],
                 requests: Requests::default(),
                 gas_used: 0,
+                blob_gas_used: 0,
             },
         };
 
