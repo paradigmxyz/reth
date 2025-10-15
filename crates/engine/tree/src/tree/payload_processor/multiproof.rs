@@ -20,7 +20,7 @@ use reth_trie::{
 };
 use reth_trie_parallel::{
     proof::ParallelProof,
-    proof_task::{AccountMultiproofInput, ProofTaskManagerHandle},
+    proof_task::{AccountMultiproofInput, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
 use std::{
@@ -347,7 +347,7 @@ pub struct MultiproofManager {
     /// Executor for tasks
     executor: WorkloadExecutor,
     /// Handle to the proof worker pools (storage and account).
-    proof_task_handle: ProofTaskManagerHandle,
+    proof_worker_handle: ProofWorkerHandle,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     ///
@@ -369,7 +369,7 @@ impl MultiproofManager {
     fn new(
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
-        proof_task_handle: ProofTaskManagerHandle,
+        proof_worker_handle: ProofWorkerHandle,
         max_concurrent: usize,
     ) -> Self {
         Self {
@@ -378,7 +378,7 @@ impl MultiproofManager {
             executor,
             inflight: 0,
             metrics,
-            proof_task_handle,
+            proof_worker_handle,
             missed_leaves_storage_roots: Default::default(),
         }
     }
@@ -447,7 +447,7 @@ impl MultiproofManager {
             multi_added_removed_keys,
         } = storage_multiproof_input;
 
-        let storage_proof_task_handle = self.proof_task_handle.clone();
+        let storage_proof_worker_handle = self.proof_worker_handle.clone();
         let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
 
         self.executor.spawn_blocking(move || {
@@ -466,7 +466,7 @@ impl MultiproofManager {
                 config.state_sorted,
                 config.prefix_sets,
                 missed_leaves_storage_roots,
-                storage_proof_task_handle,
+                storage_proof_worker_handle,
             )
             .with_branch_node_masks(true)
             .with_multi_added_removed_keys(Some(multi_added_removed_keys))
@@ -519,7 +519,7 @@ impl MultiproofManager {
             state_root_message_sender,
             multi_added_removed_keys,
         } = multiproof_input;
-        let account_proof_task_handle = self.proof_task_handle.clone();
+        let account_proof_worker_handle = self.proof_worker_handle.clone();
         let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
 
         self.executor.spawn_blocking(move || {
@@ -552,7 +552,7 @@ impl MultiproofManager {
             };
 
             let proof_result: Result<DecodedMultiProof, ParallelStateRootError> = (|| {
-                let receiver = account_proof_task_handle
+                let receiver = account_proof_worker_handle
                     .queue_account_multiproof(input)
                     .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
@@ -683,7 +683,7 @@ impl MultiProofTask {
     pub(super) fn new(
         config: MultiProofConfig,
         executor: WorkloadExecutor,
-        proof_task_handle: ProofTaskManagerHandle,
+        proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: Sender<SparseTrieUpdate>,
         max_concurrency: usize,
         chunk_size: Option<usize>,
@@ -703,7 +703,7 @@ impl MultiProofTask {
             multiproof_manager: MultiproofManager::new(
                 executor,
                 metrics.clone(),
-                proof_task_handle,
+                proof_worker_handle,
                 max_concurrency,
             ),
             metrics,
@@ -1212,7 +1212,7 @@ mod tests {
         DatabaseProviderFactory,
     };
     use reth_trie::{MultiProof, TrieInput};
-    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofTaskManagerHandle};
+    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
@@ -1228,7 +1228,7 @@ mod tests {
         );
         let consistent_view = ConsistentDbView::new(factory, None);
         let proof_handle =
-            ProofTaskManagerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1)
+            ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1)
                 .expect("Failed to spawn proof workers");
         let channel = channel();
 

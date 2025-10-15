@@ -6,8 +6,8 @@
 //! - **Worker Pools**: Pre-spawned workers with dedicated database transactions
 //!   - Storage pool: Handles storage proofs and blinded storage node requests
 //!   - Account pool: Handles account multiproofs and blinded account node requests
-//! - **Direct Channel Access**: [`ProofTaskManagerHandle`] provides type-safe queue methods with
-//!   direct access to worker channels, eliminating routing overhead
+//! - **Direct Channel Access**: [`ProofWorkerHandle`] provides type-safe queue methods with direct
+//!   access to worker channels, eliminating routing overhead
 //! - **Automatic Shutdown**: Workers terminate gracefully when all handles are dropped
 //!
 //! Individual [`ProofTaskTx`] instances manage a dedicated [`InMemoryTrieCursorFactory`] and
@@ -839,14 +839,14 @@ impl ProofTaskCtx {
 /// eliminating the need for a routing thread. All handles share reference-counted
 /// channels, and workers shut down gracefully when all handles are dropped.
 #[derive(Debug, Clone)]
-pub struct ProofTaskManagerHandle {
+pub struct ProofWorkerHandle {
     /// Direct sender to storage worker pool
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Direct sender to account worker pool
     account_work_tx: CrossbeamSender<AccountWorkerJob>,
 }
 
-impl ProofTaskManagerHandle {
+impl ProofWorkerHandle {
     /// Spawns storage and account worker pools with dedicated database transactions.
     ///
     /// Returns a handle for submitting proof tasks to the worker pools.
@@ -937,7 +937,7 @@ impl ProofTaskManagerHandle {
         Ok(Self::new_handle(storage_work_tx, account_work_tx))
     }
 
-    /// Creates a new [`ProofTaskManagerHandle`] with direct access to worker pools.
+    /// Creates a new [`ProofWorkerHandle`] with direct access to worker pools.
     ///
     /// This is an internal constructor used for creating handles.
     const fn new_handle(
@@ -1009,7 +1009,7 @@ impl ProofTaskManagerHandle {
     }
 }
 
-impl TrieNodeProviderFactory for ProofTaskManagerHandle {
+impl TrieNodeProviderFactory for ProofWorkerHandle {
     type AccountNodeProvider = ProofTaskTrieNodeProvider;
     type StorageNodeProvider = ProofTaskTrieNodeProvider;
 
@@ -1028,14 +1028,14 @@ pub enum ProofTaskTrieNodeProvider {
     /// Blinded account trie node provider.
     AccountNode {
         /// Handle to the proof worker pools.
-        handle: ProofTaskManagerHandle,
+        handle: ProofWorkerHandle,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
         /// Handle to the proof worker pools.
-        handle: ProofTaskManagerHandle,
+        handle: ProofWorkerHandle,
     },
 }
 
@@ -1081,7 +1081,7 @@ mod tests {
         )
     }
 
-    /// Ensures `ProofTaskManagerHandle::new` spawns workers correctly.
+    /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
         let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
@@ -1091,8 +1091,7 @@ mod tests {
             let view = ConsistentDbView::new(factory, None);
             let ctx = test_ctx();
 
-            let proof_handle =
-                ProofTaskManagerHandle::new(handle.clone(), view, ctx, 5, 3).unwrap();
+            let proof_handle = ProofWorkerHandle::new(handle.clone(), view, ctx, 5, 3).unwrap();
 
             // Verify handle can be cloned
             let _cloned_handle = proof_handle.clone();
