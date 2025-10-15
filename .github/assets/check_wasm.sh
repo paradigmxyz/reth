@@ -68,6 +68,7 @@ exclude_crates=(
   reth-payload-builder # reth-metrics
   reth-provider # tokio
   reth-prune # tokio
+  reth-prune-db # mdbx
   reth-stages-api # reth-provider, reth-prune
   reth-static-file # tokio
   reth-transaction-pool # c-kzg

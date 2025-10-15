@@ -1,11 +1,11 @@
-use crate::{
-    db_ext::DbTxPruneExt,
-    segments::{user::history::prune_history_indices, PruneInput, Segment},
-    PrunerError,
-};
+use crate::{db_ext::DbTxPruneExt, user::history::prune_history_indices};
 use itertools::Itertools;
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::DBProvider;
+use reth_prune::{
+    segments::{PruneInput, Segment},
+    PrunerError,
+};
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -18,12 +18,14 @@ use tracing::{instrument, trace};
 /// [`tables::AccountsHistory`]. We want to prune them to the same block number.
 const ACCOUNT_HISTORY_TABLES_TO_PRUNE: usize = 2;
 
+/// Responsible for pruning account history tables.
 #[derive(Debug)]
 pub struct AccountHistory {
     mode: PruneMode,
 }
 
 impl AccountHistory {
+    /// Creates a new account history pruner with `mode`.
     pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
@@ -126,14 +128,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{
-        user::account_history::ACCOUNT_HISTORY_TABLES_TO_PRUNE, AccountHistory, PruneInput,
-        PruneLimiter, Segment, SegmentOutput,
-    };
+    use crate::{user::account_history::ACCOUNT_HISTORY_TABLES_TO_PRUNE, AccountHistory};
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::{tables, BlockNumberList};
     use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_prune::{
+        segments::{PruneInput, Segment},
+        PruneLimiter, SegmentOutput,
+    };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };

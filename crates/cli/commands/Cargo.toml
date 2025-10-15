@@ -43,6 +43,7 @@ reth-node-metrics.workspace = true
 reth-ethereum-primitives = { workspace = true, optional = true }
 reth-provider.workspace = true
 reth-prune.workspace = true
+reth-prune-db.workspace = true
 reth-prune-types = { workspace = true, optional = true }
 reth-revm.workspace = true
 reth-stages.workspace = true

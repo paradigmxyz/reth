@@ -1,25 +1,28 @@
-use crate::{
-    db_ext::DbTxPruneExt,
-    segments::{PruneInput, Segment},
-    PrunerError,
-};
+use crate::db_ext::DbTxPruneExt;
 use alloy_consensus::TxReceipt;
 use reth_db_api::{table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockReader, DBProvider, NodePrimitivesProvider, PruneCheckpointWriter, TransactionsProvider,
 };
+use reth_prune::{
+    segments::{PruneInput, Segment},
+    PrunerError,
+};
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig, SegmentOutput,
     MINIMUM_PRUNING_DISTANCE,
 };
 use tracing::{instrument, trace};
+
+/// Responsible for pruning receipts by logs tables.
 #[derive(Debug)]
 pub struct ReceiptsByLogs {
     config: ReceiptsLogPruneConfig,
 }
 
 impl ReceiptsByLogs {
+    /// Creates a new receipts by logs pruner with `mode`.
     pub const fn new(config: ReceiptsLogPruneConfig) -> Self {
         Self { config }
     }
@@ -227,13 +230,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneLimiter, ReceiptsByLogs, Segment};
+    use crate::ReceiptsByLogs;
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
     use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
     use reth_primitives_traits::InMemorySize;
     use reth_provider::{
         DBProvider, DatabaseProviderFactory, PruneCheckpointReader, TransactionsProvider,
+    };
+    use reth_prune::{
+        segments::{PruneInput, Segment},
+        PruneLimiter,
     };
     use reth_prune_types::{PruneMode, PruneSegment, ReceiptsLogPruneConfig};
     use reth_stages::test_utils::{StorageKind, TestStageDB};

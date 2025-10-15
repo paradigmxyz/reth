@@ -7468,6 +7468,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
+ "reth-prune-db",
  "reth-prune-types",
  "reth-revm",
  "reth-stages",
@@ -8944,6 +8945,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
+ "reth-prune-db",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
@@ -9788,6 +9790,26 @@ dependencies = [
 name = "reth-prune"
 version = "1.8.2"
 dependencies = [
+ "alloy-primitives",
+ "metrics",
+ "reth-chainspec",
+ "reth-config",
+ "reth-errors",
+ "reth-exex-types",
+ "reth-metrics",
+ "reth-provider",
+ "reth-prune-types",
+ "reth-testing-utils",
+ "reth-tokio-util",
+ "thiserror 2.0.16",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "reth-prune-db"
+version = "1.8.2"
+dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
@@ -9804,6 +9826,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune",
  "reth-prune-types",
  "reth-stages",
  "reth-static-file-types",
@@ -10331,6 +10354,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
+ "reth-prune-db",
  "reth-prune-types",
  "reth-revm",
  "reth-stages-api",
@@ -10364,6 +10388,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
+ "reth-prune-db",
  "reth-stages-types",
  "reth-static-file",
  "reth-static-file-types",

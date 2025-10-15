@@ -1,22 +1,25 @@
-use crate::{
-    segments::{PruneInput, Segment},
-    PrunerError,
-};
+use crate::receipts;
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,
     PruneCheckpointWriter, TransactionsProvider,
 };
+use reth_prune::{
+    segments::{PruneInput, Segment},
+    PrunerError,
+};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 use tracing::instrument;
 
+/// Responsible for pruning receipts tables.
 #[derive(Debug)]
 pub struct Receipts {
     mode: PruneMode,
 }
 
 impl Receipts {
+    /// Creates a new receipts pruner with `mode`.
     pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
@@ -44,7 +47,7 @@ where
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
-        crate::segments::receipts::prune(provider, input)
+        receipts::prune(provider, input)
     }
 
     fn save_checkpoint(
@@ -52,6 +55,6 @@ where
         provider: &Provider,
         checkpoint: PruneCheckpoint,
     ) -> ProviderResult<()> {
-        crate::segments::receipts::save_checkpoint(provider, checkpoint)
+        receipts::save_checkpoint(provider, checkpoint)
     }
 }

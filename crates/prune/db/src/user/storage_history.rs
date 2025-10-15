@@ -1,8 +1,4 @@
-use crate::{
-    db_ext::DbTxPruneExt,
-    segments::{user::history::prune_history_indices, PruneInput, Segment, SegmentOutput},
-    PrunerError,
-};
+use crate::{db_ext::DbTxPruneExt, user::history::prune_history_indices};
 use itertools::Itertools;
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
@@ -10,7 +6,13 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 use reth_provider::DBProvider;
-use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint};
+use reth_prune::{
+    segments::{PruneInput, Segment},
+    PrunerError,
+};
+use reth_prune_types::{
+    PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+};
 use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
 
@@ -20,12 +22,14 @@ use tracing::{instrument, trace};
 /// [`tables::StoragesHistory`]. We want to prune them to the same block number.
 const STORAGE_HISTORY_TABLES_TO_PRUNE: usize = 2;
 
+/// Responsible for pruning storage history tables.
 #[derive(Debug)]
 pub struct StorageHistory {
     mode: PruneMode,
 }
 
 impl StorageHistory {
+    /// Creates a new storage history pruner with `mode`.
     pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
@@ -133,15 +137,18 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{
-        user::storage_history::STORAGE_HISTORY_TABLES_TO_PRUNE, PruneInput, PruneLimiter, Segment,
-        SegmentOutput, StorageHistory,
-    };
+    use crate::{user::storage_history::STORAGE_HISTORY_TABLES_TO_PRUNE, StorageHistory};
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::{tables, BlockNumberList};
     use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
-    use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
+    use reth_prune::{
+        segments::{PruneInput, Segment},
+        PruneLimiter,
+    };
+    use reth_prune_types::{
+        PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, SegmentOutput,
+    };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,

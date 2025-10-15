@@ -32,6 +32,7 @@ reth-provider.workspace = true
 reth-execution-types.workspace = true
 reth-ethereum-primitives = { workspace = true, optional = true }
 reth-prune.workspace = true
+reth-prune-db.workspace = true
 reth-prune-types.workspace = true
 reth-storage-errors.workspace = true
 reth-revm.workspace = true

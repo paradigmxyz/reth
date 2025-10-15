@@ -52,10 +52,12 @@ where
     }
 
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        let mut pruner = PrunerBuilder::default()
-            .segments(self.prune_modes.clone())
-            .delete_limit(self.commit_threshold)
-            .build::<Provider>(provider.static_file_provider());
+        let mut pruner = reth_prune_db::build::<Provider>(
+            PrunerBuilder::default()
+                .segments(self.prune_modes.clone())
+                .delete_limit(self.commit_threshold),
+            provider.static_file_provider(),
+        );
 
         let result = pruner.run_with_provider(provider, input.target())?;
         if result.progress.is_finished() {

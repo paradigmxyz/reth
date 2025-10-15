@@ -1,80 +1,72 @@
-use crate::{
-    db_ext::DbTxPruneExt,
+use crate::db_ext::DbTxPruneExt;
+use reth_db_api::{tables, transaction::DbTxMut};
+use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
+use reth_prune::{
     segments::{PruneInput, Segment},
     PrunerError,
-};
-use reth_db_api::{table::Value, tables, transaction::DbTxMut};
-use reth_primitives_traits::NodePrimitives;
-use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, StaticFileProviderFactory,
-    TransactionsProvider,
 };
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
-use reth_static_file_types::StaticFileSegment;
-use tracing::trace;
+use tracing::{instrument, trace};
 
-/// The type responsible for pruning transactions in the database and history expiry.
+/// Responsible for pruning sender recovery tables.
 #[derive(Debug)]
-pub struct Transactions<N> {
-    static_file_provider: StaticFileProvider<N>,
+pub struct SenderRecovery {
+    mode: PruneMode,
 }
 
-impl<N> Transactions<N> {
-    pub const fn new(static_file_provider: StaticFileProvider<N>) -> Self {
-        Self { static_file_provider }
+impl SenderRecovery {
+    /// Creates a new sender recovery pruner with `mode`.
+    pub const fn new(mode: PruneMode) -> Self {
+        Self { mode }
     }
 }
 
-impl<Provider> Segment<Provider> for Transactions<Provider::Primitives>
+impl<Provider> Segment<Provider> for SenderRecovery
 where
-    Provider: DBProvider<Tx: DbTxMut>
-        + TransactionsProvider
-        + BlockReader
-        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value>>,
+    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
 {
     fn segment(&self) -> PruneSegment {
-        PruneSegment::Transactions
+        PruneSegment::SenderRecovery
     }
 
     fn mode(&self) -> Option<PruneMode> {
-        self.static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::Transactions)
-            .map(PruneMode::before_inclusive)
+        Some(self.mode)
     }
 
     fn purpose(&self) -> PrunePurpose {
-        PrunePurpose::StaticFile
+        PrunePurpose::User
     }
 
+    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
-                trace!(target: "pruner", "No transactions to prune");
+                trace!(target: "pruner", "No transaction senders to prune");
                 return Ok(SegmentOutput::done())
             }
         };
+        let tx_range_end = *tx_range.end();
 
         let mut limiter = input.limiter;
 
-        let mut last_pruned_transaction = *tx_range.end();
-        let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Transactions<
-            <Provider::Primitives as NodePrimitives>::SignedTx,
-        >>(
-            tx_range,
-            &mut limiter,
-            |_| false,
-            |row| last_pruned_transaction = row.0,
-        )?;
-        trace!(target: "pruner", %pruned, %done, "Pruned transactions");
+        let mut last_pruned_transaction = tx_range_end;
+        let (pruned, done) =
+            provider.tx_ref().prune_table_with_range::<tables::TransactionSenders>(
+                tx_range,
+                &mut limiter,
+                |_| false,
+                |row| last_pruned_transaction = row.0,
+            )?;
+        trace!(target: "pruner", %pruned, %done, "Pruned transaction senders");
 
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
-            // If there's more transactions to prune, set the checkpoint block number to previous,
-            // so we could finish pruning its transactions on the next run.
+            // If there's more transaction senders to prune, set the checkpoint block number to
+            // previous, so we could finish pruning its transaction senders on the next run.
             .checked_sub(if done { 0 } else { 1 });
 
         let progress = limiter.progress(done);
@@ -92,7 +84,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneLimiter, Segment};
+    use crate::SenderRecovery;
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -100,13 +92,14 @@ mod tests {
         Itertools,
     };
     use reth_db_api::tables;
-    use reth_provider::{
-        DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
-        StaticFileProviderFactory,
+    use reth_primitives_traits::SignerRecoverable;
+    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_prune::{
+        segments::{PruneInput, Segment},
+        PruneLimiter,
     };
     use reth_prune_types::{
-        PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
-        SegmentOutput,
+        PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, SegmentOutput,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
@@ -119,26 +112,43 @@ mod tests {
 
         let blocks = random_block_range(
             &mut rng,
-            1..=100,
+            1..=10,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
         );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
-        let transactions =
-            blocks.iter().flat_map(|block| &block.body().transactions).collect::<Vec<_>>();
+        let mut transaction_senders = Vec::new();
+        for block in &blocks {
+            transaction_senders.reserve_exact(block.transaction_count());
+            for transaction in &block.body().transactions {
+                transaction_senders.push((
+                    transaction_senders.len() as u64,
+                    transaction.recover_signer().expect("recover signer"),
+                ));
+            }
+        }
+        let transaction_senders_len = transaction_senders.len();
+        db.insert_transaction_senders(transaction_senders).expect("insert transaction senders");
 
-        assert_eq!(db.table::<tables::Transactions>().unwrap().len(), transactions.len());
+        assert_eq!(
+            db.table::<tables::Transactions>().unwrap().len(),
+            blocks.iter().map(|block| block.transaction_count()).sum::<usize>()
+        );
+        assert_eq!(
+            db.table::<tables::Transactions>().unwrap().len(),
+            db.table::<tables::TransactionSenders>().unwrap().len()
+        );
 
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
-            let segment = super::Transactions::new(db.factory.static_file_provider());
             let prune_mode = PruneMode::Before(to_block);
+            let segment = SenderRecovery::new(prune_mode);
             let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
             let input = PruneInput {
                 previous_checkpoint: db
                     .factory
                     .provider()
                     .unwrap()
-                    .get_prune_checkpoint(PruneSegment::Transactions)
+                    .get_prune_checkpoint(PruneSegment::SenderRecovery)
                     .unwrap(),
                 to_block,
                 limiter: limiter.clone(),
@@ -148,29 +158,11 @@ mod tests {
                 .factory
                 .provider()
                 .unwrap()
-                .get_prune_checkpoint(PruneSegment::Transactions)
+                .get_prune_checkpoint(PruneSegment::SenderRecovery)
                 .unwrap()
                 .and_then(|checkpoint| checkpoint.tx_number)
                 .map(|tx_number| tx_number + 1)
                 .unwrap_or_default();
-
-            let provider = db.factory.database_provider_rw().unwrap();
-            let result = segment.prune(&provider, input.clone()).unwrap();
-            limiter.increment_deleted_entries_count_by(result.pruned);
-
-            assert_matches!(
-                result,
-                SegmentOutput {progress, pruned, checkpoint: Some(_)}
-                    if (progress, pruned) == expected_result
-            );
-
-            provider
-                .save_prune_checkpoint(
-                    PruneSegment::Transactions,
-                    result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
-                )
-                .unwrap();
-            provider.commit().expect("commit");
 
             let last_pruned_tx_number = blocks
                 .iter()
@@ -195,18 +187,38 @@ mod tests {
                     }
                 })
                 .into_inner()
-                .0
+                .0;
+
+            let provider = db.factory.database_provider_rw().unwrap();
+            let result = segment.prune(&provider, input).unwrap();
+            limiter.increment_deleted_entries_count_by(result.pruned);
+
+            assert_matches!(
+                result,
+                SegmentOutput {progress, pruned, checkpoint: Some(_)}
+                    if (progress, pruned) == expected_result
+            );
+
+            segment
+                .save_checkpoint(
+                    &provider,
+                    result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
+                )
+                .unwrap();
+            provider.commit().expect("commit");
+
+            let last_pruned_block_number = last_pruned_block_number
                 .checked_sub(if result.progress.is_finished() { 0 } else { 1 });
 
             assert_eq!(
-                db.table::<tables::Transactions>().unwrap().len(),
-                transactions.len() - (last_pruned_tx_number + 1)
+                db.table::<tables::TransactionSenders>().unwrap().len(),
+                transaction_senders_len - (last_pruned_tx_number + 1)
             );
             assert_eq!(
                 db.factory
                     .provider()
                     .unwrap()
-                    .get_prune_checkpoint(PruneSegment::Transactions)
+                    .get_prune_checkpoint(PruneSegment::SenderRecovery)
                     .unwrap(),
                 Some(PruneCheckpoint {
                     block_number: last_pruned_block_number,
@@ -218,8 +230,14 @@ mod tests {
 
         test_prune(
             6,
-            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 10),
+            (
+                PruneProgress::HasMoreData(
+                    reth_prune_types::PruneInterruptReason::DeletedEntriesLimitReached,
+                ),
+                10,
+            ),
         );
         test_prune(6, (PruneProgress::Finished, 2));
+        test_prune(10, (PruneProgress::Finished, 8));
     }
 }
