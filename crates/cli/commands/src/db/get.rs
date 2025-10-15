@@ -1,4 +1,3 @@
-use alloy_consensus::Header;
 use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
@@ -67,7 +66,7 @@ impl Command {
             Subcommand::StaticFile { segment, key, raw } => {
                 let (key, mask): (u64, _) = match segment {
                     StaticFileSegment::Headers => {
-                        (table_key::<tables::Headers>(&key)?, <HeaderWithHashMask<Header>>::MASK)
+                        (table_key::<tables::Headers>(&key)?, <HeaderWithHashMask<HeaderTy<N>>>::MASK)
                     }
                     StaticFileSegment::Transactions => {
                         (table_key::<tables::Transactions>(&key)?, <TransactionMask<TxTy<N>>>::MASK)
