@@ -4995,7 +4995,7 @@ mod tests {
                             state.clone(),
                             trie_cursor.account_trie_cursor().unwrap(),
                             Default::default(),
-                            state.keys().copied().collect::<Vec<_>>(),
+                            state.keys().copied(),
                         );
 
                     // Write trie updates to the database
@@ -5040,7 +5040,7 @@ mod tests {
                                 .iter()
                                 .map(|nibbles| B256::from_slice(&nibbles.pack()))
                                 .collect(),
-                            state.keys().copied().collect::<Vec<_>>(),
+                            state.keys().copied(),
                         );
 
                     // Write trie updates to the database

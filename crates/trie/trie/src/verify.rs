@@ -400,9 +400,8 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
                     // need to validate that all accounts coming after it have empty storages.
                     let prev_account = *prev_account;
 
-                    // Calculate the max possible account address.
-                    let mut max_account = B256::ZERO;
-                    max_account.reverse();
+                    // Calculate the max possible account address (all bits set).
+                    let max_account = B256::from([0xFFu8; 32]);
 
                     self.verify_empty_storages(prev_account, max_account, false, true)?;
                 }

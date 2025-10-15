@@ -703,7 +703,8 @@ impl MultiProofTask {
             multiproof_manager: MultiproofManager::new(
                 executor,
                 metrics.clone(),
-                proof_task_handle,
+                proof_task_handle.clone(), // handle for storage proof workers
+                proof_task_handle,         // handle for account proof workers
                 max_concurrency,
             ),
             metrics,
