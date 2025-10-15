@@ -901,7 +901,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
-    #[instrument(level = "trace", target = "trie::sparse::serial")]
+    #[instrument(target = "trie::sparse::serial")]
     fn root(&mut self) -> B256 {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
@@ -1462,7 +1462,7 @@ impl SerialSparseTrie {
     /// # Panics
     ///
     /// If the node at provided path does not exist.
-    #[instrument(level = "trace", target = "trie::sparse::serial", skip_all, ret)]
+    #[instrument(target = "trie::sparse::serial", skip_all, ret(level = "trace"))]
     pub fn rlp_node(
         &mut self,
         prefix_set: &mut PrefixSet,

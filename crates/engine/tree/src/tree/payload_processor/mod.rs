@@ -444,8 +444,8 @@ where
             let _ = state_root_tx.send(result);
 
             // Clear the SparseStateTrie and replace it back into the mutex _after_ sending
-            // results to the next step, so that time spent clearing doesn't
-            // block the step after this one.
+            // results to the next step, so that time spent clearing doesn't block the step after
+            // this one.
             let _enter = info_span!(target: "engine::tree::payload_processor", "clear").entered();
             cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
         });

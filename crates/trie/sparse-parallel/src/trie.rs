@@ -1317,7 +1317,7 @@ impl ParallelSparseTrie {
     }
 
     /// Updates hashes for the upper subtrie, using nodes from both upper and lower subtries.
-    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, ret)]
+    #[instrument(target = "trie::parallel_sparse", skip_all, ret(level = "trace"))]
     fn update_upper_subtrie_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
         trace!(target: "trie::parallel_sparse", "Updating upper subtrie hashes");
 
@@ -2040,7 +2040,7 @@ impl SparseSubtrie {
     /// # Panics
     ///
     /// If the node at the root path does not exist.
-    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret)]
+    #[instrument(target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret(level = "trace"))]
     fn update_hashes(
         &mut self,
         prefix_set: &mut PrefixSet,
