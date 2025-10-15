@@ -170,14 +170,20 @@ impl ParallelProof {
         // Extend prefix sets with targets
         let prefix_sets = Self::extend_prefix_sets_with_targets(&self.prefix_sets, &targets);
 
-        let storage_root_targets_len = StorageRootTargets::count(
-            &prefix_sets.account_prefix_set,
-            &prefix_sets.storage_prefix_sets,
-        );
+        // Compute total targets count for trace logs only
+        let total_targets = if tracing::enabled!(target: "trie::parallel_proof", tracing::Level::TRACE)
+        {
+            Some(StorageRootTargets::count(
+                &prefix_sets.account_prefix_set,
+                &prefix_sets.storage_prefix_sets,
+            ))
+        } else {
+            None
+        };
 
         trace!(
             target: "trie::parallel_proof",
-            total_targets = storage_root_targets_len,
+            total_targets = ?total_targets,
             "Starting parallel proof generation"
         );
 
@@ -208,7 +214,7 @@ impl ParallelProof {
 
         trace!(
             target: "trie::parallel_proof",
-            total_targets = storage_root_targets_len,
+            total_targets = ?total_targets,
             duration = ?stats.duration(),
             branches_added = stats.branches_added(),
             leaves_added = stats.leaves_added(),
