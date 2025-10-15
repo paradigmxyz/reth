@@ -192,8 +192,7 @@ where
     {
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task, save the trie input
-        let (trie_input, state_root_config) =
-            MultiProofConfig::new_from_input(consistent_view, trie_input);
+        let (trie_input, state_root_config) = MultiProofConfig::from_input(trie_input);
         self.trie_input = Some(trie_input);
 
         // Create and spawn the storage proof task
@@ -202,14 +201,15 @@ where
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
         );
-        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let storage_worker_count = config.storage_worker_count();
+        let account_worker_count = config.account_worker_count();
+        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let proof_task = match ProofTaskManager::new(
             self.executor.handle().clone(),
-            state_root_config.consistent_view.clone(),
+            consistent_view,
             task_ctx,
-            max_proof_task_concurrency,
             storage_worker_count,
+            account_worker_count,
         ) {
             Ok(task) => task,
             Err(error) => {
