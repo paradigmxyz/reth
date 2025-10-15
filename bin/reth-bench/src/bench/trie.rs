@@ -130,7 +130,7 @@ impl Command {
             // Run state root task calculation
             let (task_root, task_time) = self.calculate_state_root_task(
                 consistent_view.clone(),
-                trie_input.clone(),
+                trie_input.clone().cleared_prefix_sets(),
                 state_transitions,
             )?;
             task_times.push(task_time);
@@ -324,7 +324,7 @@ impl Command {
         let task_ctx = ProofTaskCtx::new(
             state_root_config.nodes_sorted.clone(),
             state_root_config.state_sorted.clone(),
-            Default::default(),
+            state_root_config.prefix_sets.clone(),
         );
         let storage_worker_count = tree_config.storage_worker_count();
         let account_worker_count = tree_config.account_worker_count();
