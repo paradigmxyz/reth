@@ -215,17 +215,15 @@ where
             }
         };
 
-        // We derive the multiproof concurrency from the worker counts, since each multiproof
-        // often spawns one Tokio task for the account proof and one for the storage proof.
-        // We use the account worker count as the basis, since account workers coordinate
-        // the overall proof collection process.
-        let max_multi_proof_task_concurrency = account_worker_count;
+        // Limit concurrent multiproof tasks to match the account worker pool size.
+        // Each multiproof task spawns a tokio task that queues to one account worker,
+        // which then fans out to storage workers as needed.
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
             proof_handle.clone(),
             to_sparse_trie,
-            max_multi_proof_task_concurrency,
+            account_worker_count,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );
 
