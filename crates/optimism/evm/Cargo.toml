@@ -14,7 +14,7 @@ workspace = true
 # Reth
 reth-chainspec.workspace = true
 reth-evm = { workspace = true, features = ["op"] }
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, features = ["op"] }
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-storage-errors.workspace = true
@@ -34,7 +34,7 @@ alloy-consensus.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-primitives.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["op"] }
 
 # revm
 revm.workspace = true
