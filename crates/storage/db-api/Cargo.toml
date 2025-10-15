@@ -28,7 +28,7 @@ alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 
 # optimism
-reth-optimism-primitives = { workspace = true, optional = true, features = ["serde", "reth-codec"] }
+reth-optimism-primitives = { workspace = true, optional = true, features = ["serde", "reth-codec", "serde-bincode-compat"] }
 
 # codecs
 modular-bitfield.workspace = true
