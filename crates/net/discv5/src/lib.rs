@@ -384,7 +384,7 @@ impl Discv5 {
         let Some(key) = self.fork_key else { return Err(Error::NetworkStackIdNotConfigured) };
         let fork_id = enr
             .get_decodable::<EnrForkIdEntry>(key)
-            .or({
+            .or_else(|| {
                 (key != NetworkStackId::ETH)
                     .then(|| {
                         // Fallback: trying to get fork id from Enr with 'eth' as network stack id
