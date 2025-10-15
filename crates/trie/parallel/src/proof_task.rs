@@ -121,26 +121,9 @@ fn storage_worker_loop<Factory>(
     Factory: DatabaseProviderFactory<Provider: BlockReader>,
 {
     // Create db transaction before entering work loop
-    let proof_tx = match view.provider_ro() {
-        Ok(provider) => {
-            let tx = provider.into_tx();
-            tracing::debug!(
-                target: "trie::proof_task",
-                worker_id,
-                "Storage worker initialized transaction successfully"
-            );
-            ProofTaskTx::new(tx, task_ctx, worker_id)
-        }
-        Err(e) => {
-            tracing::error!(
-                target: "trie::proof_task",
-                worker_id,
-                error = %e,
-                "Storage worker failed to initialize transaction, exiting"
-            );
-            return;
-        }
-    };
+    let provider = view.provider_ro()
+        .expect("Storage worker failed to initialize: database unavailable");
+    let proof_tx = ProofTaskTx::new(provider.into_tx(), task_ctx, worker_id);
 
     tracing::debug!(
         target: "trie::proof_task",
@@ -291,26 +274,9 @@ fn account_worker_loop<Factory>(
     Factory: DatabaseProviderFactory<Provider: BlockReader>,
 {
     // Create db transaction before entering work loop
-    let proof_tx = match view.provider_ro() {
-        Ok(provider) => {
-            let tx = provider.into_tx();
-            tracing::debug!(
-                target: "trie::proof_task",
-                worker_id,
-                "Account worker initialized transaction successfully"
-            );
-            ProofTaskTx::new(tx, task_ctx, worker_id)
-        }
-        Err(e) => {
-            tracing::error!(
-                target: "trie::proof_task",
-                worker_id,
-                error = %e,
-                "Account worker failed to initialize transaction, exiting"
-            );
-            return;
-        }
-    };
+    let provider = view.provider_ro()
+        .expect("Account worker failed to initialize: database unavailable");
+    let proof_tx = ProofTaskTx::new(provider.into_tx(), task_ctx, worker_id);
 
     tracing::debug!(
         target: "trie::proof_task",
