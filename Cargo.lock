@@ -8619,6 +8619,7 @@ name = "reth-invalid-block-hooks"
 version = "1.8.2"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-debug",
@@ -8626,18 +8627,24 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "pretty_assertions",
+ "reth-chainspec",
  "reth-engine-primitives",
+ "reth-ethereum-primitives",
  "reth-evm",
+ "reth-evm-ethereum",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
  "reth-rpc-api",
+ "reth-testing-utils",
  "reth-tracing",
  "reth-trie",
+ "revm",
  "revm-bytecode",
  "revm-database",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
