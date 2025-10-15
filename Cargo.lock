@@ -3127,7 +3127,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
- "k256",
  "rayon",
  "reth-chainspec",
  "reth-consensus",
