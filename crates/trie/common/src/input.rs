@@ -122,9 +122,4 @@ impl TrieInput {
         self.clear();
         self
     }
-
-    pub fn cleared_prefix_sets(mut self) -> Self {
-        self.prefix_sets.clear();
-        self
-    }
 }

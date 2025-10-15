@@ -130,7 +130,7 @@ impl Command {
             // Run state root task calculation
             let (task_root, task_time) = self.calculate_state_root_task(
                 consistent_view.clone(),
-                trie_input.clone().cleared_prefix_sets(),
+                TrieInput::default(),
                 state_transitions,
             )?;
             task_times.push(task_time);
