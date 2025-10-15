@@ -18,7 +18,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{sync::Arc, time::Duration};
-use tracing::trace;
+use tracing::{instrument, trace, trace_span};
 
 pub(crate) type Cache<K, V> =
     mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
@@ -354,6 +354,7 @@ impl ExecutionCache {
     }
 
     /// Invalidates the storage for all addresses in the set
+    #[instrument(target = "engine::tree", skip_all, fields(accounts = addresses.len()))]
     pub(crate) fn invalidate_storages(&self, addresses: HashSet<&Address>) {
         // NOTE: this must collect because the invalidate function should not be called while we
         // hold an iter for it
@@ -385,12 +386,22 @@ impl ExecutionCache {
     /// ## Error Handling
     ///
     /// Returns an error if the state updates are inconsistent and should be discarded.
+    #[instrument(target = "engine::tree", skip_all)]
     pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
+        let _enter = trace_span!("contracts", len = state_updates.contracts.len()).entered();
         // Insert bytecodes
         for (code_hash, bytecode) in &state_updates.contracts {
             self.code_cache.insert(*code_hash, Some(Bytecode(bytecode.clone())));
         }
+        drop(_enter);
 
+        let _enter = trace_span!(
+            "accounts",
+            accounts = state_updates.state.len(),
+            storages =
+                state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
+        )
+        .entered();
         let mut invalidated_accounts = HashSet::default();
         for (addr, account) in &state_updates.state {
             // If the account was not modified, as in not changed and not destroyed, then we have
@@ -433,6 +444,8 @@ impl ExecutionCache {
 
         // invalidate storage for all destroyed accounts
         self.invalidate_storages(invalidated_accounts);
+
+        drop(_enter);
 
         Ok(())
     }

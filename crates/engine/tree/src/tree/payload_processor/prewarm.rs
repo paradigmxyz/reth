@@ -39,7 +39,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, instrument, trace, trace_span, warn};
 
 /// A wrapper for transactions that includes their index in the block.
 #[derive(Clone)]
@@ -86,6 +86,8 @@ where
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
+    /// Tracing span associated with this prewarm task.
+    span: tracing::Span,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -121,6 +123,7 @@ where
                 transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
+                span: tracing::Span::current(),
             },
             actions_tx,
         )
@@ -139,8 +142,11 @@ where
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
         let transaction_count_hint = self.transaction_count_hint;
+        let span = self.span.clone();
 
         self.executor.spawn_blocking(move || {
+            let _enter = span.enter();
+
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0usize;
 
@@ -157,8 +163,8 @@ where
             };
 
             // Only spawn initial workers as needed
-            for _ in 0..workers_needed {
-                handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
+            for i in 0..workers_needed {
+                handles.push(ctx.spawn_worker(i, &executor, actions_tx.clone(), done_tx.clone()));
             }
 
             let mut tx_index = 0usize;
@@ -248,6 +254,7 @@ where
     /// the new, warmed cache to be inserted.
     ///
     /// This method is called from `run()` only after all execution tasks are complete.
+    #[instrument(target = "engine::tree", skip_all)]
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
@@ -289,6 +296,8 @@ where
         pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         actions_tx: Sender<PrewarmTaskEvent>,
     ) {
+        let _enter = self.span.clone().entered();
+
         // spawn execution tasks.
         self.spawn_all(pending, actions_tx);
 
@@ -429,6 +438,7 @@ where
     ///
     /// Note: There are no ordering guarantees; this does not reflect the state produced by
     /// sequential execution.
+    #[instrument(target = "engine::tree", skip_all)]
     fn transact_batch<Tx>(
         self,
         txs: mpsc::Receiver<IndexedTransaction<Tx>>,
@@ -440,6 +450,8 @@ where
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
         while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
+            let _enter = trace_span!("prewarm tx", index, tx_hash=%tx.tx().tx_hash()).entered();
+
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
             if terminate_execution.load(Ordering::Relaxed) {
@@ -485,6 +497,7 @@ where
     /// Spawns a worker task for transaction execution and returns its sender channel.
     fn spawn_worker<Tx>(
         &self,
+        idx: usize,
         executor: &WorkloadExecutor,
         actions_tx: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
@@ -494,8 +507,10 @@ where
     {
         let (tx, rx) = mpsc::channel();
         let ctx = self.clone();
+        let span = trace_span!("prewarm worker", idx);
 
         executor.spawn_blocking(move || {
+            let _enter = span.enter();
             ctx.transact_batch(rx, actions_tx, done_tx);
         });
 
