@@ -193,7 +193,7 @@ impl ParallelProof {
 
         let receiver = self
             .proof_worker_handle
-            .queue_account_multiproof(input)
+            .dispatch_account_multiproof(input)
             .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
         // Wait for account multiproof result from worker

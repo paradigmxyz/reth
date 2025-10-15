@@ -308,7 +308,7 @@ fn account_worker_loop<Tx>(
                 );
                 tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-                let storage_proof_receivers = match queue_storage_proofs(
+                let storage_proof_receivers = match dispatch_storage_proofs(
                     &storage_work_tx,
                     &input.targets,
                     &mut storage_prefix_sets,
@@ -568,7 +568,7 @@ where
 /// computation. This enables interleaved parallelism for better performance.
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
-fn queue_storage_proofs(
+fn dispatch_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     targets: &MultiProofTargets,
     storage_prefix_sets: &mut B256Map<PrefixSet>,
@@ -963,7 +963,7 @@ impl ProofWorkerHandle {
     }
 
     /// Queue an account multiproof computation
-    pub fn queue_account_multiproof(
+    pub fn dispatch_account_multiproof(
         &self,
         input: AccountMultiproofInput,
     ) -> Result<Receiver<AccountMultiproofResult>, ProviderError> {

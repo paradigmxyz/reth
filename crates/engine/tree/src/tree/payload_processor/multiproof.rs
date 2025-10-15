@@ -553,7 +553,7 @@ impl MultiproofManager {
 
             let proof_result: Result<DecodedMultiProof, ParallelStateRootError> = (|| {
                 let receiver = account_proof_worker_handle
-                    .queue_account_multiproof(input)
+                    .dispatch_account_multiproof(input)
                     .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
                 receiver
