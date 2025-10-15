@@ -1595,3 +1595,247 @@ async fn test_replace_updates_applies_all_updates<S: OpProofsStorage>(
 
     Ok(())
 }
+
+/// Test that pure deletions (nodes only in `removed_nodes`) are properly stored
+///
+/// This test verifies that when a node appears only in `removed_nodes` (not in updates),
+/// it is properly stored as a deletion and subsequent queries return None for that path.
+#[test_case(InMemoryProofsStorage::new(); "InMemory")]
+#[tokio::test]
+async fn test_pure_deletions_stored_correctly<S: OpProofsStorage>(
+    storage: S,
+) -> Result<(), OpProofsStorageError> {
+    use reth_trie::updates::StorageTrieUpdates;
+
+    // ========== Setup: Store initial branch nodes at block 50 ==========
+    let account_path1 = nibbles_from(vec![1, 2, 3]);
+    let account_path2 = nibbles_from(vec![4, 5, 6]);
+    let storage_path1 = nibbles_from(vec![7, 8, 9]);
+    let storage_path2 = nibbles_from(vec![10, 11, 12]);
+    let storage_address = B256::repeat_byte(0x42);
+
+    let initial_branch = create_test_branch();
+
+    let mut initial_trie_updates = TrieUpdates::default();
+    initial_trie_updates.account_nodes.insert(account_path1, initial_branch.clone());
+    initial_trie_updates.account_nodes.insert(account_path2, initial_branch.clone());
+
+    let mut storage_trie = StorageTrieUpdates::default();
+    storage_trie.storage_nodes.insert(storage_path1, initial_branch.clone());
+    storage_trie.storage_nodes.insert(storage_path2, initial_branch.clone());
+    initial_trie_updates.insert_storage_updates(storage_address, storage_trie);
+
+    let initial_diff = BlockStateDiff {
+        trie_updates: initial_trie_updates,
+        post_state: HashedPostState::default(),
+    };
+
+    storage.store_trie_updates(50, initial_diff).await?;
+
+    // Verify initial state exists at block 75
+    let mut cursor_75 = storage.account_trie_cursor(75)?;
+    assert!(
+        cursor_75.seek_exact(account_path1)?.is_some(),
+        "Initial account branch 1 should exist at block 75"
+    );
+    assert!(
+        cursor_75.seek_exact(account_path2)?.is_some(),
+        "Initial account branch 2 should exist at block 75"
+    );
+
+    let mut storage_cursor_75 = storage.storage_trie_cursor(storage_address, 75)?;
+    assert!(
+        storage_cursor_75.seek_exact(storage_path1)?.is_some(),
+        "Initial storage branch 1 should exist at block 75"
+    );
+    assert!(
+        storage_cursor_75.seek_exact(storage_path2)?.is_some(),
+        "Initial storage branch 2 should exist at block 75"
+    );
+
+    // ========== At block 100: Mark paths as deleted (ONLY in removed_nodes) ==========
+    let mut deletion_trie_updates = TrieUpdates::default();
+
+    // Add to removed_nodes ONLY (no updates)
+    deletion_trie_updates.removed_nodes.insert(account_path1);
+
+    // Do the same for storage branch
+    let mut deletion_storage_trie = StorageTrieUpdates::default();
+    deletion_storage_trie.removed_nodes.insert(storage_path1);
+    deletion_trie_updates.insert_storage_updates(storage_address, deletion_storage_trie);
+
+    let deletion_diff = BlockStateDiff {
+        trie_updates: deletion_trie_updates,
+        post_state: HashedPostState::default(),
+    };
+
+    storage.store_trie_updates(100, deletion_diff).await?;
+
+    // ========== Verify that deleted nodes return None at block 150 ==========
+
+    // Deleted account branch should not be found
+    let mut cursor_150 = storage.account_trie_cursor(150)?;
+    let account_result = cursor_150.seek_exact(account_path1)?;
+    assert!(account_result.is_none(), "Deleted account branch should return None at block 150");
+
+    // Non-deleted account branch should still exist
+    let account_result2 = cursor_150.seek_exact(account_path2)?;
+    assert!(
+        account_result2.is_some(),
+        "Non-deleted account branch should still exist at block 150"
+    );
+
+    // Deleted storage branch should not be found
+    let mut storage_cursor_150 = storage.storage_trie_cursor(storage_address, 150)?;
+    let storage_result = storage_cursor_150.seek_exact(storage_path1)?;
+    assert!(storage_result.is_none(), "Deleted storage branch should return None at block 150");
+
+    // Non-deleted storage branch should still exist
+    let storage_result2 = storage_cursor_150.seek_exact(storage_path2)?;
+    assert!(
+        storage_result2.is_some(),
+        "Non-deleted storage branch should still exist at block 150"
+    );
+
+    // ========== Verify that the nodes still exist at block 75 (before deletion) ==========
+    let mut cursor_75_after = storage.account_trie_cursor(75)?;
+    assert!(
+        cursor_75_after.seek_exact(account_path1)?.is_some(),
+        "Deleted node should still exist at block 75 (before deletion)"
+    );
+
+    let mut storage_cursor_75_after = storage.storage_trie_cursor(storage_address, 75)?;
+    assert!(
+        storage_cursor_75_after.seek_exact(storage_path1)?.is_some(),
+        "Deleted storage node should still exist at block 75 (before deletion)"
+    );
+
+    // ========== Verify iteration skips deleted nodes ==========
+    let mut cursor_iter = storage.account_trie_cursor(150)?;
+    let mut found_paths = Vec::new();
+    while let Some((path, _)) = cursor_iter.next()? {
+        found_paths.push(path);
+    }
+
+    assert!(!found_paths.contains(&account_path1), "Iteration should skip deleted node");
+    assert!(found_paths.contains(&account_path2), "Iteration should include non-deleted node");
+
+    Ok(())
+}
+
+/// Test that updates take precedence over removals when both are present
+///
+/// This test verifies that when a path appears in both `removed_nodes` and `account_nodes`,
+/// the update from `account_nodes` takes precedence. This is critical for correctness
+/// when processing trie updates that both remove and update the same node.
+#[test_case(InMemoryProofsStorage::new(); "InMemory")]
+#[tokio::test]
+async fn test_updates_take_precedence_over_removals<S: OpProofsStorage>(
+    storage: S,
+) -> Result<(), OpProofsStorageError> {
+    use reth_trie::updates::StorageTrieUpdates;
+
+    // ========== Setup: Store initial branch nodes at block 50 ==========
+    let account_path = nibbles_from(vec![1, 2, 3]);
+    let storage_path = nibbles_from(vec![4, 5, 6]);
+    let storage_address = B256::repeat_byte(0x42);
+
+    let initial_branch = create_test_branch();
+
+    let mut initial_trie_updates = TrieUpdates::default();
+    initial_trie_updates.account_nodes.insert(account_path, initial_branch.clone());
+
+    let mut storage_trie = StorageTrieUpdates::default();
+    storage_trie.storage_nodes.insert(storage_path, initial_branch.clone());
+    initial_trie_updates.insert_storage_updates(storage_address, storage_trie);
+
+    let initial_diff = BlockStateDiff {
+        trie_updates: initial_trie_updates,
+        post_state: HashedPostState::default(),
+    };
+
+    storage.store_trie_updates(50, initial_diff).await?;
+
+    // Verify initial state exists at block 75
+    let mut cursor_75 = storage.account_trie_cursor(75)?;
+    assert!(
+        cursor_75.seek_exact(account_path)?.is_some(),
+        "Initial account branch should exist at block 75"
+    );
+
+    let mut storage_cursor_75 = storage.storage_trie_cursor(storage_address, 75)?;
+    assert!(
+        storage_cursor_75.seek_exact(storage_path)?.is_some(),
+        "Initial storage branch should exist at block 75"
+    );
+
+    // ========== At block 100: Add paths to BOTH removed_nodes AND account_nodes ==========
+    // This simulates a scenario where a node is both removed and updated
+    // The update should take precedence
+    let updated_branch = create_test_branch_variant();
+
+    let mut conflicting_trie_updates = TrieUpdates::default();
+
+    // Add to removed_nodes
+    conflicting_trie_updates.removed_nodes.insert(account_path);
+
+    // Also add to account_nodes (this should take precedence)
+    conflicting_trie_updates.account_nodes.insert(account_path, updated_branch.clone());
+
+    // Do the same for storage branch
+    let mut conflicting_storage_trie = StorageTrieUpdates::default();
+    conflicting_storage_trie.removed_nodes.insert(storage_path);
+    conflicting_storage_trie.storage_nodes.insert(storage_path, updated_branch.clone());
+    conflicting_trie_updates.insert_storage_updates(storage_address, conflicting_storage_trie);
+
+    let conflicting_diff = BlockStateDiff {
+        trie_updates: conflicting_trie_updates,
+        post_state: HashedPostState::default(),
+    };
+
+    storage.store_trie_updates(100, conflicting_diff).await?;
+
+    // ========== Verify that updates took precedence at block 150 ==========
+
+    // Account branch should exist (not deleted) with the updated value
+    let mut cursor_150 = storage.account_trie_cursor(150)?;
+    let account_result = cursor_150.seek_exact(account_path)?;
+    assert!(
+        account_result.is_some(),
+        "Account branch should exist at block 150 (update should take precedence over removal)"
+    );
+    let (found_path, found_branch) = account_result.unwrap();
+    assert_eq!(found_path, account_path);
+    // Verify it's the updated branch, not the initial one
+    assert_eq!(
+        found_branch.state_mask, updated_branch.state_mask,
+        "Account branch should be the updated version, not the initial one"
+    );
+
+    // Storage branch should exist (not deleted) with the updated value
+    let mut storage_cursor_150 = storage.storage_trie_cursor(storage_address, 150)?;
+    let storage_result = storage_cursor_150.seek_exact(storage_path)?;
+    assert!(
+        storage_result.is_some(),
+        "Storage branch should exist at block 150 (update should take precedence over removal)"
+    );
+    let (found_storage_path, found_storage_branch) = storage_result.unwrap();
+    assert_eq!(found_storage_path, storage_path);
+    // Verify it's the updated branch
+    assert_eq!(
+        found_storage_branch.state_mask, updated_branch.state_mask,
+        "Storage branch should be the updated version, not the initial one"
+    );
+
+    // ========== Verify that the old version still exists at block 75 ==========
+    let mut cursor_75_after = storage.account_trie_cursor(75)?;
+    let result_75 = cursor_75_after.seek_exact(account_path)?;
+    assert!(result_75.is_some(), "Initial version should still exist at block 75");
+    let (_, branch_75) = result_75.unwrap();
+    assert_eq!(
+        branch_75.state_mask, initial_branch.state_mask,
+        "Block 75 should see the initial branch, not the updated one"
+    );
+
+    Ok(())
+}
