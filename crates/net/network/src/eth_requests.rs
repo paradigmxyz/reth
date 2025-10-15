@@ -15,7 +15,8 @@ use reth_eth_wire::{
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
-use reth_primitives_traits::{Block, B256};
+use reth_primitives::B256;
+use reth_primitives_traits::Block;
 use reth_storage_api::{BlockReader, HeaderProvider};
 use std::{
     future::Future,
@@ -147,31 +148,22 @@ where
         headers
     }
     
+    /// Generic helper to fetch items with limits.
     #[inline]
-    fn get_response_items<T, F>(&self, hashes: Vec<B256>, fetch_fn: F, max_items: usize) -> Vec<T>
+    fn get_response_items<T, F>(&self, hashes: Vec<B256>, mut fetch_fn: F, limit: usize) -> Vec<T>
     where
-        F: Fn(B256) -> Option<Vec<T>>,
-        T: Encodable + Clone,
+        F: FnMut(B256) -> Option<T>,
+        T: Encodable,
     {
         let mut items = Vec::new();
         let mut total_bytes = 0;
 
         for hash in hashes {
-            if let Some(mut fetched_items) = fetch_fn(hash) {
-                if items.len() + fetched_items.len() > max_items {
-                    fetched_items.truncate(max_items - items.len());
-                }
-                
-                let fetched_bytes = fetched_items.iter().map(|item| item.length()).sum::<usize>();
+            if let Some(item) = fetch_fn(hash) {
+                total_bytes += item.length();
+                items.push(item);
 
-                if total_bytes + fetched_bytes > SOFT_RESPONSE_LIMIT && !items.is_empty() {
-                    break;
-                }
-                
-                total_bytes += fetched_bytes;
-                items.extend(fetched_items);
-
-                if items.len() >= max_items {
+                if items.len() >= limit || total_bytes > SOFT_RESPONSE_LIMIT {
                     break;
                 }
             } else {
@@ -199,11 +191,13 @@ where
         response: oneshot::Sender<RequestResult<BlockBodies<<C::Block as Block>::Body>>>,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
-
-        let bodies = self.get_response_items(request.0, |hash| {
-            self.client.block_by_hash(hash).unwrap_or_default().map(|block| vec![block.into_body()])
-        }, MAX_BODIES_SERVE);
-
+        
+        let bodies = self.get_response_items(
+            request.0,
+            |hash| self.client.block_by_hash(hash).unwrap_or_default().map(|block| block.into_body()),
+            MAX_BODIES_SERVE,
+        );
+        
         let _ = response.send(Ok(BlockBodies(bodies)));
     }
 
@@ -244,26 +238,16 @@ where
         F: Fn(Vec<C::Receipt>) -> Vec<T>,
         T: Encodable,
     {
-        let mut receipts = Vec::new();
-        let mut total_bytes = 0;
-
-        for hash in request.0 {
-            if let Some(receipts_by_block) =
-                self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
-            {
-                let transformed_receipts = transform_fn(receipts_by_block);
-                total_bytes += transformed_receipts.length();
-                receipts.push(vec![transformed_receipts]);
-
-                if receipts.len() >= MAX_RECEIPTS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
-                }
-            } else {
-                break
-            }
-        }
-
-        receipts.into_iter().map(|mut v| v.remove(0)).collect()
+        self.get_response_items(
+            request.0,
+            |hash| {
+                self.client
+                    .receipts_by_block(BlockHashOrNumber::Hash(hash))
+                    .unwrap_or_default()
+                    .map(&transform_fn)
+            },
+            MAX_RECEIPTS_SERVE,
+        )
     }
 }
 
