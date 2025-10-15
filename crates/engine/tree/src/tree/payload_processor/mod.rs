@@ -200,7 +200,7 @@ where
         );
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let proof_handle = match ProofWorkerHandle::new(
+        let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
             consistent_view,
             task_ctx,
