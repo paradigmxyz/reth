@@ -6,6 +6,7 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::B256;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
@@ -15,7 +16,6 @@ use reth_eth_wire::{
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
-use reth_primitives::B256;
 use reth_primitives_traits::Block;
 use reth_storage_api::{BlockReader, HeaderProvider};
 use std::{
@@ -84,7 +84,7 @@ where
     N: NetworkPrimitives,
     C: BlockReader,
 {
-    /// Returns the list of requested headers
+    /// Returns the list of requested headers.
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
@@ -148,9 +148,9 @@ where
         headers
     }
     
-    /// Generic helper to fetch items with limits.
+    /// Generic implementation for fetching response items.
     #[inline]
-    fn get_response_items<T, F>(&self, hashes: Vec<B256>, mut fetch_fn: F, limit: usize) -> Vec<T>
+    fn get_response_items<T, F>(&self, hashes: Vec<B256>, mut fetch_fn: F, max_items: usize) -> Vec<T>
     where
         F: FnMut(B256) -> Option<T>,
         T: Encodable,
@@ -159,13 +159,17 @@ where
         let mut total_bytes = 0;
 
         for hash in hashes {
-            if let Some(item) = fetch_fn(hash) {
-                total_bytes += item.length();
-                items.push(item);
+            if items.len() >= max_items {
+                break;
+            }
 
-                if items.len() >= limit || total_bytes > SOFT_RESPONSE_LIMIT {
+            if let Some(item) = fetch_fn(hash) {
+                let item_len = item.length();
+                if !items.is_empty() && total_bytes + item_len > SOFT_RESPONSE_LIMIT {
                     break;
                 }
+                total_bytes += item_len;
+                items.push(item);
             } else {
                 break;
             }
@@ -197,7 +201,7 @@ where
             |hash| self.client.block_by_hash(hash).unwrap_or_default().map(|block| block.into_body()),
             MAX_BODIES_SERVE,
         );
-        
+
         let _ = response.send(Ok(BlockBodies(bodies)));
     }
 
@@ -209,9 +213,20 @@ where
     ) {
         self.metrics.eth_receipts_requests_received_total.increment(1);
 
-        let receipts = self.get_receipts_response(request, |receipts_by_block| {
-            receipts_by_block.into_iter().map(ReceiptWithBloom::from).collect::<Vec<_>>()
-        });
+        let transform_fn = |receipts_by_block: Vec<C::Receipt>| -> Vec<_> {
+            receipts_by_block.into_iter().map(ReceiptWithBloom::from).collect()
+        };
+
+        let receipts = self.get_response_items(
+            request.0,
+            |hash| {
+                self.client
+                    .receipts_by_block(BlockHashOrNumber::Hash(hash))
+                    .unwrap_or_default()
+                    .map(transform_fn)
+            },
+            MAX_RECEIPTS_SERVE,
+        );
 
         let _ = response.send(Ok(Receipts(receipts)));
     }
@@ -223,31 +238,14 @@ where
         response: oneshot::Sender<RequestResult<Receipts69<C::Receipt>>>,
     ) {
         self.metrics.eth_receipts_requests_received_total.increment(1);
-
-        let receipts = self.get_receipts_response(request, |receipts_by_block| {
-            // skip bloom filter for eth69
-            receipts_by_block
-        });
+        
+        let receipts = self.get_response_items(
+            request.0,
+            |hash| self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default(),
+            MAX_RECEIPTS_SERVE
+        );
 
         let _ = response.send(Ok(Receipts69(receipts)));
-    }
-
-    #[inline]
-    fn get_receipts_response<T, F>(&self, request: GetReceipts, transform_fn: F) -> Vec<Vec<T>>
-    where
-        F: Fn(Vec<C::Receipt>) -> Vec<T>,
-        T: Encodable,
-    {
-        self.get_response_items(
-            request.0,
-            |hash| {
-                self.client
-                    .receipts_by_block(BlockHashOrNumber::Hash(hash))
-                    .unwrap_or_default()
-                    .map(&transform_fn)
-            },
-            MAX_RECEIPTS_SERVE,
-        )
     }
 }
 
