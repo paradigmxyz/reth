@@ -8,6 +8,8 @@ ignore = [
     "RUSTSEC-2024-0384",
     # https://rustsec.org/advisories/RUSTSEC-2024-0436 paste! is unmaintained
     "RUSTSEC-2024-0436",
+    # https://rustsec.org/advisories/RUSTSEC-2025-0073 from alloy-dyn-abi 1.4.0
+    "RUSTSEC-2025-0073",
 ]
 
 # This section is considered when running `cargo deny check bans`.
@@ -22,7 +24,75 @@ highlight = "all"
 # List of crates to deny
 deny = [{ name = "openssl" }]
 # Certain crates/versions that will be skipped when doing duplicate detection.
-skip = []
+skip = [
+    "base64",
+    "bindgen",
+    "bitflags",
+    "cargo_metadata",
+    "crossterm",
+    "darling",
+    "darling_core",
+    "darling_macro",
+    "dashmap",
+    "fastrand",
+    "foldhash",
+    "getrandom",
+    "hashbrown",
+    "icu_collections",
+    "icu_normalizer",
+    "icu_normalizer_data",
+    "icu_properties",
+    "icu_properties_data",
+    "icu_provider",
+    "itertools",
+    "linux-raw-sys",
+    "litemap",
+    "lru",
+    "proptest-derive",
+    "rand",
+    "rand_chacha",
+    "rand_core",
+    "redox_users",
+    "rustc-hash",
+    "rustix",
+    "secp256k1",
+    "secp256k1-sys",
+    "send_wrapper",
+    "socket2",
+    "strum",
+    "strum_macros",
+    "syn",
+    "thiserror",
+    "thiserror-impl",
+    "tinystr",
+    "toml_datetime",
+    "toml_edit",
+    "unicode-width",
+    "wasi",
+    "webpki-roots",
+    "windows",
+    "windows-core",
+    "windows-implement",
+    "windows-interface",
+    "windows-link",
+    "windows-result",
+    "windows-strings",
+    "windows-sys",
+    "windows-targets",
+    "windows_aarch64_gnullvm",
+    "windows_aarch64_msvc",
+    "windows_i686_gnu",
+    "windows_i686_gnullvm",
+    "windows_i686_msvc",
+    "windows_x86_64_gnu",
+    "windows_x86_64_gnullvm",
+    "windows_x86_64_msvc",
+    "writeable",
+    "yoke",
+    "yoke-derive",
+    "zerovec",
+    "zerovec-derive",
+]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
 # dependencies starting at the specified crate, up to a certain depth, which is
@@ -58,12 +128,7 @@ allow = [
 
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
 # aren't accepted for every possible crate as with the normal allow list
-exceptions = [
-    # TODO: decide on MPL-2.0 handling
-    # These dependencies are grandfathered in https://github.com/paradigmxyz/reth/pull/6980
-    { allow = ["MPL-2.0"], name = "option-ext" },
-    { allow = ["MPL-2.0"], name = "webpki-root-certs" },
-]
+exceptions = []
 
 [[licenses.clarify]]
 name = "rustls-webpki"
@@ -80,13 +145,4 @@ unknown-registry = "warn"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
 unknown-git = "deny"
-allow-git = [
-    # TODO: Please avoid adding new entries to this list.
-    "https://github.com/alloy-rs/alloy",
-    "https://github.com/foundry-rs/block-explorers",
-    "https://github.com/bluealloy/revm",
-    "https://github.com/paradigmxyz/revm-inspectors",
-    "https://github.com/alloy-rs/evm",
-    "https://github.com/alloy-rs/hardforks",
-    "https://github.com/paradigmxyz/jsonrpsee",
-]
+allow-git = []
