@@ -166,8 +166,6 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    ///
-    /// Returns an error with the original transactions iterator if proof worker spawning fails.
     #[allow(clippy::type_complexity)]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
@@ -179,7 +177,7 @@ where
         config: &TreeConfig,
     ) -> Result<
         PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
-        (reth_provider::ProviderError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
+        (ParallelStateRootError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
     >
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
@@ -203,18 +201,13 @@ where
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
-        let proof_handle = match ProofWorkerHandle::new(
+        let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
             consistent_view,
             task_ctx,
             storage_worker_count,
             account_worker_count,
-        ) {
-            Ok(handle) => handle,
-            Err(error) => {
-                return Err((error, transactions, env, provider_builder));
-            }
-        };
+        );
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
