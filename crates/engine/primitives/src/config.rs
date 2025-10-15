@@ -17,8 +17,7 @@ fn default_storage_worker_count() -> usize {
     #[cfg(feature = "std")]
     {
         std::thread::available_parallelism()
-            .map(|n| (n.get() * 2).clamp(MIN_WORKER_COUNT, 128))
-            .unwrap_or(8)
+            .map_or(8, |n| n.get() * 2).min(MIN_WORKER_COUNT)
     }
     #[cfg(not(feature = "std"))]
     {
