@@ -166,6 +166,7 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
+    #[allow(clippy::type_complexity)]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -174,7 +175,10 @@ where
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+    ) -> Result<
+        PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
+        (ParallelStateRootError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
+    >
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
