@@ -898,4 +898,50 @@ mod test {
         assert_eq!(fork_id, decoded_fork_id);
         assert_eq!(TCP_PORT, enr.tcp4().unwrap()); // listen config is defaulting to ip mode ipv4
     }
+
+    #[test]
+    fn get_fork_id_with_different_network_stack_ids() {
+        let fork_id = MAINNET.latest_fork_id();
+        let sk = SecretKey::new(&mut thread_rng());
+
+        // Test 1: ENR with OPEL fork ID, Discv5 configured for OPEL
+        let enr_with_opel = Enr::builder()
+            .add_value_rlp(
+                NetworkStackId::OPEL,
+                alloy_rlp::encode(&EnrForkIdEntry::from(fork_id)).into(),
+            )
+            .build(&sk)
+            .unwrap();
+
+        let mut discv5 = discv5_noop();
+        discv5.fork_key = Some(NetworkStackId::OPEL);
+        assert_eq!(discv5.get_fork_id(&enr_with_opel).unwrap(), fork_id);
+
+        // Test 2: ENR with ETH fork ID, Discv5 configured for OPEL (fallback to ETH)
+        let enr_with_eth = Enr::builder()
+            .add_value_rlp(
+                NetworkStackId::ETH,
+                alloy_rlp::encode(&EnrForkIdEntry::from(fork_id)).into(),
+            )
+            .build(&sk)
+            .unwrap();
+
+        discv5.fork_key = Some(NetworkStackId::OPEL);
+        assert_eq!(discv5.get_fork_id(&enr_with_eth).unwrap(), fork_id);
+
+        // Test 3: ENR with neither OPEL nor ETH fork ID (should fail)
+        let enr_without_network_stack_id = Enr::empty(&sk).unwrap();
+        discv5.fork_key = Some(NetworkStackId::OPEL);
+        assert!(matches!(
+            discv5.get_fork_id(&enr_without_network_stack_id),
+            Err(Error::ForkMissing(NetworkStackId::OPEL))
+        ));
+
+        // Test 4: discv5 without network stack id configured (should fail)
+        let discv5 = discv5_noop();
+        assert!(matches!(
+            discv5.get_fork_id(&enr_without_network_stack_id),
+            Err(Error::NetworkStackIdNotConfigured)
+        ));
+    }
 }
