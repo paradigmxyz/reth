@@ -10,7 +10,7 @@ use reth_node_builder::NodeHandle;
 use reth_node_ethereum::EthereumNode;
 use tracing::info;
 
-fn main() {
+fn main() -> std::process::ExitCode {
     reth_cli_util::sigsegv_handler::install();
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
@@ -18,28 +18,31 @@ fn main() {
         unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
     }
 
-    if let Err(err) =
-        Cli::<EthereumChainSpecParser, RessArgs>::parse().run(async move |builder, ress_args| {
-            info!(target: "reth::cli", "Launching node");
-            let NodeHandle { node, node_exit_future } =
-                builder.node(EthereumNode::default()).launch_with_debug_capabilities().await?;
+    let result = Cli::<EthereumChainSpecParser, RessArgs>::parse().run(async move |builder, ress_args| {
+        info!(target: "reth::cli", "Launching node");
+        let NodeHandle { node, node_exit_future } =
+            builder.node(EthereumNode::default()).launch_with_debug_capabilities().await?;
 
-            // Install ress subprotocol.
-            if ress_args.enabled {
-                install_ress_subprotocol(
-                    ress_args,
-                    node.provider,
-                    node.evm_config,
-                    node.network,
-                    node.task_executor,
-                    node.add_ons_handle.engine_events.new_listener(),
-                )?;
-            }
+        // Install ress subprotocol.
+        if ress_args.enabled {
+            install_ress_subprotocol(
+                ress_args,
+                node.provider,
+                node.evm_config,
+                node.network,
+                node.task_executor,
+                node.add_ons_handle.engine_events.new_listener(),
+            )?;
+        }
 
-            node_exit_future.await
-        })
-    {
-        eprintln!("Error: {err:?}");
-        std::process::exit(1);
+        node_exit_future.await
+    });
+
+    match result {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("Error: {err:?}");
+            std::process::ExitCode::FAILURE
+        }
     }
 }
