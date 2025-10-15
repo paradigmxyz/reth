@@ -511,15 +511,4 @@ impl TreeConfig {
         self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
         self
     }
-
-    /// Return the number of account proof worker threads.
-    pub const fn account_worker_count(&self) -> usize {
-        self.account_worker_count
-    }
-
-    /// Setter for the number of account proof worker threads.
-    pub const fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
-        self.account_worker_count = account_worker_count;
-        self
-    }
 }
