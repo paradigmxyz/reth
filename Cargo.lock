@@ -9339,6 +9339,7 @@ dependencies = [
  "reth-exex",
  "reth-node-api",
  "reth-node-types",
+ "reth-optimism-primitives",
  "reth-optimism-trie",
  "reth-provider",
  "serde",
