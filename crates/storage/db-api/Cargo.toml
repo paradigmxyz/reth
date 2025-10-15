@@ -86,9 +86,9 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
 ]
 op = [
-	"dep:reth-optimism-primitives",
-	"reth-codecs/op",
-	"reth-primitives-traits/op",
-	"reth-optimism-primitives?/op"
+    "dep:reth-optimism-primitives",
+    "reth-codecs/op",
+    "reth-primitives-traits/op",
+    "reth-optimism-primitives?/op",
 ]
 bench = []

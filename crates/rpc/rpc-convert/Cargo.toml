@@ -51,13 +51,13 @@ serde_json.workspace = true
 [features]
 default = []
 op = [
-	"dep:op-alloy-consensus",
-	"dep:op-alloy-rpc-types",
-	"dep:op-alloy-network",
-	"dep:reth-optimism-primitives",
-	"dep:reth-storage-api",
-	"dep:op-revm",
-	"reth-evm/op",
-	"reth-primitives-traits/op",
-	"reth-optimism-primitives?/op"
+    "dep:op-alloy-consensus",
+    "dep:op-alloy-rpc-types",
+    "dep:op-alloy-network",
+    "dep:reth-optimism-primitives",
+    "dep:reth-storage-api",
+    "dep:op-revm",
+    "reth-evm/op",
+    "reth-primitives-traits/op",
+    "reth-optimism-primitives?/op",
 ]
