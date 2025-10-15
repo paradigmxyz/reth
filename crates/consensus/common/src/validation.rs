@@ -24,15 +24,15 @@ pub const MAX_RLP_BLOCK_SIZE: usize = 8_388_608;
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
 pub fn validate_header_gas<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
-    if header.gas_used() > header.gas_limit() {
-        return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
-            gas_used: header.gas_used(),
-            gas_limit: header.gas_limit(),
-        })
+    let gas_used = header.gas_used();
+    let gas_limit = header.gas_limit();
+
+    if gas_used > gas_limit {
+        return Err(ConsensusError::HeaderGasUsedExceedsGasLimit { gas_used, gas_limit })
     }
     // Check that the gas limit is below the maximum allowed gas limit
-    if header.gas_limit() > MAXIMUM_GAS_LIMIT_BLOCK {
-        return Err(ConsensusError::HeaderGasLimitExceedsMax { gas_limit: header.gas_limit() })
+    if gas_limit > MAXIMUM_GAS_LIMIT_BLOCK {
+        return Err(ConsensusError::HeaderGasLimitExceedsMax { gas_limit })
     }
     Ok(())
 }
@@ -249,10 +249,11 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
         })
     }
 
-    if blob_gas_used > blob_params.max_blob_gas_per_block() {
+    let max_blob_gas_per_block = blob_params.max_blob_gas_per_block();
+    if blob_gas_used > max_blob_gas_per_block {
         return Err(ConsensusError::BlobGasUsedExceedsMaxBlobGasPerBlock {
             blob_gas_used,
-            max_blob_gas_per_block: blob_params.max_blob_gas_per_block(),
+            max_blob_gas_per_block,
         })
     }
 
@@ -358,36 +359,36 @@ pub fn validate_against_parent_gas_limit<
     parent: &SealedHeader<H>,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
+    let header_number = header.number();
+    let header_timestamp = header.timestamp();
+    let child_gas_limit = header.gas_limit();
+
     // Determine the parent gas limit, considering elasticity multiplier on the London fork.
     let parent_gas_limit = if !chain_spec.is_london_active_at_block(parent.number()) &&
-        chain_spec.is_london_active_at_block(header.number())
+        chain_spec.is_london_active_at_block(header_number)
     {
         parent.gas_limit() *
-            chain_spec.base_fee_params_at_timestamp(header.timestamp()).elasticity_multiplier
-                as u64
+            chain_spec.base_fee_params_at_timestamp(header_timestamp).elasticity_multiplier as u64
     } else {
         parent.gas_limit()
     };
 
     // Check for an increase in gas limit beyond the allowed threshold.
-    if header.gas_limit() > parent_gas_limit {
-        if header.gas_limit() - parent_gas_limit >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
+    if child_gas_limit > parent_gas_limit {
+        if child_gas_limit - parent_gas_limit >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
             return Err(ConsensusError::GasLimitInvalidIncrease {
                 parent_gas_limit,
-                child_gas_limit: header.gas_limit(),
+                child_gas_limit,
             })
         }
     }
     // Check for a decrease in gas limit beyond the allowed threshold.
-    else if parent_gas_limit - header.gas_limit() >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
-        return Err(ConsensusError::GasLimitInvalidDecrease {
-            parent_gas_limit,
-            child_gas_limit: header.gas_limit(),
-        })
+    else if parent_gas_limit - child_gas_limit >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
+        return Err(ConsensusError::GasLimitInvalidDecrease { parent_gas_limit, child_gas_limit })
     }
     // Check if the self gas limit is below the minimum required limit.
-    else if header.gas_limit() < MINIMUM_GAS_LIMIT {
-        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: header.gas_limit() })
+    else if child_gas_limit < MINIMUM_GAS_LIMIT {
+        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit })
     }
 
     Ok(())
