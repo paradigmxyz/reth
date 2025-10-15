@@ -496,13 +496,15 @@ where
                     ctx.state(),
                 ) {
                     Ok(result) => {
+                        let elapsed = root_time.elapsed();
                         info!(
                             target: "engine::tree",
                             block = ?block_num_hash,
                             regular_state_root = ?result.0,
+                            ?elapsed,
                             "Regular root task finished"
                         );
-                        maybe_state_root = Some((result.0, result.1, root_time.elapsed()));
+                        maybe_state_root = Some((result.0, result.1, elapsed));
                     }
                     Err(error) => {
                         debug!(target: "engine::tree", %error, "Parallel state root computation failed");
@@ -894,13 +896,12 @@ where
                             (handle, StateRootStrategy::StateRootTask)
                         }
                         Err((error, txs, env, provider_builder)) => {
-                            // Failed to initialize proof task manager, fallback to parallel state
-                            // root
+                            // Failed to spawn proof workers, fallback to parallel state root
                             error!(
                                 target: "engine::tree",
                                 block=?block_num_hash,
                                 ?error,
-                                "Failed to initialize proof task manager, falling back to parallel state root"
+                                "Failed to spawn proof workers, falling back to parallel state root"
                             );
                             (
                                 self.payload_processor.spawn_cache_exclusive(
