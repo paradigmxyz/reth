@@ -15,7 +15,6 @@ use reth_ethereum::{
         core::{args::RpcServerArgs, node_config::NodeConfig},
         EthereumNode,
     },
-    provider::CanonStateSubscriptions,
     rpc::api::eth::helpers::EthTransactions,
     tasks::TaskManager,
 };
@@ -28,7 +27,7 @@ async fn main() -> eyre::Result<()> {
     let node_config = NodeConfig::test()
         .dev()
         .with_rpc(RpcServerArgs::default().with_http())
-        .with_chain(custom_chain());
+        .with_chain(custom_chain()?);
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
@@ -60,7 +59,7 @@ async fn main() -> eyre::Result<()> {
     Ok(())
 }
 
-fn custom_chain() -> Arc<ChainSpec> {
+fn custom_chain() -> eyre::Result<Arc<ChainSpec>> {
     let custom_genesis = r#"
 {
     "nonce": "0x42",
@@ -97,6 +96,6 @@ fn custom_chain() -> Arc<ChainSpec> {
     }
 }
 "#;
-    let genesis: Genesis = serde_json::from_str(custom_genesis).unwrap();
-    Arc::new(genesis.into())
+    let genesis: Genesis = serde_json::from_str(custom_genesis)?;
+    Ok(Arc::new(genesis.into()))
 }
