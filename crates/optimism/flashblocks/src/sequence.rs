@@ -11,15 +11,6 @@ use tracing::{debug, trace, warn};
 /// The size of the broadcast channel for completed flashblock sequences.
 const FLASHBLOCK_SEQUENCE_CHANNEL_SIZE: usize = 128;
 
-impl<T> Default for FlashBlockPendingSequence<T>
-where
-    T: SignedTransaction,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// An ordered B-tree keeping the track of a sequence of [`FlashBlock`]s by their indices.
 #[derive(Debug)]
 pub struct FlashBlockPendingSequence<T> {
@@ -88,7 +79,7 @@ where
             self.clear_and_broadcast_blocks();
 
             self.inner.insert(flashblock.index, PreparedFlashBlock::new(flashblock)?);
-            return Ok(());
+            return Ok(())
         }
 
         // only insert if we previously received the same block, assume we received index 0
@@ -147,6 +138,15 @@ where
     /// Returns the current/latest flashblock index in the sequence
     pub fn index(&self) -> Option<u64> {
         Some(self.inner.values().last()?.block().index)
+    }
+}
+
+impl<T> Default for FlashBlockPendingSequence<T>
+where
+    T: SignedTransaction,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 
