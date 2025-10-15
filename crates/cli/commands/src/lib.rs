@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod common;
 pub mod config_cmd;
@@ -24,7 +24,6 @@ pub mod node;
 pub mod p2p;
 pub mod prune;
 pub mod re_execute;
-pub mod recover;
 pub mod stage;
 #[cfg(feature = "arbitrary")]
 pub mod test_vectors;

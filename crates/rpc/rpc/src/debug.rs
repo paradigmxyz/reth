@@ -1,4 +1,7 @@
-use alloy_consensus::{transaction::SignerRecoverable, BlockHeader};
+use alloy_consensus::{
+    transaction::{SignerRecoverable, TxHashRef},
+    BlockHeader,
+};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{uint, Address, Bytes, B256};
@@ -15,10 +18,9 @@ use alloy_rpc_types_trace::geth::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_errors::RethError;
 use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor, TxEnvFor};
-use reth_primitives_traits::{
-    Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
-};
+use reth_primitives_traits::{Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -150,7 +152,12 @@ where
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
 
-        let evm_env = self.eth_api().evm_config().evm_env(block.header());
+        let evm_env = self
+            .eth_api()
+            .evm_config()
+            .evm_env(block.header())
+            .map_err(RethError::other)
+            .map_err(Eth::Error::from_eth_err)?;
 
         // Depending on EIP-2 we need to recover the transactions differently
         let senders =
@@ -910,7 +917,7 @@ where
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
         let header = match block_id {
-            BlockId::Hash(hash) => self.provider().header(&hash.into()).to_rpc_result()?,
+            BlockId::Hash(hash) => self.provider().header(hash.into()).to_rpc_result()?,
             BlockId::Number(number_or_tag) => {
                 let number = self
                     .provider()

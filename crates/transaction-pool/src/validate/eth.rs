@@ -32,6 +32,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{AccountInfoReader, BytecodeReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
+use revm_primitives::U256;
 use std::{
     marker::PhantomData,
     sync::{
@@ -92,6 +93,8 @@ pub struct EthTransactionValidator<Client, T> {
     _marker: PhantomData<T>,
     /// Metrics for tsx pool validation
     validation_metrics: TxPoolValidationMetrics,
+    /// Bitmap of custom transaction types that are allowed.
+    other_tx_types: U256,
 }
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx> {
@@ -294,12 +297,14 @@ where
                 }
             }
 
-            _ => {
+            ty if !self.other_tx_types.bit(ty as usize) => {
                 return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
                 ))
             }
+
+            _ => {}
         };
 
         // Reject transactions with a nonce equal to U64::max according to EIP-2681
@@ -339,10 +344,10 @@ where
         }
 
         // Check whether the init code size has been exceeded.
-        if self.fork_tracker.is_shanghai_activated() {
-            if let Err(err) = transaction.ensure_max_init_code_size(MAX_INIT_CODE_BYTE_SIZE) {
-                return Err(TransactionValidationOutcome::Invalid(transaction, err))
-            }
+        if self.fork_tracker.is_shanghai_activated() &&
+            let Err(err) = transaction.ensure_max_init_code_size(MAX_INIT_CODE_BYTE_SIZE)
+        {
+            return Err(TransactionValidationOutcome::Invalid(transaction, err))
         }
 
         // Checks for gas limit
@@ -359,16 +364,16 @@ where
         }
 
         // Check individual transaction gas limit if configured
-        if let Some(max_tx_gas_limit) = self.max_tx_gas_limit {
-            if transaction_gas_limit > max_tx_gas_limit {
-                return Err(TransactionValidationOutcome::Invalid(
-                    transaction,
-                    InvalidPoolTransactionError::MaxTxGasLimitExceeded(
-                        transaction_gas_limit,
-                        max_tx_gas_limit,
-                    ),
-                ))
-            }
+        if let Some(max_tx_gas_limit) = self.max_tx_gas_limit &&
+            transaction_gas_limit > max_tx_gas_limit
+        {
+            return Err(TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::MaxTxGasLimitExceeded(
+                    transaction_gas_limit,
+                    max_tx_gas_limit,
+                ),
+            ))
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
@@ -422,13 +427,13 @@ where
         }
 
         // Checks for chainid
-        if let Some(chain_id) = transaction.chain_id() {
-            if chain_id != self.chain_id() {
-                return Err(TransactionValidationOutcome::Invalid(
-                    transaction,
-                    InvalidTransactionError::ChainIdMismatch.into(),
-                ))
-            }
+        if let Some(chain_id) = transaction.chain_id() &&
+            chain_id != self.chain_id()
+        {
+            return Err(TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::ChainIdMismatch.into(),
+            ))
         }
 
         if transaction.is_eip7702() {
@@ -837,6 +842,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     max_tx_gas_limit: Option<u64>,
     /// Disable balance checks during transaction validation
     disable_balance_check: bool,
+    /// Bitmap of custom transaction types that are allowed.
+    other_tx_types: U256,
 }
 
 impl<Client> EthTransactionValidatorBuilder<Client> {
@@ -883,6 +890,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
             // balance checks are enabled by default
             disable_balance_check: false,
+
+            // no custom transaction types by default
+            other_tx_types: U256::ZERO,
         }
     }
 
@@ -992,7 +1002,8 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
     /// Configures validation rules based on the head block's timestamp.
     ///
-    /// For example, whether the Shanghai and Cancun hardfork is activated at launch.
+    /// For example, whether the Shanghai and Cancun hardfork is activated at launch, or max blob
+    /// counts.
     pub fn with_head_timestamp(mut self, timestamp: u64) -> Self
     where
         Client: ChainSpecProvider<ChainSpec: EthereumHardforks>,
@@ -1044,6 +1055,12 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self
     }
 
+    /// Adds a custom transaction type to the validator.
+    pub const fn with_custom_tx_type(mut self, tx_type: u8) -> Self {
+        self.other_tx_types.set_bit(tx_type as usize, true);
+        self
+    }
+
     /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
     pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
     where
@@ -1067,14 +1084,10 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             max_tx_input_bytes,
             max_tx_gas_limit,
             disable_balance_check,
-            ..
+            max_blob_count,
+            additional_tasks: _,
+            other_tx_types,
         } = self;
-
-        let max_blob_count = if prague {
-            BlobParams::prague().max_blobs_per_tx
-        } else {
-            BlobParams::cancun().max_blobs_per_tx
-        };
 
         let fork_tracker = ForkTracker {
             shanghai: AtomicBool::new(shanghai),
@@ -1102,6 +1115,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             disable_balance_check,
             _marker: Default::default(),
             validation_metrics: TxPoolValidationMetrics::default(),
+            other_tx_types,
         }
     }
 

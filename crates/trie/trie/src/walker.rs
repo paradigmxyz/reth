@@ -28,7 +28,7 @@ pub struct TrieWalker<C, K = AddedRemovedKeys> {
     pub changes: PrefixSet,
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
-    /// Provided when it's necessary to not skip certain nodes during proof generation.
+    /// Provided when it's necessary not to skip certain nodes during proof generation.
     /// Specifically we don't skip certain branch nodes even when they are not in the `PrefixSet`,
     /// when they might be required to support leaf removal.
     added_removed_keys: Option<K>,
@@ -185,7 +185,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
                 target: "trie::walker",
                 ?key_is_only_nonremoved_child,
                 full_key=?node.full_key(),
-                "Checked for only nonremoved child",
+                "Checked for only non-removed child",
             );
 
             !self.changes.contains(node.full_key()) &&
@@ -316,13 +316,13 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         // Sanity check that the newly retrieved trie node key is the child of the last item
         // on the stack. If not, advance to the next sibling instead of adding the node to the
         // stack.
-        if let Some(subnode) = self.stack.last() {
-            if !key.starts_with(subnode.full_key()) {
-                #[cfg(feature = "metrics")]
-                self.metrics.inc_out_of_order_subnode(1);
-                self.move_to_next_sibling(false)?;
-                return Ok(())
-            }
+        if let Some(subnode) = self.stack.last() &&
+            !key.starts_with(subnode.full_key())
+        {
+            #[cfg(feature = "metrics")]
+            self.metrics.inc_out_of_order_subnode(1);
+            self.move_to_next_sibling(false)?;
+            return Ok(())
         }
 
         // Create a new CursorSubNode and push it to the stack.
@@ -333,10 +333,10 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
 
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
-        if !self.can_skip_current_node || position.is_child() {
-            if let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?) {
-                keys.insert(key);
-            }
+        if (!self.can_skip_current_node || position.is_child()) &&
+            let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?)
+        {
+            keys.insert(key);
         }
 
         Ok(())

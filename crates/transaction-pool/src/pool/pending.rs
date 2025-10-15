@@ -329,13 +329,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &mut self,
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        if let Some(lowest) = self.independent_transactions.get(&id.sender) {
-            if lowest.transaction.nonce() == id.nonce {
-                self.independent_transactions.remove(&id.sender);
-                // mark the next as independent if it exists
-                if let Some(unlocked) = self.get(&id.descendant()) {
-                    self.independent_transactions.insert(id.sender, unlocked.clone());
-                }
+        if let Some(lowest) = self.independent_transactions.get(&id.sender) &&
+            lowest.transaction.nonce() == id.nonce
+        {
+            self.independent_transactions.remove(&id.sender);
+            // mark the next as independent if it exists
+            if let Some(unlocked) = self.get(&id.descendant()) {
+                self.independent_transactions.insert(id.sender, unlocked.clone());
             }
         }
 
@@ -571,16 +571,16 @@ impl<T: TransactionOrdering> PendingPool<T> {
     pub(crate) fn assert_invariants(&self) {
         assert!(
             self.independent_transactions.len() <= self.by_id.len(),
-            "independent.len() > all.len()"
+            "independent_transactions.len() > by_id.len()"
         );
         assert!(
             self.highest_nonces.len() <= self.by_id.len(),
-            "independent_descendants.len() > all.len()"
+            "highest_nonces.len() > by_id.len()"
         );
         assert_eq!(
             self.highest_nonces.len(),
             self.independent_transactions.len(),
-            "independent.len() = independent_descendants.len()"
+            "highest_nonces.len() != independent_transactions.len()"
         );
     }
 }

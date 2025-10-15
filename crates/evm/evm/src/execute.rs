@@ -107,6 +107,23 @@ pub trait Executor<DB: Database>: Sized {
         Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
+    /// Executes the EVM with the given input and accepts a state closure that is always invoked
+    /// with the EVM state after execution, even after failure.
+    fn execute_with_state_closure_always<F>(
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        mut f: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(&State<DB>),
+    {
+        let result = self.execute_one(block);
+        let mut state = self.into_state();
+        f(&state);
+
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result: result? })
+    }
+
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
     /// the EVM state after execution.
     fn execute_with_state_hook<F>(
@@ -197,6 +214,32 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     pub state_provider: &'b dyn StateProvider,
     /// State root for this block.
     pub state_root: B256,
+}
+
+impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
+    /// Creates a new [`BlockAssemblerInput`].
+    #[expect(clippy::too_many_arguments)]
+    pub fn new(
+        evm_env: EvmEnv<<F::EvmFactory as EvmFactory>::Spec>,
+        execution_ctx: F::ExecutionCtx<'a>,
+        parent: &'a SealedHeader<H>,
+        transactions: Vec<F::Transaction>,
+        output: &'b BlockExecutionResult<F::Receipt>,
+        bundle_state: &'a BundleState,
+        state_provider: &'b dyn StateProvider,
+        state_root: B256,
+    ) -> Self {
+        Self {
+            evm_env,
+            execution_ctx,
+            parent,
+            transactions,
+            output,
+            bundle_state,
+            state_provider,
+            state_root,
+        }
+    }
 }
 
 /// A type that knows how to assemble a block from execution results.
@@ -533,6 +576,7 @@ where
         let result = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
+            .map_err(BlockExecutionError::other)?
             .execute_block(block.transactions_recovered())?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
@@ -551,6 +595,7 @@ where
         let result = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
+            .map_err(BlockExecutionError::other)?
             .with_state_hook(Some(Box::new(state_hook)))
             .execute_block(block.transactions_recovered())?;
 

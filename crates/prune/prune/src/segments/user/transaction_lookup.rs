@@ -48,18 +48,17 @@ where
         // data. If the TransactionLookup checkpoint is lagging behind (which can happen e.g. when
         // pre-merge history is dropped and then later tx lookup pruning is enabled) then we can
         // only prune from the tx checkpoint and onwards.
-        if let Some(txs_checkpoint) = provider.get_prune_checkpoint(PruneSegment::Transactions)? {
-            if input
+        if let Some(txs_checkpoint) = provider.get_prune_checkpoint(PruneSegment::Transactions)? &&
+            input
                 .previous_checkpoint
                 .is_none_or(|checkpoint| checkpoint.block_number < txs_checkpoint.block_number)
-            {
-                input.previous_checkpoint = Some(txs_checkpoint);
-                debug!(
-                    target: "pruner",
-                    transactions_checkpoint = ?input.previous_checkpoint,
-                    "No TransactionLookup checkpoint found, using Transactions checkpoint as fallback"
-                );
-            }
+        {
+            input.previous_checkpoint = Some(txs_checkpoint);
+            debug!(
+                target: "pruner",
+                transactions_checkpoint = ?input.previous_checkpoint,
+                "No TransactionLookup checkpoint found, using Transactions checkpoint as fallback"
+            );
         }
 
         let (start, end) = match input.get_next_tx_num_range(provider)? {
@@ -140,7 +139,7 @@ mod tests {
         Itertools,
     };
     use reth_db_api::tables;
-    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
@@ -158,7 +157,7 @@ mod tests {
             1..=10,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let mut tx_hash_numbers = Vec::new();
         for block in &blocks {
@@ -171,11 +170,11 @@ mod tests {
         db.insert_tx_hash_numbers(tx_hash_numbers).expect("insert tx hash numbers");
 
         assert_eq!(
-            db.table::<tables::Transactions>().unwrap().len(),
+            db.count_entries::<tables::Transactions>().unwrap(),
             blocks.iter().map(|block| block.transaction_count()).sum::<usize>()
         );
         assert_eq!(
-            db.table::<tables::Transactions>().unwrap().len(),
+            db.count_entries::<tables::Transactions>().unwrap(),
             db.table::<tables::TransactionHashNumbers>().unwrap().len()
         );
 

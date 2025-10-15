@@ -51,9 +51,6 @@ serde.workspace = true
 thiserror.workspace = true
 modular-bitfield.workspace = true
 
-[dev-dependencies]
-test-fuzz.workspace = true
-
 [features]
 arbitrary = [
     "alloy-consensus/arbitrary",

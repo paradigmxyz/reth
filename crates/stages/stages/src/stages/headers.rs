@@ -145,19 +145,18 @@ where
 
         let mut cursor_header_numbers =
             provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
-        let mut first_sync = false;
-
         // If we only have the genesis block hash, then we are at first sync, and we can remove it,
         // add it to the collector and use tx.append on all hashes.
-        if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
-            if let Some((hash, block_number)) = cursor_header_numbers.last()? {
-                if block_number.value()? == 0 {
-                    self.hash_collector.insert(hash.key()?, 0)?;
-                    cursor_header_numbers.delete_current()?;
-                    first_sync = true;
-                }
-            }
-        }
+        let first_sync = if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 &&
+            let Some((hash, block_number)) = cursor_header_numbers.last()? &&
+            block_number.value()? == 0
+        {
+            self.hash_collector.insert(hash.key()?, 0)?;
+            cursor_header_numbers.delete_current()?;
+            true
+        } else {
+            false
+        };
 
         // Since ETL sorts all entries by hashes, we are either appending (first sync) or inserting
         // in order (further syncs).
@@ -402,13 +401,9 @@ mod tests {
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
-    use reth_ethereum_primitives::BlockBody;
-    use reth_execution_types::ExecutionOutcome;
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
-    use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
+    use reth_provider::{DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
-    use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
     use std::sync::Arc;
     use test_runner::HeadersTestRunner;
 
@@ -630,30 +625,29 @@ mod tests {
         assert!(runner.stage().header_collector.is_empty());
 
         // let's insert some blocks using append_blocks_with_state
-        let sealed_headers =
-            random_header_range(&mut generators::rng(), tip.number..tip.number + 10, tip.hash());
+        let sealed_headers = random_header_range(
+            &mut generators::rng(),
+            tip.number + 1..tip.number + 10,
+            tip.hash(),
+        );
 
-        // make them sealed blocks with senders by converting them to empty blocks
-        let sealed_blocks = sealed_headers
-            .iter()
-            .map(|header| {
-                RecoveredBlock::new_sealed(
-                    SealedBlock::from_sealed_parts(header.clone(), BlockBody::default()),
-                    vec![],
-                )
-            })
-            .collect();
+        let provider = runner.db().factory.database_provider_rw().unwrap();
+        let static_file_provider = provider.static_file_provider();
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        for header in sealed_headers {
+            let ttd = if header.number() == 0 {
+                header.difficulty()
+            } else {
+                let parent_block_number = header.number() - 1;
+                let parent_ttd =
+                    provider.header_td_by_number(parent_block_number).unwrap().unwrap_or_default();
+                parent_ttd + header.difficulty()
+            };
 
-        // append the blocks
-        let provider = runner.db().factory.provider_rw().unwrap();
-        provider
-            .append_blocks_with_state(
-                sealed_blocks,
-                &ExecutionOutcome::default(),
-                HashedPostStateSorted::default(),
-                TrieUpdates::default(),
-            )
-            .unwrap();
+            writer.append_header(header.header(), ttd, &header.hash()).unwrap();
+        }
+        drop(writer);
+
         provider.commit().unwrap();
 
         // now we can unwind 10 blocks

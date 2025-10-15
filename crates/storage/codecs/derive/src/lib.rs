@@ -7,7 +7,7 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![allow(unreachable_pub, missing_docs)]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
@@ -69,8 +69,8 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
     let mut decompressor = None;
 
     for attr in &input.attrs {
-        if attr.path().is_ident("reth_zstd") {
-            if let Err(err) = attr.parse_nested_meta(|meta| {
+        if attr.path().is_ident("reth_zstd") &&
+            let Err(err) = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("compressor") {
                     let value = meta.value()?;
                     let path: syn::Path = value.parse()?;
@@ -83,9 +83,9 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
                     return Err(meta.error("unsupported attribute"))
                 }
                 Ok(())
-            }) {
-                return err.to_compile_error().into()
-            }
+            })
+        {
+            return err.to_compile_error().into()
         }
     }
 
