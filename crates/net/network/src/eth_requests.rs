@@ -147,7 +147,6 @@ where
         headers
     }
     
-    /// Generic implementation for fetching items (bodies or receipts) based on hashes.
     #[inline]
     fn get_response_items<T, F>(&self, hashes: Vec<B256>, fetch_fn: F, max_items: usize) -> Vec<T>
     where
@@ -176,8 +175,6 @@ where
                     break;
                 }
             } else {
-                // If any hash is not found, we stop processing further hashes.
-                // This is consistent with the original logic.
                 break;
             }
         }
