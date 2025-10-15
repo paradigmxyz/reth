@@ -871,7 +871,7 @@ impl ProofTaskManagerHandle {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
-        tracing::info!(
+        tracing::debug!(
             target: "trie::proof_task",
             storage_worker_count,
             account_worker_count,
