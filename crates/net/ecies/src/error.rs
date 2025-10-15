@@ -47,7 +47,7 @@ pub enum ECIESErrorImpl {
     /// Error when parsing ACK data
     #[error("invalid ack data")]
     InvalidAckData,
-    /// Error when reading/parsing the RLPx header
+    /// Error when reading/parsing the `RLPx` header
     #[error("invalid header")]
     InvalidHeader,
     /// Error when interacting with secp256k1
