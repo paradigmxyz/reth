@@ -391,7 +391,8 @@ where
         };
 
         let evm_env = trace_span!("evm env")
-            .in_scope(|| self.evm_env_for(&input).map_err(NewPayloadError::other))?;
+            .in_scope(|| self.evm_env_for(&input))
+            .map_err(NewPayloadError::other)?;
 
         let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
 
