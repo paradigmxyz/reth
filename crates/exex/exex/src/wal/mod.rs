@@ -111,7 +111,7 @@ where
     }
 
     /// Fills the block cache with the notifications from the storage.
-    #[instrument(level = "trace", skip(self))]
+    #[instrument(skip(self))]
     fn fill_block_cache(&self) -> WalResult<()> {
         let Some(files_range) = self.storage.files_range()? else { return Ok(()) };
         self.next_file_id.store(files_range.end() + 1, Ordering::Relaxed);
@@ -143,7 +143,7 @@ where
         Ok(())
     }
 
-    #[instrument(level = "trace", skip_all, fields(
+    #[instrument(skip_all, fields(
         reverted_block_range = ?notification.reverted_chain().as_ref().map(|chain| chain.range()),
         committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
     ))]
@@ -161,7 +161,7 @@ where
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(self))]
+    #[instrument(skip(self))]
     fn finalize(&self, to_block: BlockNumHash) -> WalResult<()> {
         let mut block_cache = self.block_cache.write();
         let file_ids = block_cache.remove_before(to_block.number);

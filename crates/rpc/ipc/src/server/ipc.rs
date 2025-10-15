@@ -27,7 +27,7 @@ pub(crate) struct Batch<S> {
 // Batch responses must be sent back as a single message so we read the results from each
 // request in the batch and read the results off of a new channel, `rx_batch`, and then send the
 // complete batch response back to the client over `tx`.
-#[instrument(level = "trace", name = "batch", skip(b))]
+#[instrument(name = "batch", skip(b))]
 pub(crate) async fn process_batch_request<S>(
     b: Batch<S>,
     max_response_body_size: usize,
@@ -98,7 +98,7 @@ where
     }
 }
 
-#[instrument(level = "trace", name = "method_call", fields(method = req.method.as_ref()), skip(req, rpc_service))]
+#[instrument(name = "method_call", fields(method = req.method.as_ref()), skip(req, rpc_service))]
 pub(crate) async fn execute_call_with_tracing<'a, S>(
     req: Request<'a>,
     rpc_service: &S,

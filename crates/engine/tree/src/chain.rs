@@ -71,7 +71,7 @@ where
     /// Internal function used to advance the chain.
     ///
     /// Polls the `ChainOrchestrator` for the next event.
-    #[tracing::instrument(level = "debug", name = "ChainOrchestrator::poll", skip(self, cx))]
+    #[tracing::instrument(name = "ChainOrchestrator::poll", skip(self, cx))]
     fn poll_next_event(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<ChainEvent<T::Event>> {
         let this = self.get_mut();
 

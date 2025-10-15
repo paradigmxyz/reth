@@ -52,7 +52,7 @@ where
     /// # Returns
     ///
     /// The size of the file that was removed in bytes, if any.
-    #[instrument(level = "trace", skip(self))]
+    #[instrument(skip(self))]
     fn remove_notification(&self, file_id: u32) -> Option<u64> {
         let path = self.file_path(file_id);
         let size = path.metadata().ok()?.len();
@@ -126,7 +126,7 @@ where
     }
 
     /// Reads the notification from the file with the given ID.
-    #[instrument(level = "trace", skip(self))]
+    #[instrument(skip(self))]
     pub(super) fn read_notification(
         &self,
         file_id: u32,
