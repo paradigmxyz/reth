@@ -13,7 +13,7 @@ pub enum Error {
     #[error("network stack identifier is not configured")]
     NetworkStackIdNotConfigured,
     /// Missing key used to identify rlpx network.
-    #[error("fork missing on enr, with local network id '{id}', and 'eth' always accepted as fallback", id = String::from_utf8_lossy(.0))]
+    #[error("fork missing on enr, key {0:?} and key 'eth' missing")]
     ForkMissing(&'static [u8]),
     /// Failed to decode [`ForkId`](reth_ethereum_forks::ForkId) rlp value.
     #[error("failed to decode fork id, 'eth': {0:?}")]
