@@ -384,7 +384,23 @@ impl Discv5 {
         let Some(key) = self.fork_key else { return Err(Error::NetworkStackIdNotConfigured) };
         let fork_id = enr
             .get_decodable::<EnrForkIdEntry>(key)
-            .ok_or(Error::ForkMissing(key))?
+            .or({
+                (key != NetworkStackId::ETH)
+                    .then(|| {
+                        // Fallback: trying to get fork id from Enr with 'eth' as network stack id
+                        trace!(
+                            target: "net::discv5",
+                            "fork id not found for '{key}' network stack id, trying 'eth'",
+                            key = String::from_utf8_lossy(key),
+                        );
+                        enr.get_decodable::<EnrForkIdEntry>(NetworkStackId::ETH)
+                    })
+                    .flatten()
+            })
+            .ok_or({
+                trace!(target: "net::discv5", "fork id not found for 'eth' network stack id");
+                Error::ForkMissing(key)
+            })?
             .map(Into::into)?;
 
         Ok(fork_id)
