@@ -1,5 +1,4 @@
 //! Compatibility functions for rpc `Transaction` type.
-
 use crate::{
     fees::{CallFees, CallFeesError},
     RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes,
