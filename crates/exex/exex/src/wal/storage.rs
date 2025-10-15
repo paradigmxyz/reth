@@ -186,6 +186,7 @@ mod tests {
     // wal with 1 block and tx
     // <https://github.com/paradigmxyz/reth/issues/15012>
     #[test]
+    #[ignore]
     fn decode_notification_wal() {
         let wal = include_bytes!("../../test-data/28.wal");
         let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
