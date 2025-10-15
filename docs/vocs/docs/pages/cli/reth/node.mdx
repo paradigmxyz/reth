@@ -996,16 +996,18 @@ Display:
 
 Tracing:
       --tracing-otlp[=<URL>]
-          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+          Enable `Opentelemetry` tracing export to an OTLP endpoint. Currently only http exporting is supported.
 
           If no value provided, defaults to `http://localhost:4318/v1/traces`.
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
 
-      --tracing-otlp-level <LEVEL>
-          Set the minimum log level for OTLP traces.
+          [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
 
-          Valid values: ERROR, WARN, INFO, DEBUG, TRACE
+      --tracing-otlp-level <FILTER>
+          Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
+
+          Example: --tracing-otlp-level=info,reth=debug,hyper_util=off
 
           Defaults to TRACE if not specified.
 
