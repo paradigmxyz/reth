@@ -6,6 +6,7 @@
 //! applications. It allows for easily capturing and exporting distributed traces to compatible
 //! backends like Jaeger, Zipkin, or any other OpenTelemetry-compatible tracing system.
 
+use clap::ValueEnum;
 use eyre::ensure;
 use opentelemetry::{global, trace::TracerProvider, KeyValue, Value};
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
@@ -15,7 +16,6 @@ use opentelemetry_sdk::{
     Resource,
 };
 use opentelemetry_semantic_conventions::{attribute::SERVICE_VERSION, SCHEMA_URL};
-use std::str::FromStr;
 use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;
@@ -68,24 +68,12 @@ fn build_resource(service_name: impl Into<Value>) -> Resource {
 }
 
 /// OTLP transport protocol type
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum OtlpProtocol {
     /// HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
     Http,
     /// gRPC transport, port 4317
     Grpc,
-}
-
-impl FromStr for OtlpProtocol {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "http" => Ok(Self::Http),
-            "grpc" => Ok(Self::Grpc),
-            _ => Err(format!("Invalid protocol '{}'. Valid values: http, grpc", s)),
-        }
-    }
 }
 
 impl OtlpProtocol {
