@@ -553,7 +553,15 @@ where
         }
     }
 
-    /// Runs the storage worker loop until all senders are dropped.
+    /// Worker loop for storage trie operations.
+    ///
+    /// # Lifecycle
+    ///
+    /// Each worker:
+    /// 1. Receives `StorageWorkerJob` from crossbeam unbounded channel
+    /// 2. Computes result using its dedicated long-lived transaction
+    /// 3. Sends result directly to original caller via `std::mpsc`
+    /// 4. Repeats until channel closes (graceful shutdown)
     fn run(self) {
         let Self {
             view,
@@ -690,7 +698,15 @@ where
         }
     }
 
-    /// Runs the account worker loop until all senders are dropped.
+    /// Worker loop for account trie operations.
+    ///
+    /// # Lifecycle
+    ///
+    /// Each worker:
+    /// 1. Receives `AccountWorkerJob` from crossbeam unbounded channel
+    /// 2. Computes result using its dedicated long-lived transaction
+    /// 3. Sends result directly to original caller via `std::mpsc`
+    /// 4. Repeats until channel closes (graceful shutdown)
     fn run(self) {
         let Self {
             view,
