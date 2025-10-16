@@ -320,10 +320,7 @@ impl Discv5 {
             return None
         }
 
-        // todo: extend for all network stacks in reth-network rlpx logic
-        let fork_id = (self.fork_key == Some(NetworkStackId::ETH))
-            .then(|| self.get_fork_id(enr).ok())
-            .flatten();
+        let fork_id = self.get_fork_id(enr).ok();
 
         trace!(target: "net::discv5",
             ?fork_id,
@@ -387,7 +384,22 @@ impl Discv5 {
         let Some(key) = self.fork_key else { return Err(Error::NetworkStackIdNotConfigured) };
         let fork_id = enr
             .get_decodable::<EnrForkIdEntry>(key)
-            .ok_or(Error::ForkMissing(key))?
+            .or_else(|| {
+                (key != NetworkStackId::ETH)
+                    .then(|| {
+                        // Fallback: trying to get fork id from Enr with 'eth' as network stack id
+                        trace!(target: "net::discv5",
+                            key = %String::from_utf8_lossy(key),
+                            "Fork id not found for key, trying 'eth'..."
+                        );
+                        enr.get_decodable::<EnrForkIdEntry>(NetworkStackId::ETH)
+                    })
+                    .flatten()
+            })
+            .ok_or({
+                trace!(target: "net::discv5", "Fork id not found for 'eth' network stack id");
+                Error::ForkMissing(key)
+            })?
             .map(Into::into)?;
 
         Ok(fork_id)
@@ -669,6 +681,8 @@ mod test {
     use ::enr::{CombinedKey, EnrKey};
     use rand_08::thread_rng;
     use reth_chainspec::MAINNET;
+    use reth_tracing::init_test_tracing;
+    use std::env;
     use tracing::trace;
 
     fn discv5_noop() -> Discv5 {
@@ -900,5 +914,56 @@ mod test {
 
         assert_eq!(fork_id, decoded_fork_id);
         assert_eq!(TCP_PORT, enr.tcp4().unwrap()); // listen config is defaulting to ip mode ipv4
+    }
+
+    #[test]
+    fn get_fork_id_with_different_network_stack_ids() {
+        unsafe {
+            env::set_var("RUST_LOG", "net::discv5=trace");
+        }
+        init_test_tracing();
+
+        let fork_id = MAINNET.latest_fork_id();
+        let sk = SecretKey::new(&mut thread_rng());
+
+        // Test 1: ENR with OPEL fork ID, Discv5 configured for OPEL
+        let enr_with_opel = Enr::builder()
+            .add_value_rlp(
+                NetworkStackId::OPEL,
+                alloy_rlp::encode(EnrForkIdEntry::from(fork_id)).into(),
+            )
+            .build(&sk)
+            .unwrap();
+
+        let mut discv5 = discv5_noop();
+        discv5.fork_key = Some(NetworkStackId::OPEL);
+        assert_eq!(discv5.get_fork_id(&enr_with_opel).unwrap(), fork_id);
+
+        // Test 2: ENR with ETH fork ID, Discv5 configured for OPEL (fallback to ETH)
+        let enr_with_eth = Enr::builder()
+            .add_value_rlp(
+                NetworkStackId::ETH,
+                alloy_rlp::encode(EnrForkIdEntry::from(fork_id)).into(),
+            )
+            .build(&sk)
+            .unwrap();
+
+        discv5.fork_key = Some(NetworkStackId::OPEL);
+        assert_eq!(discv5.get_fork_id(&enr_with_eth).unwrap(), fork_id);
+
+        // Test 3: ENR with neither OPEL nor ETH fork ID (should fail)
+        let enr_without_network_stack_id = Enr::empty(&sk).unwrap();
+        discv5.fork_key = Some(NetworkStackId::OPEL);
+        assert!(matches!(
+            discv5.get_fork_id(&enr_without_network_stack_id),
+            Err(Error::ForkMissing(NetworkStackId::OPEL))
+        ));
+
+        // Test 4: discv5 without network stack id configured (should fail)
+        let discv5 = discv5_noop();
+        assert!(matches!(
+            discv5.get_fork_id(&enr_without_network_stack_id),
+            Err(Error::NetworkStackIdNotConfigured)
+        ));
     }
 }
