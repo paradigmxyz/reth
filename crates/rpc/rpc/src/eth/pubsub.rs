@@ -326,7 +326,7 @@ where
                 syncing: true,
                 starting_block: 0,
                 current_block,
-                highest_block: Some(current_block),
+                highest_block: None, // Set to None instead of current_block as we don't have peer network height info here
             })
         } else {
             PubSubSyncStatus::Simple(false)
