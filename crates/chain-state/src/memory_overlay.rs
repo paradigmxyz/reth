@@ -62,11 +62,7 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
         })
     }
 
-    fn merged_hashed_storage(
-        &self,
-        address: Address,
-        storage: HashedStorage,
-    ) -> HashedStorage {
+    fn merged_hashed_storage(&self, address: Address, storage: HashedStorage) -> HashedStorage {
         let state = &self.trie_input().state;
         let mut hashed = state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
         hashed.extend(&storage);
