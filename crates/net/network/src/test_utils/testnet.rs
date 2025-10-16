@@ -131,17 +131,11 @@ where
         &mut self,
         config: PeerConfig<C>,
     ) -> Result<(), NetworkError> {
-        let PeerConfig { config, client, secret_key } = config;
+        let PeerConfig { config, client } = config;
 
         let network = NetworkManager::new(config).await?;
-        let peer = Peer {
-            network,
-            client,
-            secret_key,
-            request_handler: None,
-            transactions_manager: None,
-            pool: None,
-        };
+        let peer =
+            Peer { network, client, request_handler: None, transactions_manager: None, pool: None };
         self.peers.push(peer);
         Ok(())
     }
@@ -408,7 +402,6 @@ pub struct Peer<C, Pool = TestPool> {
     >,
     pool: Option<Pool>,
     client: C,
-    secret_key: SecretKey,
 }
 
 // === impl Peer ===
@@ -490,7 +483,7 @@ where
     where
         P: TransactionPool,
     {
-        let Self { mut network, request_handler, client, secret_key, .. } = self;
+        let Self { mut network, request_handler, client, .. } = self;
         let (tx, rx) = unbounded_channel();
         network.set_transactions(tx);
         let transactions_manager = TransactionsManager::new(
@@ -505,7 +498,6 @@ where
             transactions_manager: Some(transactions_manager),
             pool: Some(pool),
             client,
-            secret_key,
         }
     }
 
@@ -531,7 +523,7 @@ where
     where
         P: TransactionPool,
     {
-        let Self { mut network, request_handler, client, secret_key, .. } = self;
+        let Self { mut network, request_handler, client, .. } = self;
         let (tx, rx) = unbounded_channel();
         network.set_transactions(tx);
 
@@ -552,7 +544,6 @@ where
             transactions_manager: Some(transactions_manager),
             pool: Some(pool),
             client,
-            secret_key,
         }
     }
 }
@@ -606,7 +597,6 @@ where
 pub struct PeerConfig<C = NoopProvider> {
     config: NetworkConfig<C>,
     client: C,
-    secret_key: SecretKey,
 }
 
 /// A handle to a peer in the [`Testnet`].
@@ -664,16 +654,10 @@ where
 {
     /// Launches the network and returns the [Peer] that manages it
     pub async fn launch(self) -> Result<Peer<C>, NetworkError> {
-        let Self { config, client, secret_key } = self;
+        let Self { config, client } = self;
         let network = NetworkManager::new(config).await?;
-        let peer = Peer {
-            network,
-            client,
-            secret_key,
-            request_handler: None,
-            transactions_manager: None,
-            pool: None,
-        };
+        let peer =
+            Peer { network, client, request_handler: None, transactions_manager: None, pool: None };
         Ok(peer)
     }
 
@@ -685,7 +669,7 @@ where
     {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let config = Self::network_config_builder(secret_key).build(client.clone());
-        Self { config, client, secret_key }
+        Self { config, client }
     }
 
     /// Initialize the network with a given secret key, allowing devp2p and discovery to bind any
@@ -695,7 +679,7 @@ where
         C: ChainSpecProvider<ChainSpec: Hardforks>,
     {
         let config = Self::network_config_builder(secret_key).build(client.clone());
-        Self { config, client, secret_key }
+        Self { config, client }
     }
 
     /// Initialize the network with a given capabilities.
@@ -710,7 +694,7 @@ where
             HelloMessageWithProtocols::builder(builder.get_peer_id()).protocols(protocols).build();
         let config = builder.hello_message(hello_message).build(client.clone());
 
-        Self { config, client, secret_key }
+        Self { config, client }
     }
 
     fn network_config_builder(secret_key: SecretKey) -> NetworkConfigBuilder {
