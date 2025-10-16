@@ -319,9 +319,18 @@ fn account_worker_loop<Factory>(
                 );
                 tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
+                // Dispatch storage proofs for ALL accounts in storage_prefix_sets, not just
+                // targets. This prevents "missed leaves" during account trie walk,
+                // reducing synchronous database access. Previously, only accounts
+                // in targets were pre-dispatched, causing 85%+ miss ratio.
+                let all_storage_accounts: MultiProofTargets = storage_prefix_sets
+                    .keys()
+                    .map(|&addr| (addr, input.targets.get(&addr).cloned().unwrap_or_default()))
+                    .collect();
+
                 let storage_proof_receivers = match dispatch_storage_proofs(
                     &storage_work_tx,
-                    &input.targets,
+                    &all_storage_accounts,
                     &mut storage_prefix_sets,
                     input.collect_branch_node_masks,
                     input.multi_added_removed_keys.as_ref(),
