@@ -9,7 +9,9 @@ use reth_config::config::EtlConfig;
 use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_execution_errors::StateRootError;
-use reth_primitives_traits::{Account, Bytecode, GotExpected, NodePrimitives, StorageEntry};
+use reth_primitives_traits::{
+    Account, Bytecode, GotExpected, NodePrimitives, SealedHeader, StorageEntry,
+};
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
@@ -389,13 +391,16 @@ where
     }
 
     let block = provider_rw.last_block_number()?;
+
     let hash = provider_rw
         .block_hash(block)?
         .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
-    let expected_state_root = provider_rw
+    let header = provider_rw
         .header_by_number(block)?
-        .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?
-        .state_root();
+        .map(SealedHeader::seal_slow)
+        .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?;
+
+    let expected_state_root = header.state_root();
 
     // first line can be state root
     let dump_state_root = parse_state_root(&mut reader)?;
@@ -403,6 +408,7 @@ where
         error!(target: "reth::cli",
             ?dump_state_root,
             ?expected_state_root,
+            header=?header.num_hash(),
             "State root from state dump does not match state root in current header."
         );
         return Err(InitStorageError::StateRootMismatch(GotExpected {
