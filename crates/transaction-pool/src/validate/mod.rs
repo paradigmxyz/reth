@@ -497,6 +497,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 }
 
+#[cfg(test)]
 impl<T: PoolTransaction> Clone for ValidPoolTransaction<T> {
     fn clone(&self) -> Self {
         Self {

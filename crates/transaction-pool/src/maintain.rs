@@ -504,6 +504,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     let spawner = task_spawner.clone();
                     let client = client.clone();
                     task_spawner.spawn(Box::pin(async move {
+                        let mut interval = tokio::time::interval(Duration::from_secs(1));
                         loop {
                             // Loop and replace blob transactions until we reach Osaka transition
                             // block after which no legacy blobs are going to be accepted.
@@ -519,7 +520,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                                 if !tx.transaction.is_eip4844() {
                                     continue;
                                 }
-                                let tx_hash = *tx.transaction.tx_hash();
+                                let tx_hash = *tx.transaction.hash();
 
                                 // Fetch sidecar from the pool
                                 let Ok(Some(sidecar)) = pool.get_blob(tx_hash) else {
@@ -546,9 +547,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                                 let pool = pool.clone();
                                 spawner.spawn(Box::pin(async move {
                                     // Convert sidecar to EIP-7594 format
-                                    let Some(sidecar) =
-                                        converter.convert(Arc::unwrap_or_clone(sidecar)).await
-                                    else {
+                                    let Some(sidecar) = converter.convert(sidecar).await else {
                                         return;
                                     };
 
@@ -567,16 +566,14 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                             if last_iteration {
                                 break;
                             }
+
+                            interval.tick().await;
                         }
                     }));
                 }
             }
         }
     }
-}
-
-async fn convert_blob_sidecars<Pool, Tasks>(pool: P, spawner: Tasks) {
-    let interval = tokio::time::interval(Duration::from_secs(1));
 }
 
 struct FinalizedBlockTracker {
