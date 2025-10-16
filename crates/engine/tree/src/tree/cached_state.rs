@@ -474,9 +474,9 @@ impl ExecutionCacheBuilder {
             .build_with_hasher(DefaultHashBuilder::default());
 
         let account_cache = CacheBuilder::new(self.account_cache_entries)
-            .weigher(|_key: &Address, _value: &Option<Account>| -> u32 {
+            .weigher(|_key: &Address, value: &Option<Account>| -> u32 {
                 // Account has a fixed size (none, balance,code_hash)
-                20 + size_of::<Option<Account>>() as u32
+                20 + size_of_val(&value) as u32
             })
             .max_capacity(account_cache_size)
             .time_to_live(EXPIRY_TIME)
