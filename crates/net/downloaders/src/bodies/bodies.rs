@@ -347,6 +347,12 @@ where
         // written by external services (e.g. BlockchainTree).
         tracing::trace!(target: "downloaders::bodies", ?range, prev_range = ?self.download_range, "Download range reset");
         info!(target: "downloaders::bodies", count, ?range, "Downloading bodies");
+        // Increment out-of-order requests metric if the new start is below the last returned block
+        if let Some(last_returned) = self.latest_queued_block_number &&
+            *range.start() < last_returned
+        {
+            self.metrics.out_of_order_requests.increment(1);
+        }
         self.clear();
         self.download_range = range;
         Ok(())
