@@ -295,7 +295,7 @@ pub use crate::{
 };
 use crate::{
     identifier::TransactionId,
-    pool::PoolInner,
+    pool::{AddedTransactionState, PoolInner, QueuedReason},
     validate::{PoolTransactionSidecar, ValidTransaction},
 };
 use alloy_eips::{
@@ -349,7 +349,7 @@ pub struct Pool<V, T: TransactionOrdering, S> {
 
 impl<V, T, S> Pool<V, T, S>
 where
-    V: TransactionValidator,
+    V: TransactionValidator + 'static,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {
@@ -423,6 +423,84 @@ where
     /// Returns the configured blob store.
     pub fn blob_store(&self) -> &S {
         self.pool.blob_store()
+    }
+
+    /// Takes an iterator over validated transactions and returns [`AddedTransactionOutcome`] for
+    /// each transaction.
+    ///
+    /// Blob transactions requiring conversions are sent to separate tasks that perform the
+    /// conversions and insert the transactions into the pool. For those transactions a successful
+    /// result is produced right away.
+    ///
+    /// Other transactions are added directly into the pool.
+    fn add_transactions_with_origins(
+        &self,
+        txs: impl IntoIterator<Item = (TransactionOrigin, TransactionValidationOutcome<V::Transaction>)>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>>
+    where
+        V::Transaction: EthPoolTransaction,
+    {
+        // Produce results right away for transactions that are inserted in a separate tasks and
+        // collect a vec of transactions that need to be added to the pool
+        let (ready_results, to_add): (Vec<_>, Vec<_>) = txs
+            .into_iter()
+            .map(|(origin, tx)| match tx {
+                TransactionValidationOutcome::Valid {
+                    transaction:
+                        ValidTransaction::ValidWithSidecar {
+                            transaction,
+                            sidecar:
+                                PoolTransactionSidecar::Eip4844 { sidecar, should_convert: true },
+                        },
+                    ..
+                } => {
+                    let this = self.clone();
+                    let hash = *transaction.hash();
+                    tokio::task::spawn(async move {
+                        let Some(converted) =
+                            this.pool.blob_sidecar_converter().convert(sidecar).await
+                        else {
+                            return
+                        };
+
+                        let Some(tx) = V::Transaction::try_from_eip4844(
+                            transaction.into_consensus(),
+                            converted.into(),
+                        ) else {
+                            return
+                        };
+
+                        let _ = this.add_transaction(origin, tx).await;
+                    });
+
+                    (
+                        Some(Ok(AddedTransactionOutcome {
+                            hash,
+                            state: AddedTransactionState::Queued(QueuedReason::LegacyBlob),
+                        })),
+                        None,
+                    )
+                }
+                tx => (None, Some((origin, tx))),
+            })
+            .unzip();
+
+        let mut added = self.pool.add_transactions_with_origins(to_add.into_iter().flatten());
+        // Reverse the order of the results so that we can pop from the end of the vec
+        added.reverse();
+
+        ready_results
+            .into_iter()
+            .map(
+                |maybe_result| {
+                    if let Some(result) = maybe_result {
+                        result
+                    } else {
+                        added.pop().unwrap()
+                    }
+                },
+            )
+            .collect()
     }
 }
 
@@ -502,7 +580,7 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<AddedTransactionOutcome> {
         let tx = self.validate(origin, transaction).await;
-        let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
+        let mut results = self.add_transactions_with_origins(std::iter::once((origin, tx)));
         results.pop().expect("result length is the same as the input")
     }
 
@@ -514,41 +592,9 @@ where
         if transactions.is_empty() {
             return Vec::new()
         }
-        let validated =
-            self.validate_all(origin, transactions).await.into_iter().filter_map(|tx| match tx {
-                TransactionValidationOutcome::Valid {
-                    transaction:
-                        ValidTransaction::ValidWithSidecar {
-                            transaction,
-                            sidecar:
-                                PoolTransactionSidecar::Eip4844 { sidecar, should_convert: true },
-                        },
-                    ..
-                } => {
-                    let this = self.clone();
-                    tokio::spawn(async move {
-                        let Some(converted) =
-                            this.pool.blob_sidecar_converter().convert(sidecar).await
-                        else {
-                            return
-                        };
+        let validated = self.validate_all(origin, transactions).await;
 
-                        let Some(tx) = V::Transaction::try_from_eip4844(
-                            transaction.into_consensus(),
-                            converted.into(),
-                        ) else {
-                            return
-                        };
-
-                        let _ = this.add_transaction(origin, tx).await;
-                    });
-
-                    None
-                }
-                tx => Some(tx),
-            });
-
-        self.pool.add_transactions(origin, validated)
+        self.add_transactions_with_origins(validated.into_iter().map(|tx| (origin, tx)))
     }
 
     async fn add_transactions_with_origins(
@@ -560,7 +606,7 @@ where
         }
         let validated = self.validate_all_with_origins(transactions).await;
 
-        self.pool.add_transactions_with_origins(validated)
+        self.add_transactions_with_origins(validated.into_iter())
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {

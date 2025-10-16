@@ -125,9 +125,8 @@ impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
     }
 }
 
-impl<'a, Node, V> TxPoolBuilder<'a, Node, TransactionValidationTaskExecutor<V>>
+impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, TransactionValidationTaskExecutor<V>>
 where
-    Node: FullNodeTypes,
     V: TransactionValidator + 'static,
     V::Transaction:
         PoolTransaction<Consensus = TxTy<Node::Types>> + reth_transaction_pool::EthPoolTransaction,

@@ -1284,6 +1284,8 @@ pub enum QueuedReason {
     InsufficientBaseFee,
     /// Transaction doesn't meet the blob fee requirement (EIP-4844)
     InsufficientBlobFee,
+    /// Transaction is a legacy blob transaction that needs to be converted to EIP-7594 format
+    LegacyBlob,
 }
 
 /// The state of a transaction when is was added to the pool
