@@ -16,6 +16,10 @@
 mod traits;
 pub use traits::*;
 
+/// Genesis block number initialization utilities.
+pub mod init;
+pub use init::{get_genesis_block_number, set_genesis_block_number};
+
 /// Provider trait implementations.
 pub mod providers;
 pub use providers::{

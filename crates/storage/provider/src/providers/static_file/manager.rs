@@ -5,7 +5,7 @@ use super::{
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
     ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt,
+    TransactionsProviderExt, get_genesis_block_number,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -1358,7 +1358,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         &self,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
-        self.get_writer(self.get_highest_static_file_block(segment).unwrap_or_default(), segment)
+        self.get_writer(self.get_highest_static_file_block(segment).unwrap_or(get_genesis_block_number()), segment)
     }
 
     fn commit(&self) -> ProviderResult<()> {
