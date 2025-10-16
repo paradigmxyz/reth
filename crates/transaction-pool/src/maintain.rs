@@ -496,14 +496,20 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 // keep track of mined blob transactions
                 blob_store_tracker.add_new_chain_blocks(&blocks);
 
-                // At Osaka transition, we need to convert blobs to new format
+                // If Osaka activates in 2 slots we need to convert blobs to new format.
                 if !chain_spec.is_osaka_active_at_timestamp(tip.timestamp()) &&
-                    chain_spec.is_osaka_active_at_timestamp(tip.timestamp().saturating_add(12))
+                    !chain_spec.is_osaka_active_at_timestamp(tip.timestamp().saturating_add(12)) &&
+                    chain_spec.is_osaka_active_at_timestamp(tip.timestamp().saturating_add(24))
                 {
                     let pool = pool.clone();
                     let spawner = task_spawner.clone();
                     let client = client.clone();
                     task_spawner.spawn(Box::pin(async move {
+                        // Start converting not eaerlier than 4 seconds into current slot to ensure
+                        // that our pool only contains valid transactions for the next block (as
+                        // it's not Osaka yet).
+                        tokio::time::sleep(Duration::from_secs(4)).await;
+
                         let mut interval = tokio::time::interval(Duration::from_secs(1));
                         loop {
                             // Loop and replace blob transactions until we reach Osaka transition
@@ -516,10 +522,11 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                                 });
 
                             let AllPoolTransactions { pending, queued } = pool.all_transactions();
-                            for tx in pending.into_iter().chain(queued) {
-                                if !tx.transaction.is_eip4844() {
-                                    continue;
-                                }
+                            for tx in pending
+                                .into_iter()
+                                .chain(queued)
+                                .filter(|tx| tx.transaction.is_eip4844())
+                            {
                                 let tx_hash = *tx.transaction.hash();
 
                                 // Fetch sidecar from the pool
