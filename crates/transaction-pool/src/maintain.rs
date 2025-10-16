@@ -1,11 +1,12 @@
 //! Support for maintaining the state of the transaction pool
 
 use crate::{
-    blobstore::{BlobStoreCanonTracker, BlobStoreUpdates},
+    blobstore::{BlobSidecarConverter, BlobStoreCanonTracker, BlobStoreUpdates},
     error::PoolError,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
-    BlockInfo, PoolTransaction, PoolUpdateKind, TransactionOrigin,
+    AllPoolTransactions, BlobTransactionSidecarVariant, BlockInfo, PoolTransaction, PoolUpdateKind,
+    TransactionOrigin,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
 use alloy_eips::{BlockNumberOrTag, Decodable2718, Encodable2718};
@@ -16,7 +17,7 @@ use futures_util::{
     FutureExt, Stream, StreamExt,
 };
 use reth_chain_state::CanonStateNotification;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives_traits::{
@@ -103,12 +104,12 @@ where
     N: NodePrimitives,
     Client: StateProviderFactory
         + BlockReaderIdExt<Header = N::BlockHeader>
-        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader>>
+        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
         + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
-    Tasks: TaskSpawner + 'static,
+    Tasks: TaskSpawner + Clone + 'static,
 {
     async move {
         maintain_transaction_pool(client, pool, events, task_spawner, config).await;
@@ -129,12 +130,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     N: NodePrimitives,
     Client: StateProviderFactory
         + BlockReaderIdExt<Header = N::BlockHeader>
-        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader>>
+        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
         + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
-    Tasks: TaskSpawner + 'static,
+    Tasks: TaskSpawner + Clone + 'static,
 {
     let metrics = MaintainPoolMetrics::default();
     let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
@@ -494,9 +495,88 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // keep track of mined blob transactions
                 blob_store_tracker.add_new_chain_blocks(&blocks);
+
+                // At Osaka transition, we need to convert blobs to new format
+                if !chain_spec.is_osaka_active_at_timestamp(tip.timestamp()) &&
+                    chain_spec.is_osaka_active_at_timestamp(tip.timestamp().saturating_add(12))
+                {
+                    let pool = pool.clone();
+                    let spawner = task_spawner.clone();
+                    let client = client.clone();
+                    task_spawner.spawn(Box::pin(async move {
+                        loop {
+                            // Loop and replace blob transactions until we reach Osaka transition
+                            // block after which no legacy blobs are going to be accepted.
+                            let last_iteration =
+                                client.latest_header().ok().flatten().is_none_or(|header| {
+                                    client
+                                        .chain_spec()
+                                        .is_osaka_active_at_timestamp(header.timestamp())
+                                });
+
+                            let AllPoolTransactions { pending, queued } = pool.all_transactions();
+                            for tx in pending.into_iter().chain(queued) {
+                                if !tx.transaction.is_eip4844() {
+                                    continue;
+                                }
+                                let tx_hash = *tx.transaction.tx_hash();
+
+                                // Fetch sidecar from the pool
+                                let Ok(Some(sidecar)) = pool.get_blob(tx_hash) else {
+                                    continue;
+                                };
+                                // Ensure it is a legacy blob
+                                if !sidecar.is_eip4844() {
+                                    continue;
+                                }
+                                // Remove transaction and sidecar from the pool, both are in memory
+                                // now
+                                let Some(tx) = pool.remove_transactions(vec![tx_hash]).pop() else {
+                                    continue;
+                                };
+                                pool.delete_blob(tx_hash);
+
+                                let BlobTransactionSidecarVariant::Eip4844(sidecar) =
+                                    Arc::unwrap_or_clone(sidecar)
+                                else {
+                                    continue;
+                                };
+
+                                let converter = BlobSidecarConverter::new();
+                                let pool = pool.clone();
+                                spawner.spawn(Box::pin(async move {
+                                    // Convert sidecar to EIP-7594 format
+                                    let Some(sidecar) =
+                                        converter.convert(Arc::unwrap_or_clone(sidecar)).await
+                                    else {
+                                        return;
+                                    };
+
+                                    // Re-insert transaction with the new sidecar
+                                    let origin = tx.origin;
+                                    let Some(tx) = EthPoolTransaction::try_from_eip4844(
+                                        tx.transaction.clone_into_consensus(),
+                                        sidecar.into(),
+                                    ) else {
+                                        return;
+                                    };
+                                    let _ = pool.add_transaction(origin, tx).await;
+                                }));
+                            }
+
+                            if last_iteration {
+                                break;
+                            }
+                        }
+                    }));
+                }
             }
         }
     }
+}
+
+async fn convert_blob_sidecars<Pool, Tasks>(pool: P, spawner: Tasks) {
+    let interval = tokio::time::interval(Duration::from_secs(1));
 }
 
 struct FinalizedBlockTracker {
