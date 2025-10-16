@@ -57,17 +57,16 @@ impl<Eth> EthPubSub<Eth> {
     }
 }
 
-impl<N: NodePrimitives, Eth> EthPubSub<Eth>
+impl<N: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>, Eth> EthPubSub<Eth>
 where
     Eth: RpcNodeCore<
             Provider: BlockNumReader + CanonStateSubscriptions<Primitives = N>,
             Pool: TransactionPool,
             Network: NetworkInfo,
         > + EthApiTypes<
-            RpcConvert: RpcConvert<
-                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
-            >,
+            RpcConvert: RpcConvert<Primitives = N, Network = Eth::NetworkTypes, Error = Eth::Error>,
         >,
+    PoolConsensusTx<Eth::Pool>: TxHashRef,
 {
     /// Returns the current sync status for the `syncing` subscription
     pub fn sync_status(&self, is_syncing: bool) -> PubSubSyncStatus {
@@ -94,6 +93,14 @@ where
     /// Returns a stream that yields all logs that match the given filter.
     pub fn log_stream(&self, filter: Filter) -> impl Stream<Item = Log> {
         self.inner.log_stream(filter)
+    }
+
+    /// Returns a stream that yields all transaction receipts from new blocks.
+    pub fn transaction_receipts_stream(
+        &self,
+        hashes: Option<Vec<TxHash>>,
+    ) -> impl Stream<Item = reth_rpc_convert::RpcReceipt<Eth::NetworkTypes>> {
+        self.inner.transaction_receipts_stream(hashes)
     }
 
     /// The actual handler for an accepted [`EthPubSub::subscribe`] call.
@@ -202,13 +209,17 @@ where
 
                 Ok(())
             }
-            _ => Err(invalid_params_rpc_err("Unsupported subscription kind")),
+            _ => {
+                // TODO: implement once https://github.com/alloy-rs/alloy/pull/2974 is released
+                Err(invalid_params_rpc_err("Unsupported subscription kind"))
+            }
         }
     }
 }
 
-// Additional impl block for transaction receipts functionality
-impl<N: NodePrimitives<SignedTx: TxHashRef>, Eth> EthPubSub<Eth>
+#[async_trait::async_trait]
+impl<N: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>, Eth>
+    EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
 where
     Eth: RpcNodeCore<
             Provider: BlockNumReader + CanonStateSubscriptions<Primitives = N>,
@@ -216,29 +227,8 @@ where
             Network: NetworkInfo,
         > + EthApiTypes<
             RpcConvert: RpcConvert<Primitives = N, Network = Eth::NetworkTypes, Error = Eth::Error>,
-        >,
-{
-    /// Returns a stream that yields all transaction receipts from new blocks.
-    pub fn transaction_receipts_stream(
-        &self,
-        hashes: Option<Vec<TxHash>>,
-    ) -> impl Stream<Item = reth_rpc_convert::RpcReceipt<Eth::NetworkTypes>> {
-        self.inner.transaction_receipts_stream(hashes)
-    }
-}
-
-#[async_trait::async_trait]
-impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
-where
-    Eth: RpcNodeCore<
-            Provider: BlockNumReader + CanonStateSubscriptions,
-            Pool: TransactionPool,
-            Network: NetworkInfo,
-        > + EthApiTypes<
-            RpcConvert: RpcConvert<
-                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
-            >,
         > + 'static,
+    PoolConsensusTx<Eth::Pool>: TxHashRef,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
