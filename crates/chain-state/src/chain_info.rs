@@ -77,7 +77,7 @@ where
         self.inner.finalized_block.borrow().clone()
     }
 
-    /// Returns the BlockNumHash of the canonical head.
+    /// Returns the `BlockNumHash` of the canonical head.
     pub fn get_canonical_num_hash(&self) -> BlockNumHash {
         self.inner.canonical_head.read().num_hash()
     }
@@ -87,12 +87,12 @@ where
         self.inner.canonical_head_number.load(Ordering::Relaxed)
     }
 
-    /// Returns the safe header of the chain.
+    /// Returns the `BlockNumHash` of the safe header.
     pub fn get_safe_num_hash(&self) -> Option<BlockNumHash> {
         self.inner.safe_block.borrow().as_ref().map(SealedHeader::num_hash)
     }
 
-    /// Returns the finalized header of the chain.
+    /// Returns the `BlockNumHash` of the finalized header.
     pub fn get_finalized_num_hash(&self) -> Option<BlockNumHash> {
         self.inner.finalized_block.borrow().as_ref().map(SealedHeader::num_hash)
     }
