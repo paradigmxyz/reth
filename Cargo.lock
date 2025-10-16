@@ -6113,16 +6113,20 @@ name = "op-reth"
 version = "1.8.2"
 dependencies = [
  "clap",
+ "eyre",
+ "futures-util",
  "reth-cli-util",
  "reth-optimism-chainspec",
  "reth-optimism-cli",
  "reth-optimism-consensus",
  "reth-optimism-evm",
+ "reth-optimism-exex",
  "reth-optimism-forks",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-optimism-rpc",
+ "reth-optimism-trie",
  "tracing",
 ]
 
