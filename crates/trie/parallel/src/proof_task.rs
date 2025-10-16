@@ -523,7 +523,9 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
     }
 }
 
-/// Worker responsible for storage trie operations.
+/// Handles storage trie jobs: keeps a dedicated `ConsistentDbView`, consumes
+/// `StorageWorkerJob`s from the crossbeam queue, returns results through the
+/// caller's `std::mpsc` sender, and records per-worker metrics when enabled.
 struct StorageProofWorker<Factory> {
     view: ConsistentDbView<Factory>,
     task_ctx: ProofTaskCtx,
@@ -665,7 +667,10 @@ where
     }
 }
 
-/// Worker responsible for account trie operations.
+/// Handles account trie jobs: keeps a dedicated `ConsistentDbView`, consumes
+/// `AccountWorkerJob`s from the crossbeam queue, dispatches related storage work
+/// via `storage_work_tx`, returns results through the caller's `std::mpsc`
+/// sender, and records per-worker metrics when enabled.
 struct AccountProofWorker<Factory> {
     view: ConsistentDbView<Factory>,
     task_ctx: ProofTaskCtx,
