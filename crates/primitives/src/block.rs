@@ -16,10 +16,6 @@ pub type BlockBody<T = TransactionSigned, H = Header> = alloy_consensus::BlockBo
 /// Ethereum sealed block type
 pub type SealedBlock<B = Block> = reth_primitives_traits::block::SealedBlock<B>;
 
-/// Helper type for constructing the block
-#[deprecated(note = "Use `RecoveredBlock` instead")]
-pub type SealedBlockFor<B = Block> = reth_primitives_traits::block::SealedBlock<B>;
-
 /// Ethereum recovered block
 #[deprecated(note = "Use `RecoveredBlock` instead")]
 pub type BlockWithSenders<B = Block> = reth_primitives_traits::block::RecoveredBlock<B>;
