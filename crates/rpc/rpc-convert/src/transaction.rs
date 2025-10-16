@@ -5,7 +5,9 @@ use crate::{
     RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes,
 };
 use alloy_consensus::{
-    error::ValueError, transaction::Recovered, EthereumTxEnvelope, Sealable, TxEip4844,
+    error::ValueError,
+    transaction::{Recovered, TxHashRef},
+    BlockHeader, EthereumTxEnvelope, Sealable, TxEip4844, TxReceipt,
 };
 use alloy_network::Network;
 use alloy_primitives::{Address, TxKind, U256};
@@ -1098,6 +1100,63 @@ impl TryFromTransactionResponse<alloy_network::Ethereum>
     fn from_transaction_response(transaction_response: Transaction) -> Result<Self, Self::Error> {
         Ok(transaction_response.into_inner().into())
     }
+}
+
+/// Helper function to build `ConvertReceiptInput` from block and receipts.
+///
+/// This function takes a block and its receipts and creates the input needed for receipt
+/// conversion. It handles the complex logic of calculating gas used and log indices for each
+/// transaction.
+///
+/// This is extracted from the pattern used in `eth_getBlockReceipts` to enable reuse in
+/// subscription streams.
+pub fn build_convert_receipt_inputs<'a, N: NodePrimitives>(
+    block: &'a reth_primitives_traits::RecoveredBlock<N::Block>,
+    receipts: &'a [N::Receipt],
+) -> Vec<ConvertReceiptInput<'a, N>>
+where
+    N::SignedTx: TxHashRef,
+{
+    let block_number = block.header().number();
+    let base_fee = block.header().base_fee_per_gas();
+    let block_hash = block.hash();
+    let excess_blob_gas = block.header().excess_blob_gas();
+    let timestamp = block.header().timestamp();
+    let mut gas_used = 0;
+    let mut next_log_index = 0;
+
+    block
+        .transactions_recovered()
+        .zip(receipts.iter())
+        .enumerate()
+        .map(|(idx, (tx, receipt))| {
+            let meta = reth_primitives_traits::TransactionMeta {
+                tx_hash: *tx.tx_hash(),
+                index: idx as u64,
+                block_hash,
+                block_number,
+                base_fee,
+                excess_blob_gas,
+                timestamp,
+            };
+
+            let cumulative_gas_used = receipt.cumulative_gas_used();
+            let logs_len = receipt.logs().len();
+
+            let input = ConvertReceiptInput {
+                tx,
+                gas_used: cumulative_gas_used - gas_used,
+                next_log_index,
+                meta,
+                receipt: receipt.clone(),
+            };
+
+            gas_used = cumulative_gas_used;
+            next_log_index += logs_len;
+
+            input
+        })
+        .collect()
 }
 
 #[cfg(feature = "op")]

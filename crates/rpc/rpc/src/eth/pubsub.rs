@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{TxHash, U256};
 use alloy_rpc_types_eth::{
     pubsub::{Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata},
@@ -14,6 +15,7 @@ use jsonrpsee::{
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_primitives_traits::NodePrimitives;
+use reth_rpc_convert::build_convert_receipt_inputs;
 use reth_rpc_eth_api::{
     pubsub::EthPubSubApiServer, EthApiTypes, RpcConvert, RpcNodeCore, RpcTransaction,
 };
@@ -201,7 +203,13 @@ where
                 Ok(())
             }
             _ => {
-                // TODO: implement once https://github.com/alloy-rs/alloy/pull/2974 is released
+                // For now, check if this is a TransactionReceipts subscription kind
+                // This is a temporary solution until alloy#2974 is merged
+                if format!("{:?}", kind).contains("TransactionReceipts") {
+                    // We need to handle this differently since transaction_receipts_stream
+                    // has different trait bounds than the current context
+                    return Err(invalid_params_rpc_err("TransactionReceipts subscription requires additional trait bounds - see alloy#2974"));
+                }
                 Err(invalid_params_rpc_err("Unsupported subscription kind"))
             }
         }
@@ -372,7 +380,46 @@ where
             futures::stream::iter(headers)
         })
     }
+}
 
+impl<N: NodePrimitives<SignedTx: TxHashRef>, Eth> EthPubSubInner<Eth>
+where
+    Eth: RpcNodeCore<Provider: CanonStateSubscriptions<Primitives = N>>
+        + EthApiTypes<
+            RpcConvert: RpcConvert<Primitives = N, Network = Eth::NetworkTypes, Error = Eth::Error>,
+        >,
+{
+    /// Returns a stream that yields all transaction receipts from new blocks.
+    fn transaction_receipts_stream(
+        &self,
+    ) -> impl Stream<Item = reth_rpc_convert::RpcReceipt<Eth::NetworkTypes>> {
+        let eth_api = self.eth_api.clone();
+        self.eth_api.provider().canonical_state_stream().flat_map(move |new_chain| {
+            let mut all_receipts = Vec::new();
+
+            // Process all blocks in the committed chain - exactly like new_headers_stream pattern
+            for (block, receipts) in new_chain.committed().blocks_and_receipts() {
+                // Build ConvertReceiptInput using our helper function
+                let inputs = build_convert_receipt_inputs(block, receipts);
+
+                // Convert to RPC receipts using the same pattern as eth_getBlockReceipts
+                if let Ok(rpc_receipts) = eth_api
+                    .tx_resp_builder()
+                    .convert_receipts_with_block(inputs, block.sealed_block())
+                {
+                    all_receipts.extend(rpc_receipts);
+                }
+            }
+
+            futures::stream::iter(all_receipts)
+        })
+    }
+}
+
+impl<N: NodePrimitives, Eth> EthPubSubInner<Eth>
+where
+    Eth: RpcNodeCore<Provider: CanonStateSubscriptions<Primitives = N>>,
+{
     /// Returns a stream that yields all logs that match the given filter.
     fn log_stream(&self, filter: Filter) -> impl Stream<Item = Log> {
         BroadcastStream::new(self.eth_api.provider().subscribe_to_canonical_state())
@@ -390,5 +437,21 @@ where
                 );
                 futures::stream::iter(all_logs)
             })
+    }
+}
+
+// Specialized impl block for transaction receipts functionality
+impl<N: NodePrimitives<SignedTx: TxHashRef>, Eth> EthPubSub<Eth>
+where
+    Eth: RpcNodeCore<Provider: CanonStateSubscriptions<Primitives = N>>
+        + EthApiTypes<
+            RpcConvert: RpcConvert<Primitives = N, Network = Eth::NetworkTypes, Error = Eth::Error>,
+        >,
+{
+    /// Returns a stream that yields all transaction receipts from new blocks.
+    pub fn transaction_receipts_stream(
+        &self,
+    ) -> impl Stream<Item = reth_rpc_convert::RpcReceipt<Eth::NetworkTypes>> {
+        self.inner.transaction_receipts_stream()
     }
 }
