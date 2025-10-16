@@ -43,6 +43,22 @@ pub enum StaticFileSegment {
     Receipts,
     #[strum(serialize = "accountchangesets")]
     /// Static File segment responsible for the `AccountChangeSets` table.
+    ///
+    /// Account changeset static files append block-by-block changesets sorted by address.
+    /// For example, a changeset static file for three blocks, with two changes each, would be
+    /// organized with six rows, as follows:
+    ///
+    /// Block 1:
+    /// * address 0xaa, account info
+    /// * address 0xbb, account info
+    ///
+    /// Block 2:
+    /// * address 0xaa, account info
+    /// * address 0xcc, account info
+    ///
+    /// Block 3:
+    /// * address 0xbb, account info
+    /// * address 0xcc, account info
     AccountChangeSets,
 }
 
