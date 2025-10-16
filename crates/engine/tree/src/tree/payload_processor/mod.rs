@@ -32,7 +32,7 @@ use reth_provider::{
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
 use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofTaskManager},
+    proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
@@ -166,9 +166,6 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    ///
-    /// Returns an error with the original transactions iterator if the proof task manager fails to
-    /// initialize.
     #[allow(clippy::type_complexity)]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
@@ -180,7 +177,7 @@ where
         config: &TreeConfig,
     ) -> Result<
         PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
-        (reth_provider::ProviderError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
+        (ParallelStateRootError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
     >
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
@@ -192,8 +189,7 @@ where
     {
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task, save the trie input
-        let (trie_input, state_root_config) =
-            MultiProofConfig::new_from_input(consistent_view, trie_input);
+        let (trie_input, state_root_config) = MultiProofConfig::from_input(trie_input);
         self.trie_input = Some(trie_input);
 
         // Create and spawn the storage proof task
@@ -202,30 +198,25 @@ where
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
         );
-        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let storage_worker_count = config.storage_worker_count();
-        let proof_task = match ProofTaskManager::new(
+        let account_worker_count = config.account_worker_count();
+        let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
-            state_root_config.consistent_view.clone(),
+            consistent_view,
             task_ctx,
-            max_proof_task_concurrency,
             storage_worker_count,
-        ) {
-            Ok(task) => task,
-            Err(error) => {
-                return Err((error, transactions, env, provider_builder));
-            }
-        };
+            account_worker_count,
+        );
 
-        // We set it to half of the proof task concurrency, because often for each multiproof we
-        // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
-        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
+        // Limit concurrent multiproof tasks to match the account worker pool size.
+        // Each multiproof task spawns a tokio task that queues to one account worker,
+        // which then fans out to storage workers as needed.
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
-            proof_task.handle(),
+            proof_handle.clone(),
             to_sparse_trie,
-            max_multi_proof_task_concurrency,
+            account_worker_count,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );
 
@@ -252,19 +243,7 @@ where
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        self.spawn_sparse_trie_task(sparse_trie_rx, proof_task.handle(), state_root_tx);
-
-        // spawn the proof task
-        self.executor.spawn_blocking(move || {
-            if let Err(err) = proof_task.run() {
-                // At least log if there is an error at any point
-                tracing::error!(
-                    target: "engine::root",
-                    ?err,
-                    "Storage proof task returned an error"
-                );
-            }
-        });
+        self.spawn_sparse_trie_task(sparse_trie_rx, proof_handle, state_root_tx);
 
         Ok(PayloadHandle {
             to_multi_proof,
@@ -406,7 +385,7 @@ where
     fn spawn_sparse_trie_task<BPF>(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
-        proof_task_handle: BPF,
+        proof_worker_handle: BPF,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
     ) where
         BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
@@ -436,7 +415,7 @@ where
         let task =
             SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
                 sparse_trie_rx,
-                proof_task_handle,
+                proof_worker_handle,
                 self.trie_metrics.clone(),
                 sparse_state_trie,
             );

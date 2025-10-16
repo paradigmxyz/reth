@@ -43,6 +43,7 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm::context::Block;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, debug_span, error, info, trace, warn};
 
@@ -642,7 +643,7 @@ where
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
-        let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
+        let num_hash = NumHash::new(env.evm_env.block_env.number().to(), env.hash);
 
         let span = debug_span!(target: "engine::tree", "execute_block", num = ?num_hash.number, hash = ?num_hash.hash);
         let _enter = span.enter();
@@ -892,13 +893,12 @@ where
                             (handle, StateRootStrategy::StateRootTask)
                         }
                         Err((error, txs, env, provider_builder)) => {
-                            // Failed to initialize proof task manager, fallback to parallel state
-                            // root
+                            // Failed to spawn proof workers, fallback to parallel state root
                             error!(
                                 target: "engine::tree",
                                 block=?block_num_hash,
                                 ?error,
-                                "Failed to initialize proof task manager, falling back to parallel state root"
+                                "Failed to spawn proof workers, falling back to parallel state root"
                             );
                             (
                                 self.payload_processor.spawn_cache_exclusive(

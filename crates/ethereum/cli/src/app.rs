@@ -139,19 +139,19 @@ where
         runner: Option<&CliRunner>,
     ) -> Result<()> {
         let endpoint = endpoint.clone();
-        let level = self.cli.traces.otlp_level;
         let protocol = self.cli.traces.protocol;
+        let filter_level = self.cli.traces.otlp_level.clone();
 
         match protocol {
             OtlpProtocol::Grpc => {
                 let runner =
                     runner.ok_or_else(|| eyre!("Runner required for gRPC OTLP initialization"))?;
                 runner.block_on(async {
-                    layers.with_span_layer("reth".to_string(), endpoint, level, protocol)
+                    layers.with_span_layer("reth".to_string(), endpoint, filter_level, protocol)
                 })?;
             }
             OtlpProtocol::Http => {
-                layers.with_span_layer("reth".to_string(), endpoint, level, protocol)?;
+                layers.with_span_layer("reth".to_string(), endpoint, filter_level, protocol)?;
             }
         }
 

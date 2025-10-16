@@ -4,8 +4,8 @@ use clap::Args;
 use reth_engine_primitives::{TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE};
 
 use crate::node_config::{
-    DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
-    DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD, DEFAULT_RESERVED_CPU_CORES,
+    DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+    DEFAULT_PERSISTENCE_THRESHOLD, DEFAULT_RESERVED_CPU_CORES,
 };
 
 /// Parameters for configuring the engine driver.
@@ -63,10 +63,6 @@ pub struct EngineArgs {
     #[arg(long = "engine.accept-execution-requests-hash")]
     pub accept_execution_requests_hash: bool,
 
-    /// Configure the maximum number of concurrent proof tasks
-    #[arg(long = "engine.max-proof-task-concurrency", default_value_t = DEFAULT_MAX_PROOF_TASK_CONCURRENCY)]
-    pub max_proof_task_concurrency: u64,
-
     /// Whether multiproof task should chunk proof targets.
     #[arg(long = "engine.multiproof-chunking", default_value = "true")]
     pub multiproof_chunking_enabled: bool,
@@ -113,6 +109,11 @@ pub struct EngineArgs {
     /// If not specified, defaults to 2x available parallelism, clamped between 2 and 64.
     #[arg(long = "engine.storage-worker-count")]
     pub storage_worker_count: Option<usize>,
+
+    /// Configure the number of account proof workers in the Tokio blocking pool.
+    /// If not specified, defaults to the same count as storage workers.
+    #[arg(long = "engine.account-worker-count")]
+    pub account_worker_count: Option<usize>,
 }
 
 #[allow(deprecated)]
@@ -130,7 +131,6 @@ impl Default for EngineArgs {
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             accept_execution_requests_hash: false,
-            max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
             multiproof_chunking_enabled: true,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
@@ -140,6 +140,7 @@ impl Default for EngineArgs {
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
+            account_worker_count: None,
         }
     }
 }
@@ -156,7 +157,6 @@ impl EngineArgs {
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
-            .with_max_proof_task_concurrency(self.max_proof_task_concurrency)
             .with_multiproof_chunking_enabled(self.multiproof_chunking_enabled)
             .with_multiproof_chunk_size(self.multiproof_chunk_size)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
@@ -169,6 +169,10 @@ impl EngineArgs {
 
         if let Some(count) = self.storage_worker_count {
             config = config.with_storage_worker_count(count);
+        }
+
+        if let Some(count) = self.account_worker_count {
+            config = config.with_account_worker_count(count);
         }
 
         config

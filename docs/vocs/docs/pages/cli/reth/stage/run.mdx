@@ -302,6 +302,9 @@ Networking:
       --required-block-hashes <REQUIRED_BLOCK_HASHES>
           Comma separated list of required block hashes. Peers that don't have these blocks will be filtered out
 
+      --network-id <NETWORK_ID>
+          Optional network ID to override the chain specification's network ID for P2P connections
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
@@ -392,6 +395,8 @@ Tracing:
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
 
+          [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
+
       --tracing-otlp-protocol <PROTOCOL>
           OTLP transport protocol to use for exporting traces.
 
@@ -401,10 +406,10 @@ Tracing:
 
           [default: http]
 
-      --tracing-otlp-level <LEVEL>
-          Set the minimum log level for OTLP traces.
+      --tracing-otlp-level <FILTER>
+          Set the minimum log level for OTLP traces. Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
 
-          Valid values: ERROR, WARN, INFO, DEBUG, TRACE
+          Example: --tracing-otlp-level=info,reth=debug,hyper_util=off
 
           Defaults to TRACE if not specified.
 

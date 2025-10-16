@@ -45,7 +45,7 @@ alloy-eips.workspace = true
 
 # misc
 eyre.workspace = true
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 humantime.workspace = true
 rand.workspace = true
 derive_more.workspace = true

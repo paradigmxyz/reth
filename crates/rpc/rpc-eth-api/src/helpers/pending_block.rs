@@ -13,7 +13,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, ExecutionOutcome},
-    ConfigureEvm, Evm, NextBlockEnvAttributes, SpecFor,
+    ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
 use reth_revm::{database::StateProviderDatabase, db::State};
@@ -23,8 +23,8 @@ use reth_rpc_eth_types::{
     PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader,
-    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderBox, StateProviderFactory,
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx, ReceiptProvider,
+    StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
@@ -61,17 +61,7 @@ pub trait LoadPendingBlock:
     /// Configures the [`PendingBlockEnv`] for the pending block
     ///
     /// If no pending block is available, this will derive it from the `latest` block
-    #[expect(clippy::type_complexity)]
-    fn pending_block_env_and_cfg(
-        &self,
-    ) -> Result<
-        PendingBlockEnv<
-            ProviderBlock<Self::Provider>,
-            ProviderReceipt<Self::Provider>,
-            SpecFor<Self::Evm>,
-        >,
-        Self::Error,
-    > {
+    fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
         if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)? &&
             let Some(receipts) = self
                 .provider()
@@ -166,7 +156,7 @@ pub trait LoadPendingBlock:
             // Is the pending block cached?
             if let Some(pending_block) = lock.as_ref() {
                 // Is the cached block not expired and latest is its parent?
-                if pending.evm_env.block_env.number == U256::from(pending_block.block().number()) &&
+                if pending.evm_env.block_env.number() == U256::from(pending_block.block().number()) &&
                     parent.hash() == pending_block.block().parent_hash() &&
                     now <= pending_block.expires_at
                 {
@@ -265,14 +255,14 @@ pub trait LoadPendingBlock:
             .unwrap_or_else(BlobParams::cancun);
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let block_gas_limit: u64 = block_env.gas_limit;
+        let block_gas_limit: u64 = block_env.gas_limit();
 
         // Only include transactions if not configured as Empty
         if !self.pending_block_kind().is_empty() {
             let mut best_txs = self
                 .pool()
                 .best_transactions_with_attributes(BestTransactionsAttributes::new(
-                    block_env.basefee,
+                    block_env.basefee(),
                     block_env.blob_gasprice().map(|gasprice| gasprice as u64),
                 ))
                 // freeze to get a block as fast as possible
