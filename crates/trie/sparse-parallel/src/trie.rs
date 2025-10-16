@@ -4998,9 +4998,12 @@ mod tests {
                             state.keys().copied(),
                         );
 
+                    // Extract account nodes before moving hash_builder_updates
+                    let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();
+
                     // Write trie updates to the database
                     let provider_rw = provider_factory.provider_rw().unwrap();
-                    provider_rw.write_trie_updates(&hash_builder_updates).unwrap();
+                    provider_rw.write_trie_updates(hash_builder_updates).unwrap();
                     provider_rw.commit().unwrap();
 
                     // Assert that the sparse trie root matches the hash builder root
@@ -5008,7 +5011,7 @@ mod tests {
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         BTreeMap::from_iter(sparse_updates.updated_nodes),
-                        BTreeMap::from_iter(hash_builder_updates.account_nodes)
+                        BTreeMap::from_iter(hash_builder_account_nodes)
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_parallel_sparse_trie_proof_nodes(
@@ -5043,9 +5046,12 @@ mod tests {
                             state.keys().copied(),
                         );
 
+                    // Extract account nodes before moving hash_builder_updates
+                    let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();
+
                     // Write trie updates to the database
                     let provider_rw = provider_factory.provider_rw().unwrap();
-                    provider_rw.write_trie_updates(&hash_builder_updates).unwrap();
+                    provider_rw.write_trie_updates(hash_builder_updates).unwrap();
                     provider_rw.commit().unwrap();
 
                     // Assert that the sparse trie root matches the hash builder root
@@ -5053,7 +5059,7 @@ mod tests {
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         BTreeMap::from_iter(sparse_updates.updated_nodes),
-                        BTreeMap::from_iter(hash_builder_updates.account_nodes)
+                        BTreeMap::from_iter(hash_builder_account_nodes)
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_parallel_sparse_trie_proof_nodes(

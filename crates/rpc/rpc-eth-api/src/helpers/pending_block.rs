@@ -359,7 +359,7 @@ pub trait LoadPendingBlock:
             }
         }
 
-        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
+        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates } =
             builder.finish(NoopProvider::default()).map_err(Self::Error::from_eth_err)?;
 
         let execution_outcome = ExecutionOutcome::new(
@@ -373,6 +373,7 @@ pub trait LoadPendingBlock:
             recovered_block: block.into(),
             execution_output: Arc::new(execution_outcome),
             hashed_state: Arc::new(hashed_state),
+            trie_updates: Arc::new(trie_updates),
         })
     }
 }
