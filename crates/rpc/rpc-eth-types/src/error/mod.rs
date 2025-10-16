@@ -1063,7 +1063,7 @@ mod tests {
     #[test]
     fn call_many_error_display() {
         // Test the display format of CallManyError
-        let source_error = std::io::Error::new(std::io::ErrorKind::Other, "test error");
+        let source_error = std::io::Error::other("test error");
         let err = EthApiError::call_many_error(2, 5, source_error);
 
         // Check the error message format
@@ -1075,7 +1075,7 @@ mod tests {
     #[test]
     fn call_many_error_rpc_conversion() {
         // Test that CallManyError converts properly to RPC error
-        let source_error = std::io::Error::new(std::io::ErrorKind::Other, "test error");
+        let source_error = std::io::Error::other("test error");
         let err = EthApiError::call_many_error(1, 3, source_error);
 
         let rpc_error: jsonrpsee_types::error::ErrorObject<'static> = err.into();
