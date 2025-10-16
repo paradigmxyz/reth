@@ -50,22 +50,26 @@ pub struct TraceArgs {
     /// of spans and events sent to the OTLP endpoint. It follows the same
     /// syntax as the `RUST_LOG` environment variable.
     ///
-    /// Example: --tracing-otlp-level=info,reth=debug,hyper_util=off
+    /// Example: --tracing-otlp.filter=info,reth=debug,hyper_util=off
     ///
     /// Defaults to TRACE if not specified.
     #[arg(
-        long = "tracing-otlp-level",
+        long = "tracing-otlp.filter",
         global = true,
         value_name = "FILTER",
         default_value = "TRACE",
         help_heading = "Tracing"
     )]
-    pub otlp_level: EnvFilter,
+    pub otlp_filter: EnvFilter,
 }
 
 impl Default for TraceArgs {
     fn default() -> Self {
-        Self { otlp: None, protocol: OtlpProtocol::Http, otlp_level: EnvFilter::from_default_env() }
+        Self {
+            otlp: None,
+            protocol: OtlpProtocol::Http,
+            otlp_filter: EnvFilter::from_default_env(),
+        }
     }
 }
 

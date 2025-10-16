@@ -90,7 +90,7 @@ impl FromStr for OtlpProtocol {
 
 impl OtlpProtocol {
     /// Validate and correct the URL to match protocol requirements.
-    /// 
+    ///
     /// For HTTP: Ensures the path ends with `/v1/traces`, appending it if necessary.
     /// For gRPC: Ensures the path does NOT include `/v1/traces`.
     pub fn validate_endpoint(&self, url: &mut Url) -> eyre::Result<()> {
@@ -105,7 +105,8 @@ impl OtlpProtocol {
                 ensure!(
                     !url.path().ends_with(HTTP_TRACE_ENDPOINT),
                     "OTLP gRPC endpoint should not include {} path, got: {}",
-                    HTTP_TRACE_ENDPOINT, url
+                    HTTP_TRACE_ENDPOINT,
+                    url
                 );
             }
         }

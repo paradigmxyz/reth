@@ -123,10 +123,10 @@ Tracing:
 
           [default: http]
 
-      --tracing-otlp-level <FILTER>
+      --tracing-otlp.filter <FILTER>
           Set the minimum log level for OTLP traces. Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
 
-          Example: --tracing-otlp-level=info,reth=debug,hyper_util=off
+          Example: --tracing-otlp.filter=info,reth=debug,hyper_util=off
 
           Defaults to TRACE if not specified.
 

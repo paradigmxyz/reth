@@ -143,7 +143,7 @@ where
     ) -> Result<()> {
         let endpoint = endpoint.clone();
         let protocol = self.cli.traces.protocol;
-        let filter_level = self.cli.traces.otlp_level.clone();
+        let filter_level = self.cli.traces.otlp_filter.clone();
 
         match protocol {
             OtlpProtocol::Grpc => {
