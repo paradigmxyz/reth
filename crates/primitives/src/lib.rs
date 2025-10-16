@@ -26,7 +26,7 @@ pub mod transaction;
 pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{Block, BlockBody, SealedBlock};
 #[expect(deprecated)]
-pub use block::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders};
+pub use block::{BlockWithSenders, SealedBlockWithSenders};
 
 pub use receipt::{gas_spent_by_transactions, Receipt};
 pub use reth_primitives_traits::{
