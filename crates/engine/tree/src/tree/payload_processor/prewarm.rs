@@ -288,7 +288,7 @@ where
     ///
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
-    #[instrument(target = "engine::tree::payload_processor::prewarm", skip_all)]
+    #[instrument(target = "engine::tree::payload_processor::prewarm", name = "prewarm", skip_all)]
     pub(super) fn run(
         self,
         pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
