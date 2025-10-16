@@ -45,7 +45,7 @@ use reth_trie::{
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use tracing::{debug, error, info, info_span, instrument, trace, warn};
+use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
 /// Context providing access to tree state during validation.
 ///
@@ -324,6 +324,7 @@ where
     /// - State root computation
     /// - Fork detection
     #[instrument(
+        level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
         fields(
@@ -375,7 +376,7 @@ where
 
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
-            info_span!(target: "engine::tree::payload_validator", "state provider").entered();
+            debug_span!(target: "engine::tree::payload_validator", "state provider").entered();
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
@@ -399,7 +400,7 @@ where
             .into())
         };
 
-        let evm_env = info_span!(target: "engine::tree::payload_validator", "evm env")
+        let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm env")
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
@@ -608,7 +609,7 @@ where
     }
 
     /// Executes a block with the given state provider
-    #[instrument(target = "engine::tree::payload_validator", skip_all)]
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn execute_block<S, Err, T>(
         &mut self,
         state_provider: S,
@@ -674,7 +675,7 @@ where
     /// Returns `Err(_)` if error was encountered during computation.
     /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
     /// should be used instead.
-    #[instrument(target = "engine::tree::payload_validator", skip_all)]
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn compute_state_root_parallel(
         &self,
         persisting_kind: PersistingKind,
@@ -765,7 +766,12 @@ where
     /// The method handles strategy fallbacks if the preferred approach fails, ensuring
     /// block execution always completes with a valid state root.
     #[allow(clippy::too_many_arguments)]
-    #[instrument(target = "engine::tree::payload_validator", skip_all, fields(strategy))]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_validator",
+        skip_all,
+        fields(strategy)
+    )]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -910,7 +916,7 @@ where
     }
 
     /// Determines the state root computation strategy based on persistence state and configuration.
-    #[instrument(target = "engine::tree::payload_validator", skip_all)]
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn plan_state_root_computation<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &BlockOrPayload<T>,
@@ -985,6 +991,7 @@ where
     /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
     ///    [`HashedPostState`] from them.
     #[instrument(
+        level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
         fields(persisting_kind, parent_hash)
@@ -1010,7 +1017,7 @@ where
         // If the current block is a descendant of the currently persisting blocks, then we need to
         // filter in-memory blocks, so that none of them are already persisted in the database.
         let _enter =
-            info_span!(target: "engine::tree::payload_validator", "filter in-memory blocks", len = blocks.len())
+            debug_span!(target: "engine::tree::payload_validator", "filter in-memory blocks", len = blocks.len())
                 .entered();
         if persisting_kind.is_descendant() {
             // Iterate over the blocks from oldest to newest.
@@ -1051,7 +1058,7 @@ where
             .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
 
         let _enter =
-            info_span!(target: "engine::tree::payload_validator", "revert state", blocks_empty)
+            debug_span!(target: "engine::tree::payload_validator", "revert state", blocks_empty)
                 .entered();
         // Retrieve revert state for historical block.
         let (revert_state, revert_trie) = if block_number == best_block_number {
