@@ -1,7 +1,4 @@
 use crate::formatter::LogFormat;
-
-#[cfg(feature = "otlp")]
-use reth_tracing_otlp::{span_layer, OtlpProtocol};
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
     fmt,
@@ -9,7 +6,11 @@ use std::{
 };
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
-use url::Url;
+#[cfg(feature = "otlp")]
+use {
+    reth_tracing_otlp::{span_layer, OtlpProtocol},
+    url::Url,
+};
 
 /// A worker guard returned by the file layer.
 ///
