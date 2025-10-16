@@ -16,7 +16,7 @@ use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
 use std::time::Instant;
-use tracing::{info_span, trace};
+use tracing::{debug_span, trace};
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
@@ -79,7 +79,7 @@ impl EngineApiMetrics {
             for tx in transactions {
                 let tx = tx?;
                 let span =
-                    info_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
+                    debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
                 let _enter = span.enter();
                 trace!(target: "engine::tree", "Executing transaction");
                 executor.execute_transaction(tx)?;

@@ -15,7 +15,7 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-use tracing::{debug, info_span, instrument, trace};
+use tracing::{debug, debug_span, instrument, trace};
 
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
@@ -61,7 +61,7 @@ where
     ///
     /// - State root computation outcome.
     /// - `SparseStateTrie` that needs to be cleared and reused to avoid reallocations.
-    #[instrument(target = "engine::tree::payload_processor::sparse_trie", skip_all)]
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::sparse_trie", skip_all)]
     pub(super) fn run(
         mut self,
     ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseStateTrie<A, S>) {
@@ -82,7 +82,7 @@ where
             num_iterations += 1;
             let mut num_updates = 1;
             let _enter =
-                info_span!(target: "engine::tree::payload_processor::sparse_trie", "drain updates")
+                debug_span!(target: "engine::tree::payload_processor::sparse_trie", "drain updates")
                     .entered();
             while let Ok(next) = self.updates.try_recv() {
                 update.extend(next);
@@ -135,7 +135,7 @@ pub struct StateRootComputeOutcome {
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
-#[instrument(target = "engine::tree::payload_processor::sparse_trie", skip_all)]
+#[instrument(level = "debug", target = "engine::tree::payload_processor::sparse_trie", skip_all)]
 pub(crate) fn update_sparse_trie<BPF, A, S>(
     trie: &mut SparseStateTrie<A, S>,
     SparseTrieUpdate { mut state, multiproof }: SparseTrieUpdate,
@@ -170,7 +170,7 @@ where
         .par_bridge()
         .map(|(address, storage, storage_trie)| {
             let _enter =
-                info_span!(target: "engine::tree::payload_processor::sparse_trie", parent: span.clone(), "storage trie", ?address)
+                debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: span.clone(), "storage trie", ?address)
                     .entered();
 
             trace!(target: "engine::tree::payload_processor::sparse_trie", "Updating storage");
@@ -229,7 +229,7 @@ where
 
     // Update account storage roots
     let _enter =
-        tracing::info_span!(target: "engine::tree::payload_processor::sparse_trie", "account trie")
+        tracing::debug_span!(target: "engine::tree::payload_processor::sparse_trie", "account trie")
             .entered();
     for result in rx {
         let (address, storage_trie) = result?;
