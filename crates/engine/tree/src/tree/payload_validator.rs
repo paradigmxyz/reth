@@ -43,7 +43,6 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm::context::Block;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
 
