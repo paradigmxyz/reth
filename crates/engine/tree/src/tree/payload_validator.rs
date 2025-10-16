@@ -43,6 +43,7 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm::context::Block;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
 
@@ -651,7 +652,6 @@ where
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
-        let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let mut db = State::builder()
@@ -691,7 +691,7 @@ where
         )?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
-        debug!(target: "engine::tree::payload_validator", elapsed = ?execution_time, number=?num_hash.number, "Executed block");
+        debug!(target: "engine::tree::payload_validator", elapsed = ?execution_time, "Executed block");
         Ok(output)
     }
 

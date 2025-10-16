@@ -166,8 +166,6 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    ///
-    /// Returns an error with the original transactions iterator if proof worker spawning fails.
     #[allow(clippy::type_complexity)]
     #[instrument(target = "engine::tree::payload_processor", skip_all)]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
@@ -180,7 +178,7 @@ where
         config: &TreeConfig,
     ) -> Result<
         PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
-        (reth_provider::ProviderError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
+        (ParallelStateRootError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
     >
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
@@ -203,29 +201,23 @@ where
         );
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
-        let proof_handle = match ProofWorkerHandle::new(
+        let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
             consistent_view,
             task_ctx,
             storage_worker_count,
             account_worker_count,
-        ) {
-            Ok(handle) => handle,
-            Err(error) => {
-                return Err((error, transactions, env, provider_builder));
-            }
-        };
+        );
 
-        // We set it to half of the proof task concurrency, because often for each multiproof we
-        // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
-        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
+        // Limit concurrent multiproof tasks to match the account worker pool size.
+        // Each multiproof task spawns a tokio task that queues to one account worker,
+        // which then fans out to storage workers as needed.
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
             proof_handle.clone(),
             to_sparse_trie,
-            max_multi_proof_task_concurrency,
+            account_worker_count,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );
 

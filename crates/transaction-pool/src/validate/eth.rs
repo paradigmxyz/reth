@@ -396,7 +396,7 @@ where
                     // max possible tx fee is (gas_price * gas_limit)
                     // (if EIP1559) max possible tx fee is (max_fee_per_gas * gas_limit)
                     let gas_price = transaction.max_fee_per_gas();
-                    let max_tx_fee_wei = gas_price.saturating_mul(transaction.gas_limit() as u128);
+                    let max_tx_fee_wei = gas_price.saturating_mul(transaction_gas_limit as u128);
                     if max_tx_fee_wei > tx_fee_cap_wei {
                         return Err(TransactionValidationOutcome::Invalid(
                             transaction,
