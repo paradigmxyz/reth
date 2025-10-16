@@ -19,7 +19,7 @@ tracing-subscriber.workspace = true
 tracing.workspace = true
 
 # misc
-clap.workspace = true
+clap = { workspace = true, features = ["derive"] }
 eyre.workspace = true
 url.workspace = true
 
