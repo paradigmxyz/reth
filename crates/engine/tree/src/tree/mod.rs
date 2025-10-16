@@ -585,7 +585,7 @@ where
     /// - `Valid`: Payload successfully validated and inserted
     /// - `Syncing`: Parent missing, payload buffered for later
     /// - Error status: Payload is invalid
-    #[instrument(target = "engine::tree", skip(self))]
+    #[instrument(target = "engine::tree", skip_all)]
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
