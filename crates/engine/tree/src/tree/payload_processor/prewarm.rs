@@ -369,6 +369,7 @@ where
 {
     /// Splits this context into an evm, an evm config, metrics, and the atomic bool for terminating
     /// execution.
+    #[instrument(target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>)> {
         let Self {
             env,
@@ -445,7 +446,11 @@ where
     {
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
-        while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
+        while let Ok(IndexedTransaction { index, tx }) = {
+            let _enter =
+                info_span!(target: "engine::tree::payload_processor::prewarm", "recv tx").entered();
+            txs.recv()
+        } {
             let _enter =
                 info_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
                     .entered();
@@ -477,12 +482,18 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
+            drop(_enter);
+
             // Only send outcome for transactions after the first txn
             // as the main execution will be just as fast
             if index > 0 {
+                let _enter =
+                    info_span!(target: "engine::tree::payload_processor::prewarm", "prewarm outcome", index, tx_hash=%tx.tx().tx_hash())
+                        .entered();
                 let (targets, storage_targets) = multiproof_targets_from_state(res.state);
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
                 let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
+                drop(_enter);
             }
 
             metrics.total_runtime.record(start.elapsed());

@@ -16,7 +16,7 @@ use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
 use std::time::Instant;
-use tracing::{debug_span, info_span, trace};
+use tracing::{info_span, trace};
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
