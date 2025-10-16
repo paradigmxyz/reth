@@ -1,7 +1,7 @@
 //! Opentelemetry tracing configuration through CLI args.
 
 use clap::Parser;
-use eyre::{ensure, WrapErr};
+use eyre::WrapErr;
 use reth_tracing::tracing_subscriber::EnvFilter;
 use reth_tracing_otlp::OtlpProtocol;
 use url::Url;
@@ -71,29 +71,15 @@ impl Default for TraceArgs {
 
 impl TraceArgs {
     /// Validate the configuration
-    pub fn validate(&self) -> eyre::Result<()> {
-        if let Some(url) = &self.otlp {
+    pub fn validate(&mut self) -> eyre::Result<()> {
+        if let Some(url) = &mut self.otlp {
             self.protocol.validate_endpoint(url)?;
         }
         Ok(())
     }
 }
 
-// Parses and validates an OTLP endpoint url.
+// Parses an OTLP endpoint url.
 fn parse_otlp_endpoint(arg: &str) -> eyre::Result<Url> {
-    let mut url = Url::parse(arg).wrap_err("Invalid URL for OTLP trace output")?;
-
-    // If the path is empty, we set the path.
-    if url.path() == "/" {
-        url.set_path("/v1/traces")
-    }
-
-    // OTLP url must end with `/v1/traces` per the OTLP specification.
-    ensure!(
-        url.path().ends_with("/v1/traces"),
-        "OTLP trace endpoint must end with /v1/traces, got path: {}",
-        url.path()
-    );
-
-    Ok(url)
+    Url::parse(arg).wrap_err("Invalid URL for OTLP trace output")
 }

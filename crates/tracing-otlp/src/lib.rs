@@ -21,6 +21,10 @@ use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;
 use url::Url;
 
+// Otlp http endpoint is expected to end with this path.
+// See also <https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/#otel_exporter_otlp_traces_endpoint>.
+const HTTP_TRACE_ENDPOINT: &str = "/v1/traces";
+
 /// Creates a tracing [`OpenTelemetryLayer`] that exports spans to an OTLP endpoint.
 ///
 /// This layer can be added to a [`tracing_subscriber::Registry`] to enable `OpenTelemetry` tracing
@@ -85,21 +89,23 @@ impl FromStr for OtlpProtocol {
 }
 
 impl OtlpProtocol {
-    /// Validate that an url matches the requirements for each protocol
-    pub fn validate_endpoint(&self, url: &Url) -> eyre::Result<()> {
+    /// Validate and correct the URL to match protocol requirements.
+    /// 
+    /// For HTTP: Ensures the path ends with `/v1/traces`, appending it if necessary.
+    /// For gRPC: Ensures the path does NOT include `/v1/traces`.
+    pub fn validate_endpoint(&self, url: &mut Url) -> eyre::Result<()> {
         match self {
             Self::Http => {
-                ensure!(
-                    url.path().ends_with("/v1/traces"),
-                    "OTLP trace endpoint must end with /v1/traces, got path: {}",
-                    url.path()
-                );
+                if !url.path().ends_with(HTTP_TRACE_ENDPOINT) {
+                    let path = url.path().trim_end_matches('/');
+                    url.set_path(&format!("{}{}", path, HTTP_TRACE_ENDPOINT));
+                }
             }
             Self::Grpc => {
                 ensure!(
-                    !url.path().ends_with("/v1/traces"),
-                    "OTLP gRPC endpoint should not include /v1/traces path, got: {}",
-                    url
+                    !url.path().ends_with(HTTP_TRACE_ENDPOINT),
+                    "OTLP gRPC endpoint should not include {} path, got: {}",
+                    HTTP_TRACE_ENDPOINT, url
                 );
             }
         }
