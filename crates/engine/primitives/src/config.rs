@@ -92,8 +92,8 @@ pub struct TreeConfig {
     /// Whether to always compare trie updates from the state root task to the trie updates from
     /// the regular state root calculation.
     always_compare_trie_updates: bool,
-    /// Whether to disable cross-block caching and parallel prewarming.
-    disable_caching_and_prewarming: bool,
+    /// Whether to disable parallel prewarming.
+    disable_prewarming: bool,
     /// Whether to disable the parallel sparse trie state root algorithm.
     disable_parallel_sparse_trie: bool,
     /// Whether to enable state provider metrics.
@@ -148,7 +148,7 @@ impl Default for TreeConfig {
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
             legacy_state_root: false,
             always_compare_trie_updates: false,
-            disable_caching_and_prewarming: false,
+            disable_prewarming: false,
             disable_parallel_sparse_trie: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
@@ -179,7 +179,7 @@ impl TreeConfig {
         max_execute_block_batch_size: usize,
         legacy_state_root: bool,
         always_compare_trie_updates: bool,
-        disable_caching_and_prewarming: bool,
+        disable_prewarming: bool,
         disable_parallel_sparse_trie: bool,
         state_provider_metrics: bool,
         cross_block_cache_size: u64,
@@ -205,7 +205,7 @@ impl TreeConfig {
             max_execute_block_batch_size,
             legacy_state_root,
             always_compare_trie_updates,
-            disable_caching_and_prewarming,
+            disable_prewarming,
             disable_parallel_sparse_trie,
             state_provider_metrics,
             cross_block_cache_size,
@@ -285,9 +285,9 @@ impl TreeConfig {
         self.disable_parallel_sparse_trie
     }
 
-    /// Returns whether or not cross-block caching and parallel prewarming should be used.
-    pub const fn disable_caching_and_prewarming(&self) -> bool {
-        self.disable_caching_and_prewarming
+    /// Returns whether or not parallel prewarming should be used.
+    pub const fn disable_prewarming(&self) -> bool {
+        self.disable_prewarming
     }
 
     /// Returns whether to always compare trie updates from the state root task to the trie updates
@@ -377,12 +377,9 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether to disable cross-block caching and parallel prewarming.
-    pub const fn without_caching_and_prewarming(
-        mut self,
-        disable_caching_and_prewarming: bool,
-    ) -> Self {
-        self.disable_caching_and_prewarming = disable_caching_and_prewarming;
+    /// Setter for whether to disable parallel prewarming.
+    pub const fn without_prewarming(mut self, disable_prewarming: bool) -> Self {
+        self.disable_prewarming = disable_prewarming;
         self
     }
 
