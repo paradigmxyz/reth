@@ -390,11 +390,30 @@ impl MultiproofManager {
     /// Spawns a new multiproof calculation or enqueues it for later if
     /// `max_concurrent` are already inflight.
     fn spawn_or_queue(&mut self, input: PendingMultiproofTask) {
+        let sequence = input.proof_sequence_number();
+        let has_targets = !input.proof_targets_is_empty();
+        let is_storage = matches!(input, PendingMultiproofTask::Storage(_));
+        let is_full = self.is_full();
+
+        info!(
+            target: "tree::multiproof",
+            sequence,
+            has_targets,
+            is_storage,
+            inflight = self.inflight,
+            max_concurrent = self.max_concurrent,
+            pending = self.pending.len(),
+            is_full,
+            "DEBUG: spawn_or_queue ENTRY"
+        );
+
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets_is_empty() {
-            debug!(
-                sequence_number = input.proof_sequence_number(),
-                "No proof targets, sending empty multiproof back immediately"
+            info!(
+                target: "tree::multiproof",
+                sequence,
+                inflight = self.inflight,
+                "DEBUG: No proof targets - taking empty proof path (inflight NOT incremented)"
             );
             input.send_empty_proof();
             return
@@ -413,6 +432,13 @@ impl MultiproofManager {
             return;
         }
 
+        info!(
+            target: "tree::multiproof",
+            sequence,
+            inflight_before = self.inflight,
+            "DEBUG: About to spawn multiproof task (will increment inflight)"
+        );
+
         self.spawn_multiproof_task(input);
     }
 
@@ -422,7 +448,7 @@ impl MultiproofManager {
         let prev_inflight = self.inflight;
         self.inflight = self.inflight.saturating_sub(1);
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
-        
+
         info!(
             target: "tree::multiproof",
             prev_inflight,
@@ -527,7 +553,7 @@ impl MultiproofManager {
 
         self.inflight += 1;
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
-        
+
         info!(
             target: "tree::multiproof",
             inflight = self.inflight,
@@ -549,7 +575,7 @@ impl MultiproofManager {
         } = multiproof_input;
         let account_proof_worker_handle = self.proof_worker_handle.clone();
         let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
-        
+
         // Capture metrics before moving into closure
         let account_targets = proof_targets.len();
         let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
@@ -625,7 +651,7 @@ impl MultiproofManager {
 
         self.inflight += 1;
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
-        
+
         info!(
             target: "tree::multiproof",
             inflight = self.inflight,
