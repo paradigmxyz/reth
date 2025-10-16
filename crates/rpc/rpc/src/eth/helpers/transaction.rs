@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::EthApi;
-use alloy_consensus::EnvKzgSettings;
+use alloy_consensus::BlobTransactionValidationError;
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, BlockId, Typed2718};
 use alloy_primitives::{hex, Bytes, B256};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -63,10 +63,12 @@ where
                     if self.provider().chain_spec().is_osaka_active_at_timestamp(latest.timestamp())
                     {
                         BlobTransactionSidecarVariant::Eip7594(
-                            sidecar.try_into_7594(EnvKzgSettings::default().get()).map_err(
-                                |err| {
+                            self.blob_sidecar_converter().convert(sidecar).await.ok_or_else(
+                                || {
                                     RpcPoolError::Eip4844(
-                                        Eip4844PoolTransactionError::InvalidEip4844Blob(err.into()),
+                                        Eip4844PoolTransactionError::InvalidEip4844Blob(
+                                            BlobTransactionValidationError::InvalidProof,
+                                        ),
                                     )
                                 },
                             )?,
