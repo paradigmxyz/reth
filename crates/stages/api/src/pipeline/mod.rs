@@ -639,14 +639,18 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     // FIXME: When handling errors, we do not commit the database transaction. This
                     // leads to the Merkle stage not clearing its checkpoint, and restarting from an
                     // invalid place.
-                    let provider_rw = self.provider_factory.database_provider_rw()?;
-                    provider_rw.save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
-                    provider_rw.save_stage_checkpoint(
-                        StageId::MerkleExecute,
-                        prev_checkpoint.unwrap_or_default(),
-                    )?;
+                    // Only reset MerkleExecute checkpoint if MerkleExecute itself failed
+                    if stage_id == StageId::MerkleExecute {
+                        let provider_rw = self.provider_factory.database_provider_rw()?;
+                        provider_rw
+                            .save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
+                        provider_rw.save_stage_checkpoint(
+                            StageId::MerkleExecute,
+                            prev_checkpoint.unwrap_or_default(),
+                        )?;
 
-                    provider_rw.commit()?;
+                        provider_rw.commit()?;
+                    }
 
                     // We unwind because of a validation error. If the unwind itself
                     // fails, we bail entirely,

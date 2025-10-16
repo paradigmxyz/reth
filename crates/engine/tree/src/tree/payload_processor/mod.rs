@@ -201,6 +201,7 @@ where
         );
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
+        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
             consistent_view,
@@ -209,15 +210,15 @@ where
             account_worker_count,
         );
 
-        // Limit concurrent multiproof tasks to match the account worker pool size.
-        // Each multiproof task spawns a tokio task that queues to one account worker,
-        // which then fans out to storage workers as needed.
+        // We set it to half of the proof task concurrency, because often for each multiproof we
+        // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
+        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
             proof_handle.clone(),
             to_sparse_trie,
-            account_worker_count,
+            max_multi_proof_task_concurrency,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );
 

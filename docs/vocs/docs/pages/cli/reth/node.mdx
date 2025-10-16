@@ -835,6 +835,11 @@ Engine:
       --engine.accept-execution-requests-hash
           Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`
 
+      --engine.max-proof-task-concurrency <MAX_PROOF_TASK_CONCURRENCY>
+          Configure the maximum number of concurrent proof tasks
+
+          [default: 256]
+
       --engine.multiproof-chunking
           Whether multiproof task should chunk proof targets
 
@@ -999,10 +1004,10 @@ Tracing:
 
           [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
 
-      --tracing-otlp-level <FILTER>
+      --tracing-otlp.filter <FILTER>
           Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
 
-          Example: --tracing-otlp-level=info,reth=debug,hyper_util=off
+          Example: --tracing-otlp.filter=info,reth=debug,hyper_util=off
 
           Defaults to TRACE if not specified.
 
