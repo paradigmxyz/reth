@@ -86,7 +86,7 @@ pub(crate) fn create_test_receipt_with_bloom(
     log_count: usize,
 ) -> ReceiptWithBloom {
     let receipt = create_test_receipt(tx_type, success, cumulative_gas_used, log_count);
-    ReceiptWithBloom { receipt: receipt.into(), logs_bloom: Default::default() }
+    ReceiptWithBloom { receipt, logs_bloom: Default::default() }
 }
 
 // Helper function to create a sample block tuple
