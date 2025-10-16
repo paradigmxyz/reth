@@ -99,6 +99,7 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-ethereum-cli.workspace = true
+tempfile.workspace = true
 
 [features]
 default = []

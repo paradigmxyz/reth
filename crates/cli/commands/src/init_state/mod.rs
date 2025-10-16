@@ -88,7 +88,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
             let header = self.header.ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
             let header = without_evm::read_header_from_file::<
                 <N::Primitives as NodePrimitives>::BlockHeader,
-            >(header)?;
+            >(&header)?;
 
             let header_hash =
                 self.header_hash.ok_or_else(|| eyre::eyre!("Header hash must be provided"))?;
