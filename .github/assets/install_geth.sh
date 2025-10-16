@@ -10,6 +10,8 @@ name="geth-linux-amd64-$GETH_BUILD"
 
 mkdir -p "$HOME/bin"
 wget "https://gethstore.blob.core.windows.net/builds/$name.tar.gz"
+wget "https://gethstore.blob.core.windows.net/builds/$name.tar.gz.sha256"
+sha256sum -c "$name.tar.gz.sha256"
 tar -xvf "$name.tar.gz"
 rm "$name.tar.gz"
 mv "$name/geth" "$HOME/bin/geth"
