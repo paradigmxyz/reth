@@ -10,16 +10,22 @@ use reth_provider::{
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use std::{fs::File, io::Read, path::PathBuf};
+use std::path::Path;
 use tracing::info;
+
 /// Reads the header RLP from a file and returns the Header.
-pub(crate) fn read_header_from_file<H>(path: PathBuf) -> Result<H, eyre::Error>
+///
+/// This supports both raw rlp bytes and rlp hex string.
+pub(crate) fn read_header_from_file<H>(path: &Path) -> Result<H, eyre::Error>
 where
     H: Decodable,
 {
-    let mut file = File::open(path)?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
+    let buf = if let Ok(content) = reth_fs_util::read_to_string(path) {
+        alloy_primitives::hex::decode(content.trim())?
+    } else {
+        // If UTF-8 decoding fails, read as raw bytes
+        reth_fs_util::read(path)?
+    };
 
     let header = H::decode(&mut &buf[..])?;
     Ok(header)
@@ -166,4 +172,51 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::{address, b256};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_read_header_from_file_hex_string() {
+        let header_rlp = "0xf90212a00d84d79f59fc384a1f6402609a5b7253b4bfe7a4ae12608ed107273e5422b6dda01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d493479471562b71999873db5b286df957af199ec94617f7a0f496f3d199c51a1aaee67dac95f24d92ac13c60d25181e1eecd6eca5ddf32ac0a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808206a4840365908a808468e975f09ad983011003846765746888676f312e32352e308664617277696ea06f485a167165ec12e0ab3e6ab59a7b88560b90306ac98a26eb294abf95a8c59b88000000000000000007";
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(header_rlp.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let header: Header = read_header_from_file(temp_file.path()).unwrap();
+
+        assert_eq!(header.number, 1700);
+        assert_eq!(
+            header.parent_hash,
+            b256!("0d84d79f59fc384a1f6402609a5b7253b4bfe7a4ae12608ed107273e5422b6dd")
+        );
+        assert_eq!(header.beneficiary, address!("71562b71999873db5b286df957af199ec94617f7"));
+    }
+
+    #[test]
+    fn test_read_header_from_file_raw_bytes() {
+        let header_rlp = "0xf90212a00d84d79f59fc384a1f6402609a5b7253b4bfe7a4ae12608ed107273e5422b6dda01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d493479471562b71999873db5b286df957af199ec94617f7a0f496f3d199c51a1aaee67dac95f24d92ac13c60d25181e1eecd6eca5ddf32ac0a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808206a4840365908a808468e975f09ad983011003846765746888676f312e32352e308664617277696ea06f485a167165ec12e0ab3e6ab59a7b88560b90306ac98a26eb294abf95a8c59b88000000000000000007";
+        let header_bytes =
+            alloy_primitives::hex::decode(header_rlp.trim_start_matches("0x")).unwrap();
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(&header_bytes).unwrap();
+        temp_file.flush().unwrap();
+
+        let header: Header = read_header_from_file(temp_file.path()).unwrap();
+
+        assert_eq!(header.number, 1700);
+        assert_eq!(
+            header.parent_hash,
+            b256!("0d84d79f59fc384a1f6402609a5b7253b4bfe7a4ae12608ed107273e5422b6dd")
+        );
+        assert_eq!(header.beneficiary, address!("71562b71999873db5b286df957af199ec94617f7"));
+    }
 }
