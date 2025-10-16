@@ -8,7 +8,7 @@ use crate::{
     },
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
-    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
+    validate::{PoolTransactionSidecar, ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
     Address, BlobTransactionSidecarVariant, EthBlobTransactionSidecar, EthPoolTransaction,
     LocalTransactionConfig, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
@@ -541,7 +541,7 @@ where
         }
 
         // heavy blob tx validation
-        let maybe_blob_sidecar = match self.validate_eip4844(&mut transaction) {
+        let maybe_blob_sidecar = match self.validate_eip4844(origin, &mut transaction) {
             Err(err) => return TransactionValidationOutcome::Invalid(transaction, err),
             Ok(sidecar) => sidecar,
         };
@@ -639,8 +639,9 @@ where
     /// Validates EIP-4844 blob sidecar data and returns the extracted sidecar, if any.
     pub fn validate_eip4844(
         &self,
+        origin: TransactionOrigin,
         transaction: &mut Tx,
-    ) -> Result<Option<BlobTransactionSidecarVariant>, InvalidPoolTransactionError> {
+    ) -> Result<Option<PoolTransactionSidecar>, InvalidPoolTransactionError> {
         let mut maybe_blob_sidecar = None;
 
         // heavy blob tx validation
@@ -668,7 +669,8 @@ where
                     let now = Instant::now();
 
                     if self.fork_tracker.is_osaka_activated() {
-                        if sidecar.is_eip4844() {
+                        if sidecar.is_eip4844() && !origin.is_local() {
+                            // Reject all non-local transactions with legacy blobs.
                             return Err(InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
                             ))
@@ -687,8 +689,19 @@ where
                     }
                     // Record the duration of successful blob validation as histogram
                     self.validation_metrics.blob_validation_duration.record(now.elapsed());
-                    // store the extracted blob
-                    maybe_blob_sidecar = Some(sidecar);
+
+                    // store the extracted blob with conversion context
+                    maybe_blob_sidecar = Some(match sidecar {
+                        BlobTransactionSidecarVariant::Eip4844(sidecar) => {
+                            PoolTransactionSidecar::Eip4844 {
+                                sidecar,
+                                should_convert: self.fork_tracker.is_osaka_activated(),
+                            }
+                        }
+                        BlobTransactionSidecarVariant::Eip7594(sidecar) => {
+                            PoolTransactionSidecar::Eip7594(sidecar)
+                        }
+                    });
                 }
             }
         }

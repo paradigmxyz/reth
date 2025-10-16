@@ -97,15 +97,7 @@ use reth_execution_types::ChangedAccount;
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, Typed2718};
 use reth_primitives_traits::Recovered;
 use rustc_hash::FxHashMap;
-use std::{
-    collections::HashSet,
-    fmt,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Instant,
-};
+use std::{collections::HashSet, fmt, sync::Arc, time::Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 mod events;
@@ -165,8 +157,6 @@ where
     // TODO: remove below fields after Osaka hardfork
     /// Converter for blob sidecars.
     blob_sidecar_converter: BlobSidecarConverter,
-    /// Whether EIP-7594 is activated.
-    eip7594_activated: AtomicBool,
 }
 
 // === impl PoolInner ===
@@ -193,13 +183,7 @@ where
             blob_sidecar_converter: BlobSidecarConverter::new(
                 MAX_BLOB_SIDECAR_CONVERTER_CONCURRENCY,
             ),
-            eip7594_activated: Default::default(),
         }
-    }
-
-    /// Returns `true` if EIP-7594 is activated.
-    pub fn is_eip7594_activated(&self) -> bool {
-        self.eip7594_activated.load(Ordering::Relaxed)
     }
 
     /// Returns the blob sidecar converter.
@@ -425,10 +409,6 @@ where
         } = update;
         self.validator.on_new_head_block(new_tip);
 
-        if update.eip7594_activated {
-            self.eip7594_activated.store(true, Ordering::Relaxed);
-        }
-
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
 
         // update the pool
@@ -529,7 +509,7 @@ where
                             transaction.is_eip4844(),
                             "validator returned sidecar for non EIP-4844 transaction"
                         );
-                        (transaction, Some(sidecar))
+                        (transaction, Some(sidecar.into()))
                     }
                 };
 
@@ -1403,7 +1383,7 @@ mod tests {
         blobstore::{BlobStore, InMemoryBlobStore},
         identifier::SenderId,
         test_utils::{MockTransaction, TestPoolBuilder},
-        validate::ValidTransaction,
+        validate::{PoolTransactionSidecar, ValidTransaction},
         BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
     use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
@@ -1477,7 +1457,10 @@ mod tests {
                     bytecode_hash: None,
                     transaction: ValidTransaction::ValidWithSidecar {
                         transaction: tx,
-                        sidecar: sidecar.clone(),
+                        sidecar: PoolTransactionSidecar::Eip4844 {
+                            sidecar: sidecar.as_eip4844().unwrap().clone(),
+                            should_convert: false,
+                        },
                     },
                     propagate: true,
                     authorities: None,

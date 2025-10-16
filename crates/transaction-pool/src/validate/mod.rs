@@ -6,7 +6,11 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
     PriceBumpConfig,
 };
-use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
+use alloy_consensus::BlobTransactionSidecar;
+use alloy_eips::{
+    eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
+    eip7702::SignedAuthorization,
+};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Recovered, SealedBlock};
@@ -90,6 +94,29 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
     }
 }
 
+/// A wrapper type for a transaction sidecar.
+#[derive(Debug, Clone)]
+pub enum PoolTransactionSidecar {
+    /// EIP-4844 blob transaction sidecar, potentially requiring conversion to EIP-7594 format.
+    Eip4844 {
+        /// The EIP-4844 blob transaction sidecar.
+        sidecar: BlobTransactionSidecar,
+        /// Flag marking whether the sidecar should be converted to EIP-7594 format.
+        should_convert: bool,
+    },
+    /// EIP-7594 blob transaction sidecar.
+    Eip7594(BlobTransactionSidecarEip7594),
+}
+
+impl From<PoolTransactionSidecar> for BlobTransactionSidecarVariant {
+    fn from(sidecar: PoolTransactionSidecar) -> Self {
+        match sidecar {
+            PoolTransactionSidecar::Eip4844 { sidecar, .. } => sidecar.into(),
+            PoolTransactionSidecar::Eip7594(sidecar) => sidecar.into(),
+        }
+    }
+}
+
 /// A wrapper type for a transaction that is valid and has an optional extracted EIP-4844 blob
 /// transaction sidecar.
 ///
@@ -111,13 +138,13 @@ pub enum ValidTransaction<T> {
         /// The valid EIP-4844 transaction.
         transaction: T,
         /// The extracted sidecar of that transaction
-        sidecar: BlobTransactionSidecarVariant,
+        sidecar: PoolTransactionSidecar,
     },
 }
 
 impl<T> ValidTransaction<T> {
     /// Creates a new valid transaction with an optional sidecar.
-    pub fn new(transaction: T, sidecar: Option<BlobTransactionSidecarVariant>) -> Self {
+    pub fn new(transaction: T, sidecar: Option<PoolTransactionSidecar>) -> Self {
         if let Some(sidecar) = sidecar {
             Self::ValidWithSidecar { transaction, sidecar }
         } else {

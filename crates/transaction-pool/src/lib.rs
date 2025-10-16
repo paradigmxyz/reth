@@ -293,7 +293,11 @@ pub use crate::{
         TransactionValidator, ValidPoolTransaction,
     },
 };
-use crate::{identifier::TransactionId, pool::PoolInner, validate::ValidTransaction};
+use crate::{
+    identifier::TransactionId,
+    pool::PoolInner,
+    validate::{PoolTransactionSidecar, ValidTransaction},
+};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
@@ -516,10 +520,11 @@ where
                     transaction:
                         ValidTransaction::ValidWithSidecar {
                             transaction,
-                            sidecar: BlobTransactionSidecarVariant::Eip4844(sidecar),
+                            sidecar:
+                                PoolTransactionSidecar::Eip4844 { sidecar, should_convert: true },
                         },
                     ..
-                } if self.pool.is_eip7594_activated() => {
+                } => {
                     let this = self.clone();
                     tokio::spawn(async move {
                         let Some(converted) =

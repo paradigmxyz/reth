@@ -8,7 +8,7 @@ use crate::{
     error::{InvalidPoolTransactionError, PoolError},
     pool::TransactionListenerKind,
     traits::{BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar},
-    validate::ValidTransaction,
+    validate::{PoolTransactionSidecar, ValidTransaction},
     AddedTransactionOutcome, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
     BlockInfo, EthPoolTransaction, EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize,
     PoolTransaction, PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
@@ -383,7 +383,15 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
                 InvalidPoolTransactionError::Underpriced,
             );
         }
-        let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
+        let maybe_sidecar =
+            transaction.take_blob().maybe_sidecar().cloned().map(|sidecar| match sidecar {
+                BlobTransactionSidecarVariant::Eip4844(sidecar) => {
+                    PoolTransactionSidecar::Eip4844 { sidecar, should_convert: false }
+                }
+                BlobTransactionSidecarVariant::Eip7594(sidecar) => {
+                    PoolTransactionSidecar::Eip7594(sidecar)
+                }
+            });
         // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
         // overdraft
         TransactionValidationOutcome::Valid {
