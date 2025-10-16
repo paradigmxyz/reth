@@ -2,7 +2,7 @@
 
 use crate::common::{AccessRights, CliHeader, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_consensus::BlockHeader as AlloyBlockHeader;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Sealable, B256, U256};
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -64,7 +64,7 @@ pub struct InitStateCommand<C: ChainSpecParser> {
 
     /// Hash of the header.
     #[arg(long, value_name = "HEADER_HASH", verbatim_doc_comment)]
-    pub header_hash: Option<String>,
+    pub header_hash: Option<B256>,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateCommand<C> {
@@ -90,9 +90,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
                 <N::Primitives as NodePrimitives>::BlockHeader,
             >(&header)?;
 
-            let header_hash =
-                self.header_hash.ok_or_else(|| eyre::eyre!("Header hash must be provided"))?;
-            let header_hash = B256::from_str(&header_hash)?;
+            let header_hash = self.header_hash.unwrap_or_else(|| header.hash_slow());
 
             let total_difficulty = self
                 .total_difficulty
@@ -144,5 +142,37 @@ impl<C: ChainSpecParser> InitStateCommand<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::b256;
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+
+    #[test]
+    fn parse_init_state_command_with_without_evm() {
+        let cmd: InitStateCommand<EthereumChainSpecParser> = InitStateCommand::parse_from([
+            "reth",
+            "--chain",
+            "sepolia",
+            "--without-evm",
+            "--header",
+            "header.rlp",
+            "--total-difficulty",
+            "12345",
+            "--header-hash",
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "state.jsonl",
+        ]);
+        assert_eq!(cmd.state.to_str().unwrap(), "state.jsonl");
+        assert!(cmd.without_evm);
+        assert_eq!(cmd.header.unwrap().to_str().unwrap(), "header.rlp");
+        assert_eq!(cmd.total_difficulty.unwrap(), "12345");
+        assert_eq!(
+            cmd.header_hash.unwrap(),
+            b256!("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+        );
     }
 }
