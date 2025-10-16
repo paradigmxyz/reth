@@ -389,8 +389,8 @@ impl Discv5 {
                     .then(|| {
                         // Fallback: trying to get fork id from Enr with 'eth' as network stack id
                         trace!(target: "net::discv5",
-                            "Fork id not found for '{key}' network stack id, trying 'eth'...",
-                            key = String::from_utf8_lossy(key)
+                            key = String::from_utf8_lossy(key),
+                            "Fork id not found for key, trying 'eth'..."
                         );
                         enr.get_decodable::<EnrForkIdEntry>(NetworkStackId::ETH)
                     })
