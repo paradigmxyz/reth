@@ -397,7 +397,7 @@ impl Discv5 {
                     .flatten()
             })
             .ok_or({
-                trace!(target: "net::discv5", "fork id not found for 'eth' network stack id");
+                trace!(target: "net::discv5", "Fork id not found for 'eth' network stack id");
                 Error::ForkMissing(key)
             })?
             .map(Into::into)?;
