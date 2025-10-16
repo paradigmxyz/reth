@@ -8,9 +8,8 @@ use tokio::{
 
 /// An executor for mixed I/O and CPU workloads.
 ///
-/// This type uses tokio to spawn blocking tasks.
-///
-/// It will reuse an existing tokio runtime if available or create its own.
+/// This type uses tokio to spawn blocking tasks and will reuse an existing tokio
+/// runtime if available or create its own.
 #[derive(Debug, Clone)]
 pub struct WorkloadExecutor {
     inner: WorkloadExecutorInner,
