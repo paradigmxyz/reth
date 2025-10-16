@@ -111,7 +111,8 @@ impl StageId {
 
     /// Get a pre-encoded raw Vec, for example, to be used as the DB key for
     /// `tables::StageCheckpoints` and `tables::StageCheckpointProgresses`
-    pub const fn get_pre_encoded(&self) -> Option<&Vec<u8>> {
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn get_pre_encoded(&self) -> Option<&Vec<u8>> {
         #[cfg(not(feature = "std"))]
         {
             None
