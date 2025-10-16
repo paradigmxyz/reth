@@ -429,14 +429,14 @@ impl ProofWorkerHandle {
 
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
-            let worker = StorageProofWorker::new(
+            let storage_worker = StorageProofWorker::new(
                 view.clone(),
                 task_ctx.clone(),
                 storage_work_rx.clone(),
                 worker_id,
             );
 
-            executor.spawn_blocking(move || worker.run());
+            executor.spawn_blocking(move || storage_worker.run());
 
             tracing::debug!(
                 target: "trie::proof_task",
@@ -447,7 +447,7 @@ impl ProofWorkerHandle {
 
         // Spawn account workers
         for worker_id in 0..account_worker_count {
-            let worker = AccountProofWorker::new(
+            let account_worker = AccountProofWorker::new(
                 view.clone(),
                 task_ctx.clone(),
                 account_work_rx.clone(),
@@ -455,7 +455,7 @@ impl ProofWorkerHandle {
                 worker_id,
             );
 
-            executor.spawn_blocking(move || worker.run());
+            executor.spawn_blocking(move || account_worker.run());
 
             tracing::debug!(
                 target: "trie::proof_task",
