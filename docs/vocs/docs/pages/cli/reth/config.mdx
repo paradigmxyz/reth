@@ -117,6 +117,10 @@ Tracing:
 
           Defaults to HTTP if not specified.
 
+          Possible values:
+          - http: HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
+          - grpc: gRPC transport, port 4317
+
           [default: http]
 
       --tracing-otlp.filter <FILTER>
