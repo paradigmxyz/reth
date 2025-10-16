@@ -5,17 +5,17 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     executor::WorkloadExecutor,
     instrumented_state::InstrumentedStateProvider,
-    payload_processor::PayloadProcessor,
+    payload_processor::{multiproof::MultiProofConfig, PayloadProcessor},
     persistence_state::CurrentPersistenceAction,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
-    PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, PersistenceState,
+    PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::B256;
+use alloy_primitives::{BlockNumber, B256};
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
@@ -33,16 +33,13 @@ use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider, StateProviderFactory,
-    StateReader, StateRootProvider, TrieReader,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
+    DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
+    StageCheckpointReader, StateProvider, StateProviderFactory, StateReader, StateRootProvider,
+    TrieReader,
 };
 use reth_revm::db::State;
-use reth_trie::{
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, KeccakKeyHasher, TrieInput,
-};
-use reth_trie_db::DatabaseHashedPostState;
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm::context::Block;
 use std::{collections::HashMap, sync::Arc, time::Instant};
@@ -163,12 +160,14 @@ where
     metrics: EngineApiMetrics,
     /// Validator for the payload.
     validator: V,
+    /// A cleared trie input, kept around to be reused so allocations can be minimized.
+    trie_input: Option<TrieInput>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory<Provider: BlockReader + TrieReader>
+    P: DatabaseProviderFactory<Provider: BlockReader + TrieReader + StageCheckpointReader>
         + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
@@ -205,6 +204,7 @@ where
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
             validator,
+            trie_input: Default::default(),
         }
     }
 
@@ -676,19 +676,31 @@ where
         hashed_state: &HashedPostState,
         state: &EngineApiTreeState<N>,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+        let provider = self.provider.database_provider_ro()?;
 
-        let mut input = self.compute_trie_input(
-            persisting_kind,
-            consistent_view.provider_ro()?,
-            parent_hash,
-            state,
-            None,
-        )?;
+        let (mut input, block_number) =
+            self.compute_trie_input(persisting_kind, provider, parent_hash, state, None)?;
+
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
+        // Convert the TrieInput into a MultProofConfig, since everything uses the sorted
+        // forms of the state/trie fields.
+        let (_, multiproof_config) = MultiProofConfig::from_input(input);
+
+        let factory = OverlayStateProviderFactory::new(self.provider.clone())
+            .with_block_number(Some(block_number))
+            .with_trie_overlay(Some(multiproof_config.nodes_sorted))
+            .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
+
+        // The `hashed_state` argument is already taken into account as part of the overlay, but we
+        // need to use the prefix sets which were generated from it to indicate to the
+        // ParallelStateRoot which parts of the trie need to be recomputed.
+        let prefix_sets = Arc::into_inner(multiproof_config.prefix_sets)
+            .expect("MultiProofConfig was never cloned")
+            .freeze();
+
+        ParallelStateRoot::new(factory, prefix_sets).incremental_root_with_updates()
     }
 
     /// Validates the block after execution.
@@ -781,17 +793,14 @@ where
     > {
         match strategy {
             StateRootStrategy::StateRootTask => {
-                // use background tasks for state root calc
-                let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-
                 // get allocated trie input if it exists
-                let allocated_trie_input = self.payload_processor.take_trie_input();
+                let allocated_trie_input = self.trie_input.take();
 
                 // Compute trie input
                 let trie_input_start = Instant::now();
-                let trie_input = self.compute_trie_input(
+                let (trie_input, block_number) = self.compute_trie_input(
                     persisting_kind,
-                    consistent_view.provider_ro()?,
+                    self.provider.database_provider_ro()?,
                     parent_hash,
                     state,
                     allocated_trie_input,
@@ -802,52 +811,50 @@ where
                     .trie_input_duration
                     .record(trie_input_start.elapsed().as_secs_f64());
 
+                // Convert the TrieInput into a MultProofConfig, since everything uses the sorted
+                // forms of the state/trie fields.
+                let (trie_input, multiproof_config) = MultiProofConfig::from_input(trie_input);
+                self.trie_input.replace(trie_input);
+
+                // Create OverlayStateProviderFactory with the multiproof config, for use with
+                // multiproofs.
+                let multiproof_provider_factory =
+                    OverlayStateProviderFactory::new(self.provider.clone())
+                        .with_block_number(Some(block_number))
+                        .with_trie_overlay(Some(multiproof_config.nodes_sorted))
+                        .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
+
                 // Use state root task only if prefix sets are empty, otherwise proof generation is
                 // too expensive because it requires walking all paths in every proof.
                 let spawn_start = Instant::now();
-                let (handle, strategy) = if trie_input.prefix_sets.is_empty() {
-                    match self.payload_processor.spawn(
-                        env,
-                        txs,
-                        provider_builder,
-                        consistent_view,
-                        trie_input,
-                        &self.config,
-                    ) {
-                        Ok(handle) => {
-                            // Successfully spawned with state root task support
-                            (handle, StateRootStrategy::StateRootTask)
-                        }
-                        Err((error, txs, env, provider_builder)) => {
-                            // Failed to spawn proof workers, fallback to parallel state root
-                            error!(
-                                target: "engine::tree",
-                                block=?block_num_hash,
-                                ?error,
-                                "Failed to spawn proof workers, falling back to parallel state root"
-                            );
-                            (
-                                self.payload_processor.spawn_cache_exclusive(
-                                    env,
-                                    txs,
-                                    provider_builder,
-                                ),
-                                StateRootStrategy::Parallel,
-                            )
-                        }
+                let (handle, strategy) = match self.payload_processor.spawn(
+                    env,
+                    txs,
+                    provider_builder,
+                    multiproof_provider_factory,
+                    &self.config,
+                ) {
+                    Ok(handle) => {
+                        // Successfully spawned with state root task support
+                        (handle, StateRootStrategy::StateRootTask)
                     }
-                // if prefix sets are not empty, we spawn a task that exclusively handles cache
-                // prewarming for transaction execution
-                } else {
-                    debug!(
-                        target: "engine::tree",
-                        block=?block_num_hash,
-                        "Disabling state root task due to non-empty prefix sets"
-                    );
-                    (
-                        self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder),
-                        StateRootStrategy::Parallel,
-                    )
+                    Err((error, txs, env, provider_builder)) => {
+                        // Failed to spawn proof workers, fallback to parallel state root
+                        error!(
+                            target: "engine::tree::payload_validator",
+                            block=?block_num_hash,
+                            ?error,
+                            "Failed to spawn proof workers, falling back to parallel state root"
+                        );
+                        (
+                            self.payload_processor.spawn_cache_exclusive(
+                                env,
+                                txs,
+                                provider_builder,
+                            ),
+                            StateRootStrategy::Parallel,
+                        )
+                    }
                 };
 
                 // record prewarming initialization duration
@@ -964,7 +971,8 @@ where
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
 
-    /// Computes the trie input at the provided parent hash.
+    /// Computes the trie input at the provided parent hash, as well as the block number of the
+    /// highest persisted ancestor.
     ///
     /// The goal of this function is to take in-memory blocks and generate a [`TrieInput`] that
     /// serves as an overlay to the database blocks.
@@ -986,7 +994,7 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
         allocated_trie_input: Option<TrieInput>,
-    ) -> ProviderResult<TrieInput> {
+    ) -> ProviderResult<(TrieInput, BlockNumber)> {
         // get allocated trie input or use a default trie input
         let mut input = allocated_trie_input.unwrap_or_default();
 
@@ -1030,44 +1038,17 @@ where
             debug!(target: "engine::tree", %parent_hash, %historical, blocks = blocks.len(), "Parent found in memory");
         }
 
-        // Convert the historical block to the block number.
+        // Convert the historical block to the block number
         let block_number = provider
             .convert_hash_or_number(historical)?
             .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
-
-        // Retrieve revert state for historical block.
-        let (revert_state, revert_trie) = if block_number == best_block_number {
-            // We do not check against the `last_block_number` here because
-            // `HashedPostState::from_reverts` / `trie_reverts` only use the database tables, and
-            // not static files.
-            debug!(target: "engine::tree", block_number, best_block_number, "Empty revert state");
-            (HashedPostState::default(), TrieUpdatesSorted::default())
-        } else {
-            let revert_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
-                provider.tx_ref(),
-                block_number + 1..,
-            )
-            .map_err(ProviderError::from)?;
-            let revert_trie = provider.trie_reverts(block_number + 1)?;
-            debug!(
-                target: "engine::tree",
-                block_number,
-                best_block_number,
-                accounts = revert_state.accounts.len(),
-                storages = revert_state.storages.len(),
-                "Non-empty revert state"
-            );
-            (revert_state, revert_trie)
-        };
-
-        input.append_cached(revert_trie.into(), revert_state);
 
         // Extend with contents of parent in-memory blocks.
         input.extend_with_blocks(
             blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())),
         );
 
-        Ok(input)
+        Ok((input, block_number))
     }
 }
 
@@ -1146,7 +1127,7 @@ pub trait EngineValidator<
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
-    P: DatabaseProviderFactory<Provider: BlockReader + TrieReader>
+    P: DatabaseProviderFactory<Provider: BlockReader + TrieReader + StageCheckpointReader>
         + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader

@@ -2,7 +2,10 @@ use alloy_primitives::{BlockNumber, B256};
 use reth_db_api::DatabaseError;
 use reth_errors::ProviderError;
 use reth_stages_types::StageId;
-use reth_storage_api::{DBProvider, DatabaseProviderFactory, StageCheckpointReader, TrieReader};
+use reth_storage_api::{
+    DBProvider, DatabaseProviderFactory, DatabaseProviderROFactory, StageCheckpointReader,
+    TrieReader,
+};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
@@ -30,11 +33,7 @@ pub struct OverlayStateProviderFactory<F> {
     hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
 }
 
-impl<F> OverlayStateProviderFactory<F>
-where
-    F: DatabaseProviderFactory,
-    F::Provider: Clone + TrieReader + StageCheckpointReader,
-{
+impl<F> OverlayStateProviderFactory<F> {
     /// Create a new overlay state provider factory
     pub const fn new(factory: F) -> Self {
         Self { factory, block_number: None, trie_overlay: None, hashed_state_overlay: None }
@@ -60,7 +59,13 @@ where
         self.hashed_state_overlay = hashed_state_overlay;
         self
     }
+}
 
+impl<F> OverlayStateProviderFactory<F>
+where
+    F: DatabaseProviderFactory,
+    F::Provider: TrieReader + StageCheckpointReader,
+{
     /// Validates that there are sufficient changesets to revert to the requested block number.
     ///
     /// Returns an error if the `MerkleChangeSets` checkpoint doesn't cover the requested block.
@@ -93,9 +98,17 @@ where
 
         Ok(())
     }
+}
+
+impl<F> DatabaseProviderROFactory for OverlayStateProviderFactory<F>
+where
+    F: DatabaseProviderFactory,
+    F::Provider: TrieReader + StageCheckpointReader,
+{
+    type Provider = OverlayStateProvider<F::Provider>;
 
     /// Create a read-only [`OverlayStateProvider`].
-    pub fn provider_ro(&self) -> Result<OverlayStateProvider<F::Provider>, ProviderError> {
+    fn database_provider_ro(&self) -> Result<OverlayStateProvider<F::Provider>, ProviderError> {
         // Get a read-only provider
         let provider = self.factory.database_provider_ro()?;
 
@@ -143,7 +156,7 @@ where
 /// This provider uses in-memory trie updates and hashed post state as an overlay
 /// on top of a database provider, implementing [`TrieCursorFactory`] and [`HashedCursorFactory`]
 /// using the in-memory overlay factories.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct OverlayStateProvider<Provider: DBProvider> {
     provider: Provider,
     trie_updates: Arc<TrieUpdatesSorted>,

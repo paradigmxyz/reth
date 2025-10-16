@@ -25,12 +25,12 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor, TxEnvFor,
 };
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateProviderFactory,
-    StateReader,
-};
+use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_trie::TrieInput;
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
+    trie_cursor::TrieCursorFactory,
+};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
@@ -94,8 +94,6 @@ where
     >,
     /// Whether to disable the parallel sparse trie.
     disable_parallel_sparse_trie: bool,
-    /// A cleared trie input, kept around to be reused so allocations can be minimized.
-    trie_input: Option<TrieInput>,
     /// Maximum concurrency for prewarm task.
     prewarm_max_concurrency: usize,
 }
@@ -122,7 +120,6 @@ where
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: Arc::default(),
-            trie_input: None,
             disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
         }
@@ -167,43 +164,39 @@ where
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
     #[allow(clippy::type_complexity)]
-    pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
+    pub fn spawn<P, F, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-        consistent_view: ConsistentDbView<P>,
-        trie_input: TrieInput,
+        multiproof_provider_factory: F,
         config: &TreeConfig,
     ) -> Result<
         PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
         (ParallelStateRootError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
     >
     where
-        P: DatabaseProviderFactory<Provider: BlockReader>
-            + BlockReader
-            + StateProviderFactory
-            + StateReader
+        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
+            + Send
             + 'static,
     {
         let (to_sparse_trie, sparse_trie_rx) = channel();
-        // spawn multiproof task, save the trie input
-        let (trie_input, state_root_config) = MultiProofConfig::from_input(trie_input);
-        self.trie_input = Some(trie_input);
+
+        // We rely on the cursor factory to provide whatever DB overlay is necessary to see a
+        // consistent view of the database, including the trie tables. Because of this there is no
+        // need for an overarching prefix set to invalidate any section of the trie tables, and so
+        // we use an empty prefix set.
+        let prefix_sets = Arc::new(TriePrefixSetsMut::default());
 
         // Create and spawn the storage proof task
-        let task_ctx = ProofTaskCtx::new(
-            state_root_config.nodes_sorted.clone(),
-            state_root_config.state_sorted.clone(),
-            state_root_config.prefix_sets.clone(),
-        );
+        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory, prefix_sets);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
-            consistent_view,
             task_ctx,
             storage_worker_count,
             account_worker_count,
@@ -213,7 +206,6 @@ where
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
         let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
         let multi_proof_task = MultiProofTask::new(
-            state_root_config,
             self.executor.clone(),
             proof_handle.clone(),
             to_sparse_trie,
@@ -359,11 +351,6 @@ where
         }
 
         CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
-    }
-
-    /// Takes the trie input from the inner payload processor, if it exists.
-    pub const fn take_trie_input(&mut self) -> Option<TrieInput> {
-        self.trie_input.take()
     }
 
     /// Returns the cache for the given parent hash.
@@ -663,12 +650,12 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
-        providers::{BlockchainProvider, ConsistentDbView},
+        providers::{BlockchainProvider, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory_with_chain_spec,
         ChainSpecProvider, HashingWriter,
     };
     use reth_testing_utils::generators;
-    use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
+    use reth_trie::{test_utils::state_root, HashedPostState};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
@@ -850,7 +837,9 @@ mod tests {
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
         );
-        let provider = BlockchainProvider::new(factory).unwrap();
+
+        let provider_factory = BlockchainProvider::new(factory).unwrap();
+
         let mut handle =
             payload_processor
                 .spawn(
@@ -858,9 +847,8 @@ mod tests {
                     core::iter::empty::<
                         Result<Recovered<TransactionSigned>, core::convert::Infallible>,
                     >(),
-                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                    ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-                    TrieInput::from_state(hashed_state),
+                    StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+                    OverlayStateProviderFactory::new(provider_factory),
                     &TreeConfig::default(),
                 )
                 .map_err(|(err, ..)| err)

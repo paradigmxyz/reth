@@ -64,8 +64,8 @@ impl SparseTrieUpdate {
 }
 
 /// Common configuration for multi proof tasks
-#[derive(Debug, Clone)]
-pub(super) struct MultiProofConfig {
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MultiProofConfig {
     /// The sorted collection of cached in-memory intermediate trie nodes that
     /// can be reused for computation.
     pub nodes_sorted: Arc<TrieUpdatesSorted>,
@@ -82,7 +82,7 @@ impl MultiProofConfig {
     ///
     /// This returns a cleared [`TrieInput`] so that we can reuse any allocated space in the
     /// [`TrieInput`].
-    pub(super) fn from_input(mut input: TrieInput) -> (TrieInput, Self) {
+    pub(crate) fn from_input(mut input: TrieInput) -> (TrieInput, Self) {
         let config = Self {
             nodes_sorted: Arc::new(input.nodes.drain_into_sorted()),
             state_sorted: Arc::new(input.state.drain_into_sorted()),
@@ -290,7 +290,6 @@ impl From<MultiproofInput> for PendingMultiproofTask {
 /// Input parameters for spawning a dedicated storage multiproof calculation.
 #[derive(Debug)]
 struct StorageMultiproofInput {
-    config: MultiProofConfig,
     source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
     hashed_address: B256,
@@ -313,7 +312,6 @@ impl StorageMultiproofInput {
 /// Input parameters for spawning a multiproof calculation.
 #[derive(Debug)]
 struct MultiproofInput {
-    config: MultiProofConfig,
     source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
     proof_targets: MultiProofTargets,
@@ -437,7 +435,6 @@ impl MultiproofManager {
     /// Spawns a single storage proof calculation task.
     fn spawn_storage_proof(&mut self, storage_multiproof_input: StorageMultiproofInput) {
         let StorageMultiproofInput {
-            config,
             source,
             hashed_state_update,
             hashed_address,
@@ -462,9 +459,7 @@ impl MultiproofManager {
             );
             let start = Instant::now();
             let proof_result = ParallelProof::new(
-                config.nodes_sorted,
-                config.state_sorted,
-                config.prefix_sets,
+                Default::default(), // prefix sets
                 missed_leaves_storage_roots,
                 storage_proof_worker_handle,
             )
@@ -511,7 +506,6 @@ impl MultiproofManager {
     /// Spawns a single multiproof calculation task.
     fn spawn_multiproof(&mut self, multiproof_input: MultiproofInput) {
         let MultiproofInput {
-            config,
             source,
             hashed_state_update,
             proof_targets,
@@ -540,7 +534,7 @@ impl MultiproofManager {
 
             // Extend prefix sets with targets
             let frozen_prefix_sets =
-                ParallelProof::extend_prefix_sets_with_targets(&config.prefix_sets, &proof_targets);
+                ParallelProof::extend_prefix_sets_with_targets(&Default::default(), &proof_targets);
 
             // Queue account multiproof to worker pool
             let input = AccountMultiproofInput {
@@ -658,8 +652,6 @@ pub(super) struct MultiProofTask {
     ///
     /// If [`None`], then chunking is disabled.
     chunk_size: Option<usize>,
-    /// Task configuration.
-    config: MultiProofConfig,
     /// Receiver for state root related messages.
     rx: Receiver<MultiProofMessage>,
     /// Sender for state root related messages.
@@ -681,7 +673,6 @@ pub(super) struct MultiProofTask {
 impl MultiProofTask {
     /// Creates a new multi proof task with the unified message channel
     pub(super) fn new(
-        config: MultiProofConfig,
         executor: WorkloadExecutor,
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: Sender<SparseTrieUpdate>,
@@ -693,7 +684,6 @@ impl MultiProofTask {
 
         Self {
             chunk_size,
-            config,
             rx,
             tx,
             to_sparse_trie,
@@ -742,7 +732,6 @@ impl MultiProofTask {
         let mut spawn = |proof_targets| {
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
-                    config: self.config.clone(),
                     source: None,
                     hashed_state_update: Default::default(),
                     proof_targets,
@@ -885,7 +874,6 @@ impl MultiProofTask {
 
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
-                    config: self.config.clone(),
                     source: Some(source),
                     hashed_state_update,
                     proof_targets,
@@ -1208,30 +1196,27 @@ mod tests {
     use super::*;
     use alloy_primitives::map::B256Set;
     use reth_provider::{
-        providers::ConsistentDbView, test_utils::create_test_provider_factory, BlockReader,
-        DatabaseProviderFactory,
+        providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
+        BlockReader, DatabaseProviderFactory, StageCheckpointReader, TrieReader,
     };
-    use reth_trie::{MultiProof, TrieInput};
+    use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
     where
-        F: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
+        F: DatabaseProviderFactory<Provider: BlockReader + TrieReader + StageCheckpointReader>
+            + Clone
+            + Send
+            + 'static,
     {
         let executor = WorkloadExecutor::default();
-        let (_trie_input, config) = MultiProofConfig::from_input(TrieInput::default());
-        let task_ctx = ProofTaskCtx::new(
-            config.nodes_sorted.clone(),
-            config.state_sorted.clone(),
-            config.prefix_sets.clone(),
-        );
-        let consistent_view = ConsistentDbView::new(factory, None);
-        let proof_handle =
-            ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1);
+        let overlay_factory = OverlayStateProviderFactory::new(factory);
+        let task_ctx = ProofTaskCtx::new(overlay_factory, Default::default());
+        let proof_handle = ProofWorkerHandle::new(executor.handle().clone(), task_ctx, 1, 1);
         let channel = channel();
 
-        MultiProofTask::new(config, executor, proof_handle, channel.0, 1, None)
+        MultiProofTask::new(executor, proof_handle, channel.0, 1, None)
     }
 
     #[test]

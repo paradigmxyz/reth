@@ -12,7 +12,7 @@ use std::fmt::Debug;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
-    DatabaseProviderFactory<DB = N::DB, Provider: BlockReader + TrieReader>
+    DatabaseProviderFactory<DB = N::DB, Provider: BlockReader + TrieReader + StageCheckpointReader>
     + NodePrimitivesProvider<Primitives = N::Primitives>
     + StaticFileProviderFactory<Primitives = N::Primitives>
     + BlockReaderIdExt<
@@ -37,8 +37,10 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 }
 
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
-    T: DatabaseProviderFactory<DB = N::DB, Provider: BlockReader + TrieReader>
-        + NodePrimitivesProvider<Primitives = N::Primitives>
+    T: DatabaseProviderFactory<
+            DB = N::DB,
+            Provider: BlockReader + TrieReader + StageCheckpointReader,
+        > + NodePrimitivesProvider<Primitives = N::Primitives>
         + StaticFileProviderFactory<Primitives = N::Primitives>
         + BlockReaderIdExt<
             Transaction = TxTy<N>,
