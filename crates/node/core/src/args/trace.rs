@@ -45,7 +45,6 @@ pub struct TraceArgs {
     )]
     pub protocol: OtlpProtocol,
 
-    /// Set the minimum log level for OTLP traces.
     /// Set a filter directive for the OTLP tracer. This controls the verbosity
     /// of spans and events sent to the OTLP endpoint. It follows the same
     /// syntax as the `RUST_LOG` environment variable.
