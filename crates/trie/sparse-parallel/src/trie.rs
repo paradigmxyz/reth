@@ -1364,7 +1364,14 @@ impl ParallelSparseTrie {
         }
 
         #[cfg(feature = "metrics")]
-        self.metrics.subtrie_upper_hash_latency.record(start.elapsed());
+        {
+            self.metrics.subtrie_upper_hash_latency.record(start.elapsed());
+            let upper_capacity = self.upper_subtrie.capacity();
+            let lower_capacity: usize = self.lower_subtries.iter().map(|s| s.capacity()).sum();
+            self.metrics.upper_subtrie_capacity.set(upper_capacity as f64);
+            self.metrics.lower_subtries_capacity.set(lower_capacity as f64);
+            self.metrics.total_subtrie_capacity.set((upper_capacity + lower_capacity) as f64);
+        }
 
         debug_assert_eq!(self.upper_subtrie.inner.buffers.rlp_node_stack.len(), 1);
         self.upper_subtrie.inner.buffers.rlp_node_stack.pop().unwrap().rlp_node
@@ -2076,6 +2083,13 @@ impl SparseSubtrie {
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.inner.clear();
+    }
+
+    /// Returns the combined capacity of nodes and values `HashMap`s.
+    ///
+    /// This represents the allocated memory capacity for storing trie data.
+    pub(crate) fn capacity(&self) -> usize {
+        self.nodes.capacity() + self.inner.values.capacity()
     }
 }
 

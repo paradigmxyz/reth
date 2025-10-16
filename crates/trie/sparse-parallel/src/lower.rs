@@ -106,4 +106,15 @@ impl LowerSparseSubtrie {
             Self::Revealed(_) | Self::Blind(_) => None,
         }
     }
+
+    /// Returns the combined capacity of nodes and values in this subtrie.
+    ///
+    /// For blinded subtries (including those with allocated storage), returns 0.
+    /// For revealed subtries, returns the sum of the capacity of nodes and values `HashMap`s.
+    pub(crate) fn capacity(&self) -> usize {
+        match self {
+            Self::Blind(_) => 0,
+            Self::Revealed(subtrie) => subtrie.capacity(),
+        }
+    }
 }

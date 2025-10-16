@@ -1,5 +1,8 @@
 //! Metrics for the parallel sparse trie
-use reth_metrics::{metrics::Histogram, Metrics};
+use reth_metrics::{
+    metrics::{Gauge, Histogram},
+    Metrics,
+};
 
 /// Metrics for the parallel sparse trie
 #[derive(Metrics, Clone)]
@@ -11,6 +14,13 @@ pub(crate) struct ParallelSparseTrieMetrics {
     pub(crate) subtrie_hash_update_latency: Histogram,
     /// A histogram for the time it took to update the upper subtrie hashes.
     pub(crate) subtrie_upper_hash_latency: Histogram,
+    /// A gauge for the total capacity (nodes + values) of all subtries.
+    /// This tracks memory usage across upper subtrie and all lower subtries.
+    pub(crate) total_subtrie_capacity: Gauge,
+    /// A gauge for the capacity (nodes + values) of the upper subtrie.
+    pub(crate) upper_subtrie_capacity: Gauge,
+    /// A gauge for the combined capacity (nodes + values) of all lower subtries.
+    pub(crate) lower_subtries_capacity: Gauge,
 }
 
 impl PartialEq for ParallelSparseTrieMetrics {
