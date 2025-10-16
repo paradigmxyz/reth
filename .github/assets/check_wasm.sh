@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set +e  # Disable immediate exit on error
+set -e -o pipefail
 
 # Array of crates to compile
 crates=($(cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name' | grep '^reth' | sort))
