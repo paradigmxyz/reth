@@ -32,7 +32,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
@@ -403,6 +403,13 @@ impl MultiproofManager {
         if self.is_full() {
             self.pending.push_back(input);
             self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
+            info!(
+                target: "tree::multiproof",
+                inflight = self.inflight,
+                max_concurrent = self.max_concurrent,
+                pending = self.pending.len(),
+                "DEBUG: Queue is full, enqueuing multiproof request"
+            );
             return;
         }
 
@@ -412,11 +419,25 @@ impl MultiproofManager {
     /// Signals that a multiproof calculation has finished and there's room to
     /// spawn a new calculation if needed.
     fn on_calculation_complete(&mut self) {
+        let prev_inflight = self.inflight;
         self.inflight = self.inflight.saturating_sub(1);
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        
+        info!(
+            target: "tree::multiproof",
+            prev_inflight,
+            new_inflight = self.inflight,
+            pending = self.pending.len(),
+            "DEBUG: Multiproof calculation completed"
+        );
 
         if let Some(input) = self.pending.pop_front() {
             self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
+            info!(
+                target: "tree::multiproof",
+                pending_after_pop = self.pending.len(),
+                "DEBUG: Spawning queued multiproof from pending"
+            );
             self.spawn_multiproof_task(input);
         }
     }
@@ -506,6 +527,13 @@ impl MultiproofManager {
 
         self.inflight += 1;
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        
+        info!(
+            target: "tree::multiproof",
+            inflight = self.inflight,
+            max_concurrent = self.max_concurrent,
+            "DEBUG: Spawned storage proof task"
+        );
     }
 
     /// Spawns a single multiproof calculation task.
@@ -521,11 +549,12 @@ impl MultiproofManager {
         } = multiproof_input;
         let account_proof_worker_handle = self.proof_worker_handle.clone();
         let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
+        
+        // Capture metrics before moving into closure
+        let account_targets = proof_targets.len();
+        let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
 
         self.executor.spawn_blocking(move || {
-            let account_targets = proof_targets.len();
-            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
-
             trace!(
                 target: "engine::root",
                 proof_sequence_number,
@@ -596,6 +625,15 @@ impl MultiproofManager {
 
         self.inflight += 1;
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        
+        info!(
+            target: "tree::multiproof",
+            inflight = self.inflight,
+            max_concurrent = self.max_concurrent,
+            account_targets,
+            storage_targets,
+            "DEBUG: Spawned multiproof task"
+        );
     }
 }
 
@@ -1091,11 +1129,12 @@ impl MultiProofTask {
                             .proof_calculation_duration_histogram
                             .record(proof_calculated.elapsed);
 
-                        debug!(
+                        info!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
                             total_proofs = proofs_processed,
-                            "Processing calculated proof"
+                            elapsed_ms = proof_calculated.elapsed.as_millis(),
+                            "DEBUG: Received ProofCalculated message, calling on_calculation_complete"
                         );
 
                         self.multiproof_manager.on_calculation_complete();

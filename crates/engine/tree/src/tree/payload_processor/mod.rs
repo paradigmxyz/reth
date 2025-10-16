@@ -212,6 +212,15 @@ where
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
         let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
+        
+        tracing::info!(
+            target: "tree::payload_processor",
+            storage_workers = storage_worker_count,
+            account_workers = account_worker_count,
+            max_proof_concurrency = max_proof_task_concurrency,
+            max_multiproof_concurrency = max_multi_proof_task_concurrency,
+            "Initialized proof worker system"
+        );
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
