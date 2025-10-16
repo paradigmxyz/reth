@@ -60,7 +60,7 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
             SyncStatus::Info(Box::new(SyncInfo {
                 starting_block: self.starting_block(),
                 current_block,
-                highest_block: current_block,
+                highest_block: U256::ZERO, // Use 0 to indicate unknown network target during sync
                 warp_chunks_amount: None,
                 warp_chunks_processed: None,
                 stages: Some(stages),
