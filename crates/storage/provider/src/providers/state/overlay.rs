@@ -5,13 +5,12 @@ use reth_stages_types::StageId;
 use reth_storage_api::{DBProvider, DatabaseProviderFactory, StageCheckpointReader, TrieReader};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
-    trie_cursor::{InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursorFactory},
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     HashedPostState, HashedPostStateSorted, KeccakKeyHasher,
 };
 use reth_trie_db::{
-    DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseHashedPostState,
-    DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
+    DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
 use std::sync::Arc;
 
@@ -153,11 +152,11 @@ pub struct OverlayStateProvider<Provider: DBProvider> {
 
 impl<Provider> OverlayStateProvider<Provider>
 where
-    Provider: DBProvider + Clone,
+    Provider: DBProvider,
 {
     /// Create new overlay state provider. The `Provider` must be cloneable, which generally means
     /// it should be wrapped in an `Arc`.
-    pub fn new(
+    pub const fn new(
         provider: Provider,
         trie_updates: Arc<TrieUpdatesSorted>,
         hashed_post_state: Arc<HashedPostStateSorted>,
@@ -187,22 +186,26 @@ where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        let cursor = DatabaseAccountTrieCursor::from_tx(self.provider.tx_ref())?;
-        Ok(InMemoryTrieCursor::new(Some(cursor), self.trie_updates.account_nodes_ref()))
+        let db_trie_cursor_factory = DatabaseTrieCursorFactory::new(self.provider.tx_ref());
+        let trie_cursor_factory =
+            InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
+        trie_cursor_factory.account_trie_cursor()
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        let cursor = DatabaseStorageTrieCursor::from_tx(self.provider.tx_ref(), hashed_address)?;
-        Ok(InMemoryTrieCursor::new_storage(Some(cursor), &self.trie_updates, hashed_address))
+        let db_trie_cursor_factory = DatabaseTrieCursorFactory::new(self.provider.tx_ref());
+        let trie_cursor_factory =
+            InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
+        trie_cursor_factory.storage_trie_cursor(hashed_address)
     }
 }
 
 impl<Provider> HashedCursorFactory for OverlayStateProvider<Provider>
 where
-    Provider: DBProvider + Clone,
+    Provider: DBProvider,
 {
     type AccountCursor<'a>
         = <HashedPostStateCursorFactory<

@@ -44,12 +44,21 @@ where
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        let cursor = self.cursor_factory.storage_trie_cursor(hashed_address)?;
-        Ok(InMemoryTrieCursor::new_storage(
-            Some(cursor),
-            self.trie_updates.as_ref(),
-            hashed_address,
-        ))
+        // if the storage trie has no updates then we use this as the in-memory overlay.
+        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+
+        let storage_trie_updates = self.trie_updates.as_ref().storage_tries.get(&hashed_address);
+        let (storage_nodes, cleared) = storage_trie_updates
+            .map(|u| (u.storage_nodes_ref(), u.is_deleted()))
+            .unwrap_or((&EMPTY_UPDATES, false));
+
+        let cursor = if cleared {
+            None
+        } else {
+            Some(self.cursor_factory.storage_trie_cursor(hashed_address)?)
+        };
+
+        Ok(InMemoryTrieCursor::new(cursor, storage_nodes))
     }
 }
 
@@ -74,24 +83,6 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     ) -> Self {
         let in_memory_cursor = ForwardInMemoryCursor::new(trie_updates);
         Self { cursor, in_memory_cursor, last_key: None }
-    }
-
-    /// Wraps [`Self::new`] to create new trie cursor for the storage trie of a particular account.
-    pub fn new_storage(
-        cursor: Option<C>,
-        trie_updates: &'a TrieUpdatesSorted,
-        hashed_address: B256,
-    ) -> Self {
-        // if the storage trie has no updates then we use this as the in-memory overlay.
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
-
-        let storage_trie_updates = trie_updates.storage_tries.get(&hashed_address);
-        let (storage_nodes, cleared) = storage_trie_updates
-            .map(|u| (u.storage_nodes_ref(), u.is_deleted()))
-            .unwrap_or((&EMPTY_UPDATES, false));
-
-        let cursor = if cleared { None } else { cursor };
-        Self::new(cursor, storage_nodes)
     }
 
     fn seek_inner(
