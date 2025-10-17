@@ -988,8 +988,8 @@ impl ProofWorkerHandle {
         Ok(rx)
     }
 
-    /// Internal: Dispatch blinded storage node request to storage worker pool
-    fn dispatch_blinded_storage_node(
+    /// Dispatch blinded storage node request to storage worker pool
+    pub(crate) fn dispatch_blinded_storage_node(
         &self,
         account: B256,
         path: Nibbles,
@@ -1004,8 +1004,8 @@ impl ProofWorkerHandle {
         Ok(rx)
     }
 
-    /// Internal: Dispatch blinded account node request to account worker pool
-    fn dispatch_blinded_account_node(
+    /// Dispatch blinded account node request to account worker pool
+    pub(crate) fn dispatch_blinded_account_node(
         &self,
         path: Nibbles,
     ) -> Result<Receiver<TrieNodeProviderResult>, ProviderError> {
