@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::setup;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{Address, BlockNumber};
 use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
@@ -142,17 +142,12 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 
     let unwind_inner_tx = provider.into_tx();
 
-    // Import only the StorageChangeSets entries within the block range (from, to)
     output_db.update(|tx| {
-        let mut source_cursor = unwind_inner_tx.cursor_dup_read::<tables::StorageChangeSets>()?;
-        let mut target_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
-
-        let range = BlockNumberAddress::range(from..=to);
-        for row in source_cursor.walk_range(range)? {
-            let (key, value) = row?;
-            target_cursor.append_dup(key, value)?;
-        }
-        Ok::<(), reth_db::DatabaseError>(())
+        tx.import_table_with_range::<tables::StorageChangeSets, _>(
+            &unwind_inner_tx,
+            Some(BlockNumberAddress((from, Address::ZERO))),
+            BlockNumberAddress((to, Address::repeat_byte(0xff))),
+        )
     })??;
 
     output_db.update(|tx| tx.import_table::<tables::HashedAccounts, _>(&unwind_inner_tx))??;
