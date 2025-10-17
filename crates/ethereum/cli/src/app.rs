@@ -84,7 +84,7 @@ where
     where
         N: CliNodeTypes<
             Primitives: NodePrimitives<BlockHeader: CliHeader>,
-            ChainSpec: Hardforks + EthChainSpec,
+            ChainSpec: Hardforks,
         >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
