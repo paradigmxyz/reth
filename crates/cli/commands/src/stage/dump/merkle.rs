@@ -6,8 +6,7 @@ use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::DatabaseEnv;
-use reth_db_api::{
-    cursor::DbCursorRO, database::Database, models::BlockNumberAddress, table::TableImporter,
+use reth_db_api::{database::Database, models::BlockNumberAddress, table::TableImporter,
     tables,
 };
 use reth_db_common::DbTool;
