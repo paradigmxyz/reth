@@ -577,7 +577,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
-    #[instrument(target = "trie::sparse::serial", skip(provider))]
+    #[instrument(target = "trie::sparse::serial", skip(self, provider))]
     fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
@@ -715,7 +715,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
-    #[instrument(target = "trie::sparse::serial", skip(provider))]
+    #[instrument(target = "trie::sparse::serial", skip(self, provider))]
     fn remove_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: &Nibbles,
@@ -901,7 +901,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
-    #[instrument(target = "trie::sparse::serial")]
+    #[instrument(target = "trie::sparse::serial", skip(self))]
     fn root(&mut self) -> B256 {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
@@ -1329,7 +1329,7 @@ impl SerialSparseTrie {
     ///
     /// This function identifies all nodes that have changed (based on the prefix set) at the given
     /// depth and recalculates their RLP representation.
-    #[instrument(target = "trie::sparse::serial")]
+    #[instrument(target = "trie::sparse::serial", skip(self))]
     pub fn update_rlp_node_level(&mut self, depth: usize) {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
@@ -1375,7 +1375,7 @@ impl SerialSparseTrie {
     ///   specified depth.
     /// - A `PrefixSetMut` containing paths shallower than the specified depth that still need to be
     ///   tracked for future updates.
-    #[instrument(target = "trie::sparse::serial")]
+    #[instrument(target = "trie::sparse::serial", skip(self))]
     fn get_changed_nodes_at_depth(
         &self,
         prefix_set: &mut PrefixSet,

@@ -845,7 +845,7 @@ impl MultiProofTask {
     /// Handles state updates.
     ///
     /// Returns a number of proofs that were spawned.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip(update), fields(accounts = update.len()))]
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip(self, update), fields(accounts = update.len()))]
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
