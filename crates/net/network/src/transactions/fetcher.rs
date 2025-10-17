@@ -628,12 +628,11 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         {
             for hash in &new_announced_hashes {
                 if self.hashes_pending_fetch.contains(hash) {
-                    tracing::debug!(target: "net::tx", "`{}` should have been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and `@inflight_requests`, `@hashes_fetch_inflight_and_pending_fetch` for `{}`: {:?}",
-                        format!("{:?}", new_announced_hashes), // Assuming new_announced_hashes can be debug-printed directly
-                        format!("{:?}", new_announced_hashes),
+                    tracing::debug!(target: "net::tx", "`{:?}` should have been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and `@inflight_requests`, `@hashes_fetch_inflight_and_pending_fetch` for `{:?}`: {:?}",
+                        new_announced_hashes,
+                        new_announced_hashes,
                         new_announced_hashes.iter().map(|hash| {
                             let metadata = self.hashes_fetch_inflight_and_pending_fetch.get(hash);
-                            // Assuming you only need `retries` and `tx_encoded_length` for debugging
                             (*hash, metadata.map(|m| (m.retries, m.tx_encoded_length)))
                         }).collect::<Vec<(TxHash, Option<(u8, Option<usize>)>)>>())
                 }
