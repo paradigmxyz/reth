@@ -18,7 +18,7 @@ use reth_db_api::{
 };
 use reth_libmdbx::{
     ffi, DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode,
-    MaxReadTransactionDuration, Mode, PageSize, SyncMode, RO, RW,
+    MaxReadTransactionDuration, Mode, PageSize, SyncMode,
 };
 use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
@@ -27,30 +27,21 @@ use std::{
     ops::{Deref, Range},
     path::Path,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tx::Tx;
-
 pub mod cursor;
 pub mod tx;
 
 mod utils;
 
-/// 1 KB in bytes
-pub const KILOBYTE: usize = 1024;
-/// 1 MB in bytes
-pub const MEGABYTE: usize = KILOBYTE * 1024;
-/// 1 GB in bytes
-pub const GIGABYTE: usize = MEGABYTE * 1024;
-/// 1 TB in bytes
-pub const TERABYTE: usize = GIGABYTE * 1024;
+// Constants are now defined in database.rs for shared use
 
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
 
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
-const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
+const MAX_SAFE_READER_SPACE: usize = 10 * crate::database::GIGABYTE;
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -117,8 +108,8 @@ impl DatabaseArguments {
         Self {
             client_version,
             geometry: Geometry {
-                size: Some(0..(8 * TERABYTE)),
-                growth_step: Some(4 * GIGABYTE as isize),
+                size: Some(0..(8 * crate::database::TERABYTE)),
+                growth_step: Some(4 * crate::database::GIGABYTE as isize),
                 shrink_threshold: Some(0),
                 page_size: Some(PageSize::Set(default_page_size())),
             },
@@ -165,6 +156,25 @@ impl DatabaseArguments {
         max_read_transaction_duration: Option<MaxReadTransactionDuration>,
     ) -> Self {
         self.max_read_transaction_duration(max_read_transaction_duration);
+        self
+    }
+
+    /// Set max read transaction duration from Duration (unified interface for application layer).
+    pub const fn with_max_read_transaction_duration2(mut self, duration: Option<Duration>) -> Self {
+        match duration {
+            Some(duration) => {
+                self.max_read_transaction_duration = Some(MaxReadTransactionDuration::Set(duration))
+            }
+            None => {
+                self.max_read_transaction_duration = Some(MaxReadTransactionDuration::Unbounded)
+            }
+        };
+        self
+    }
+
+    /// Set max read transaction duration as unbounded (unified interface for application layer).
+    pub const fn with_max_read_transaction_duration_unbounded(mut self) -> Self {
+        self.max_read_transaction_duration = Some(MaxReadTransactionDuration::Unbounded);
         self
     }
 
@@ -494,13 +504,12 @@ impl DatabaseEnv {
     ///
     /// This is recommended to be called during initialization to create and track additional tables
     /// after the default [`Self::create_tables`] are created.
-    pub fn create_tables_for<TS: TableSet>(self: &mut Arc<Self>) -> Result<(), DatabaseError> {
+    pub fn create_tables_for<TS: TableSet>(&mut self) -> Result<(), DatabaseError> {
         let handles = self._create_tables::<TS>()?;
-        if let Some(db) = Arc::get_mut(self) {
-            // Note: The db is unique and the dbis as well, and they can also be cloned.
-            let dbis = Arc::make_mut(&mut db.dbis);
-            dbis.extend(handles);
-        }
+        // Note: This is okay because self has mutable access here and `DatabaseEnv` must be Arc'ed
+        // before it can be shared.
+        let dbis = Arc::make_mut(&mut self.dbis);
+        dbis.extend(handles);
         Ok(())
     }
 
@@ -1482,3 +1491,11 @@ mod tests {
         }
     }
 }
+
+// Re-export all necessary types for unified access
+pub use cursor::{Cursor, CursorRO, CursorRW};
+pub use reth_libmdbx::{RO, RW};
+pub use tx::Tx;
+
+/// Type alias for read-write transaction
+pub type TxMut = tx::Tx<RW>;

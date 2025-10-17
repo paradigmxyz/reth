@@ -54,7 +54,7 @@ mod tests {
     };
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_db::mdbx::{cursor::Cursor, RW};
+    use reth_db::database::cursor::{Cursor, RW};
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW},
         table::Table,

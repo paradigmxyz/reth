@@ -66,7 +66,7 @@ eyre.workspace = true
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
+reth-db = { workspace = true, features = ["mdbx"] }
 reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
 reth-ethereum-consensus.workspace = true
 reth-evm-ethereum.workspace = true

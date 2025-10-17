@@ -3,7 +3,7 @@ use crate::common::{AccessRights, CliNodeComponents, CliNodeTypes, Environment, 
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db::{init_db, DatabaseArguments, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, models::ClientVersion, table::TableImporter, tables,
     transaction::DbTx,

@@ -16,7 +16,7 @@ reth-chainspec.workspace = true
 reth-consensus.workspace = true
 reth-primitives-traits = { workspace = true, features = ["rayon"] }
 reth-cli-util.workspace = true
-reth-db = { workspace = true, features = ["mdbx"] }
+reth-db = { workspace = true }
 reth-storage-errors.workspace = true
 reth-storage-api = { workspace = true, features = ["std", "db-api"] }
 reth-network = { workspace = true, features = ["serde"] }

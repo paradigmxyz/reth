@@ -5,6 +5,7 @@ use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     DatabaseError,
 };
+
 use reth_db_api::{
     table::{Compress, DupSort, Encode, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
@@ -65,6 +66,39 @@ impl<K: TransactionKind> Tx<K> {
     /// Gets this transaction ID.
     pub fn id(&self) -> reth_libmdbx::Result<u64> {
         self.metrics_handler.as_ref().map_or_else(|| self.inner.id(), |handler| Ok(handler.txn_id))
+    }
+
+    /// Get table statistics
+    pub fn get_table_stats(
+        &self,
+        table_name: &str,
+    ) -> Result<crate::database::TableStats, DatabaseError> {
+        let table_db = self
+            .inner
+            .open_db(Some(table_name))
+            .map_err(|e| DatabaseError::Other(e.to_string().into()))?;
+        let stats = self
+            .inner
+            .db_stat(&table_db)
+            .map_err(|e| DatabaseError::Other(e.to_string().into()))?;
+
+        Ok(crate::database::TableStats {
+            entries: stats.entries(),
+            page_size: stats.page_size(),
+            leaf_pages: stats.leaf_pages(),
+            branch_pages: stats.branch_pages(),
+            overflow_pages: stats.overflow_pages(),
+        })
+    }
+
+    /// Get database environment
+    pub fn get_env(&self) -> &reth_libmdbx::Environment {
+        self.inner.env()
+    }
+
+    /// Get freelist
+    pub fn get_freelist(&self) -> Result<usize, DatabaseError> {
+        self.inner.env().freelist().map_err(|e| DatabaseError::Other(e.to_string().into()))
     }
 
     /// Gets a table database handle if it exists, otherwise creates it.
@@ -435,7 +469,7 @@ impl DbTxMut for Tx<RW> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mdbx::DatabaseArguments, tables, DatabaseEnv, DatabaseEnvKind};
+    use crate::{implementation::mdbx::DatabaseArguments, tables, DatabaseEnv, DatabaseEnvKind};
     use reth_db_api::{database::Database, models::ClientVersion, transaction::DbTx};
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;
