@@ -10,6 +10,7 @@ use reth_trie::{
     updates::StorageTrieUpdatesSorted,
     BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
+use std::marker::PhantomData;
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
 #[derive(Debug, Clone)]
@@ -26,37 +27,53 @@ impl<TX> TrieCursorFactory for DatabaseTrieCursorFactory<&TX>
 where
     TX: DbTx,
 {
-    type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
-    type StorageTrieCursor =
-        DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
+    type AccountTrieCursor<'a>
+        = DatabaseAccountTrieCursor<'a, <TX as DbTx>::Cursor<tables::AccountsTrie>>
+    where
+        Self: 'a;
 
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
-        Ok(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?))
+    type StorageTrieCursor<'a>
+        = DatabaseStorageTrieCursor<'a, <TX as DbTx>::DupCursor<tables::StoragesTrie>>
+    where
+        Self: 'a;
+
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+        DatabaseAccountTrieCursor::from_tx(self.0)
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
-        Ok(DatabaseStorageTrieCursor::new(
-            self.0.cursor_dup_read::<tables::StoragesTrie>()?,
-            hashed_address,
-        ))
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+        DatabaseStorageTrieCursor::from_tx(self.0, hashed_address)
     }
 }
 
 /// A cursor over the account trie.
 #[derive(Debug)]
-pub struct DatabaseAccountTrieCursor<C>(pub(crate) C);
+pub struct DatabaseAccountTrieCursor<'a, C> {
+    cursor: C,
+    _phantom: PhantomData<&'a ()>,
+}
 
-impl<C> DatabaseAccountTrieCursor<C> {
+impl<'a, C> DatabaseAccountTrieCursor<'a, C> {
     /// Create a new account trie cursor.
     pub const fn new(cursor: C) -> Self {
-        Self(cursor)
+        Self { cursor, _phantom: PhantomData }
     }
 }
 
-impl<C> TrieCursor for DatabaseAccountTrieCursor<C>
+impl<'a> DatabaseAccountTrieCursor<'a, ()> {
+    /// Create a new account trie cursor from a [`DbTx`].
+    pub fn from_tx<TX: DbTx>(
+        tx: &TX,
+    ) -> Result<DatabaseAccountTrieCursor<'a, TX::Cursor<tables::AccountsTrie>>, DatabaseError>
+    {
+        Ok(DatabaseAccountTrieCursor::new(tx.cursor_read::<tables::AccountsTrie>()?))
+    }
+}
+
+impl<C> TrieCursor for DatabaseAccountTrieCursor<'_, C>
 where
     C: DbCursorRO<tables::AccountsTrie> + Send + Sync,
 {
@@ -65,7 +82,7 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+        Ok(self.cursor.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Seeks a key in the account trie that matches or is greater than the provided key.
@@ -73,37 +90,52 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+        Ok(self.cursor.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.next()?.map(|value| (value.0 .0, value.1)))
+        Ok(self.cursor.next()?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Retrieves the current key in the cursor.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        Ok(self.0.current()?.map(|(k, _)| k.0))
+        Ok(self.cursor.current()?.map(|(k, _)| k.0))
     }
 }
 
 /// A cursor over the storage tries stored in the database.
 #[derive(Debug)]
-pub struct DatabaseStorageTrieCursor<C> {
+pub struct DatabaseStorageTrieCursor<'a, C> {
     /// The underlying cursor.
     pub cursor: C,
     /// Hashed address used for cursor positioning.
     hashed_address: B256,
+    _phantom: PhantomData<&'a ()>,
 }
 
-impl<C> DatabaseStorageTrieCursor<C> {
+impl<'a, C> DatabaseStorageTrieCursor<'a, C> {
     /// Create a new storage trie cursor.
     pub const fn new(cursor: C, hashed_address: B256) -> Self {
-        Self { cursor, hashed_address }
+        Self { cursor, hashed_address, _phantom: PhantomData }
     }
 }
 
-impl<C> DatabaseStorageTrieCursor<C>
+impl<'a> DatabaseStorageTrieCursor<'a, ()> {
+    /// Create a new storage trie cursor from a [`DbTx`].
+    pub fn from_tx<TX: DbTx>(
+        tx: &TX,
+        hashed_address: B256,
+    ) -> Result<DatabaseStorageTrieCursor<'a, TX::DupCursor<tables::StoragesTrie>>, DatabaseError>
+    {
+        Ok(DatabaseStorageTrieCursor::new(
+            tx.cursor_dup_read::<tables::StoragesTrie>()?,
+            hashed_address,
+        ))
+    }
+}
+
+impl<C> DatabaseStorageTrieCursor<'_, C>
 where
     C: DbCursorRO<tables::StoragesTrie>
         + DbCursorRW<tables::StoragesTrie>
@@ -148,7 +180,7 @@ where
     }
 }
 
-impl<C> TrieCursor for DatabaseStorageTrieCursor<C>
+impl<C> TrieCursor for DatabaseStorageTrieCursor<'_, C>
 where
     C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send + Sync,
 {
