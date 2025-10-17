@@ -26,7 +26,6 @@ use revm::context_interface::result::{
 use revm_inspectors::tracing::MuxError;
 use std::convert::Infallible;
 use tokio::sync::oneshot::error::RecvError;
-use tracing::error;
 
 /// A trait to convert an error to an RPC error.
 pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
@@ -451,18 +450,32 @@ impl From<InvalidHeader> for EthApiError {
     }
 }
 
-impl<T> From<EVMError<T, InvalidTransaction>> for EthApiError
+impl<T, TxError> From<EVMError<T, TxError>> for EthApiError
 where
     T: Into<Self>,
+    TxError: reth_evm::InvalidTxError,
 {
-    fn from(err: EVMError<T, InvalidTransaction>) -> Self {
+    fn from(err: EVMError<T, TxError>) -> Self {
         match err {
-            EVMError::Transaction(invalid_tx) => match invalid_tx {
-                InvalidTransaction::NonceTooLow { tx, state } => {
-                    Self::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow { tx, state })
+            EVMError::Transaction(invalid_tx) => {
+                // Try to get the underlying InvalidTransaction if available
+                if let Some(eth_tx_err) = invalid_tx.as_invalid_tx_err() {
+                    // Handle the special NonceTooLow case
+                    match eth_tx_err {
+                        InvalidTransaction::NonceTooLow { tx, state } => {
+                            Self::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow {
+                                tx: *tx,
+                                state: *state,
+                            })
+                        }
+                        _ => RpcInvalidTransactionError::from(eth_tx_err.clone()).into(),
+                    }
+                } else {
+                    // For custom transaction errors that don't wrap InvalidTransaction,
+                    // convert to a custom error message
+                    Self::EvmCustom(invalid_tx.to_string())
                 }
-                _ => RpcInvalidTransactionError::from(invalid_tx).into(),
-            },
+            }
             EVMError::Header(err) => err.into(),
             EVMError::Database(err) => err.into(),
             EVMError::Custom(err) => Self::EvmCustom(err),
@@ -668,7 +681,7 @@ impl RpcInvalidTransactionError {
     /// Converts the halt error
     ///
     /// Takes the configured gas limit of the transaction which is attached to the error
-    pub const fn halt(reason: HaltReason, gas_limit: u64) -> Self {
+    pub fn halt(reason: HaltReason, gas_limit: u64) -> Self {
         match reason {
             HaltReason::OutOfGas(err) => Self::out_of_gas(err, gas_limit),
             HaltReason::NonceOverflow => Self::NonceMaxValue,
@@ -749,7 +762,7 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobVersionedHashesNotSupported => {
                 Self::BlobVersionedHashesNotSupported
             }
-            InvalidTransaction::BlobGasPriceGreaterThanMax => Self::BlobFeeCapTooLow,
+            InvalidTransaction::BlobGasPriceGreaterThanMax { .. } => Self::BlobFeeCapTooLow,
             InvalidTransaction::EmptyBlobs => Self::BlobTransactionMissingBlobHashes,
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
             InvalidTransaction::TooManyBlobs { have, .. } => Self::TooManyBlobs { have },
@@ -767,6 +780,7 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::Eip7873MissingTarget => {
                 Self::other(internal_rpc_err(err.to_string()))
             }
+            InvalidTransaction::Str(_) => Self::other(internal_rpc_err(err.to_string())),
         }
     }
 }
@@ -879,7 +893,7 @@ pub enum RpcPoolError {
     /// respect the tx fee exceeds the configured cap
     #[error("tx fee ({max_tx_fee_wei} wei) exceeds the configured cap ({tx_fee_cap_wei} wei)")]
     ExceedsFeeCap {
-        /// max fee in wei of new tx submitted to the pull (e.g. 0.11534 ETH)
+        /// max fee in wei of new tx submitted to the pool (e.g. 0.11534 ETH)
         max_tx_fee_wei: u128,
         /// configured tx fee cap in wei (e.g. 1.0 ETH)
         tx_fee_cap_wei: u128,

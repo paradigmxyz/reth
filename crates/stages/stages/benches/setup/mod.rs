@@ -9,7 +9,8 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, SealedBlock, SealedHeader};
 use reth_provider::{
-    test_utils::MockNodeTypesWithDB, DatabaseProvider, DatabaseProviderFactory, TrieWriter,
+    test_utils::MockNodeTypesWithDB, DBProvider, DatabaseProvider, DatabaseProviderFactory,
+    TrieWriter,
 };
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
@@ -164,7 +165,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         db.insert_changesets(transitions, None).unwrap();
 
         let provider_rw = db.factory.provider_rw().unwrap();
-        provider_rw.write_trie_updates(&updates).unwrap();
+        provider_rw.write_trie_updates(updates).unwrap();
         provider_rw.commit().unwrap();
 
         let (transitions, final_state) = random_changeset_range(

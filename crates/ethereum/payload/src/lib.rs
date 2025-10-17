@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
 use alloy_consensus::Transaction;
@@ -176,8 +176,8 @@ where
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
-    let block_gas_limit: u64 = builder.evm_mut().block().gas_limit;
-    let base_fee = builder.evm_mut().block().basefee;
+    let block_gas_limit: u64 = builder.evm_mut().block().gas_limit();
+    let base_fee = builder.evm_mut().block().basefee();
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,

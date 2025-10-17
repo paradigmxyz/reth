@@ -53,7 +53,7 @@ fn main() {
                     Ok(())
                 })
                 // launch the node with custom rpc
-                .launch()
+                .launch_with_debug_capabilities()
                 .await?;
 
             handle.wait_for_node_exit().await

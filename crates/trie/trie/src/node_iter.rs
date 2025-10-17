@@ -120,7 +120,7 @@ where
     ///
     /// If the key is the same as the last seeked key, the result of the last seek is returned.
     ///
-    /// If `metrics` feature is enabled, also updates the metrics.
+    /// If `metrics` feature is enabled, it also updates the metrics.
     fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
         if let Some((last_key, last_value)) = self.last_next_result &&
             last_key == key
@@ -158,7 +158,7 @@ where
 
     /// Advances the hashed cursor to the next entry.
     ///
-    /// If `metrics` feature is enabled, also updates the metrics.
+    /// If `metrics` feature is enabled, it also updates the metrics.
     fn next_hashed_entry(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
         let result = self.hashed_cursor.next();
 

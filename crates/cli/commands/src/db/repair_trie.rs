@@ -123,20 +123,20 @@ fn verify_and_repair<N: ProviderNodeTypes>(
     // Check that a pipeline sync isn't in progress.
     verify_checkpoints(provider_rw.as_ref())?;
 
+    // Create cursors for making modifications with
     let tx = provider_rw.tx_mut();
     tx.disable_long_read_transaction_safety();
+    let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+    let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
 
-    // Create the hashed cursor factory
+    // Create the cursor factories. These cannot accept the `&mut` tx above because they require it
+    // to be AsRef.
+    let tx = provider_rw.tx_ref();
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-
-    // Create the trie cursor factory
     let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
 
     // Create the verifier
     let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
-
-    let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
-    let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
 
     let mut inconsistent_nodes = 0;
     let start_time = Instant::now();
@@ -179,8 +179,17 @@ fn verify_and_repair<N: ProviderNodeTypes>(
             Output::StorageWrong { account, path, expected: node, .. } |
             Output::StorageMissing(account, path, node) => {
                 // Wrong/missing storage node value, upsert it
+                // (We can't just use `upsert` method with a dup cursor, it's not properly
+                // supported)
                 let nibbles = StoredNibblesSubKey(path);
-                let entry = StorageTrieEntry { nibbles, node };
+                let entry = StorageTrieEntry { nibbles: nibbles.clone(), node };
+                if storage_trie_cursor
+                    .seek_by_key_subkey(account, nibbles.clone())?
+                    .filter(|v| v.nibbles == nibbles)
+                    .is_some()
+                {
+                    storage_trie_cursor.delete_current()?;
+                }
                 storage_trie_cursor.upsert(account, &entry)?;
             }
             Output::Progress(path) => {

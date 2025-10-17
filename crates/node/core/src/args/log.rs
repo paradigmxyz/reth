@@ -70,6 +70,7 @@ pub struct LogArgs {
         default_value_t = ColorMode::Always
     )]
     pub color: ColorMode,
+
     /// The verbosity settings for the tracer.
     #[command(flatten)]
     pub verbosity: Verbosity,

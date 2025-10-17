@@ -12,7 +12,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -404,7 +404,13 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         db: &'a mut State<DB>,
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> Result<impl BlockBuilder<Primitives = Self::Primitives>, Self::Error> {
+    ) -> Result<
+        impl BlockBuilder<
+            Primitives = Self::Primitives,
+            Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, DB>,
+        >,
+        Self::Error,
+    > {
         let evm_env = self.next_evm_env(parent, &attributes)?;
         let evm = self.evm_with_env(db, evm_env);
         let ctx = self.context_for_next_block(parent, attributes)?;

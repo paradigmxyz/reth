@@ -19,15 +19,15 @@ use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    providers::StaticFileProviderRWRefMut, writer::UnifiedStorageWriter, BlockWriter,
-    ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    providers::StaticFileProviderRWRefMut, BlockWriter, ProviderError, StaticFileProviderFactory,
+    StaticFileSegment, StaticFileWriter,
 };
 use reth_stages_types::{
     CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
 };
 use reth_storage_api::{
     errors::ProviderResult, DBProvider, DatabaseProviderFactory, HeaderProvider,
-    NodePrimitivesProvider, StageCheckpointWriter, StorageLocation,
+    NodePrimitivesProvider, StageCheckpointWriter,
 };
 use std::{
     collections::Bound,
@@ -102,14 +102,14 @@ where
 
         save_stage_checkpoints(&provider, from, height, height, height)?;
 
-        UnifiedStorageWriter::commit(provider)?;
+        provider.commit()?;
     }
 
     let provider = provider_factory.database_provider_rw()?;
 
     build_index(&provider, hash_collector)?;
 
-    UnifiedStorageWriter::commit(provider)?;
+    provider.commit()?;
 
     Ok(height)
 }
@@ -286,12 +286,12 @@ where
 {
     let mut last_header_number = match block_numbers.start_bound() {
         Bound::Included(&number) => number,
-        Bound::Excluded(&number) => number.saturating_sub(1),
+        Bound::Excluded(&number) => number.saturating_add(1),
         Bound::Unbounded => 0,
     };
     let target = match block_numbers.end_bound() {
         Bound::Included(&number) => Some(number),
-        Bound::Excluded(&number) => Some(number.saturating_add(1)),
+        Bound::Excluded(&number) => Some(number.saturating_sub(1)),
         Bound::Unbounded => None,
     };
 
@@ -318,11 +318,7 @@ where
         writer.append_header(&header, *total_difficulty, &hash)?;
 
         // Write bodies to database.
-        provider.append_block_bodies(
-            vec![(header.number(), Some(body))],
-            // We are writing transactions directly to static files.
-            StorageLocation::StaticFiles,
-        )?;
+        provider.append_block_bodies(vec![(header.number(), Some(body))])?;
 
         hash_collector.insert(hash, number)?;
     }

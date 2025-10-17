@@ -512,7 +512,7 @@ where
                 f.debug_tuple("BestPayload").field(&f0).field(&f1).finish()
             }
             Self::PayloadTimestamp(f0, f1) => {
-                f.debug_tuple("PayloadAttributes").field(&f0).field(&f1).finish()
+                f.debug_tuple("PayloadTimestamp").field(&f0).field(&f1).finish()
             }
             Self::Resolve(f0, f1, _f2) => f.debug_tuple("Resolve").field(&f0).field(&f1).finish(),
             Self::Subscribe(f0) => f.debug_tuple("Subscribe").field(&f0).finish(),
