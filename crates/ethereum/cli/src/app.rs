@@ -82,10 +82,7 @@ where
         ) -> Result<()>,
     ) -> Result<()>
     where
-        N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader: CliHeader>,
-            ChainSpec: Hardforks,
-        >,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let runner = match self.runner.take() {
