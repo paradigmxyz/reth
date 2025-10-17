@@ -7,12 +7,8 @@ use reth_config::config::EtlConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::DatabaseEnv;
 use reth_db_api::{
-    cursor::{DbCursorRO, DbDupCursorRW},
-    database::Database,
-    models::BlockNumberAddress,
-    table::TableImporter,
+    cursor::DbCursorRO, database::Database, models::BlockNumberAddress, table::TableImporter,
     tables,
-    transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::DbTool;
 use reth_evm::ConfigureEvm;
