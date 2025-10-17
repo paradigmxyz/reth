@@ -5,6 +5,8 @@ use std::time::Duration;
 use clap::Args;
 use humantime::parse_duration;
 
+const DEFAULT_MNEMONIC: &str = "test test test test test test test test test test test junk";
+
 /// Parameters for Dev testnet configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone)]
 #[command(next_help_heading = "Dev testnet")]
@@ -41,15 +43,15 @@ pub struct DevArgs {
     pub block_time: Option<Duration>,
 
     /// Derive dev accounts from a fixed mnemonic instead of random ones.
-    /// "test test test test test test test test test test test junk".
     #[arg(
         long = "dev.mnemonic",
         help_heading = "Dev testnet",
         value_name = "MNEMONIC",
         requires = "dev",
-        verbatim_doc_comment
+        verbatim_doc_comment,
+        default_value = DEFAULT_MNEMONIC
     )]
-    pub dev_mnemonic: Option<Option<String>>,
+    pub dev_mnemonic: String,
 }
 
 #[cfg(test)]
@@ -73,7 +75,7 @@ mod tests {
                 dev: false,
                 block_max_transactions: None,
                 block_time: None,
-                dev_mnemonic: None
+                dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
         );
 
@@ -84,7 +86,7 @@ mod tests {
                 dev: true,
                 block_max_transactions: None,
                 block_time: None,
-                dev_mnemonic: None
+                dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
         );
 
@@ -95,7 +97,7 @@ mod tests {
                 dev: true,
                 block_max_transactions: None,
                 block_time: None,
-                dev_mnemonic: None,
+                dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
         );
 
@@ -112,7 +114,7 @@ mod tests {
                 dev: true,
                 block_max_transactions: Some(2),
                 block_time: None,
-                dev_mnemonic: None
+                dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
         );
 
@@ -124,7 +126,7 @@ mod tests {
                 dev: true,
                 block_max_transactions: None,
                 block_time: Some(std::time::Duration::from_secs(1)),
-                dev_mnemonic: None,
+                dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
         );
     }

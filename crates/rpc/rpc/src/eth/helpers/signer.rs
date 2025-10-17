@@ -1,43 +1,14 @@
 //! An abstraction over ethereum signers.
 
-use std::collections::HashMap;
-
-use crate::EthApi;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Decodable2718;
 use alloy_primitives::{eip191_hash_message, Address, Signature, B256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::{coins_bip39::English, MnemonicBuilder, PrivateKeySigner};
-use reth_rpc_convert::{RpcConvert, RpcTypes, SignableTxRequest};
-use reth_rpc_eth_api::{
-    helpers::{signer::Result, AddDevSigners, EthSigner},
-    FromEvmError, RpcNodeCore,
-};
-use reth_rpc_eth_types::{EthApiError, SignError};
-use reth_storage_api::ProviderTx;
-
-impl<N, Rpc> AddDevSigners for EthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    EthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<
-        Network: RpcTypes<TransactionRequest: SignableTxRequest<ProviderTx<N::Provider>>>,
-    >,
-{
-    fn with_dev_accounts(&self, dev_mnemonic: Option<Option<String>>) {
-        const DEFAULT_MNEMONIC: &str =
-            "test test test test test test test test test test test junk";
-
-        let phrase = match dev_mnemonic {
-            None => return,                  // no dev accounts
-            Some(None) => DEFAULT_MNEMONIC,  // flag given without value
-            Some(Some(ref m)) => m.as_str(), // custom mnemonic
-        };
-
-        let signers = DevSigner::from_mnemonic(phrase, 20);
-        *self.inner.signers().write() = signers;
-    }
-}
+use reth_rpc_convert::SignableTxRequest;
+use reth_rpc_eth_api::helpers::{signer::Result, EthSigner};
+use reth_rpc_eth_types::SignError;
+use std::collections::HashMap;
 
 /// Holds developer keys
 #[derive(Debug, Clone)]
