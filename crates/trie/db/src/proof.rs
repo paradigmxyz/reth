@@ -35,7 +35,7 @@ pub trait DatabaseProof<'a> {
 }
 
 impl<'a, TX: DbTx> DatabaseProof<'a>
-    for Proof<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
+    for Proof<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
 {
     type Tx = TX;
 
