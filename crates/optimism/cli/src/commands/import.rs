@@ -71,7 +71,6 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
             .sealed_header(provider_factory.last_block_number()?)?
             .expect("should have genesis");
 
-        // Reuse a single StaticFileProducer across all chunks
         let static_file_producer =
             StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
