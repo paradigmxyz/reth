@@ -246,7 +246,6 @@ impl_compression_for_compact!(
     Receipt<T>,
     TxType,
     BranchNodeCompact,
-    TrieChangeSetsEntry,
     StoredNibbles,
     StoredNibblesSubKey,
     StoredBlockBodyIndices,
@@ -263,7 +262,7 @@ impl_compression_for_compact!(
     GenesisAccount
 );
 
-impl_compression_for_value_with_subkey!(StorageEntry, AccountBeforeTx, StorageTrieEntry);
+impl_compression_for_value_with_subkey!(StorageEntry, AccountBeforeTx, StorageTrieEntry, TrieChangeSetsEntry);
 
 #[cfg(feature = "op")]
 mod op {

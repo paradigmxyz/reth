@@ -53,6 +53,12 @@ pub struct TrieChangeSetsEntry {
     pub node: Option<BranchNodeCompact>,
 }
 
+impl SubkeyContainedValue for TrieChangeSetsEntry {
+    fn subkey_length(&self) -> Option<usize> {
+        Some(65)
+    }
+}
+
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for TrieChangeSetsEntry {
     fn to_compact<B>(&self, buf: &mut B) -> usize
