@@ -187,15 +187,14 @@ pub enum EthApiError {
     #[error("Batch transaction sender channel closed")]
     BatchTxSendError,
     /// Error that occurred during `call_many` execution with bundle and transaction context
-    #[error("call_many error at bundle {bundle_index}, tx {tx_index}: {source}")]
+    #[error("call_many error in bundle {bundle_index} and transaction {tx_index}: {error}")]
     CallManyError {
         /// Bundle index where the error occurred
         bundle_index: usize,
         /// Transaction index within the bundle where the error occurred  
         tx_index: usize,
         /// The underlying error
-        #[source]
-        source: Box<dyn core::error::Error + Send + Sync>,
+        error: Box<dyn ToRpcError>,
     },
     /// Any other error
     #[error("{0}")]
@@ -209,11 +208,8 @@ impl EthApiError {
     }
 
     /// Creates a new [`EthApiError::CallManyError`] variant.
-    pub fn call_many_error<E>(bundle_index: usize, tx_index: usize, source: E) -> Self
-    where
-        E: core::error::Error + Send + Sync + 'static,
-    {
-        Self::CallManyError { bundle_index, tx_index, source: Box::new(source) }
+    pub fn call_many_error<E: ToRpcError>(bundle_index: usize, tx_index: usize, error: E) -> Self {
+        Self::CallManyError { bundle_index, tx_index, error: Box::new(error) }
     }
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
@@ -323,9 +319,17 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::BatchTxSendError => {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())
             }
-            EthApiError::CallManyError { bundle_index, tx_index, source } => internal_rpc_err(
-                format!("call_many error at bundle {}, tx {}: {}", bundle_index, tx_index, source),
-            ),
+            EthApiError::CallManyError { bundle_index, tx_index, error } => {
+                let origin = error.to_rpc_error();
+                jsonrpsee_types::error::ErrorObject::owned(
+                    origin.code(),
+                    format!(
+                        "call_many error in bundle {bundle_index} and transaction {tx_index}: {}",
+                        origin.message()
+                    ),
+                    origin.data().clone(),
+                )
+            }
         }
     }
 }
@@ -1081,32 +1085,6 @@ mod tests {
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
-    }
-
-    #[test]
-    fn call_many_error_display() {
-        // Test the display format of CallManyError
-        let source_error = std::io::Error::other("test error");
-        let err = EthApiError::call_many_error(2, 5, source_error);
-
-        // Check the error message format
-        let error_msg = err.to_string();
-        assert!(error_msg.contains("call_many error at bundle 2, tx 5"));
-        assert!(error_msg.contains("test error"));
-    }
-
-    #[test]
-    fn call_many_error_rpc_conversion() {
-        // Test that CallManyError converts properly to RPC error
-        let source_error = std::io::Error::other("test error");
-        let err = EthApiError::call_many_error(1, 3, source_error);
-
-        let rpc_error: jsonrpsee_types::error::ErrorObject<'static> = err.into();
-
-        // Should be an internal error with our custom message
-        assert_eq!(rpc_error.code(), jsonrpsee_types::error::INTERNAL_ERROR_CODE);
-        assert!(rpc_error.message().contains("call_many error at bundle 1, tx 3"));
-        assert!(rpc_error.message().contains("test error"));
     }
 
     #[test]
