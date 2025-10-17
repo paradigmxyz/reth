@@ -53,14 +53,12 @@ where
 
 /// A cursor over the account trie.
 #[derive(Debug)]
-pub struct DatabaseAccountTrieCursor<C> {
-    cursor: C,
-}
+pub struct DatabaseAccountTrieCursor<C>(pub(crate) C);
 
 impl<C> DatabaseAccountTrieCursor<C> {
     /// Create a new account trie cursor.
     pub const fn new(cursor: C) -> Self {
-        Self { cursor }
+        Self(cursor)
     }
 }
 
@@ -73,7 +71,7 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.cursor.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+        Ok(self.0.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Seeks a key in the account trie that matches or is greater than the provided key.
@@ -81,17 +79,17 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.cursor.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+        Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.cursor.next()?.map(|value| (value.0 .0, value.1)))
+        Ok(self.0.next()?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Retrieves the current key in the cursor.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        Ok(self.cursor.current()?.map(|(k, _)| k.0))
+        Ok(self.0.current()?.map(|(k, _)| k.0))
     }
 }
 

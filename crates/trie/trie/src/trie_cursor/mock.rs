@@ -52,8 +52,14 @@ impl MockTrieCursorFactory {
 }
 
 impl TrieCursorFactory for MockTrieCursorFactory {
-    type AccountTrieCursor<'a> = MockTrieCursor where Self: 'a;
-    type StorageTrieCursor<'a> = MockTrieCursor where Self: 'a;
+    type AccountTrieCursor<'a>
+        = MockTrieCursor
+    where
+        Self: 'a;
+    type StorageTrieCursor<'a>
+        = MockTrieCursor
+    where
+        Self: 'a;
 
     /// Generates a mock account trie cursor.
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {

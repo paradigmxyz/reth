@@ -19,19 +19,19 @@ impl<CF, T> HashedPostStateCursorFactory<CF, T> {
     }
 }
 
-impl<'a, CF, T> HashedCursorFactory for HashedPostStateCursorFactory<CF, &'a T>
+impl<'overlay, CF, T> HashedCursorFactory for HashedPostStateCursorFactory<CF, &'overlay T>
 where
     CF: HashedCursorFactory,
     T: AsRef<HashedPostStateSorted>,
 {
-    type AccountCursor<'b>
-        = HashedPostStateAccountCursor<'a, CF::AccountCursor<'b>>
+    type AccountCursor<'cursor>
+        = HashedPostStateAccountCursor<'overlay, CF::AccountCursor<'cursor>>
     where
-        Self: 'b;
-    type StorageCursor<'b>
-        = HashedPostStateStorageCursor<'a, CF::StorageCursor<'b>>
+        Self: 'cursor;
+    type StorageCursor<'cursor>
+        = HashedPostStateStorageCursor<'overlay, CF::StorageCursor<'cursor>>
     where
-        Self: 'b;
+        Self: 'cursor;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
