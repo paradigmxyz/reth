@@ -60,7 +60,11 @@ where
                         .provider()
                         .latest_header()?
                         .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
-                    if self.provider().chain_spec().is_osaka_active_at_timestamp(latest.timestamp())
+                    // Convert to EIP-7594 if next block is Osaka
+                    if self
+                        .provider()
+                        .chain_spec()
+                        .is_osaka_active_at_timestamp(latest.timestamp().saturating_add(12))
                     {
                         BlobTransactionSidecarVariant::Eip7594(
                             self.blob_sidecar_converter().convert(sidecar).await.ok_or_else(
