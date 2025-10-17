@@ -33,9 +33,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         if let Some(prune_tip) = lowest_static_file_height {
             info!(target: "reth::cli", ?prune_tip, ?prune_config, "Pruning data from database...");
             // Run the pruner according to the configuration, and don't enforce any limits on it
-            let mut pruner = PrunerBuilder::new(prune_config)
-                .delete_limit(usize::MAX)
-                .build_with_provider_factory(provider_factory);
+            let mut pruner = reth_prune_db::build_with_provider_factory(
+                PrunerBuilder::new(prune_config).delete_limit(usize::MAX),
+                provider_factory,
+            );
 
             pruner.run(prune_tip)?;
             info!(target: "reth::cli", "Pruned data from database");

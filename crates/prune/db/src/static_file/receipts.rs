@@ -1,22 +1,25 @@
-use crate::{
-    segments::{PruneInput, Segment},
-    PrunerError,
-};
+use crate::receipts;
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileProvider, BlockReader, DBProvider,
     PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
 };
+use reth_prune::{
+    segments::{PruneInput, Segment},
+    PrunerError,
+};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 use reth_static_file_types::StaticFileSegment;
 
+/// Responsible for pruning receipts.
 #[derive(Debug)]
 pub struct Receipts<N> {
     static_file_provider: StaticFileProvider<N>,
 }
 
 impl<N> Receipts<N> {
+    /// Creates a receipts pruner that uses `static_file_provider`.
     pub const fn new(static_file_provider: StaticFileProvider<N>) -> Self {
         Self { static_file_provider }
     }
@@ -45,7 +48,7 @@ where
     }
 
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
-        crate::segments::receipts::prune(provider, input)
+        receipts::prune(provider, input)
     }
 
     fn save_checkpoint(
@@ -53,6 +56,6 @@ where
         provider: &Provider,
         checkpoint: PruneCheckpoint,
     ) -> ProviderResult<()> {
-        crate::segments::receipts::save_checkpoint(provider, checkpoint)
+        receipts::save_checkpoint(provider, checkpoint)
     }
 }

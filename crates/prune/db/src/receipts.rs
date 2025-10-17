@@ -1,17 +1,18 @@
 //! Common receipts pruning logic shared between user and static file pruning segments.
 //!
-//! - [`crate::segments::user::Receipts`] is responsible for pruning receipts according to the
-//!   user-configured settings (for example, on a full node or with a custom prune config)
-//! - [`crate::segments::static_file::Receipts`] is responsible for pruning receipts on an archive
-//!   node after static file producer has finished
+//! - [`crate::user::Receipts`] is responsible for pruning receipts according to the user-configured
+//!   settings (for example, on a full node or with a custom prune config)
+//! - [`crate::static_file::Receipts`] is responsible for pruning receipts on an archive node after
+//!   static file producer has finished
 
-use crate::{db_ext::DbTxPruneExt, segments::PruneInput, PrunerError};
+use crate::db_ext::DbTxPruneExt;
 use reth_db_api::{table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,
     PruneCheckpointWriter, TransactionsProvider,
 };
+use reth_prune::{segments::PruneInput, PrunerError};
 use reth_prune_types::{PruneCheckpoint, PruneSegment, SegmentOutput, SegmentOutputCheckpoint};
 use tracing::trace;
 
@@ -81,7 +82,6 @@ pub(crate) fn save_checkpoint(
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneLimiter, SegmentOutput};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -90,6 +90,7 @@ mod tests {
     };
     use reth_db_api::tables;
     use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_prune::{segments::PruneInput, PruneLimiter, SegmentOutput};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };

@@ -10,7 +10,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod builder;
-mod db_ext;
 mod error;
 mod limiter;
 mod metrics;

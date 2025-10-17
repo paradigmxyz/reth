@@ -1,8 +1,4 @@
-use crate::{
-    db_ext::DbTxPruneExt,
-    segments::{PruneInput, Segment},
-    PruneLimiter, PrunerError,
-};
+use crate::db_ext::DbTxPruneExt;
 use alloy_primitives::BlockNumber;
 use itertools::Itertools;
 use reth_db_api::{
@@ -13,6 +9,10 @@ use reth_db_api::{
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{providers::StaticFileProvider, DBProvider, StaticFileProviderFactory};
+use reth_prune::{
+    segments::{PruneInput, Segment},
+    PruneLimiter, PrunerError,
+};
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -23,12 +23,14 @@ use tracing::trace;
 /// Number of header tables to prune in one step
 const HEADER_TABLES_TO_PRUNE: usize = 3;
 
+/// Responsible for pruning headers.
 #[derive(Debug)]
 pub struct Headers<N> {
     static_file_provider: StaticFileProvider<N>,
 }
 
 impl<N> Headers<N> {
+    /// Creates a new header pruner that uses `static_file_provider`.
     pub const fn new(static_file_provider: StaticFileProvider<N>) -> Self {
         Self { static_file_provider }
     }
@@ -212,10 +214,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{
-        static_file::headers::HEADER_TABLES_TO_PRUNE, PruneInput, PruneLimiter, Segment,
-        SegmentOutput,
-    };
+    use crate::static_file::headers::HEADER_TABLES_TO_PRUNE;
     use alloy_primitives::{BlockNumber, B256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::{tables, transaction::DbTx};
@@ -223,9 +222,13 @@ mod tests {
         DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
         StaticFileProviderFactory,
     };
+    use reth_prune::{
+        segments::{PruneInput, Segment},
+        PruneLimiter,
+    };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
-        SegmentOutputCheckpoint,
+        SegmentOutput, SegmentOutputCheckpoint,
     };
     use reth_stages::test_utils::TestStageDB;
     use reth_testing_utils::{generators, generators::random_header_range};

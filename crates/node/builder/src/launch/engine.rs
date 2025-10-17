@@ -174,7 +174,10 @@ impl EngineNodeLauncher {
             pruner_builder =
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
-        let pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
+        let pruner = reth_prune_db::build_with_provider_factory(
+            pruner_builder,
+            ctx.provider_factory().clone(),
+        );
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 

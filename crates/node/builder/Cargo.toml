@@ -43,6 +43,7 @@ reth-payload-builder.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
+reth-prune-db.workspace = true
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-builder.workspace = true

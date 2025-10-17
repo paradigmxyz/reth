@@ -1,15 +1,6 @@
-use crate::{segments::SegmentSet, Pruner};
-use alloy_eips::eip2718::Encodable2718;
 use reth_chainspec::MAINNET_PRUNE_DELETE_LIMIT;
 use reth_config::PruneConfig;
-use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_exex_types::FinishedExExHeight;
-use reth_primitives_traits::NodePrimitives;
-use reth_provider::{
-    providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
-    DatabaseProviderFactory, NodePrimitivesProvider, PruneCheckpointReader, PruneCheckpointWriter,
-    StaticFileProviderFactory,
-};
 use reth_prune_types::PruneModes;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -18,15 +9,15 @@ use tokio::sync::watch;
 #[derive(Debug, Clone)]
 pub struct PrunerBuilder {
     /// Minimum pruning interval measured in blocks.
-    block_interval: usize,
+    pub block_interval: usize,
     /// Pruning configuration for every part of the data that can be pruned.
-    segments: PruneModes,
+    pub segments: PruneModes,
     /// The delete limit for pruner, per run.
-    delete_limit: usize,
+    pub delete_limit: usize,
     /// Time a pruner job can run before timing out.
-    timeout: Option<Duration>,
+    pub timeout: Option<Duration>,
     /// The finished height of all `ExEx`'s.
-    finished_exex_height: watch::Receiver<FinishedExExHeight>,
+    pub finished_exex_height: watch::Receiver<FinishedExExHeight>,
 }
 
 impl PrunerBuilder {
@@ -74,59 +65,6 @@ impl PrunerBuilder {
     ) -> Self {
         self.finished_exex_height = finished_exex_height;
         self
-    }
-
-    /// Builds a [Pruner] from the current configuration with the given provider factory.
-    pub fn build_with_provider_factory<PF>(self, provider_factory: PF) -> Pruner<PF::ProviderRW, PF>
-    where
-        PF: DatabaseProviderFactory<
-                ProviderRW: PruneCheckpointWriter
-                                + PruneCheckpointReader
-                                + BlockReader<Transaction: Encodable2718>
-                                + ChainStateBlockReader
-                                + StaticFileProviderFactory<
-                    Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
-                >,
-            > + StaticFileProviderFactory<
-                Primitives = <PF::ProviderRW as NodePrimitivesProvider>::Primitives,
-            >,
-    {
-        let segments =
-            SegmentSet::from_components(provider_factory.static_file_provider(), self.segments);
-
-        Pruner::new_with_factory(
-            provider_factory,
-            segments.into_vec(),
-            self.block_interval,
-            self.delete_limit,
-            self.timeout,
-            self.finished_exex_height,
-        )
-    }
-
-    /// Builds a [Pruner] from the current configuration with the given static file provider.
-    pub fn build<Provider>(
-        self,
-        static_file_provider: StaticFileProvider<Provider::Primitives>,
-    ) -> Pruner<Provider, ()>
-    where
-        Provider: StaticFileProviderFactory<
-                Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
-            > + DBProvider<Tx: DbTxMut>
-            + BlockReader<Transaction: Encodable2718>
-            + ChainStateBlockReader
-            + PruneCheckpointWriter
-            + PruneCheckpointReader,
-    {
-        let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
-
-        Pruner::new(
-            segments.into_vec(),
-            self.block_interval,
-            self.delete_limit,
-            self.timeout,
-            self.finished_exex_height,
-        )
     }
 }
 

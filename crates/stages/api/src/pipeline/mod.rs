@@ -272,9 +272,10 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         if let Some(prune_tip) = lowest_static_file_height {
             // Run the pruner so we don't potentially end up with higher height in the database vs
             // static files during a pipeline unwind
-            let mut pruner = PrunerBuilder::new(Default::default())
-                .delete_limit(usize::MAX)
-                .build_with_provider_factory(self.provider_factory.clone());
+            let mut pruner = reth_prune_db::build_with_provider_factory(
+                PrunerBuilder::new(Default::default()).delete_limit(usize::MAX),
+                self.provider_factory.clone(),
+            );
 
             pruner.run(prune_tip)?;
         }
