@@ -19,7 +19,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm,
 };
-use reth_primitives_traits::{BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock};
+use reth_primitives_traits::{BlockTy, NodePrimitives, Recovered, RecoveredBlock};
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::noop::NoopProvider;
@@ -33,6 +33,29 @@ use revm::{
 /// Errors which may occur during `eth_simulateV1` execution.
 #[derive(Debug, thiserror::Error)]
 pub enum EthSimulateError {
+    /// Transactions nonce is too low.
+    #[error("nonce too low: next nonce {state}, tx nonce {tx}")]
+    NonceTooLow {
+        /// Transaction nonce.
+        tx: u64,
+        /// Expected nonce.
+        state: u64,
+    },
+    /// Transactions nonce is too high.
+    #[error("nonce too high")]
+    NonceTooHigh,
+    /// Transactions baseFeePerGas is too low.
+    #[error("max fee per gas less than block base fee")]
+    FeeCapTooLow,
+    /// Not enough gas provided to pay for intrinsic gas.
+    #[error("intrinsic gas too low")]
+    GasTooLow,
+    /// Insufficient funds for gas fees and value.
+    #[error("insufficient funds for gas * price + value: address {address}")]
+    InsufficientFunds {
+        /// Address with insufficient funds.
+        address: Address,
+    },
     /// Total gas limit of transactions for the block exceeds the block gas limit.
     #[error("Block gas limit exceeded by the block's transactions")]
     BlockGasLimitExceeded,
@@ -44,8 +67,37 @@ pub enum EthSimulateError {
 impl EthSimulateError {
     const fn error_code(&self) -> i32 {
         match self {
+            Self::NonceTooLow { .. } => -38010,
+            Self::NonceTooHigh => -38011,
+            Self::FeeCapTooLow => -38012,
+            Self::GasTooLow => -38013,
+            Self::InsufficientFunds { .. } => -38014,
             Self::BlockGasLimitExceeded => -38015,
             Self::GasLimitReached => -38026,
+        }
+    }
+}
+
+impl EthSimulateError {
+    /// Converts a [`RpcInvalidTransactionError`] to a [`EthSimulateError`] if it maps to
+    /// a specific `eth_simulateV1` error code. Returns `None` if the error doesn't have
+    /// a specific simulate error code.
+    pub fn try_from_rpc_invalid_tx_error(
+        err: &crate::RpcInvalidTransactionError,
+        sender: Address,
+    ) -> Option<Self> {
+        use crate::RpcInvalidTransactionError;
+        match err {
+            RpcInvalidTransactionError::NonceTooLow { tx, state } => {
+                Some(Self::NonceTooLow { tx: *tx, state: *state })
+            }
+            RpcInvalidTransactionError::NonceTooHigh => Some(Self::NonceTooHigh),
+            RpcInvalidTransactionError::FeeCapTooLow => Some(Self::FeeCapTooLow),
+            RpcInvalidTransactionError::GasTooLow => Some(Self::GasTooLow),
+            RpcInvalidTransactionError::InsufficientFunds { .. } => {
+                Some(Self::InsufficientFunds { address: sender })
+            }
+            _ => None,
         }
     }
 }
@@ -185,6 +237,57 @@ where
     Ok(Recovered::new_unchecked(tx, from))
 }
 
+/// Converts error to a [`SimulateError`] with `eth_simulateV1` specific error codes if possible.
+fn error_to_simulate_error_from_parts(
+    error_msg: &str,
+    error_code: i32,
+    sender: Address,
+) -> SimulateError {
+    // Check if this might be a transaction validation error that should use simulateV1 codes
+    if let Some(simulate_error) = detect_simulate_error(error_msg, sender) {
+        return SimulateError {
+            code: simulate_error.error_code(),
+            message: simulate_error.to_string(),
+        };
+    }
+
+    SimulateError { code: error_code, message: error_msg.to_string() }
+}
+
+/// Attempts to detect and create appropriate [`EthSimulateError`] from error message
+fn detect_simulate_error(error_msg: &str, sender: Address) -> Option<EthSimulateError> {
+    // Match common error patterns to simulateV1 error codes
+    if error_msg.contains("nonce too low") {
+        // Try to extract nonce values from error message
+        // Format: "nonce too low: next nonce {state}, tx nonce {tx}"
+        if let Some(tx_nonce) = extract_number_after(error_msg, "tx nonce") {
+            if let Some(state_nonce) = extract_number_after(error_msg, "next nonce") {
+                return Some(EthSimulateError::NonceTooLow { tx: tx_nonce, state: state_nonce });
+            }
+        }
+    } else if error_msg.contains("nonce too high") {
+        return Some(EthSimulateError::NonceTooHigh);
+    } else if error_msg.contains("max fee per gas less than block base fee") ||
+        error_msg.contains("fee cap too low")
+    {
+        return Some(EthSimulateError::FeeCapTooLow);
+    } else if error_msg.contains("intrinsic gas too low") {
+        return Some(EthSimulateError::GasTooLow);
+    } else if error_msg.contains("insufficient funds") {
+        return Some(EthSimulateError::InsufficientFunds { address: sender });
+    }
+
+    None
+}
+
+/// Helper to extract a number after a specific pattern in a string
+fn extract_number_after(s: &str, pattern: &str) -> Option<u64> {
+    s.find(pattern).and_then(|pos| {
+        let after = &s[pos + pattern.len()..];
+        after.trim().split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+    })
+}
+
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
 pub fn build_simulated_block<T, Halt: Clone>(
     block: RecoveredBlock<BlockTy<T::Primitives>>,
@@ -198,16 +301,20 @@ where
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
     let mut log_index = 0;
-    for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
+    for (index, (result, (sender, tx))) in
+        results.into_iter().zip(block.transactions_with_sender()).enumerate()
+    {
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error = T::Error::from_evm_halt(reason, tx.gas_limit());
+                let error_msg = error.to_string();
+                let error_code = error.into().code();
+
                 SimCallResult {
                     return_data: Bytes::new(),
-                    error: Some(SimulateError {
-                        message: error.to_string(),
-                        code: error.into().code(),
-                    }),
+                    error: Some(error_to_simulate_error_from_parts(
+                        &error_msg, error_code, *sender,
+                    )),
                     gas_used,
                     logs: Vec::new(),
                     status: false,
