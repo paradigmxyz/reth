@@ -37,7 +37,7 @@ impl CliRunner {
         Self { tokio_runtime }
     }
 
-    /// Executes an async block on the tokio runtime and blocks until completion.
+    /// Executes an async block on the runtime and blocks until completion.
     pub fn block_on<F, T>(&self, fut: F) -> T
     where
         F: Future<Output = T>,
