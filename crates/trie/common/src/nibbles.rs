@@ -29,7 +29,7 @@ impl reth_codecs::Compact for StoredNibbles {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let bytes = self.0.iter().collect::<ArrayVec<u8, 32>>();
+        let bytes = self.0.iter().collect::<ArrayVec<u8, 64>>();
         buf.put_slice(&bytes);
         bytes.len()
     }
