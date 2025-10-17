@@ -92,6 +92,13 @@ test-utils = [
     "reth-trie-sparse/test-utils",
     "reth-stages-types/test-utils",
 ]
+serde-bincode-compat = [
+    "alloy-consensus/serde-bincode-compat",
+    "alloy-eips/serde-bincode-compat",
+    "reth-ethereum-primitives/serde-bincode-compat",
+    "reth-primitives-traits/serde-bincode-compat",
+    "reth-trie-common/serde-bincode-compat",
+]
 
 [[bench]]
 name = "hash_post_state"
