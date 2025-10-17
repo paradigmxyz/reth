@@ -1,9 +1,11 @@
 use crate::utils::eth_payload_attributes;
+use alloy_eips::Decodable2718;
 use alloy_genesis::Genesis;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
     node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
 };
+use reth_ethereum_primitives::PooledTransactionVariant;
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
@@ -79,6 +81,58 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
     // make sure the sidecar is present
     TransactionTestContext::validate_sidecar(envelope);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let tasks = TaskManager::current();
+    let exec = tasks.executor();
+
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis).osaka_activated().build(),
+    );
+    let genesis_hash = chain_spec.genesis_hash();
+    let node_config = NodeConfig::test()
+        .with_chain(chain_spec)
+        .with_unused_ports()
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
+        .testing_node(exec.clone())
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
+
+    let wallets = Wallet::new(2).wallet_gen();
+    let blob_wallet = wallets.first().unwrap();
+
+    // build blob tx
+    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, blob_wallet.clone()).await?;
+
+    let tx = PooledTransactionVariant::decode_2718_exact(&blob_tx).unwrap();
+    assert!(tx.as_eip4844().unwrap().tx().sidecar.is_eip4844());
+
+    // inject blob tx to the pool
+    let blob_tx_hash = node.rpc.inject_tx(blob_tx).await?;
+    // fetch it from rpc
+    let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
+    // assert that sidecar was converted to eip7594
+    assert!(envelope.as_eip4844().unwrap().tx().sidecar().unwrap().is_eip7594());
+    // validate sidecar
+    TransactionTestContext::validate_sidecar(envelope);
+
+    // build a payload
+    let blob_payload = node.new_payload().await?;
+
+    // submit the blob payload
+    let blob_block_hash = node.submit_payload(blob_payload).await?;
+
+    node.update_forkchoice(genesis_hash, blob_block_hash).await?;
 
     Ok(())
 }
