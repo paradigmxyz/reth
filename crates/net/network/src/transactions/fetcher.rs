@@ -413,7 +413,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             if let (_, Some(evicted_hash)) = self.hashes_pending_fetch.insert_and_get_evicted(hash)
             {
                 self.hashes_fetch_inflight_and_pending_fetch.remove(&evicted_hash);
-                self.hashes_pending_fetch.remove(&evicted_hash);
             }
         }
     }

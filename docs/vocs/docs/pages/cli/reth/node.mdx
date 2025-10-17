@@ -734,6 +734,11 @@ Dev testnet:
           Parses strings using [`humantime::parse_duration`]
           --dev.block-time 12s
 
+      --dev.mnemonic <MNEMONIC>
+          Derive dev accounts from a fixed mnemonic instead of random ones.
+
+          [default: "test test test test test test test test test test test junk"]
+
 Pruning:
       --full
           Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored
@@ -815,8 +820,8 @@ Engine:
       --engine.legacy-state-root
           Enable legacy state root
 
-      --engine.disable-caching-and-prewarming
-          Disable cross-block caching and parallel prewarming
+      --engine.disable-prewarming
+          Disable parallel prewarming
 
       --engine.disable-parallel-sparse-trie
           Disable the parallel sparse trie in the engine

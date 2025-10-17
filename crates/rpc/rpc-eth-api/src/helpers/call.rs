@@ -300,7 +300,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 }
 
                 // transact all bundles
-                for bundle in bundles {
+                for (bundle_index, bundle) in bundles.into_iter().enumerate() {
                     let Bundle { transactions, block_override } = bundle;
                     if transactions.is_empty() {
                         // Skip empty bundles
@@ -311,15 +311,30 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let block_overrides = block_override.map(Box::new);
 
                     // transact all transactions in the bundle
-                    for tx in transactions {
+                    for (tx_index, tx) in transactions.into_iter().enumerate() {
                         // Apply overrides, state overrides are only applied for the first tx in the
                         // request
                         let overrides =
                             EvmOverrides::new(state_override.take(), block_overrides.clone());
 
-                        let (current_evm_env, prepared_tx) =
-                            this.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
-                        let res = this.transact(&mut db, current_evm_env, prepared_tx)?;
+                        let (current_evm_env, prepared_tx) = this
+                            .prepare_call_env(evm_env.clone(), tx, &mut db, overrides)
+                            .map_err(|err| {
+                                Self::Error::from_eth_err(EthApiError::call_many_error(
+                                    bundle_index,
+                                    tx_index,
+                                    err.into(),
+                                ))
+                            })?;
+                        let res = this.transact(&mut db, current_evm_env, prepared_tx).map_err(
+                            |err| {
+                                Self::Error::from_eth_err(EthApiError::call_many_error(
+                                    bundle_index,
+                                    tx_index,
+                                    err.into(),
+                                ))
+                            },
+                        )?;
 
                         match ensure_success::<_, Self::Error>(res.result) {
                             Ok(output) => {
@@ -790,6 +805,11 @@ pub trait Call:
 
         // Disable EIP-7825 transaction gas limit to support larger transactions
         evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
+
+        // Disable additional fee charges, e.g. opstack operator fee charge
+        // See:
+        // <https://github.com/paradigmxyz/reth/issues/18470>
+        evm_env.cfg_env.disable_fee_charge = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();

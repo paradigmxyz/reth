@@ -117,7 +117,7 @@ where
             execution_cache: Default::default(),
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
-            disable_transaction_prewarming: config.disable_caching_and_prewarming(),
+            disable_transaction_prewarming: config.disable_prewarming(),
             evm_config,
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,

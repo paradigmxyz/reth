@@ -958,8 +958,8 @@ impl ProofWorkerHandle {
         Self { storage_work_tx, account_work_tx }
     }
 
-    /// Queue a storage proof computation
-    pub fn queue_storage_proof(
+    /// Dispatch a storage proof computation to storage worker pool
+    pub fn dispatch_storage_proof(
         &self,
         input: StorageProofInput,
     ) -> Result<Receiver<StorageProofResult>, ProviderError> {
@@ -988,8 +988,8 @@ impl ProofWorkerHandle {
         Ok(rx)
     }
 
-    /// Internal: Queue blinded storage node request
-    fn queue_blinded_storage_node(
+    /// Dispatch blinded storage node request to storage worker pool
+    pub(crate) fn dispatch_blinded_storage_node(
         &self,
         account: B256,
         path: Nibbles,
@@ -1004,8 +1004,8 @@ impl ProofWorkerHandle {
         Ok(rx)
     }
 
-    /// Internal: Queue blinded account node request
-    fn queue_blinded_account_node(
+    /// Dispatch blinded account node request to account worker pool
+    pub(crate) fn dispatch_blinded_account_node(
         &self,
         path: Nibbles,
     ) -> Result<Receiver<TrieNodeProviderResult>, ProviderError> {
@@ -1055,13 +1055,13 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
         match self {
             Self::AccountNode { handle } => {
                 let rx = handle
-                    .queue_blinded_account_node(*path)
+                    .dispatch_blinded_account_node(*path)
                     .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
                 rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
             Self::StorageNode { handle, account } => {
                 let rx = handle
-                    .queue_blinded_storage_node(*account, *path)
+                    .dispatch_blinded_storage_node(*account, *path)
                     .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
                 rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
