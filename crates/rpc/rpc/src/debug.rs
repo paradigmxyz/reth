@@ -420,6 +420,10 @@ where
 
                         Ok(frame.into())
                     }
+                   _ => { // Note: this match is non-exhaustive in case we need to add support for
+                       // additional tracers
+                       Err(EthApiError::Unsupported("unsupported tracer").into())
+                   }
                 },
                 #[cfg(not(feature = "js-tracer"))]
                 GethDebugTracerType::JsTracer(_) => {
@@ -838,6 +842,10 @@ where
                             .into_localized_transaction_traces(tx_info);
 
                         return Ok((frame.into(), res.state));
+                    }
+                    _ => { // Note: this match is non-exhaustive in case we need to add support for
+                        // additional tracers
+                        Err(EthApiError::Unsupported("unsupported tracer").into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
