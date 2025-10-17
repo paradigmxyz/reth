@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use arrayvec::ArrayVec;
 use derive_more::Deref;
 pub use nybbles::Nibbles;
 
@@ -28,7 +29,7 @@ impl reth_codecs::Compact for StoredNibbles {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let bytes = self.0.to_vec();
+        let bytes = self.0.iter().collect::<ArrayVec<u8, 32>>();
         buf.put_slice(&bytes);
         bytes.len()
     }
@@ -77,9 +78,10 @@ impl reth_codecs::Compact for StoredNibblesSubKey {
     {
         assert!(self.0.len() <= 64);
 
-        let bytes = self.0.to_vec();
+        let bytes = self.0.iter().collect::<ArrayVec<u8, 64>>();
         buf.put_slice(&bytes);
 
+        // Right-pad with zeros
         static ZERO: &[u8; 64] = &[0; 64];
         buf.put_slice(&ZERO[bytes.len()..]);
 

@@ -10684,6 +10684,7 @@ dependencies = [
  "alloy-serde",
  "alloy-trie",
  "arbitrary",
+ "arrayvec",
  "bincode 1.3.3",
  "bytes",
  "codspeed-criterion-compat",
