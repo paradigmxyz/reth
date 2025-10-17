@@ -14,6 +14,7 @@ pub mod noop;
 pub mod mock;
 
 /// The factory trait for creating cursors over the hashed state.
+#[auto_impl::auto_impl(&)]
 pub trait HashedCursorFactory {
     /// The hashed account cursor type.
     type AccountCursor<'a>: HashedCursor<Value = Account>
@@ -35,6 +36,7 @@ pub trait HashedCursorFactory {
 }
 
 /// The cursor for iterating over hashed entries.
+#[auto_impl::auto_impl(&mut)]
 pub trait HashedCursor {
     /// Value returned by the cursor.
     type Value: std::fmt::Debug;
@@ -48,6 +50,7 @@ pub trait HashedCursor {
 }
 
 /// The cursor for iterating over hashed storage entries.
+#[auto_impl::auto_impl(&mut)]
 pub trait HashedStorageCursor: HashedCursor {
     /// Returns `true` if there are no entries for a given key.
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError>;
