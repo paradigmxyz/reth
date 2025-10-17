@@ -288,7 +288,12 @@ where
     ///
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", name = "prewarm", skip_all)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::prewarm",
+        name = "prewarm",
+        skip_all
+    )]
     pub(super) fn run(
         self,
         pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
@@ -447,8 +452,8 @@ where
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
         while let Ok(IndexedTransaction { index, tx }) = {
-            let _enter =
-                debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx").entered();
+            let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx")
+                .entered();
             txs.recv()
         } {
             let _enter =

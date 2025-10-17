@@ -167,7 +167,12 @@ where
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
     #[allow(clippy::type_complexity)]
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", name = "payload processor", skip_all)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor",
+        name = "payload processor",
+        skip_all
+    )]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,

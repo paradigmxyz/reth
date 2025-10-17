@@ -61,7 +61,11 @@ where
     ///
     /// - State root computation outcome.
     /// - `SparseStateTrie` that needs to be cleared and reused to avoid reallocations.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::sparse_trie", skip_all)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
     pub(super) fn run(
         mut self,
     ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseStateTrie<A, S>) {
