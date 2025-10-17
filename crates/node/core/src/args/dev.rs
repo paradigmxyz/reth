@@ -8,7 +8,7 @@ use humantime::parse_duration;
 const DEFAULT_MNEMONIC: &str = "test test test test test test test test test test test junk";
 
 /// Parameters for Dev testnet configuration
-#[derive(Debug, Args, PartialEq, Eq, Default, Clone)]
+#[derive(Debug, Args, PartialEq, Eq, Clone)]
 #[command(next_help_heading = "Dev testnet")]
 pub struct DevArgs {
     /// Start the node in dev mode
@@ -52,6 +52,17 @@ pub struct DevArgs {
         default_value = DEFAULT_MNEMONIC
     )]
     pub dev_mnemonic: String,
+}
+
+impl Default for DevArgs {
+    fn default() -> Self {
+        Self {
+            dev: false,
+            block_max_transactions: None,
+            block_time: None,
+            dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
+        }
+    }
 }
 
 #[cfg(test)]
