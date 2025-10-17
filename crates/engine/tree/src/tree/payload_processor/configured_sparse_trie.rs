@@ -172,4 +172,18 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
             Self::Parallel(trie) => trie.updates_ref(),
         }
     }
+
+    fn node_capacity(&self) -> usize {
+        match self {
+            Self::Serial(trie) => trie.node_capacity(),
+            Self::Parallel(trie) => trie.node_capacity(),
+        }
+    }
+
+    fn value_capacity(&self) -> usize {
+        match self {
+            Self::Serial(trie) => trie.value_capacity(),
+            Self::Parallel(trie) => trie.value_capacity(),
+        }
+    }
 }

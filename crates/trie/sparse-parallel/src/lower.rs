@@ -106,4 +106,20 @@ impl LowerSparseSubtrie {
             Self::Revealed(_) | Self::Blind(_) => None,
         }
     }
+
+    /// Returns the capacity of any maps containing trie nodes
+    pub(crate) fn node_capacity(&self) -> usize {
+        match self {
+            Self::Revealed(trie) | Self::Blind(Some(trie)) => trie.node_capacity(),
+            Self::Blind(None) => 0,
+        }
+    }
+
+    /// Returns the capacity of any maps containing trie values
+    pub(crate) fn value_capacity(&self) -> usize {
+        match self {
+            Self::Revealed(trie) | Self::Blind(Some(trie)) => trie.value_capacity(),
+            Self::Blind(None) => 0,
+        }
+    }
 }
