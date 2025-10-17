@@ -30,8 +30,8 @@ use reth_tasks::{
     TaskSpawner, TokioTaskExecutor,
 };
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, AddedTransactionOutcome, BatchTxProcessor, BatchTxRequest,
-    TransactionPool,
+    blobstore::BlobSidecarConverter, noop::NoopTransactionPool, AddedTransactionOutcome,
+    BatchTxProcessor, BatchTxRequest, TransactionPool,
 };
 use tokio::sync::{broadcast, mpsc, Mutex};
 
@@ -315,6 +315,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Timeout duration for `send_raw_transaction_sync` RPC method.
     send_raw_transaction_sync_timeout: Duration,
+
+    /// Blob sidecar converter
+    blob_sidecar_converter: BlobSidecarConverter,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -382,6 +385,7 @@ where
             tx_batch_sender,
             pending_block_kind,
             send_raw_transaction_sync_timeout,
+            blob_sidecar_converter: BlobSidecarConverter::new(),
         }
     }
 }
@@ -552,6 +556,12 @@ where
     #[inline]
     pub const fn send_raw_transaction_sync_timeout(&self) -> Duration {
         self.send_raw_transaction_sync_timeout
+    }
+
+    /// Returns a handle to the blob sidecar converter.
+    #[inline]
+    pub const fn blob_sidecar_converter(&self) -> &BlobSidecarConverter {
+        &self.blob_sidecar_converter
     }
 }
 

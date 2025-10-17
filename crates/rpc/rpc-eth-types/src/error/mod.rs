@@ -69,7 +69,7 @@ pub enum EthApiError {
     InvalidTransactionSignature,
     /// Errors related to the transaction pool
     #[error(transparent)]
-    PoolError(RpcPoolError),
+    PoolError(#[from] RpcPoolError),
     /// Header not found for block hash/number/tag
     #[error("header not found")]
     HeaderNotFound(BlockId),
