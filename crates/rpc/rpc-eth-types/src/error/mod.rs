@@ -187,14 +187,14 @@ pub enum EthApiError {
     #[error("Batch transaction sender channel closed")]
     BatchTxSendError,
     /// Error that occurred during `call_many` execution with bundle and transaction context
-    #[error("call_many error in bundle {bundle_index} and transaction {tx_index}: {error}")]
+    #[error("call_many error in bundle {bundle_index} and transaction {tx_index}: {}", .error.message())]
     CallManyError {
         /// Bundle index where the error occurred
         bundle_index: usize,
         /// Transaction index within the bundle where the error occurred  
         tx_index: usize,
-        /// The underlying error
-        error: Box<dyn ToRpcError>,
+        /// The underlying error object
+        error: jsonrpsee_types::ErrorObject<'static>,
     },
     /// Any other error
     #[error("{0}")]
@@ -208,8 +208,12 @@ impl EthApiError {
     }
 
     /// Creates a new [`EthApiError::CallManyError`] variant.
-    pub fn call_many_error<E: ToRpcError>(bundle_index: usize, tx_index: usize, error: E) -> Self {
-        Self::CallManyError { bundle_index, tx_index, error: Box::new(error) }
+    pub const fn call_many_error(
+        bundle_index: usize,
+        tx_index: usize,
+        error: jsonrpsee_types::ErrorObject<'static>,
+    ) -> Self {
+        Self::CallManyError { bundle_index, tx_index, error }
     }
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
@@ -320,14 +324,13 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())
             }
             EthApiError::CallManyError { bundle_index, tx_index, error } => {
-                let origin = error.to_rpc_error();
                 jsonrpsee_types::error::ErrorObject::owned(
-                    origin.code(),
+                    error.code(),
                     format!(
                         "call_many error in bundle {bundle_index} and transaction {tx_index}: {}",
-                        origin.message()
+                        error.message()
                     ),
-                    origin.data().clone(),
+                    error.data(),
                 )
             }
         }

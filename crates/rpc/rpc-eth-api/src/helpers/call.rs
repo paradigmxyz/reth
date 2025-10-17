@@ -323,7 +323,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
                                     bundle_index,
                                     tx_index,
-                                    err,
+                                    err.into(),
                                 ))
                             })?;
                         let res = this.transact(&mut db, current_evm_env, prepared_tx).map_err(
@@ -331,7 +331,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
                                     bundle_index,
                                     tx_index,
-                                    err,
+                                    err.into(),
                                 ))
                             },
                         )?;
