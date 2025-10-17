@@ -20,7 +20,7 @@ mod tests {
 
     impl PartialEq<AccessList> for RethAccessList {
         fn eq(&self, other: &AccessList) -> bool {
-            self.0.iter().zip(other.iter()).all(|(a, b)| a == b)
+            self.0.iter().eq(other.iter())
         }
     }
 
@@ -61,4 +61,23 @@ mod tests {
             assert_eq!(compacted_reth_access_list, compacted_alloy_access_list);
         }
     );
+
+    #[test]
+    fn test_accesslist_neq_on_prefix_only() {
+        // Build a RethAccessList with one item
+        let address = Address::with_last_byte(1);
+        let key1 = B256::with_last_byte(1);
+        let item1 = RethAccessListItem { address, storage_keys: vec![key1] };
+        let reth_list = RethAccessList(vec![item1]);
+
+        // Build an AccessList with same first item plus an extra
+        let key2 = B256::with_last_byte(2);
+        let alloy_items = vec![
+            AccessListItem { address, storage_keys: vec![key1] },
+            AccessListItem { address, storage_keys: vec![key2] },
+        ];
+        let alloy_list = AccessList(alloy_items);
+
+        assert_ne!(reth_list, alloy_list);
+    }
 }
