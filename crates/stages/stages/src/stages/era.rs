@@ -150,18 +150,17 @@ where
             return Poll::Ready(Ok(()));
         }
 
-        if self.stream.is_none() {
-            if let Some(source) = self.source.clone() {
-                self.stream.replace(source.create(input)?);
-            }
+        if self.stream.is_none() &&
+            let Some(source) = self.source.clone()
+        {
+            self.stream.replace(source.create(input)?);
         }
-        if let Some(stream) = &mut self.stream {
-            if let Some(next) = ready!(stream.poll_next_unpin(cx))
+        if let Some(stream) = &mut self.stream &&
+            let Some(next) = ready!(stream.poll_next_unpin(cx))
                 .transpose()
                 .map_err(|e| StageError::Fatal(e.into()))?
-            {
-                self.item.replace(next);
-            }
+        {
+            self.item.replace(next);
         }
 
         Poll::Ready(Ok(()))
@@ -212,10 +211,16 @@ where
 
             height
         } else {
-            input.target()
+            // It's possible for a pipeline sync to be executed with a None target, e.g. after a
+            // stage was manually dropped, and `reth node` is then called without a `--debug.tip`.
+            //
+            // In this case we don't want to simply default to zero, as that would overwrite the
+            // previously stored checkpoint block number. Instead we default to that previous
+            // checkpoint.
+            input.target.unwrap_or_else(|| input.checkpoint().block_number)
         };
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(height), done: height == input.target() })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(height), done: height >= input.target() })
     }
 
     fn unwind(
@@ -546,11 +551,10 @@ mod tests {
 
                         // Validate sequentiality only after prev progress,
                         // since the data before is mocked and can contain gaps
-                        if number > prev_progress {
-                            if let Some(prev_key) = prev_number {
+                        if number > prev_progress
+                            && let Some(prev_key) = prev_number {
                                 assert_eq!(prev_key + 1, number, "Body entries must be sequential");
                             }
-                        }
 
                         // Validate that the current entry is below or equals to the highest allowed block
                         assert!(

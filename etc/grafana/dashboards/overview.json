@@ -3931,7 +3931,7 @@
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Precompile cache hits",
+          "legendFormat": "{{address}}",
           "range": true,
           "refId": "A",
           "useBackend": false

@@ -24,7 +24,7 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use tracing::{trace, warn};
+use tracing::{debug, trace};
 
 /// The level below which the sparse trie hashes are calculated in
 /// [`SerialSparseTrie::update_subtrie_hashes`].
@@ -42,7 +42,7 @@ const SPARSE_TRIE_SUBTRIE_HASHES_LEVEL: usize = 2;
 /// 2. Update tracking - changes to the trie structure can be tracked and selectively persisted
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum SparseTrie<T = SerialSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
@@ -130,6 +130,13 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// ```
     pub const fn blind() -> Self {
         Self::Blind(None)
+    }
+
+    /// Creates a new blind sparse trie, clearing and later reusing the given
+    /// [`SparseTrieInterface`].
+    pub fn blind_from(mut trie: T) -> Self {
+        trie.clear();
+        Self::Blind(Some(Box::new(trie)))
     }
 
     /// Returns `true` if the sparse trie has no revealed nodes.
@@ -640,7 +647,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
-                                warn!(
+                                debug!(
                                     target: "trie::sparse",
                                     leaf_full_path = ?full_path,
                                     child_path = ?current,
@@ -814,38 +821,17 @@ impl SparseTrieInterface for SerialSparseTrie {
 
                         trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
 
-                        if self.nodes.get(&child_path).unwrap().is_hash() {
-                            warn!(
-                                target: "trie::sparse",
-                                ?child_path,
-                                leaf_full_path = ?full_path,
-                                "Branch node child not revealed in remove_leaf, falling back to db",
-                            );
-                            if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                provider.trie_node(&child_path)?
-                            {
-                                let decoded = TrieNode::decode(&mut &node[..])?;
-                                trace!(
-                                    target: "trie::sparse",
-                                    ?child_path,
-                                    ?decoded,
-                                    ?tree_mask,
-                                    ?hash_mask,
-                                    "Revealing remaining blinded branch child"
-                                );
-                                self.reveal_node(
-                                    child_path,
-                                    decoded,
-                                    TrieMasks { hash_mask, tree_mask },
-                                )?;
-                            }
-                        }
-
-                        // Get the only child node.
-                        let child = self.nodes.get(&child_path).unwrap();
+                        // If the remaining child node is not yet revealed then we have to reveal
+                        // it here, otherwise it's not possible to know how to collapse the branch.
+                        let child = self.reveal_remaining_child_on_leaf_removal(
+                            &provider,
+                            full_path,
+                            &child_path,
+                            true, // recurse_into_extension
+                        )?;
 
                         let mut delete_child = false;
-                        let new_node = match child {
+                        let new_node = match &child {
                             SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
                             &SparseNode::Hash(hash) => {
                                 return Err(SparseTrieErrorKind::BlindedNode {
@@ -968,14 +954,14 @@ impl SparseTrieInterface for SerialSparseTrie {
             expected_value: Option<&Vec<u8>>,
             path: &Nibbles,
         ) -> Result<(), LeafLookupError> {
-            if let Some(expected) = expected_value {
-                if actual_value != expected {
-                    return Err(LeafLookupError::ValueMismatch {
-                        path: *path,
-                        expected: Some(expected.clone()),
-                        actual: actual_value.clone(),
-                    });
-                }
+            if let Some(expected) = expected_value &&
+                actual_value != expected
+            {
+                return Err(LeafLookupError::ValueMismatch {
+                    path: *path,
+                    expected: Some(expected.clone()),
+                    actual: actual_value.clone(),
+                });
             }
             Ok(())
         }
@@ -1247,6 +1233,87 @@ impl SerialSparseTrie {
         }
 
         Ok(nodes)
+    }
+
+    /// Called when a leaf is removed on a branch which has only one other remaining child. That
+    /// child must be revealed in order to properly collapse the branch.
+    ///
+    /// If `recurse_into_extension` is true, and the remaining child is an extension node, then its
+    /// child will be ensured to be revealed as well.
+    ///
+    /// ## Returns
+    ///
+    /// The node of the remaining child, whether it was already revealed or not.
+    fn reveal_remaining_child_on_leaf_removal<P: TrieNodeProvider>(
+        &mut self,
+        provider: P,
+        full_path: &Nibbles, // only needed for logs
+        remaining_child_path: &Nibbles,
+        recurse_into_extension: bool,
+    ) -> SparseTrieResult<SparseNode> {
+        let remaining_child_node = match self.nodes.get(remaining_child_path).unwrap() {
+            SparseNode::Hash(_) => {
+                debug!(
+                    target: "trie::parallel_sparse",
+                    child_path = ?remaining_child_path,
+                    leaf_full_path = ?full_path,
+                    "Node child not revealed in remove_leaf, falling back to db",
+                );
+                if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                    provider.trie_node(remaining_child_path)?
+                {
+                    let decoded = TrieNode::decode(&mut &node[..])?;
+                    trace!(
+                        target: "trie::parallel_sparse",
+                        ?remaining_child_path,
+                        ?decoded,
+                        ?tree_mask,
+                        ?hash_mask,
+                        "Revealing remaining blinded branch child"
+                    );
+                    self.reveal_node(
+                        *remaining_child_path,
+                        decoded,
+                        TrieMasks { hash_mask, tree_mask },
+                    )?;
+                    self.nodes.get(remaining_child_path).unwrap().clone()
+                } else {
+                    return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
+                        path: *remaining_child_path,
+                    }
+                    .into())
+                }
+            }
+            node => node.clone(),
+        };
+
+        // If `recurse_into_extension` is true, and the remaining child is an extension node, then
+        // its child will be ensured to be revealed as well. This is required for generation of
+        // trie updates; without revealing the grandchild branch it's not always possible to know
+        // if the tree mask bit should be set for the child extension on its parent branch.
+        if let SparseNode::Extension { key, .. } = &remaining_child_node &&
+            recurse_into_extension
+        {
+            let mut remaining_grandchild_path = *remaining_child_path;
+            remaining_grandchild_path.extend(key);
+
+            trace!(
+                target: "trie::parallel_sparse",
+                remaining_grandchild_path = ?remaining_grandchild_path,
+                child_path = ?remaining_child_path,
+                leaf_full_path = ?full_path,
+                "Revealing child of extension node, which is the last remaining child of the branch"
+            );
+
+            self.reveal_remaining_child_on_leaf_removal(
+                provider,
+                full_path,
+                &remaining_grandchild_path,
+                false, // recurse_into_extension
+            )?;
+        }
+
+        Ok(remaining_child_node)
     }
 
     /// Recalculates and updates the RLP hashes of nodes deeper than or equal to the specified
@@ -1938,8 +2005,6 @@ impl SparseTrieUpdates {
 mod find_leaf_tests {
     use super::*;
     use crate::provider::DefaultTrieNodeProvider;
-    use alloy_primitives::map::foldhash::fast::RandomState;
-    // Assuming this exists
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use reth_primitives_traits::Account;
@@ -2102,7 +2167,7 @@ mod find_leaf_tests {
         let blinded_hash = B256::repeat_byte(0xBB);
         let leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
-        let mut nodes = alloy_primitives::map::HashMap::with_hasher(RandomState::default());
+        let mut nodes = alloy_primitives::map::HashMap::default();
         // Create path to the blinded node
         nodes.insert(
             Nibbles::default(),
@@ -2143,7 +2208,7 @@ mod find_leaf_tests {
         let path_to_blind = Nibbles::from_nibbles_unchecked([0x1]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
-        let mut nodes = HashMap::with_hasher(RandomState::default());
+        let mut nodes = HashMap::default();
 
         // Root is a branch with child 0x1 (blinded) and 0x5 (revealed leaf)
         // So we set Bit 1 and Bit 5 in the state_mask
@@ -2158,7 +2223,7 @@ mod find_leaf_tests {
             SparseNode::new_leaf(Nibbles::from_nibbles_unchecked([0x6, 0x7, 0x8])),
         );
 
-        let mut values = HashMap::with_hasher(RandomState::default());
+        let mut values = HashMap::default();
         values.insert(path_revealed_leaf, VALUE_A());
 
         let sparse = SerialSparseTrie {
@@ -2966,12 +3031,15 @@ mod tests {
                             state.clone(),
                             trie_cursor.account_trie_cursor().unwrap(),
                             Default::default(),
-                            state.keys().copied().collect::<Vec<_>>(),
+                            state.keys().copied(),
                         );
+
+                    // Extract account nodes before moving hash_builder_updates
+                    let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();
 
                     // Write trie updates to the database
                     let provider_rw = provider_factory.provider_rw().unwrap();
-                    provider_rw.write_trie_updates(&hash_builder_updates).unwrap();
+                    provider_rw.write_trie_updates(hash_builder_updates).unwrap();
                     provider_rw.commit().unwrap();
 
                     // Assert that the sparse trie root matches the hash builder root
@@ -2979,7 +3047,7 @@ mod tests {
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         BTreeMap::from_iter(sparse_updates.updated_nodes),
-                        BTreeMap::from_iter(hash_builder_updates.account_nodes)
+                        BTreeMap::from_iter(hash_builder_account_nodes)
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_sparse_trie_proof_nodes(&updated_sparse, hash_builder_proof_nodes);
@@ -3008,12 +3076,15 @@ mod tests {
                                 .iter()
                                 .map(|nibbles| B256::from_slice(&nibbles.pack()))
                                 .collect(),
-                            state.keys().copied().collect::<Vec<_>>(),
+                            state.keys().copied(),
                         );
+
+                    // Extract account nodes before moving hash_builder_updates
+                    let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();
 
                     // Write trie updates to the database
                     let provider_rw = provider_factory.provider_rw().unwrap();
-                    provider_rw.write_trie_updates(&hash_builder_updates).unwrap();
+                    provider_rw.write_trie_updates(hash_builder_updates).unwrap();
                     provider_rw.commit().unwrap();
 
                     // Assert that the sparse trie root matches the hash builder root
@@ -3021,7 +3092,7 @@ mod tests {
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         BTreeMap::from_iter(sparse_updates.updated_nodes),
-                        BTreeMap::from_iter(hash_builder_updates.account_nodes)
+                        BTreeMap::from_iter(hash_builder_account_nodes)
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_sparse_trie_proof_nodes(&updated_sparse, hash_builder_proof_nodes);

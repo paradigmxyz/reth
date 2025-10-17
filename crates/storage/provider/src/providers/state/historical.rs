@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
+    ChangeSetReader, HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
@@ -133,7 +133,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
             );
         }
 
-        Ok(HashedPostState::from_reverts::<KeccakKeyHasher>(self.tx(), self.block_number)?)
+        Ok(HashedPostState::from_reverts::<KeccakKeyHasher>(self.tx(), self.block_number..)?)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.
@@ -241,23 +241,23 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'_, Provi
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> AccountReader
+impl<Provider: DBProvider + BlockNumReader + ChangeSetReader> AccountReader
     for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         match self.account_history_lookup(*address)? {
             HistoryInfo::NotYetWritten => Ok(None),
-            HistoryInfo::InChangeset(changeset_block_number) => Ok(self
-                .tx()
-                .cursor_dup_read::<tables::AccountChangeSets>()?
-                .seek_by_key_subkey(changeset_block_number, *address)?
-                .filter(|acc| &acc.address == address)
-                .ok_or(ProviderError::AccountChangesetNotFound {
-                    block_number: changeset_block_number,
-                    address: *address,
-                })?
-                .info),
+            HistoryInfo::InChangeset(changeset_block_number) => {
+                // Use ChangeSetReader trait method to get the account from changesets
+                self.provider
+                    .get_account_before_block(changeset_block_number, *address)?
+                    .ok_or(ProviderError::AccountChangesetNotFound {
+                        block_number: changeset_block_number,
+                        address: *address,
+                    })
+                    .map(|account_before| account_before.info)
+            }
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                 Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
             }
@@ -394,7 +394,7 @@ impl<Provider: Sync> HashedPostStateProvider for HistoricalStateProviderRef<'_, 
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + BlockHashReader> StateProvider
+impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> StateProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get storage.
@@ -485,7 +485,7 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader ]);
+delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -530,7 +530,9 @@ mod tests {
         BlockNumberList,
     };
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_storage_api::{BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory};
+    use reth_storage_api::{
+        BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+    };
     use reth_storage_errors::provider::ProviderError;
 
     const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
@@ -540,7 +542,9 @@ mod tests {
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
-    const fn assert_historical_state_provider<T: DBProvider + BlockNumReader + BlockHashReader>() {
+    const fn assert_historical_state_provider<
+        T: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader,
+    >() {
         assert_state_provider::<HistoricalStateProvider<T>>();
     }
 

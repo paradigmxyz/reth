@@ -6,7 +6,7 @@ description: Trace API for inspecting Ethereum state and transactions.
 
 The `trace` API provides several methods to inspect the Ethereum state, including Parity-style traces.
 
-A similar module exists (with other debug functions) with Geth-style traces ([`debug`](/jsonrpc/debug)).
+A similar module exists (with other debug functions) with Geth-style traces ([`debug`](https://github.com/paradigmxyz/reth/blob/main/docs/vocs/docs/pages/jsonrpc/debug.mdx)).
 
 The `trace` API gives deeper insight into transaction processing.
 
@@ -176,9 +176,9 @@ The second parameter is an array of one or more trace types (`vmTrace`, `trace`,
 
 The third and optional parameter is a block number, block hash, or a block tag (`latest`, `finalized`, `safe`, `earliest`, `pending`).
 
-| Client | Method invocation                                         |
-| ------ | --------------------------------------------------------- |
-| RPC    | `{"method": "trace_call", "params": [tx, type[], block]}` |
+| Client | Method invocation                                              |
+| ------ | -------------------------------------------------------------- |
+| RPC    | `{"method": "trace_callMany", "params": [trace[], block]}` |
 
 ### Example
 
@@ -220,9 +220,9 @@ The first parameter is a list of call traces, where each call trace is of the fo
 
 The second and optional parameter is a block number, block hash, or a block tag (`latest`, `finalized`, `safe`, `earliest`, `pending`).
 
-| Client | Method invocation                                      |
-| ------ | ------------------------------------------------------ |
-| RPC    | `{"method": "trace_call", "params": [trace[], block]}` |
+| Client | Method invocation                                          |
+| ------ | ---------------------------------------------------------- |
+| RPC    | `{"method": "trace_callMany", "params": [trace[], block]}` |
 
 ### Example
 
@@ -284,9 +284,9 @@ The second and optional parameter is a block number, block hash, or a block tag 
 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
 
-| Client | Method invocation                                      |
-| ------ | ------------------------------------------------------ |
-| RPC    | `{"method": "trace_call", "params": [raw_tx, type[]]}` |
+| Client | Method invocation                                                     |
+| ------ | --------------------------------------------------------------------- |
+| RPC    | `{"method": "trace_rawTransaction", "params": [raw_tx, type[]]}` |
 
 ### Example
 

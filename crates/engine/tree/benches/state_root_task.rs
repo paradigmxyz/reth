@@ -44,7 +44,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
     let mut rng = runner.rng().clone();
     let all_addresses: Vec<Address> =
         (0..params.num_accounts).map(|_| Address::random_with(&mut rng)).collect();
-    let mut updates = Vec::new();
+    let mut updates = Vec::with_capacity(params.updates_per_account);
 
     for _ in 0..params.updates_per_account {
         let mut state_update = EvmState::default();
@@ -122,7 +122,7 @@ fn setup_provider(
     for update in state_updates {
         let provider_rw = factory.provider_rw()?;
 
-        let mut account_updates = Vec::new();
+        let mut account_updates = Vec::with_capacity(update.len());
 
         for (address, account) in update {
             // only process self-destructs if account exists, always process
@@ -228,16 +228,22 @@ fn bench_state_root(c: &mut Criterion) {
                     },
                     |(genesis_hash, mut payload_processor, provider, state_updates)| {
                         black_box({
-                            let mut handle = payload_processor.spawn(
-                                Default::default(),
-                                core::iter::empty::<
-                                    Result<Recovered<TransactionSigned>, core::convert::Infallible>,
-                                >(),
-                                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                                ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-                                TrieInput::default(),
-                                &TreeConfig::default(),
-                            );
+                            let mut handle = payload_processor
+                                .spawn(
+                                    Default::default(),
+                                    core::iter::empty::<
+                                        Result<
+                                            Recovered<TransactionSigned>,
+                                            core::convert::Infallible,
+                                        >,
+                                    >(),
+                                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                                    ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+                                    TrieInput::default(),
+                                    &TreeConfig::default(),
+                                )
+                                .map_err(|(err, ..)| err)
+                                .expect("failed to spawn payload processor");
 
                             let mut state_hook = handle.state_hook();
 

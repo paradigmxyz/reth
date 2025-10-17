@@ -54,6 +54,8 @@ reth-testing-utils.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 rand.workspace = true
+revm-state.workspace = true
+criterion.workspace = true
 
 [features]
 serde = [
@@ -82,3 +84,8 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]
+
+[[bench]]
+name = "canonical_hashes_range"
+harness = false
+required-features = ["test-utils"]

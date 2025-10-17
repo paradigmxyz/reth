@@ -1,13 +1,13 @@
 use crate::segments::{
-    AccountHistory, ReceiptsByLogs, Segment, SenderRecovery, StorageHistory, TransactionLookup,
-    UserReceipts,
+    AccountHistory, MerkleChangeSets, ReceiptsByLogs, Segment, SenderRecovery, StorageHistory,
+    TransactionLookup, UserReceipts,
 };
 use alloy_eips::eip2718::Encodable2718;
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, PruneCheckpointWriter,
-    StaticFileProviderFactory,
+    providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
+    PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 
@@ -51,7 +51,9 @@ where
             Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
         > + DBProvider<Tx: DbTxMut>
         + PruneCheckpointWriter
-        + BlockReader<Transaction: Encodable2718>,
+        + PruneCheckpointReader
+        + BlockReader<Transaction: Encodable2718>
+        + ChainStateBlockReader,
 {
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].
@@ -66,6 +68,7 @@ where
             account_history,
             storage_history,
             bodies_history: _,
+            merkle_changesets,
             receipts_log_filter,
         } = prune_modes;
 
@@ -76,6 +79,8 @@ where
             .segment(StaticFileTransactions::new(static_file_provider.clone()))
             // Static file receipts
             .segment(StaticFileReceipts::new(static_file_provider))
+            // Merkle changesets
+            .segment(MerkleChangeSets::new(merkle_changesets))
             // Account history
             .segment_opt(account_history.map(AccountHistory::new))
             // Storage history

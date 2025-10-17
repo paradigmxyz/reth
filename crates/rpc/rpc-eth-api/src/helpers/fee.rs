@@ -109,10 +109,10 @@ pub trait EthFees:
             // need to validate that they are monotonically
             // increasing and 0 <= p <= 100
             // Note: The types used ensure that the percentiles are never < 0
-            if let Some(percentiles) = &reward_percentiles {
-                if percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.) {
-                    return Err(EthApiError::InvalidRewardPercentiles.into())
-                }
+            if let Some(percentiles) = &reward_percentiles &&
+                percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.)
+            {
+                return Err(EthApiError::InvalidRewardPercentiles.into())
             }
 
             // Fetch the headers and ensure we got all of them

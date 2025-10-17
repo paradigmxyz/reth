@@ -55,7 +55,7 @@ impl TriePrefixSetsMut {
 }
 
 /// Collection of trie prefix sets.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct TriePrefixSets {
     /// A set of account prefixes that have changed.
     pub account_prefix_set: PrefixSet,
@@ -280,8 +280,8 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
-        assert_eq!(prefix_set_mut.keys.len(), 4); // Length should be 3 (including duplicate)
-        assert_eq!(prefix_set_mut.keys.capacity(), 4); // Capacity should be 4 (including duplicate)
+        assert_eq!(prefix_set_mut.keys.len(), 4); // Length is 4 (before deduplication)
+        assert_eq!(prefix_set_mut.keys.capacity(), 4); // Capacity is 4 (before deduplication)
 
         let mut prefix_set = prefix_set_mut.freeze();
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
@@ -300,8 +300,8 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
-        assert_eq!(prefix_set_mut.keys.len(), 4); // Length should be 3 (including duplicate)
-        assert_eq!(prefix_set_mut.keys.capacity(), 101); // Capacity should be 101 (including duplicate)
+        assert_eq!(prefix_set_mut.keys.len(), 4); // Length is 4 (before deduplication)
+        assert_eq!(prefix_set_mut.keys.capacity(), 101); // Capacity is 101 (before deduplication)
 
         let mut prefix_set = prefix_set_mut.freeze();
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));

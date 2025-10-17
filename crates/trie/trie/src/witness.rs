@@ -84,7 +84,7 @@ impl<T, H> TrieWitness<T, H> {
         self
     }
 
-    /// Set `always_include_root_node` to true. Root node will be included even on empty state.
+    /// Set `always_include_root_node` to true. Root node will be included even in empty state.
     /// This setting is useful if the caller wants to verify the witness against the
     /// parent state root.
     pub const fn always_include_root_node(mut self) -> Self {
@@ -196,7 +196,11 @@ where
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
                 .unwrap_or_default();
-            sparse_trie.update_account(hashed_address, account, &blinded_provider_factory)?;
+
+            if !sparse_trie.update_account(hashed_address, account, &blinded_provider_factory)? {
+                let nibbles = Nibbles::unpack(hashed_address);
+                sparse_trie.remove_account_leaf(&nibbles, &blinded_provider_factory)?;
+            }
 
             while let Ok(node) = rx.try_recv() {
                 self.witness.insert(keccak256(&node), node);

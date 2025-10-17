@@ -41,12 +41,10 @@ use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
-use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitStorageError};
-use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
-use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
+use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -67,26 +65,19 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, ProviderError,
-    ProviderFactory, ProviderResult, StageCheckpointReader, StateProviderFactory,
+    BlockNumReader, BlockReaderIdExt, ProviderError, ProviderFactory, ProviderResult,
     StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
-use reth_stages::{
-    sets::DefaultStages, stages::EraImportSource, MetricEvent, PipelineBuilder, PipelineTarget,
-    StageId,
-};
+use reth_stages::{stages::EraImportSource, MetricEvent};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, thread::available_parallelism};
-use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedSender},
-    oneshot, watch,
-};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 use futures::{future::Either, stream, Stream, StreamExt};
 use reth_node_ethstats::EthStatsService;
@@ -442,7 +433,10 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the [`MiningMode`] intended for --dev mode.
-    pub fn dev_mining_mode(&self, pool: impl TransactionPool) -> MiningMode {
+    pub fn dev_mining_mode<Pool>(&self, pool: Pool) -> MiningMode<Pool>
+    where
+        Pool: TransactionPool + Unpin,
+    {
         if let Some(interval) = self.node_config().dev.block_time {
             MiningMode::interval(interval)
         } else {
@@ -464,70 +458,13 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = ProviderFactory::new(
+        Ok(ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
             StaticFileProvider::read_write(self.data_dir().static_files())?,
         )
         .with_prune_modes(self.prune_modes())
-        .with_static_files_metrics();
-
-        let has_receipt_pruning =
-            self.toml_config().prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
-
-        // Check for consistency between database and static files. If it fails, it unwinds to
-        // the first block that's consistent between database and static files.
-        if let Some(unwind_target) = factory
-            .static_file_provider()
-            .check_consistency(&factory.provider()?, has_receipt_pruning)?
-        {
-            // Highly unlikely to happen, and given its destructive nature, it's better to panic
-            // instead.
-            assert_ne!(
-                unwind_target,
-                PipelineTarget::Unwind(0),
-                "A static file <> database inconsistency was found that would trigger an unwind to block 0"
-            );
-
-            info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
-
-            let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
-
-            // Builds an unwind-only pipeline
-            let pipeline = PipelineBuilder::default()
-                .add_stages(DefaultStages::new(
-                    factory.clone(),
-                    tip_rx,
-                    Arc::new(NoopConsensus::default()),
-                    NoopHeaderDownloader::default(),
-                    NoopBodiesDownloader::default(),
-                    NoopEvmConfig::<Evm>::default(),
-                    self.toml_config().stages.clone(),
-                    self.prune_modes(),
-                    None,
-                ))
-                .build(
-                    factory.clone(),
-                    StaticFileProducer::new(factory.clone(), self.prune_modes()),
-                );
-
-            // Unwinds to block
-            let (tx, rx) = oneshot::channel();
-
-            // Pipeline should be run as blocking and panic if it fails.
-            self.task_executor().spawn_critical_blocking(
-                "pipeline task",
-                Box::pin(async move {
-                    let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
-                    let _ = tx.send(result);
-                }),
-            );
-            rx.await?.inspect_err(|err| {
-                error!(target: "reth::cli", unwind_target = %unwind_target, %err, "failed to run unwind")
-            })?;
-        }
-
-        Ok(factory)
+        .with_static_files_metrics())
     }
 
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
@@ -580,7 +517,7 @@ where
         // ensure recorder runs upkeep periodically
         install_prometheus_recorder().spawn_upkeep();
 
-        let listen_addr = self.node_config().metrics;
+        let listen_addr = self.node_config().metrics.prometheus;
         if let Some(addr) = listen_addr {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", addr);
             let config = MetricServerConfig::new(
@@ -850,21 +787,6 @@ where
         &self.node_adapter().provider
     }
 
-    /// Returns the initial backfill to sync to at launch.
-    ///
-    /// This returns the configured `debug.tip` if set, otherwise it will check if backfill was
-    /// previously interrupted and returns the block hash of the last checkpoint, see also
-    /// [`Self::check_pipeline_consistency`]
-    pub fn initial_backfill_target(&self) -> ProviderResult<Option<B256>> {
-        let mut initial_target = self.node_config().debug.tip;
-
-        if initial_target.is_none() {
-            initial_target = self.check_pipeline_consistency()?;
-        }
-
-        Ok(initial_target)
-    }
-
     /// Returns true if the node should terminate after the initial backfill run.
     ///
     /// This is the case if any of these configs are set:
@@ -878,7 +800,7 @@ where
     ///
     /// This checks for OP-Mainnet and ensures we have all the necessary data to progress (past
     /// bedrock height)
-    fn ensure_chain_specific_db_checks(&self) -> ProviderResult<()> {
+    pub fn ensure_chain_specific_db_checks(&self) -> ProviderResult<()> {
         if self.chain_spec().is_optimism() &&
             !self.is_dev() &&
             self.chain_id() == Chain::optimism_mainnet()
@@ -896,54 +818,6 @@ where
         Ok(())
     }
 
-    /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
-    /// than the checkpoint of the first stage).
-    ///
-    /// This will return the pipeline target if:
-    ///  * the pipeline was interrupted during its previous run
-    ///  * a new stage was added
-    ///  * stage data was dropped manually through `reth stage drop ...`
-    ///
-    /// # Returns
-    ///
-    /// A target block hash if the pipeline is inconsistent, otherwise `None`.
-    pub fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
-        // If no target was provided, check if the stages are congruent - check if the
-        // checkpoint of the last stage matches the checkpoint of the first.
-        let first_stage_checkpoint = self
-            .blockchain_db()
-            .get_stage_checkpoint(*StageId::ALL.first().unwrap())?
-            .unwrap_or_default()
-            .block_number;
-
-        // Skip the first stage as we've already retrieved it and comparing all other checkpoints
-        // against it.
-        for stage_id in StageId::ALL.iter().skip(1) {
-            let stage_checkpoint = self
-                .blockchain_db()
-                .get_stage_checkpoint(*stage_id)?
-                .unwrap_or_default()
-                .block_number;
-
-            // If the checkpoint of any stage is less than the checkpoint of the first stage,
-            // retrieve and return the block hash of the latest header and use it as the target.
-            if stage_checkpoint < first_stage_checkpoint {
-                debug!(
-                    target: "consensus::engine",
-                    first_stage_checkpoint,
-                    inconsistent_stage_id = %stage_id,
-                    inconsistent_stage_checkpoint = stage_checkpoint,
-                    "Pipeline sync progress is inconsistent"
-                );
-                return self.blockchain_db().block_hash(first_stage_checkpoint);
-            }
-        }
-
-        self.ensure_chain_specific_db_checks()?;
-
-        Ok(None)
-    }
-
     /// Expire the pre-merge transactions if the node is configured to do so and the chain has a
     /// merge block.
     ///
@@ -953,20 +827,24 @@ where
     where
         T: FullNodeTypes<Provider: StaticFileProviderFactory>,
     {
-        if self.node_config().pruning.bodies_pre_merge {
-            if let Some(merge_block) =
-                self.chain_spec().ethereum_fork_activation(EthereumHardfork::Paris).block_number()
-            {
-                // Ensure we only expire transactions after we synced past the merge block.
-                let Some(latest) = self.blockchain_db().latest_header()? else { return Ok(()) };
-                if latest.number() > merge_block {
-                    let provider = self.blockchain_db().static_file_provider();
-                    if provider.get_lowest_transaction_static_file_block() < Some(merge_block) {
-                        info!(target: "reth::cli", merge_block, "Expiring pre-merge transactions");
-                        provider.delete_transactions_below(merge_block)?;
-                    } else {
-                        debug!(target: "reth::cli", merge_block, "No pre-merge transactions to expire");
-                    }
+        if self.node_config().pruning.bodies_pre_merge &&
+            let Some(merge_block) = self
+                .chain_spec()
+                .ethereum_fork_activation(EthereumHardfork::Paris)
+                .block_number()
+        {
+            // Ensure we only expire transactions after we synced past the merge block.
+            let Some(latest) = self.blockchain_db().latest_header()? else { return Ok(()) };
+            if latest.number() > merge_block {
+                let provider = self.blockchain_db().static_file_provider();
+                if provider
+                    .get_lowest_transaction_static_file_block()
+                    .is_some_and(|lowest| lowest < merge_block)
+                {
+                    info!(target: "reth::cli", merge_block, "Expiring pre-merge transactions");
+                    provider.delete_transactions_below(merge_block)?;
+                } else {
+                    debug!(target: "reth::cli", merge_block, "No pre-merge transactions to expire");
                 }
             }
         }
@@ -1058,19 +936,6 @@ where
 
         Ok(())
     }
-}
-
-impl<T, CB>
-    LaunchContextWith<
-        Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
-    >
-where
-    T: FullNodeTypes<
-        Provider: StateProviderFactory + ChainSpecProvider,
-        Types: NodeTypesForProvider,
-    >,
-    CB: NodeComponentsBuilder<T>,
-{
 }
 
 /// Joins two attachments together, preserving access to both values.

@@ -63,7 +63,7 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 
     // Can also query the header by hash!
     let header_by_hash =
-        provider.header(&sealed_header.hash())?.ok_or(eyre::eyre!("header by hash not found"))?;
+        provider.header(sealed_header.hash())?.ok_or(eyre::eyre!("header by hash not found"))?;
     assert_eq!(sealed_header.header(), &header_by_hash);
 
     // The header's total difficulty is stored in a separate table, so we have a separate call for
@@ -123,7 +123,7 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
     let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
     assert_eq!(block.number, number);
 
-    // Can query a block with its senders, this is useful when you'd want to execute a block and do
+    // Can query a block with its senders, this is useful when you want to execute a block and do
     // not want to manually recover the senders for each transaction (as each transaction is
     // stored on disk with its v,r,s but not its `from` field.).
     let _recovered_block = provider
@@ -145,7 +145,7 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
         .ok_or(eyre::eyre!("block by hash not found"))?;
     assert_eq!(block, block_by_hash2);
 
-    // Or you can also specify the datasource. For this provider this always return `None`, but
+    // Or you can also specify the datasource. For this provider this always returns `None`, but
     // the blockchain tree is also able to access pending state not available in the db yet.
     let block_by_hash3 = provider
         .find_block_by_hash(sealed_block.hash(), BlockSource::Any)?

@@ -40,7 +40,7 @@ where
     Io: AsyncRead + AsyncWrite + Unpin,
 {
     /// Connect to an `ECIES` server
-    #[instrument(skip(transport, secret_key))]
+    #[instrument(level = "trace", skip(transport, secret_key))]
     pub async fn connect(
         transport: Io,
         secret_key: SecretKey,

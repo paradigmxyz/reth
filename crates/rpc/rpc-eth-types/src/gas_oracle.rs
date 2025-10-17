@@ -49,7 +49,7 @@ pub struct GasPriceOracleConfig {
     pub max_reward_percentile_count: u64,
 
     /// The default gas price to use if there are no blocks to use
-    pub default: Option<U256>,
+    pub default_suggested_fee: Option<U256>,
 
     /// The maximum gas price to use for the estimate
     pub max_price: Option<U256>,
@@ -66,7 +66,7 @@ impl Default for GasPriceOracleConfig {
             max_header_history: MAX_HEADER_HISTORY,
             max_block_history: MAX_HEADER_HISTORY,
             max_reward_percentile_count: MAX_REWARD_PERCENTILE_COUNT,
-            default: None,
+            default_suggested_fee: None,
             max_price: Some(DEFAULT_MAX_GAS_PRICE),
             ignore_price: Some(DEFAULT_IGNORE_GAS_PRICE),
         }
@@ -112,7 +112,12 @@ where
         // this is the number of blocks that we will cache the values for
         let cached_values = (oracle_config.blocks * 5).max(oracle_config.max_block_history as u32);
         let inner = Mutex::new(GasPriceOracleInner {
-            last_price: Default::default(),
+            last_price: GasPriceOracleResult {
+                block_hash: B256::ZERO,
+                price: oracle_config
+                    .default_suggested_fee
+                    .unwrap_or_else(|| GasPriceOracleResult::default().price),
+            },
             lowest_effective_tip_cache: EffectiveTipLruCache(LruMap::new(ByLength::new(
                 cached_values,
             ))),
@@ -199,10 +204,10 @@ where
         };
 
         // constrain to the max price
-        if let Some(max_price) = self.oracle_config.max_price {
-            if price > max_price {
-                price = max_price;
-            }
+        if let Some(max_price) = self.oracle_config.max_price &&
+            price > max_price
+        {
+            price = max_price;
         }
 
         inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price };
@@ -249,10 +254,10 @@ where
             };
 
             // ignore transactions with a tip under the configured threshold
-            if let Some(ignore_under) = self.ignore_price {
-                if effective_tip < Some(ignore_under) {
-                    continue
-                }
+            if let Some(ignore_under) = self.ignore_price &&
+                effective_tip < Some(ignore_under)
+            {
+                continue
             }
 
             // check if the sender was the coinbase, if so, ignore
@@ -333,10 +338,10 @@ where
         }
 
         // constrain to the max price
-        if let Some(max_price) = self.oracle_config.max_price {
-            if suggestion > max_price {
-                suggestion = max_price;
-            }
+        if let Some(max_price) = self.oracle_config.max_price &&
+            suggestion > max_price
+        {
+            suggestion = max_price;
         }
 
         inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price: suggestion };

@@ -175,7 +175,10 @@ where
     /// the response if it was forwarded.
     async fn maybe_forward_request(&self, req: &Request<'_>) -> Option<MethodResponse> {
         let should_forward = match req.method_name() {
-            "debug_traceTransaction" => self.should_forward_transaction(req),
+            "debug_traceTransaction" |
+            "eth_getTransactionByHash" |
+            "eth_getTransactionReceipt" |
+            "eth_getRawTransactionByHash" => self.should_forward_transaction(req),
             method => self.should_forward_block_request(method, req),
         };
 
@@ -386,12 +389,12 @@ mod tests {
     #[test]
     fn parses_transaction_hash_from_params() {
         let hash = "0xdbdfa0f88b2cf815fdc1621bd20c2bd2b0eed4f0c56c9be2602957b5a60ec702";
-        let params_str = format!(r#"["{}"]"#, hash);
+        let params_str = format!(r#"["{hash}"]"#);
         let params = Params::new(Some(&params_str));
         let result = parse_transaction_hash_from_params(&params);
         assert!(result.is_ok());
         let parsed_hash = result.unwrap();
-        assert_eq!(format!("{:?}", parsed_hash), hash);
+        assert_eq!(format!("{parsed_hash:?}"), hash);
     }
 
     /// Tests that invalid transaction hash returns error.

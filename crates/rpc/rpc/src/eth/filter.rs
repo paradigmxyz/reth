@@ -348,7 +348,7 @@ where
                 let stream = self.pool().new_pending_pool_transactions_listener();
                 let full_txs_receiver = FullTransactionsReceiver::new(
                     stream,
-                    self.inner.eth_api.tx_resp_builder().clone(),
+                    dyn_clone::clone(self.inner.eth_api.tx_resp_builder()),
                 );
                 FilterKind::PendingTransaction(PendingTransactionKind::FullTransaction(Arc::new(
                     full_txs_receiver,
@@ -500,8 +500,17 @@ where
                     .map(|num| self.provider().convert_block_number(num))
                     .transpose()?
                     .flatten();
+
+                if let Some(f) = from &&
+                    f > info.best_number
+                {
+                    // start block higher than local head, can return empty
+                    return Ok(Vec::new());
+                }
+
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
+
                 self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
                     .await
             }
@@ -649,22 +658,23 @@ where
             // size check but only if range is multiple blocks, so we always return all
             // logs of a single block
             let is_multi_block_range = from_block != to_block;
-            if let Some(max_logs_per_response) = limits.max_logs_per_response {
-                if is_multi_block_range && all_logs.len() > max_logs_per_response {
-                    debug!(
-                        target: "rpc::eth::filter",
-                        logs_found = all_logs.len(),
-                        max_logs_per_response,
-                        from_block,
-                        to_block = num_hash.number.saturating_sub(1),
-                        "Query exceeded max logs per response limit"
-                    );
-                    return Err(EthFilterError::QueryExceedsMaxResults {
-                        max_logs: max_logs_per_response,
-                        from_block,
-                        to_block: num_hash.number.saturating_sub(1),
-                    });
-                }
+            if let Some(max_logs_per_response) = limits.max_logs_per_response &&
+                is_multi_block_range &&
+                all_logs.len() > max_logs_per_response
+            {
+                debug!(
+                    target: "rpc::eth::filter",
+                    logs_found = all_logs.len(),
+                    max_logs_per_response,
+                    from_block,
+                    to_block = num_hash.number.saturating_sub(1),
+                    "Query exceeded max logs per response limit"
+                );
+                return Err(EthFilterError::QueryExceedsMaxResults {
+                    max_logs: max_logs_per_response,
+                    from_block,
+                    to_block: num_hash.number.saturating_sub(1),
+                });
             }
         }
 

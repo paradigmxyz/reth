@@ -74,7 +74,7 @@ Database:
           Specify a snapshot URL or let the command propose a default one.
 
           Available snapshot sources:
-          - https://snapshots.merkle.io (default, mainnet archive)
+          - https://www.merkle.io/snapshots (default, mainnet archive)
           - https://publicnode.com/snapshots (full nodes & testnets)
 
           If no URL is provided, the latest mainnet archive snapshot
@@ -161,4 +161,23 @@ Display:
 
   -q, --quiet
           Silence all log output
+
+Tracing:
+      --tracing-otlp[=<URL>]
+          Enable `Opentelemetry` tracing export to an OTLP endpoint. Currently only http exporting is supported.
+
+          If no value provided, defaults to `http://localhost:4318/v1/traces`.
+
+          Example: --tracing-otlp=http://collector:4318/v1/traces
+
+          [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
+
+      --tracing-otlp.filter <FILTER>
+          Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
+
+          Example: --tracing-otlp.filter=info,reth=debug,hyper_util=off
+
+          Defaults to TRACE if not specified.
+
+          [default: TRACE]
 ```

@@ -6,8 +6,9 @@ use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_exex_types::FinishedExExHeight;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderFactory,
-    NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory,
+    providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
+    DatabaseProviderFactory, NodePrimitivesProvider, PruneCheckpointReader, PruneCheckpointWriter,
+    StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use std::time::Duration;
@@ -80,7 +81,9 @@ impl PrunerBuilder {
     where
         PF: DatabaseProviderFactory<
                 ProviderRW: PruneCheckpointWriter
+                                + PruneCheckpointReader
                                 + BlockReader<Transaction: Encodable2718>
+                                + ChainStateBlockReader
                                 + StaticFileProviderFactory<
                     Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
                 >,
@@ -111,7 +114,9 @@ impl PrunerBuilder {
                 Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
             > + DBProvider<Tx: DbTxMut>
             + BlockReader<Transaction: Encodable2718>
-            + PruneCheckpointWriter,
+            + ChainStateBlockReader
+            + PruneCheckpointWriter
+            + PruneCheckpointReader,
     {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
 
@@ -129,7 +134,7 @@ impl Default for PrunerBuilder {
     fn default() -> Self {
         Self {
             block_interval: 5,
-            segments: PruneModes::none(),
+            segments: PruneModes::default(),
             delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
             timeout: None,
             finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,

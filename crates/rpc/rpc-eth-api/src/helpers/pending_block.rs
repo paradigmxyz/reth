@@ -13,22 +13,22 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, ExecutionOutcome},
-    ConfigureEvm, Evm, NextBlockEnvAttributes, SpecFor,
+    ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
-    builder::config::PendingBlockKind, pending_block::PendingBlockAndReceipts, EthApiError,
-    PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin,
+    block::BlockAndReceipts, builder::config::PendingBlockKind, EthApiError, PendingBlock,
+    PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
-    ReceiptProvider, StateProviderBox, StateProviderFactory,
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx, ReceiptProvider,
+    StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
-    TransactionPool,
+    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
+    PoolTransaction, TransactionPool,
 };
 use revm::context_interface::Block;
 use std::{
@@ -61,33 +61,26 @@ pub trait LoadPendingBlock:
     /// Configures the [`PendingBlockEnv`] for the pending block
     ///
     /// If no pending block is available, this will derive it from the `latest` block
-    #[expect(clippy::type_complexity)]
-    fn pending_block_env_and_cfg(
-        &self,
-    ) -> Result<
-        PendingBlockEnv<
-            ProviderBlock<Self::Provider>,
-            ProviderReceipt<Self::Provider>,
-            SpecFor<Self::Evm>,
-        >,
-        Self::Error,
-    > {
-        if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)? {
-            if let Some(receipts) = self
+    fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
+        if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)? &&
+            let Some(receipts) = self
                 .provider()
                 .receipts_by_block(block.hash().into())
                 .map_err(Self::Error::from_eth_err)?
-            {
-                // Note: for the PENDING block we assume it is past the known merge block and
-                // thus this will not fail when looking up the total
-                // difficulty value for the blockenv.
-                let evm_env = self.evm_config().evm_env(block.header());
+        {
+            // Note: for the PENDING block we assume it is past the known merge block and
+            // thus this will not fail when looking up the total
+            // difficulty value for the blockenv.
+            let evm_env = self
+                .evm_config()
+                .evm_env(block.header())
+                .map_err(RethError::other)
+                .map_err(Self::Error::from_eth_err)?;
 
-                return Ok(PendingBlockEnv::new(
-                    evm_env,
-                    PendingBlockEnvOrigin::ActualPending(Arc::new(block), Arc::new(receipts)),
-                ));
-            }
+            return Ok(PendingBlockEnv::new(
+                evm_env,
+                PendingBlockEnvOrigin::ActualPending(Arc::new(block), Arc::new(receipts)),
+            ));
         }
 
         // no pending block from the CL yet, so we use the latest block and modify the env
@@ -163,7 +156,7 @@ pub trait LoadPendingBlock:
             // Is the pending block cached?
             if let Some(pending_block) = lock.as_ref() {
                 // Is the cached block not expired and latest is its parent?
-                if pending.evm_env.block_env.number == U256::from(pending_block.block().number()) &&
+                if pending.evm_env.block_env.number() == U256::from(pending_block.block().number()) &&
                     parent.hash() == pending_block.block().parent_hash() &&
                     now <= pending_block.expires_at
                 {
@@ -199,8 +192,7 @@ pub trait LoadPendingBlock:
     /// Returns the locally built pending block
     fn local_pending_block(
         &self,
-    ) -> impl Future<Output = Result<Option<PendingBlockAndReceipts<Self::Primitives>>, Self::Error>>
-           + Send
+    ) -> impl Future<Output = Result<Option<BlockAndReceipts<Self::Primitives>>, Self::Error>> + Send
     where
         Self: SpawnBlocking,
         Self::Pool:
@@ -214,7 +206,9 @@ pub trait LoadPendingBlock:
             let pending = self.pending_block_env_and_cfg()?;
 
             Ok(match pending.origin {
-                PendingBlockEnvOrigin::ActualPending(block, receipts) => Some((block, receipts)),
+                PendingBlockEnvOrigin::ActualPending(block, receipts) => {
+                    Some(BlockAndReceipts { block, receipts })
+                }
                 PendingBlockEnvOrigin::DerivedFromLatest(..) => {
                     self.pool_pending_block().await?.map(PendingBlock::into_block_and_receipts)
                 }
@@ -261,15 +255,18 @@ pub trait LoadPendingBlock:
             .unwrap_or_else(BlobParams::cancun);
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let block_gas_limit: u64 = block_env.gas_limit;
+        let block_gas_limit: u64 = block_env.gas_limit();
 
         // Only include transactions if not configured as Empty
         if !self.pending_block_kind().is_empty() {
-            let mut best_txs =
-                self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
-                    block_env.basefee,
+            let mut best_txs = self
+                .pool()
+                .best_transactions_with_attributes(BestTransactionsAttributes::new(
+                    block_env.basefee(),
                     block_env.blob_gasprice().map(|gasprice| gasprice as u64),
-                ));
+                ))
+                // freeze to get a block as fast as possible
+                .without_updates();
 
             while let Some(pool_tx) = best_txs.next() {
                 // ensure we still have capacity for this transaction
@@ -305,21 +302,21 @@ pub trait LoadPendingBlock:
 
                 // There's only limited amount of blob space available per block, so we need to
                 // check if the EIP-4844 can still fit in the block
-                if let Some(tx_blob_gas) = tx.blob_gas_used() {
-                    if sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block() {
-                        // we can't fit this _blob_ transaction into the block, so we mark it as
-                        // invalid, which removes its dependent transactions from
-                        // the iterator. This is similar to the gas limit condition
-                        // for regular transactions above.
-                        best_txs.mark_invalid(
-                            &pool_tx,
-                            InvalidPoolTransactionError::ExceedsGasLimit(
-                                tx_blob_gas,
-                                blob_params.max_blob_gas_per_block(),
-                            ),
-                        );
-                        continue
-                    }
+                if let Some(tx_blob_gas) = tx.blob_gas_used() &&
+                    sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block()
+                {
+                    // we can't fit this _blob_ transaction into the block, so we mark it as
+                    // invalid, which removes its dependent transactions from
+                    // the iterator. This is similar to the gas limit condition
+                    // for regular transactions above.
+                    best_txs.mark_invalid(
+                        &pool_tx,
+                        InvalidPoolTransactionError::ExceedsGasLimit(
+                            tx_blob_gas,
+                            blob_params.max_blob_gas_per_block(),
+                        ),
+                    );
+                    continue
                 }
 
                 let gas_used = match builder.execute_transaction(tx.clone()) {
@@ -362,8 +359,8 @@ pub trait LoadPendingBlock:
             }
         }
 
-        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
-            builder.finish(&state_provider).map_err(Self::Error::from_eth_err)?;
+        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates } =
+            builder.finish(NoopProvider::default()).map_err(Self::Error::from_eth_err)?;
 
         let execution_outcome = ExecutionOutcome::new(
             db.take_bundle(),
@@ -376,6 +373,7 @@ pub trait LoadPendingBlock:
             recovered_block: block.into(),
             execution_output: Arc::new(execution_outcome),
             hashed_state: Arc::new(hashed_state),
+            trie_updates: Arc::new(trie_updates),
         })
     }
 }

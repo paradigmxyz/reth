@@ -6,12 +6,16 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
+/// A configurable App on top of the cli parser.
+pub mod app;
 /// Chain specification parser.
 pub mod chainspec;
 pub mod interface;
-pub use interface::Cli;
+
+pub use app::CliApp;
+pub use interface::{Cli, Commands};
 
 #[cfg(test)]
 mod test {

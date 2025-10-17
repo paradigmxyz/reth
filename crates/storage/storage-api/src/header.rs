@@ -15,19 +15,19 @@ pub trait HeaderProvider: Send + Sync {
     type Header: BlockHeader;
 
     /// Check if block is known
-    fn is_known(&self, block_hash: &BlockHash) -> ProviderResult<bool> {
+    fn is_known(&self, block_hash: BlockHash) -> ProviderResult<bool> {
         self.header(block_hash).map(|header| header.is_some())
     }
 
     /// Get header by block hash
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>>;
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>>;
 
     /// Retrieves the header sealed by the given block hash.
     fn sealed_header_by_hash(
         &self,
         block_hash: BlockHash,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        Ok(self.header(&block_hash)?.map(|header| SealedHeader::new(header, block_hash)))
+        Ok(self.header(block_hash)?.map(|header| SealedHeader::new(header, block_hash)))
     }
 
     /// Get header by block number
@@ -39,13 +39,13 @@ pub trait HeaderProvider: Send + Sync {
         hash_or_num: BlockHashOrNumber,
     ) -> ProviderResult<Option<Self::Header>> {
         match hash_or_num {
-            BlockHashOrNumber::Hash(hash) => self.header(&hash),
+            BlockHashOrNumber::Hash(hash) => self.header(hash),
             BlockHashOrNumber::Number(num) => self.header_by_number(num),
         }
     }
 
     /// Get total difficulty by block hash.
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>>;
+    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>>;
 
     /// Get total difficulty by block number.
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>>;

@@ -59,6 +59,7 @@ metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
+dashmap.workspace = true
 schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true
@@ -84,7 +85,6 @@ reth-evm = { workspace = true, features = ["test-utils"] }
 reth-exex-types.workspace = true
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-prune-types.workspace = true
-reth-rpc-convert.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-static-file.workspace = true
 reth-testing-utils.workspace = true

@@ -332,10 +332,7 @@ where
         Err(err) => {
             // Clean up the temporary file before returning the error
             let _ = fs::remove_file(&tmp_path);
-            return Err(FsPathError::Write {
-                source: Error::other(err.into()),
-                path: tmp_path.clone(),
-            });
+            return Err(FsPathError::Write { source: Error::other(err.into()), path: tmp_path });
         }
     }
 
