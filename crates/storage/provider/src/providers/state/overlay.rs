@@ -1,5 +1,5 @@
 use alloy_primitives::{BlockNumber, B256};
-use reth_db_api::{tables, transaction::DbTx, DatabaseError};
+use reth_db_api::DatabaseError;
 use reth_errors::ProviderError;
 use reth_stages_types::StageId;
 use reth_storage_api::{DBProvider, DatabaseProviderFactory, StageCheckpointReader, TrieReader};
@@ -146,13 +146,9 @@ where
 /// using the in-memory overlay factories.
 #[derive(Debug, Clone)]
 pub struct OverlayStateProvider<Provider: DBProvider> {
-    /// The hashed cursor factory that wraps the database cursor factory.
-    hashed_cursor_factory: HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<Provider::Tx>,
-        Arc<HashedPostStateSorted>,
-    >,
     provider: Provider,
     trie_updates: Arc<TrieUpdatesSorted>,
+    hashed_post_state: Arc<HashedPostStateSorted>,
 }
 
 impl<Provider> OverlayStateProvider<Provider>
@@ -166,12 +162,7 @@ where
         trie_updates: Arc<TrieUpdatesSorted>,
         hashed_post_state: Arc<HashedPostStateSorted>,
     ) -> Self {
-        // Create the hashed cursor factory
-        let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.clone().into_tx());
-        let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, hashed_post_state);
-
-        Self { hashed_cursor_factory, provider, trie_updates }
+        Self { provider, trie_updates, hashed_post_state }
     }
 }
 
@@ -212,29 +203,37 @@ where
 impl<Provider> HashedCursorFactory for OverlayStateProvider<Provider>
 where
     Provider: DBProvider + Clone,
-    HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<Provider::Tx>,
-        Arc<HashedPostStateSorted>,
-    >: HashedCursorFactory,
 {
-    type AccountCursor = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<Provider::Tx>,
-        Arc<HashedPostStateSorted>,
-    > as HashedCursorFactory>::AccountCursor;
+    type AccountCursor<'a>
+        = <HashedPostStateCursorFactory<
+        DatabaseHashedCursorFactory<&'a Provider::Tx>,
+        &'a Arc<HashedPostStateSorted>,
+    > as HashedCursorFactory>::AccountCursor<'a>
+    where
+        Self: 'a;
 
-    type StorageCursor = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<Provider::Tx>,
-        Arc<HashedPostStateSorted>,
-    > as HashedCursorFactory>::StorageCursor;
+    type StorageCursor<'a>
+        = <HashedPostStateCursorFactory<
+        DatabaseHashedCursorFactory<&'a Provider::Tx>,
+        &'a Arc<HashedPostStateSorted>,
+    > as HashedCursorFactory>::StorageCursor<'a>
+    where
+        Self: 'a;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
-        self.hashed_cursor_factory.hashed_account_cursor()
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+        let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
+        let hashed_cursor_factory =
+            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
+        hashed_cursor_factory.hashed_account_cursor()
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor, DatabaseError> {
-        self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+        let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
+        let hashed_cursor_factory =
+            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
+        hashed_cursor_factory.hashed_storage_cursor(hashed_address)
     }
 }

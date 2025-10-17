@@ -24,10 +24,16 @@ where
     CF: HashedCursorFactory,
     T: AsRef<HashedPostStateSorted>,
 {
-    type AccountCursor = HashedPostStateAccountCursor<'a, CF::AccountCursor>;
-    type StorageCursor = HashedPostStateStorageCursor<'a, CF::StorageCursor>;
+    type AccountCursor<'b>
+        = HashedPostStateAccountCursor<'a, CF::AccountCursor<'b>>
+    where
+        Self: 'b;
+    type StorageCursor<'b>
+        = HashedPostStateStorageCursor<'a, CF::StorageCursor<'b>>
+    where
+        Self: 'b;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
         Ok(HashedPostStateAccountCursor::new(cursor, &self.post_state.as_ref().accounts))
     }
@@ -35,7 +41,7 @@ where
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor, DatabaseError> {
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
         Ok(HashedPostStateStorageCursor::new(
             cursor,

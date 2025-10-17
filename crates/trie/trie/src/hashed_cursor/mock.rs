@@ -55,17 +55,23 @@ impl MockHashedCursorFactory {
 }
 
 impl HashedCursorFactory for MockHashedCursorFactory {
-    type AccountCursor = MockHashedCursor<Account>;
-    type StorageCursor = MockHashedCursor<U256>;
+    type AccountCursor<'a>
+        = MockHashedCursor<Account>
+    where
+        Self: 'a;
+    type StorageCursor<'a>
+        = MockHashedCursor<U256>
+    where
+        Self: 'a;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         Ok(MockHashedCursor::new(self.hashed_accounts.clone(), self.visited_account_keys.clone()))
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor, DatabaseError> {
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         Ok(MockHashedCursor::new(
             self.hashed_storage_tries
                 .get(&hashed_address)

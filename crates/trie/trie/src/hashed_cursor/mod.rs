@@ -16,18 +16,22 @@ pub mod mock;
 /// The factory trait for creating cursors over the hashed state.
 pub trait HashedCursorFactory {
     /// The hashed account cursor type.
-    type AccountCursor: HashedCursor<Value = Account>;
+    type AccountCursor<'a>: HashedCursor<Value = Account>
+    where
+        Self: 'a;
     /// The hashed storage cursor type.
-    type StorageCursor: HashedStorageCursor<Value = U256>;
+    type StorageCursor<'a>: HashedStorageCursor<Value = U256>
+    where
+        Self: 'a;
 
     /// Returns a cursor for iterating over all hashed accounts in the state.
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError>;
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError>;
 
     /// Returns a cursor for iterating over all hashed storage entries in the state.
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor, DatabaseError>;
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError>;
 }
 
 /// The cursor for iterating over hashed entries.
