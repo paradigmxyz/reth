@@ -24,7 +24,7 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use tracing::{debug, trace};
+use tracing::{debug, instrument, trace};
 
 /// The level below which the sparse trie hashes are calculated in
 /// [`SerialSparseTrie::update_subtrie_hashes`].
@@ -175,6 +175,7 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// and resetting the trie to only contain an empty root node.
     ///
     /// Note: This method will error if the trie is blinded.
+    #[instrument(target = "trie::sparse", skip_all)]
     pub fn wipe(&mut self) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.wipe();
@@ -191,6 +192,7 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     ///
     /// - `Some(B256)` with the calculated root hash if the trie is revealed.
     /// - `None` if the trie is still blind.
+    #[instrument(target = "trie::sparse", skip_all)]
     pub fn root(&mut self) -> Option<B256> {
         Some(self.as_revealed_mut()?.root())
     }
@@ -230,6 +232,7 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// # Errors
     ///
     /// Returns an error if the trie is still blind, or if the update fails.
+    #[instrument(target = "trie::sparse", skip_all)]
     pub fn update_leaf(
         &mut self,
         path: Nibbles,
@@ -246,6 +249,7 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// # Errors
     ///
     /// Returns an error if the trie is still blind, or if the leaf cannot be removed
+    #[instrument(target = "trie::sparse", skip_all)]
     pub fn remove_leaf(
         &mut self,
         path: &Nibbles,
@@ -573,14 +577,13 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
+    #[instrument(target = "trie::sparse::serial", skip(self, provider))]
     fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
-        trace!(target: "trie::sparse", ?full_path, ?value, "update_leaf called");
-
         self.prefix_set.insert(full_path);
         let existing = self.values.insert(full_path, value);
         if existing.is_some() {
@@ -712,6 +715,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
+    #[instrument(target = "trie::sparse::serial", skip(self, provider))]
     fn remove_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: &Nibbles,
@@ -897,6 +901,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
+    #[instrument(target = "trie::sparse::serial", skip(self))]
     fn root(&mut self) -> B256 {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
@@ -1324,6 +1329,7 @@ impl SerialSparseTrie {
     ///
     /// This function identifies all nodes that have changed (based on the prefix set) at the given
     /// depth and recalculates their RLP representation.
+    #[instrument(target = "trie::sparse::serial", skip(self))]
     pub fn update_rlp_node_level(&mut self, depth: usize) {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
@@ -1369,6 +1375,7 @@ impl SerialSparseTrie {
     ///   specified depth.
     /// - A `PrefixSetMut` containing paths shallower than the specified depth that still need to be
     ///   tracked for future updates.
+    #[instrument(target = "trie::sparse::serial", skip(self))]
     fn get_changed_nodes_at_depth(
         &self,
         prefix_set: &mut PrefixSet,
@@ -1455,6 +1462,7 @@ impl SerialSparseTrie {
     /// # Panics
     ///
     /// If the node at provided path does not exist.
+    #[instrument(target = "trie::sparse::serial", skip_all, ret(level = "trace"))]
     pub fn rlp_node(
         &mut self,
         prefix_set: &mut PrefixSet,
