@@ -195,15 +195,15 @@ where
                 .copied()
                 .ok_or_else(|| eyre::eyre!("Block tag '{}' not found in registry", self.tag))?;
 
-            if let Some(expected_node) = self.expected_node_idx {
-                if node_idx != expected_node {
-                    return Err(eyre::eyre!(
-                        "Block tag '{}' came from node {} but expected node {}",
-                        self.tag,
-                        node_idx,
-                        expected_node
-                    ));
-                }
+            if let Some(expected_node) = self.expected_node_idx &&
+                node_idx != expected_node
+            {
+                return Err(eyre::eyre!(
+                    "Block tag '{}' came from node {} but expected node {}",
+                    self.tag,
+                    node_idx,
+                    expected_node
+                ));
             }
 
             debug!(

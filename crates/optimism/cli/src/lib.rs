@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 /// A configurable App on top of the cli parser.
 pub mod app;
@@ -35,11 +35,12 @@ pub mod ovm_file_codec;
 pub use app::CliApp;
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
 use reth_optimism_chainspec::OpChainSpec;
+use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 
-use std::{ffi::OsString, fmt, sync::Arc};
+use std::{ffi::OsString, fmt, marker::PhantomData, sync::Arc};
 
 use chainspec::OpChainSpecParser;
-use clap::{command, Parser};
+use clap::Parser;
 use commands::Commands;
 use futures_util::Future;
 use reth_cli::chainspec::ChainSpecParser;
@@ -47,7 +48,10 @@ use reth_cli_commands::launcher::FnLauncher;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::{args::LogArgs, version::version_metadata};
+use reth_node_core::{
+    args::{LogArgs, TraceArgs},
+    version::version_metadata,
+};
 use reth_optimism_node::args::RollupArgs;
 
 // This allows us to manually enable node metrics features, required for proper jemalloc metric
@@ -59,8 +63,11 @@ use reth_node_metrics as _;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = version_metadata().short_version.as_ref(), long_version = version_metadata().long_version.as_ref(), about = "Reth", long_about = None)]
-pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = RollupArgs>
-{
+pub struct Cli<
+    Spec: ChainSpecParser = OpChainSpecParser,
+    Ext: clap::Args + fmt::Debug = RollupArgs,
+    Rpc: RpcModuleValidator = DefaultRpcModuleValidator,
+> {
     /// The command to run
     #[command(subcommand)]
     pub command: Commands<Spec, Ext>,
@@ -68,6 +75,14 @@ pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt:
     /// The logging configuration for the CLI.
     #[command(flatten)]
     pub logs: LogArgs,
+
+    /// The metrics configuration for the CLI.
+    #[command(flatten)]
+    pub traces: TraceArgs,
+
+    /// Type marker for the RPC module validator
+    #[arg(skip)]
+    _phantom: PhantomData<Rpc>,
 }
 
 impl Cli {
@@ -86,16 +101,17 @@ impl Cli {
     }
 }
 
-impl<C, Ext> Cli<C, Ext>
+impl<C, Ext, Rpc> Cli<C, Ext, Rpc>
 where
     C: ChainSpecParser<ChainSpec = OpChainSpec>,
     Ext: clap::Args + fmt::Debug,
+    Rpc: RpcModuleValidator,
 {
     /// Configures the CLI and returns a [`CliApp`] instance.
     ///
     /// This method is used to prepare the CLI for execution by wrapping it in a
     /// [`CliApp`] that can be further configured before running.
-    pub fn configure(self) -> CliApp<C, Ext> {
+    pub fn configure(self) -> CliApp<C, Ext, Rpc> {
         CliApp::new(self)
     }
 
@@ -184,6 +200,7 @@ mod test {
             "10000",
             "--metrics",
             "9003",
+            "--tracing-otlp=http://localhost:4318/v1/traces",
             "--log.file.max-size",
             "100",
         ]);

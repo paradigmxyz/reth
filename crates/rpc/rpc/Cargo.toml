@@ -84,6 +84,7 @@ pin-project.workspace = true
 parking_lot.workspace = true
 
 # misc
+dyn-clone.workspace = true
 tracing.workspace = true
 tracing-futures.workspace = true
 futures.workspace = true

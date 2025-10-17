@@ -14,22 +14,24 @@ use alloy_rpc_types_eth::{
     Transaction, TransactionInfo,
 };
 use core::error;
+use dyn_clone::DynClone;
 use reth_evm::{
     revm::context_interface::{either::Either, Block},
-    ConfigureEvm, SpecFor, TxEnvFor,
+    BlockEnvFor, ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
 use reth_primitives_traits::{
-    HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, TransactionMeta, TxTy,
+    BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
+    TxTy,
 };
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
-use std::{borrow::Cow, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
+use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
 /// Input for [`RpcConvert::convert_receipts`].
 #[derive(Debug, Clone)]
 pub struct ConvertReceiptInput<'a, N: NodePrimitives> {
     /// Primitive receipt.
-    pub receipt: Cow<'a, N::Receipt>,
+    pub receipt: N::Receipt,
     /// Transaction the receipt corresponds to.
     pub tx: Recovered<&'a N::SignedTx>,
     /// Gas used by the transaction.
@@ -54,12 +56,29 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
         &self,
         receipts: Vec<ConvertReceiptInput<'_, N>>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error>;
+
+    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
+    /// receipts are from `block`.
+    fn convert_receipts_with_block(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, N>>,
+        _block: &SealedBlock<N::Block>,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
+        self.convert_receipts(receipts)
+    }
 }
 
 /// A type that knows how to convert a consensus header into an RPC header.
 pub trait HeaderConverter<Consensus, Rpc>: Debug + Send + Sync + Unpin + Clone + 'static {
+    /// An associated RPC conversion error.
+    type Err: error::Error;
+
     /// Converts a consensus header into an RPC header.
-    fn convert_header(&self, header: SealedHeader<Consensus>, block_size: usize) -> Rpc;
+    fn convert_header(
+        &self,
+        header: SealedHeader<Consensus>,
+        block_size: usize,
+    ) -> Result<Rpc, Self::Err>;
 }
 
 /// Default implementation of [`HeaderConverter`] that uses [`FromConsensusHeader`] to convert
@@ -68,8 +87,14 @@ impl<Consensus, Rpc> HeaderConverter<Consensus, Rpc> for ()
 where
     Rpc: FromConsensusHeader<Consensus>,
 {
-    fn convert_header(&self, header: SealedHeader<Consensus>, block_size: usize) -> Rpc {
-        Rpc::from_consensus_header(header, block_size)
+    type Err = Infallible;
+
+    fn convert_header(
+        &self,
+        header: SealedHeader<Consensus>,
+        block_size: usize,
+    ) -> Result<Rpc, Self::Err> {
+        Ok(Rpc::from_consensus_header(header, block_size))
     }
 }
 
@@ -93,22 +118,20 @@ impl<T: Sealable> FromConsensusHeader<T> for alloy_rpc_types_eth::Header<T> {
 /// A generic implementation [`RpcConverter`] should be preferred over a manual implementation. As
 /// long as its trait bound requirements are met, the implementation is created automatically and
 /// can be used in RPC method handlers for all the conversions.
-pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
+
+    /// The EVM configuration.
+    type Evm: ConfigureEvm<Primitives = Self::Primitives>;
 
     /// Associated upper layer JSON-RPC API network requests and responses to convert from and into
     /// types of [`Self::Primitives`].
     type Network: RpcTypes + Send + Sync + Unpin + Clone + Debug;
 
-    /// A set of variables for executing a transaction.
-    type TxEnv;
-
     /// An associated RPC conversion error.
     type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
-
-    /// The EVM specification identifier.
-    type Spec;
 
     /// Wrapper for `fill()` with default `TransactionInfo`
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
@@ -143,15 +166,24 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
     fn tx_env(
         &self,
         request: RpcTxReq<Self::Network>,
-        cfg_env: &CfgEnv<Self::Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<Self::TxEnv, Self::Error>;
+        evm_env: &EvmEnvFor<Self::Evm>,
+    ) -> Result<TxEnvFor<Self::Evm>, Self::Error>;
 
     /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
     /// receipts are from the same block.
     fn convert_receipts(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
+
+    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
+    /// receipts are from the same block.
+    ///
+    /// Also accepts the corresponding block in case the receipt requires additional metadata.
+    fn convert_receipts_with_block(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+        block: &SealedBlock<BlockTy<Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
 
     /// Converts a primitive header to an RPC header.
@@ -161,6 +193,11 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
         block_size: usize,
     ) -> Result<RpcHeader<Self::Network>, Self::Error>;
 }
+
+dyn_clone::clone_trait_object!(
+    <Primitives, Network, Error, Evm>
+    RpcConvert<Primitives = Primitives, Network = Network, Error = Error, Evm = Evm>
+);
 
 /// Converts `self` into `T`. The opposite of [`FromConsensusTx`].
 ///
@@ -177,10 +214,12 @@ pub trait IntoRpcTx<T> {
     /// An additional context, usually [`TransactionInfo`] in a wrapper that carries some
     /// implementation specific extra information.
     type TxInfo;
+    /// An associated RPC conversion error.
+    type Err: error::Error;
 
     /// Performs the conversion consuming `self` with `signer` and `tx_info`. See [`IntoRpcTx`]
     /// for details.
-    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> T;
+    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> Result<T, Self::Err>;
 }
 
 /// Converts `T` into `self`. It is reciprocal of [`IntoRpcTx`].
@@ -194,23 +233,30 @@ pub trait IntoRpcTx<T> {
 /// Prefer using [`IntoRpcTx`] over using [`FromConsensusTx`] when specifying trait bounds on a
 /// generic function. This way, types that directly implement [`IntoRpcTx`] can be used as arguments
 /// as well.
-pub trait FromConsensusTx<T> {
+pub trait FromConsensusTx<T>: Sized {
     /// An additional context, usually [`TransactionInfo`] in a wrapper that carries some
     /// implementation specific extra information.
     type TxInfo;
+    /// An associated RPC conversion error.
+    type Err: error::Error;
 
     /// Performs the conversion consuming `tx` with `signer` and `tx_info`. See [`FromConsensusTx`]
     /// for details.
-    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self;
+    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Result<Self, Self::Err>;
 }
 
 impl<TxIn: alloy_consensus::Transaction, T: alloy_consensus::Transaction + From<TxIn>>
     FromConsensusTx<TxIn> for Transaction<T>
 {
     type TxInfo = TransactionInfo;
+    type Err = Infallible;
 
-    fn from_consensus_tx(tx: TxIn, signer: Address, tx_info: Self::TxInfo) -> Self {
-        Self::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info)
+    fn from_consensus_tx(
+        tx: TxIn,
+        signer: Address,
+        tx_info: Self::TxInfo,
+    ) -> Result<Self, Self::Err> {
+        Ok(Self::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info))
     }
 }
 
@@ -218,10 +264,12 @@ impl<ConsensusTx, RpcTx> IntoRpcTx<RpcTx> for ConsensusTx
 where
     ConsensusTx: alloy_consensus::Transaction,
     RpcTx: FromConsensusTx<Self>,
+    <RpcTx as FromConsensusTx<ConsensusTx>>::Err: Debug,
 {
     type TxInfo = RpcTx::TxInfo;
+    type Err = <RpcTx as FromConsensusTx<ConsensusTx>>::Err;
 
-    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> RpcTx {
+    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> Result<RpcTx, Self::Err> {
         RpcTx::from_consensus_tx(self, signer, tx_info)
     }
 }
@@ -257,7 +305,7 @@ impl<Tx, RpcTx> RpcTxConverter<Tx, RpcTx, Tx::TxInfo> for ()
 where
     Tx: IntoRpcTx<RpcTx>,
 {
-    type Err = Infallible;
+    type Err = Tx::Err;
 
     fn convert_rpc_tx(
         &self,
@@ -265,7 +313,7 @@ where
         signer: Address,
         tx_info: Tx::TxInfo,
     ) -> Result<RpcTx, Self::Err> {
-        Ok(tx.into_rpc_tx(signer, tx_info))
+        tx.into_rpc_tx(signer, tx_info)
     }
 }
 
@@ -387,7 +435,7 @@ impl TryIntoSimTx<EthereumTxEnvelope<TxEip4844>> for TransactionRequest {
 /// implementation for free, thanks to the blanket implementation, unless the conversion requires
 /// more context. For example, some configuration parameters or access handles to database, network,
 /// etc.
-pub trait TxEnvConverter<TxReq, TxEnv, Spec>:
+pub trait TxEnvConverter<TxReq, Evm: ConfigureEvm>:
     Debug + Send + Sync + Unpin + Clone + 'static
 {
     /// An associated error that can occur during conversion.
@@ -399,31 +447,30 @@ pub trait TxEnvConverter<TxReq, TxEnv, Spec>:
     fn convert_tx_env(
         &self,
         tx_req: TxReq,
-        cfg_env: &CfgEnv<Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<TxEnv, Self::Error>;
+        evm_env: &EvmEnvFor<Evm>,
+    ) -> Result<TxEnvFor<Evm>, Self::Error>;
 }
 
-impl<TxReq, TxEnv, Spec> TxEnvConverter<TxReq, TxEnv, Spec> for ()
+impl<TxReq, Evm> TxEnvConverter<TxReq, Evm> for ()
 where
-    TxReq: TryIntoTxEnv<TxEnv>,
+    TxReq: TryIntoTxEnv<TxEnvFor<Evm>, BlockEnvFor<Evm>>,
+    Evm: ConfigureEvm,
 {
     type Error = TxReq::Err;
 
     fn convert_tx_env(
         &self,
         tx_req: TxReq,
-        cfg_env: &CfgEnv<Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<TxEnv, Self::Error> {
-        tx_req.try_into_tx_env(cfg_env, block_env)
+        evm_env: &EvmEnvFor<Evm>,
+    ) -> Result<TxEnvFor<Evm>, Self::Error> {
+        tx_req.try_into_tx_env(&evm_env.cfg_env, &evm_env.block_env)
     }
 }
 
 /// Converts rpc transaction requests into transaction environment using a closure.
-impl<F, TxReq, TxEnv, E, Spec> TxEnvConverter<TxReq, TxEnv, Spec> for F
+impl<F, TxReq, E, Evm> TxEnvConverter<TxReq, Evm> for F
 where
-    F: Fn(TxReq, &CfgEnv<Spec>, &BlockEnv) -> Result<TxEnv, E>
+    F: Fn(TxReq, &EvmEnvFor<Evm>) -> Result<TxEnvFor<Evm>, E>
         + Debug
         + Send
         + Sync
@@ -431,6 +478,7 @@ where
         + Clone
         + 'static,
     TxReq: Clone,
+    Evm: ConfigureEvm,
     E: error::Error + Send + Sync + 'static,
 {
     type Error = E;
@@ -438,17 +486,16 @@ where
     fn convert_tx_env(
         &self,
         tx_req: TxReq,
-        cfg_env: &CfgEnv<Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<TxEnv, Self::Error> {
-        self(tx_req, cfg_env, block_env)
+        evm_env: &EvmEnvFor<Evm>,
+    ) -> Result<TxEnvFor<Evm>, Self::Error> {
+        self(tx_req, evm_env)
     }
 }
 
 /// Converts `self` into `T`.
 ///
 /// Should create an executable transaction environment using [`TransactionRequest`].
-pub trait TryIntoTxEnv<T> {
+pub trait TryIntoTxEnv<T, BlockEnv = reth_evm::revm::context::BlockEnv> {
     /// An associated error that can occur during the conversion.
     type Err;
 
@@ -782,6 +829,23 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
             tx_env_converter,
         }
     }
+
+    /// Converts `self` into a boxed converter.
+    pub fn erased(
+        self,
+    ) -> Box<
+        dyn RpcConvert<
+            Primitives = <Self as RpcConvert>::Primitives,
+            Network = <Self as RpcConvert>::Network,
+            Error = <Self as RpcConvert>::Error,
+            Evm = <Self as RpcConvert>::Evm,
+        >,
+    >
+    where
+        Self: RpcConvert,
+    {
+        Box::new(self)
+    }
 }
 
 impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv> Default
@@ -846,6 +910,7 @@ where
                        + From<TxEnv::Error>
                        + From<<Map as TxInfoMapper<TxTy<N>>>::Err>
                        + From<RpcTx::Err>
+                       + From<Header::Err>
                        + Error
                        + Unpin
                        + Sync
@@ -861,13 +926,12 @@ where
     SimTx: SimTxConverter<RpcTxReq<Network>, TxTy<N>>,
     RpcTx:
         RpcTxConverter<TxTy<N>, Network::TransactionResponse, <Map as TxInfoMapper<TxTy<N>>>::Out>,
-    TxEnv: TxEnvConverter<RpcTxReq<Network>, TxEnvFor<Evm>, SpecFor<Evm>>,
+    TxEnv: TxEnvConverter<RpcTxReq<Network>, Evm>,
 {
     type Primitives = N;
+    type Evm = Evm;
     type Network = Network;
-    type TxEnv = TxEnvFor<Evm>;
     type Error = Receipt::Error;
-    type Spec = SpecFor<Evm>;
 
     fn fill(
         &self,
@@ -877,7 +941,7 @@ where
         let (tx, signer) = tx.into_parts();
         let tx_info = self.mapper.try_map(&tx, tx_info)?;
 
-        Ok(self.rpc_tx_converter.convert_rpc_tx(tx, signer, tx_info)?)
+        self.rpc_tx_converter.convert_rpc_tx(tx, signer, tx_info).map_err(Into::into)
     }
 
     fn build_simulate_v1_transaction(
@@ -893,10 +957,9 @@ where
     fn tx_env(
         &self,
         request: RpcTxReq<Network>,
-        cfg_env: &CfgEnv<SpecFor<Evm>>,
-        block_env: &BlockEnv,
-    ) -> Result<Self::TxEnv, Self::Error> {
-        self.tx_env_converter.convert_tx_env(request, cfg_env, block_env).map_err(Into::into)
+        evm_env: &EvmEnvFor<Evm>,
+    ) -> Result<TxEnvFor<Evm>, Self::Error> {
+        self.tx_env_converter.convert_tx_env(request, evm_env).map_err(Into::into)
     }
 
     fn convert_receipts(
@@ -906,12 +969,20 @@ where
         self.receipt_converter.convert_receipts(receipts)
     }
 
+    fn convert_receipts_with_block(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+        block: &SealedBlock<BlockTy<Self::Primitives>>,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
+        self.receipt_converter.convert_receipts_with_block(receipts, block)
+    }
+
     fn convert_header(
         &self,
         header: SealedHeaderFor<Self::Primitives>,
         block_size: usize,
     ) -> Result<RpcHeader<Self::Network>, Self::Error> {
-        Ok(self.header_converter.convert_header(header, block_size))
+        Ok(self.header_converter.convert_header(header, block_size)?)
     }
 }
 
@@ -961,9 +1032,14 @@ pub mod op {
         for op_alloy_rpc_types::Transaction<T>
     {
         type TxInfo = OpTransactionInfo;
+        type Err = Infallible;
 
-        fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
-            Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info)
+        fn from_consensus_tx(
+            tx: T,
+            signer: Address,
+            tx_info: Self::TxInfo,
+        ) -> Result<Self, Self::Err> {
+            Ok(Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info))
         }
     }
 
@@ -1069,35 +1145,59 @@ mod transaction_response_tests {
     }
 
     #[cfg(feature = "op")]
-    #[test]
-    fn test_optimism_transaction_conversion() {
-        use op_alloy_consensus::OpTxEnvelope;
-        use op_alloy_network::Optimism;
-        use reth_optimism_primitives::OpTransactionSigned;
+    mod op {
+        use super::*;
+        use crate::transaction::TryIntoTxEnv;
+        use revm_context::{BlockEnv, CfgEnv};
 
-        let signed_tx = Signed::new_unchecked(
-            TxLegacy::default(),
-            Signature::new(U256::ONE, U256::ONE, false),
-            B256::ZERO,
-        );
-        let envelope = OpTxEnvelope::Legacy(signed_tx);
+        #[test]
+        fn test_optimism_transaction_conversion() {
+            use op_alloy_consensus::OpTxEnvelope;
+            use op_alloy_network::Optimism;
+            use reth_optimism_primitives::OpTransactionSigned;
 
-        let inner_tx = Transaction {
-            inner: Recovered::new_unchecked(envelope, Address::ZERO),
-            block_hash: None,
-            block_number: None,
-            transaction_index: None,
-            effective_gas_price: None,
-        };
+            let signed_tx = Signed::new_unchecked(
+                TxLegacy::default(),
+                Signature::new(U256::ONE, U256::ONE, false),
+                B256::ZERO,
+            );
+            let envelope = OpTxEnvelope::Legacy(signed_tx);
 
-        let tx_response = op_alloy_rpc_types::Transaction {
-            inner: inner_tx,
-            deposit_nonce: None,
-            deposit_receipt_version: None,
-        };
+            let inner_tx = Transaction {
+                inner: Recovered::new_unchecked(envelope, Address::ZERO),
+                block_hash: None,
+                block_number: None,
+                transaction_index: None,
+                effective_gas_price: None,
+            };
 
-        let result = <OpTransactionSigned as TryFromTransactionResponse<Optimism>>::from_transaction_response(tx_response);
+            let tx_response = op_alloy_rpc_types::Transaction {
+                inner: inner_tx,
+                deposit_nonce: None,
+                deposit_receipt_version: None,
+            };
 
-        assert!(result.is_ok());
+            let result = <OpTransactionSigned as TryFromTransactionResponse<Optimism>>::from_transaction_response(tx_response);
+
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn test_op_into_tx_env() {
+            use op_alloy_rpc_types::OpTransactionRequest;
+            use op_revm::{transaction::OpTxTr, OpSpecId};
+            use revm_context::Transaction;
+
+            let s = r#"{"from":"0x0000000000000000000000000000000000000000","to":"0x6d362b9c3ab68c0b7c79e8a714f1d7f3af63655f","input":"0x1626ba7ec8ee0d506e864589b799a645ddb88b08f5d39e8049f9f702b3b61fa15e55fc73000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000550000002d6db27c52e3c11c1cf24072004ac75cba49b25bf45f513902e469755e1f3bf2ca8324ad16930b0a965c012a24bb1101f876ebebac047bd3b6bf610205a27171eaaeffe4b5e5589936f4e542d637b627311b0000000000000000000000","data":"0x1626ba7ec8ee0d506e864589b799a645ddb88b08f5d39e8049f9f702b3b61fa15e55fc73000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000550000002d6db27c52e3c11c1cf24072004ac75cba49b25bf45f513902e469755e1f3bf2ca8324ad16930b0a965c012a24bb1101f876ebebac047bd3b6bf610205a27171eaaeffe4b5e5589936f4e542d637b627311b0000000000000000000000","chainId":"0x7a69"}"#;
+
+            let req: OpTransactionRequest = serde_json::from_str(s).unwrap();
+
+            let cfg = CfgEnv::<OpSpecId>::default();
+            let block_env = BlockEnv::default();
+            let tx_env = req.try_into_tx_env(&cfg, &block_env).unwrap();
+            assert_eq!(tx_env.gas_limit(), block_env.gas_limit);
+            assert_eq!(tx_env.gas_price(), 0);
+            assert!(tx_env.enveloped_tx().unwrap().is_empty());
+        }
     }
 }

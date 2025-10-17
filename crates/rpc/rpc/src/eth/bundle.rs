@@ -1,13 +1,13 @@
 //! `Eth` bundle implementation and helpers.
 
-use alloy_consensus::{EnvKzgSettings, Transaction as _};
+use alloy_consensus::{transaction::TxHashRef, EnvKzgSettings, Transaction as _};
 use alloy_eips::eip7840::BlobParams;
+use alloy_evm::env::BlockEnvironment;
 use alloy_primitives::{uint, Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives_traits::SignedTransaction;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
@@ -18,7 +18,9 @@ use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
 };
-use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
+use revm::{
+    context::Block, context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef,
+};
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
@@ -88,18 +90,18 @@ where
         let (mut evm_env, at) = self.eth_api().evm_env_at(block_id).await?;
 
         if let Some(coinbase) = coinbase {
-            evm_env.block_env.beneficiary = coinbase;
+            evm_env.block_env.inner_mut().beneficiary = coinbase;
         }
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
-            evm_env.block_env.timestamp = U256::from(timestamp);
+            evm_env.block_env.inner_mut().timestamp = U256::from(timestamp);
         } else {
-            evm_env.block_env.timestamp += uint!(12_U256);
+            evm_env.block_env.inner_mut().timestamp += uint!(12_U256);
         }
 
         if let Some(difficulty) = difficulty {
-            evm_env.block_env.difficulty = U256::from(difficulty);
+            evm_env.block_env.inner_mut().difficulty = U256::from(difficulty);
         }
 
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob
@@ -110,7 +112,7 @@ where
                 .eth_api()
                 .provider()
                 .chain_spec()
-                .blob_params_at_timestamp(evm_env.block_env.timestamp.saturating_to())
+                .blob_params_at_timestamp(evm_env.block_env.timestamp().saturating_to())
                 .unwrap_or_else(BlobParams::cancun);
             if transactions.iter().filter_map(|tx| tx.blob_gas_used()).sum::<u64>() >
                 blob_params.max_blob_gas_per_block()
@@ -124,30 +126,30 @@ where
         }
 
         // default to call gas limit unless user requests a smaller limit
-        evm_env.block_env.gas_limit = self.inner.eth_api.call_gas_limit();
+        evm_env.block_env.inner_mut().gas_limit = self.inner.eth_api.call_gas_limit();
         if let Some(gas_limit) = gas_limit {
-            if gas_limit > evm_env.block_env.gas_limit {
+            if gas_limit > evm_env.block_env.gas_limit() {
                 return Err(
                     EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
                 )
             }
-            evm_env.block_env.gas_limit = gas_limit;
+            evm_env.block_env.inner_mut().gas_limit = gas_limit;
         }
 
         if let Some(base_fee) = base_fee {
-            evm_env.block_env.basefee = base_fee.try_into().unwrap_or(u64::MAX);
+            evm_env.block_env.inner_mut().basefee = base_fee.try_into().unwrap_or(u64::MAX);
         }
 
-        let state_block_number = evm_env.block_env.number;
+        let state_block_number = evm_env.block_env.number();
         // use the block number of the request
-        evm_env.block_env.number = U256::from(block_number);
+        evm_env.block_env.inner_mut().number = U256::from(block_number);
 
         let eth_api = self.eth_api().clone();
 
         self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
-                let coinbase = evm_env.block_env.beneficiary;
-                let basefee = evm_env.block_env.basefee;
+                let coinbase = evm_env.block_env.beneficiary();
+                let basefee = evm_env.block_env.basefee();
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase = db

@@ -22,7 +22,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use crate::{
     error::{DecodePacketError, Discv4Error},
@@ -213,12 +213,12 @@ impl Discv4 {
     /// Binds a new `UdpSocket` and creates the service
     ///
     /// ```
-    /// # use std::io;
     /// use reth_discv4::{Discv4, Discv4Config};
     /// use reth_network_peers::{pk2id, NodeRecord, PeerId};
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
-    /// # async fn t() -> io::Result<()> {
+    /// # async fn t() -> std:: io::Result<()> {
+    ///
     /// // generate a (random) keypair
     /// let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
     /// let id = pk2id(&pk);
@@ -627,10 +627,10 @@ impl Discv4Service {
 
     /// Sets the external Ip to the configured external IP if [`NatResolver::ExternalIp`].
     fn resolve_external_ip(&mut self) {
-        if let Some(r) = &self.resolve_external_ip_interval {
-            if let Some(external_ip) = r.resolver().as_external_ip() {
-                self.set_external_ip_addr(external_ip);
-            }
+        if let Some(r) = &self.resolve_external_ip_interval &&
+            let Some(external_ip) = r.resolver().as_external_ip()
+        {
+            self.set_external_ip_addr(external_ip);
         }
     }
 
@@ -904,10 +904,10 @@ impl Discv4Service {
 
     /// Check if the peer has an active bond.
     fn has_bond(&self, remote_id: PeerId, remote_ip: IpAddr) -> bool {
-        if let Some(timestamp) = self.received_pongs.last_pong(remote_id, remote_ip) {
-            if timestamp.elapsed() < self.config.bond_expiration {
-                return true
-            }
+        if let Some(timestamp) = self.received_pongs.last_pong(remote_id, remote_ip) &&
+            timestamp.elapsed() < self.config.bond_expiration
+        {
+            return true
         }
         false
     }
@@ -2109,7 +2109,7 @@ impl Default for LookupTargetRotator {
 }
 
 impl LookupTargetRotator {
-    /// this will return the next node id to lookup
+    /// This will return the next node id to lookup
     fn next(&mut self, local: &PeerId) -> PeerId {
         self.counter += 1;
         self.counter %= self.interval;
@@ -3048,12 +3048,11 @@ mod tests {
         loop {
             tokio::select! {
                 Some(update) = updates.next() => {
-                    if let DiscoveryUpdate::Added(record) = update {
-                        if record.id == peerid_1 {
+                    if let DiscoveryUpdate::Added(record) = update
+                        && record.id == peerid_1 {
                             bootnode_appeared = true;
                             break;
                         }
-                    }
                 }
                 _ = &mut timeout => break,
             }

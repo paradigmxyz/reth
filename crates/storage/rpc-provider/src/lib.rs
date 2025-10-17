@@ -22,7 +22,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
@@ -338,9 +338,9 @@ where
 {
     type Header = HeaderTy<Node>;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         let block_response = self.block_on_async(async {
-            self.provider.get_block_by_hash(*block_hash).await.map_err(ProviderError::other)
+            self.provider.get_block_by_hash(block_hash).await.map_err(ProviderError::other)
         })?;
 
         let Some(block_response) = block_response else {
@@ -364,7 +364,7 @@ where
         Ok(Some(sealed_header.into_header()))
     }
 
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
+    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
         let header = self.header(hash).map_err(ProviderError::other)?;
 
         Ok(header.map(|b| b.difficulty()))
@@ -508,6 +508,10 @@ where
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         Err(ProviderError::UnsupportedProvider)
     }
 }
@@ -803,6 +807,10 @@ where
         // RPC provider doesn't support pending state by hash
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn maybe_pending(&self) -> Result<Option<StateProviderBox>, ProviderError> {
+        Ok(None)
+    }
 }
 
 impl<P, Node, N> DatabaseProviderFactory for RpcBlockchainProvider<P, Node, N>
@@ -812,8 +820,8 @@ where
     Node: NodeTypes,
 {
     type DB = DatabaseMock;
-    type ProviderRW = RpcBlockchainStateProvider<P, Node, N>;
     type Provider = RpcBlockchainStateProvider<P, Node, N>;
+    type ProviderRW = RpcBlockchainStateProvider<P, Node, N>;
 
     fn database_provider_ro(&self) -> Result<Self::Provider, ProviderError> {
         // RPC provider returns a new state provider
@@ -1059,16 +1067,13 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
         {
             Ok(None)
         } else {
-            let bytecode = if account_info.code.is_empty() {
-                None
-            } else {
-                Some(Bytecode::new_raw(account_info.code))
-            };
+            let bytecode_hash =
+                if account_info.code.is_empty() { None } else { Some(account_info.code_hash()) };
 
             Ok(Some(Account {
                 balance: account_info.balance,
                 nonce: account_info.nonce,
-                bytecode_hash: bytecode.as_ref().map(|b| b.hash_slow()),
+                bytecode_hash,
             }))
         }
     }
@@ -1363,13 +1368,17 @@ where
         TxMock::default()
     }
 
-    fn prune_modes_ref(&self) -> &reth_prune_types::PruneModes {
-        unimplemented!("prune modes not supported for RPC provider")
-    }
-
     fn disable_long_read_transaction_safety(self) -> Self {
         // No-op for RPC provider
         self
+    }
+
+    fn commit(self) -> ProviderResult<bool> {
+        unimplemented!("commit not supported for RPC provider")
+    }
+
+    fn prune_modes_ref(&self) -> &reth_prune_types::PruneModes {
+        unimplemented!("prune modes not supported for RPC provider")
     }
 }
 
@@ -1534,6 +1543,10 @@ where
     ) -> Result<Vec<RecoveredBlock<Self::Block>>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl<P, Node, N> TransactionsProvider for RpcBlockchainStateProvider<P, Node, N>
@@ -1653,7 +1666,7 @@ where
 {
     type Header = HeaderTy<Node>;
 
-    fn header(&self, _block_hash: &BlockHash) -> Result<Option<Self::Header>, ProviderError> {
+    fn header(&self, _block_hash: BlockHash) -> Result<Option<Self::Header>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1661,7 +1674,7 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>, ProviderError> {
+    fn header_td(&self, _hash: BlockHash) -> Result<Option<U256>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1751,6 +1764,14 @@ where
     ) -> Result<Vec<reth_db_api::models::AccountBeforeTx>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn get_account_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<reth_db_api::models::AccountBeforeTx>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl<P, Node, N> StateProviderFactory for RpcBlockchainStateProvider<P, Node, N>
@@ -1816,6 +1837,10 @@ where
     ) -> Result<Option<StateProviderBox>, ProviderError> {
         // RPC provider doesn't support pending state by hash
         Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
+        Ok(None)
     }
 }
 

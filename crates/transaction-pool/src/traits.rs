@@ -60,7 +60,7 @@ use crate::{
     validate::ValidPoolTransaction,
     AddedTransactionOutcome, AllTransactionsEvents,
 };
-use alloy_consensus::{error::ValueError, BlockHeader, Signed, Typed2718};
+use alloy_consensus::{error::ValueError, transaction::TxHashRef, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
     eip2718::{Encodable2718, WithEncoded},
     eip2930::AccessList,
@@ -428,6 +428,20 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     ///
     /// Consumer: Utility
     fn all_transaction_hashes(&self) -> Vec<TxHash>;
+
+    /// Removes a single transaction corresponding to the given hash.
+    ///
+    /// Note: This removes the transaction as if it got discarded (_not_ mined).
+    ///
+    /// Returns the removed transaction if it was found in the pool.
+    ///
+    /// Consumer: Utility
+    fn remove_transaction(
+        &self,
+        hash: TxHash,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.remove_transactions(vec![hash]).pop()
+    }
 
     /// Removes all transactions corresponding to the given hashes.
     ///

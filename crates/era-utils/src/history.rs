@@ -19,15 +19,15 @@ use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    providers::StaticFileProviderRWRefMut, writer::UnifiedStorageWriter, BlockWriter,
-    ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    providers::StaticFileProviderRWRefMut, BlockWriter, ProviderError, StaticFileProviderFactory,
+    StaticFileSegment, StaticFileWriter,
 };
 use reth_stages_types::{
     CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
 };
 use reth_storage_api::{
     errors::ProviderResult, DBProvider, DatabaseProviderFactory, HeaderProvider,
-    NodePrimitivesProvider, StageCheckpointWriter, StorageLocation,
+    NodePrimitivesProvider, StageCheckpointWriter,
 };
 use std::{
     collections::Bound,
@@ -102,14 +102,14 @@ where
 
         save_stage_checkpoints(&provider, from, height, height, height)?;
 
-        UnifiedStorageWriter::commit(provider)?;
+        provider.commit()?;
     }
 
     let provider = provider_factory.database_provider_rw()?;
 
     build_index(&provider, hash_collector)?;
 
-    UnifiedStorageWriter::commit(provider)?;
+    provider.commit()?;
 
     Ok(height)
 }
@@ -286,12 +286,12 @@ where
 {
     let mut last_header_number = match block_numbers.start_bound() {
         Bound::Included(&number) => number,
-        Bound::Excluded(&number) => number.saturating_sub(1),
+        Bound::Excluded(&number) => number.saturating_add(1),
         Bound::Unbounded => 0,
     };
     let target = match block_numbers.end_bound() {
         Bound::Included(&number) => Some(number),
-        Bound::Excluded(&number) => Some(number.saturating_add(1)),
+        Bound::Excluded(&number) => Some(number.saturating_sub(1)),
         Bound::Unbounded => None,
     };
 
@@ -302,10 +302,10 @@ where
         if number <= last_header_number {
             continue;
         }
-        if let Some(target) = target {
-            if number > target {
-                break;
-            }
+        if let Some(target) = target &&
+            number > target
+        {
+            break;
         }
 
         let hash = header.hash_slow();
@@ -318,11 +318,7 @@ where
         writer.append_header(&header, *total_difficulty, &hash)?;
 
         // Write bodies to database.
-        provider.append_block_bodies(
-            vec![(header.number(), Some(body))],
-            // We are writing transactions directly to static files.
-            StorageLocation::StaticFiles,
-        )?;
+        provider.append_block_bodies(vec![(header.number(), Some(body))])?;
 
         hash_collector.insert(hash, number)?;
     }
@@ -351,19 +347,18 @@ where
     // Database cursor for hash to number index
     let mut cursor_header_numbers =
         provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
-    let mut first_sync = false;
-
     // If we only have the genesis block hash, then we are at first sync, and we can remove it,
     // add it to the collector and use tx.append on all hashes.
-    if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
-        if let Some((hash, block_number)) = cursor_header_numbers.last()? {
-            if block_number.value()? == 0 {
-                hash_collector.insert(hash.key()?, 0)?;
-                cursor_header_numbers.delete_current()?;
-                first_sync = true;
-            }
-        }
-    }
+    let first_sync = if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 &&
+        let Some((hash, block_number)) = cursor_header_numbers.last()? &&
+        block_number.value()? == 0
+    {
+        hash_collector.insert(hash.key()?, 0)?;
+        cursor_header_numbers.delete_current()?;
+        true
+    } else {
+        false
+    };
 
     let interval = (total_headers / 10).max(8192);
 

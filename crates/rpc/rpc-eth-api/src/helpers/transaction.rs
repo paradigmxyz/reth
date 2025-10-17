@@ -8,7 +8,7 @@ use crate::{
     RpcTransaction,
 };
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta},
+    transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, Transaction,
 };
 use alloy_dyn_abi::TypedData;
@@ -32,7 +32,7 @@ use reth_storage_api::{
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
@@ -62,6 +62,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Signer access in default (L1) trait method implementations.
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes>;
 
+    /// Returns a list of addresses owned by provider.
+    fn accounts(&self) -> Vec<Address> {
+        self.signers().read().iter().flat_map(|s| s.accounts()).collect()
+    }
+
+    /// Returns the timeout duration for `send_raw_transaction_sync` RPC method.
+    fn send_raw_transaction_sync_timeout(&self) -> Duration;
+
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
     /// Returns the hash of the transaction.
@@ -81,31 +89,31 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadReceipt + 'static,
     {
         let this = self.clone();
+        let timeout_duration = self.send_raw_transaction_sync_timeout();
         async move {
             let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
             let mut stream = this.provider().canonical_state_stream();
-            const TIMEOUT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(30);
-            tokio::time::timeout(TIMEOUT_DURATION, async {
+            tokio::time::timeout(timeout_duration, async {
                 while let Some(notification) = stream.next().await {
                     let chain = notification.committed();
                     for block in chain.blocks_iter() {
-                        if block.body().contains_transaction(&hash) {
-                            if let Some(receipt) = this.transaction_receipt(hash).await? {
-                                return Ok(receipt);
-                            }
+                        if block.body().contains_transaction(&hash) &&
+                            let Some(receipt) = this.transaction_receipt(hash).await?
+                        {
+                            return Ok(receipt);
                         }
                     }
                 }
                 Err(Self::Error::from_eth_err(TransactionConfirmationTimeout {
                     hash,
-                    duration: TIMEOUT_DURATION,
+                    duration: timeout_duration,
                 }))
             })
             .await
             .unwrap_or_else(|_elapsed| {
                 Err(Self::Error::from_eth_err(TransactionConfirmationTimeout {
                     hash,
-                    duration: TIMEOUT_DURATION,
+                    duration: timeout_duration,
                 }))
             })
         }
@@ -291,13 +299,12 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             // Check the pool first
-            if include_pending {
-                if let Some(tx) =
+            if include_pending &&
+                let Some(tx) =
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
-                {
-                    let transaction = tx.transaction.clone_into_consensus();
-                    return Ok(Some(self.tx_resp_builder().fill_pending(transaction)?));
-                }
+            {
+                let transaction = tx.transaction.clone_into_consensus();
+                return Ok(Some(self.tx_resp_builder().fill_pending(transaction)?));
             }
 
             // Check if the sender is a contract
@@ -367,10 +374,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.recovered_block(block_id).await? {
-                if let Some(tx) = block.body().transactions().get(index) {
-                    return Ok(Some(tx.encoded_2718().into()))
-                }
+            if let Some(block) = self.recovered_block(block_id).await? &&
+                let Some(tx) = block.body().transactions().get(index)
+            {
+                return Ok(Some(tx.encoded_2718().into()))
             }
 
             Ok(None)

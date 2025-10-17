@@ -111,7 +111,7 @@ impl PruningArgs {
     where
         ChainSpec: EthereumHardforks,
     {
-        // Initialise with a default prune configuration.
+        // Initialize with a default prune configuration.
         let mut config = PruneConfig::default();
 
         // If --full is set, use full node defaults.
@@ -126,6 +126,7 @@ impl PruningArgs {
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     // TODO: set default to pre-merge block if available
                     bodies_history: None,
+                    merkle_changesets: PruneMode::Distance(MINIMUM_PRUNING_DISTANCE),
                     receipts_log_filter: Default::default(),
                 },
             }

@@ -40,12 +40,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract Rust version from Cargo.toml
+        id: rust_version
+        run: |
+          RUST_VERSION=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "reth") | .rust_version' || echo "1")
+          echo "RUST_VERSION=$RUST_VERSION" >> $GITHUB_OUTPUT
+
       - name: Build and push reproducible image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.reproducible
           push: true
+          build-args: |
+            RUST_VERSION=${{ steps.rust_version.outputs.RUST_VERSION }}
           tags: |
             ${{ env.DOCKER_REPRODUCIBLE_IMAGE_NAME }}:${{ needs.extract-version.outputs.VERSION }}
             ${{ env.DOCKER_REPRODUCIBLE_IMAGE_NAME }}:latest

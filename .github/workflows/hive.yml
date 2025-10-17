@@ -34,13 +34,38 @@ jobs:
           repository: ethereum/hive
           path: hivetests
 
-      - uses: actions/setup-go@v5
+      - name: Get hive commit hash
+        id: hive-commit
+        run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-go@v6
         with:
           go-version: "^1.13.1"
       - run: go version
 
+      - name: Restore hive assets cache
+        id: cache-hive
+        uses: actions/cache@v4
+        with:
+          path: ./hive_assets
+          key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/assets/hive/build_simulators.sh') }}
+
       - name: Build hive assets
+        if: steps.cache-hive.outputs.cache-hit != 'true'
         run: .github/assets/hive/build_simulators.sh
+
+      - name: Load cached Docker images
+        if: steps.cache-hive.outputs.cache-hit == 'true'
+        run: |
+          cd hive_assets
+          for tar_file in *.tar; do
+            if [ -f "$tar_file" ]; then
+              echo "Loading $tar_file..."
+              docker load -i "$tar_file"
+            fi
+          done
+          # Make hive binary executable
+          chmod +x hive
 
       - name: Upload hive assets
         uses: actions/upload-artifact@v4
@@ -48,7 +73,7 @@ jobs:
           name: hive_assets
           path: ./hive_assets
   test:
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +138,8 @@ jobs:
 
           # consume-engine
           - sim: ethereum/eest/consume-engine
+            limit: .*tests/osaka.*
+          - sim: ethereum/eest/consume-engine
             limit: .*tests/prague.*
           - sim: ethereum/eest/consume-engine
             limit: .*tests/cancun.*
@@ -126,9 +153,13 @@ jobs:
             limit: .*tests/homestead.*
           - sim: ethereum/eest/consume-engine
             limit: .*tests/frontier.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/paris.*
 
           # consume-rlp
           - sim: ethereum/eest/consume-rlp
+            limit: .*tests/osaka.*
+          - sim: ethereum/eest/consume-rlp
             limit: .*tests/prague.*
           - sim: ethereum/eest/consume-rlp
             limit: .*tests/cancun.*
@@ -142,6 +173,8 @@ jobs:
             limit: .*tests/homestead.*
           - sim: ethereum/eest/consume-rlp
             limit: .*tests/frontier.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/paris.*
     needs:
       - prepare-reth
       - prepare-hive

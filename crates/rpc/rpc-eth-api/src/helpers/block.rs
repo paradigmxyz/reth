@@ -5,19 +5,17 @@ use crate::{
     node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
     RpcReceipt,
 };
-use alloy_consensus::TxReceipt;
+use alloy_consensus::{transaction::TxHashRef, TxReceipt};
 use alloy_eips::BlockId;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{
-    AlloyBlockHeader, RecoveredBlock, SealedHeader, SignedTransaction, TransactionMeta,
-};
+use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
 pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
@@ -127,7 +125,7 @@ pub trait EthBlocks:
 
                 let inputs = block
                     .transactions_recovered()
-                    .zip(receipts.iter())
+                    .zip(Arc::unwrap_or_clone(receipts))
                     .enumerate()
                     .map(|(idx, (tx, receipt))| {
                         let meta = TransactionMeta {
@@ -140,22 +138,28 @@ pub trait EthBlocks:
                             timestamp,
                         };
 
+                        let cumulative_gas_used = receipt.cumulative_gas_used();
+                        let logs_len = receipt.logs().len();
+
                         let input = ConvertReceiptInput {
-                            receipt: Cow::Borrowed(receipt),
                             tx,
-                            gas_used: receipt.cumulative_gas_used() - gas_used,
+                            gas_used: cumulative_gas_used - gas_used,
                             next_log_index,
                             meta,
+                            receipt,
                         };
 
-                        gas_used = receipt.cumulative_gas_used();
-                        next_log_index += receipt.logs().len();
+                        gas_used = cumulative_gas_used;
+                        next_log_index += logs_len;
 
                         input
                     })
                     .collect::<Vec<_>>();
 
-                return self.tx_resp_builder().convert_receipts(inputs).map(Some)
+                return self
+                    .tx_resp_builder()
+                    .convert_receipts_with_block(inputs, block.sealed_block())
+                    .map(Some)
             }
 
             Ok(None)
@@ -185,22 +189,20 @@ pub trait EthBlocks:
                 }
 
                 // If no pending block from provider, build the pending block locally.
-                if let Some((block, receipts)) = self.local_pending_block().await? {
-                    return Ok(Some((block, receipts)));
+                if let Some(pending) = self.local_pending_block().await? {
+                    return Ok(Some((pending.block, pending.receipts)));
                 }
             }
 
             if let Some(block_hash) =
-                self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)?
-            {
-                if let Some((block, receipts)) = self
+                self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)? &&
+                let Some((block, receipts)) = self
                     .cache()
                     .get_block_and_receipts(block_hash)
                     .await
                     .map_err(Self::Error::from_eth_err)?
-                {
-                    return Ok(Some((block, receipts)));
-                }
+            {
+                return Ok(Some((block, receipts)));
             }
 
             Ok(None)
@@ -296,7 +298,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
 
                 // If no pending block from provider, try to get local pending block
                 return match self.local_pending_block().await? {
-                    Some((block, _)) => Ok(Some(block)),
+                    Some(pending) => Ok(Some(pending.block)),
                     None => Ok(None),
                 };
             }
