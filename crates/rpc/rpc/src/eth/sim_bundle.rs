@@ -422,7 +422,6 @@ where
 
         let override_timeout = overrides.timeout;
 
-        // Clamp user-provided timeout to MAX_SIM_TIMEOUT instead of falling back to default.
         let timeout = override_timeout
             .map(Duration::from_secs)
             .map(|d| d.min(MAX_SIM_TIMEOUT))
