@@ -41,7 +41,6 @@ pub struct DatabaseArgs {
     #[arg(
         long = "db.sync-mode",
         value_parser = SyncModeValueParser::default(),
-        default_value = "durable"
     )]
     pub sync_mode: Option<SyncMode>,
 }
