@@ -13,7 +13,8 @@ use crate::transaction::signed::RecoveryError;
 ///
 /// ```rust
 /// use reth_primitives_traits::block::error::SealedBlockRecoveryError;
-/// use reth_primitives_traits::{SealedBlock, Block};
+/// use reth_primitives_traits::SealedBlock;
+/// use alloy_consensus::Block;
 ///
 /// // Simulate a block recovery operation that fails
 /// let sealed_block = SealedBlock::new_unchecked(Block::default(), Default::default());
