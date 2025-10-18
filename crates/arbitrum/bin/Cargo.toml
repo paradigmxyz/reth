@@ -1,0 +1,21 @@
+[package]
+name = "arb-reth"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+eyre = "0.6"
+reth-cli = { path = "../../cli/cli" }
+reth-cli-util = { path = "../../cli/util" }
+reth-cli-commands = { path = "../../cli/commands" }
+reth-cli-runner = { path = "../../cli/runner" }
+reth-node-builder = { path = "../../node/builder" }
+reth-db = { path = "../../storage/db" }
+reth-chainspec = { path = "../../chainspec" }
+reth-ethereum-cli = { path = "../../ethereum/cli" }
+reth-arbitrum-node = { path = "../node" }
+reth-arbitrum-chainspec = { path = "../chainspec" }

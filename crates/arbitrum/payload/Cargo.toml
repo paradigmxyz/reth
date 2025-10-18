@@ -1,0 +1,36 @@
+
+
+[package]
+name = "reth-arbitrum-payload"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+]
+
+[dependencies]
+alloy-consensus = { workspace = true }
+reth-chain-state = { path = "../../chain-state", default-features = false }
+reth-arbitrum-primitives = { path = "../primitives", default-features = false, features = ["serde-bincode-compat", "serde"] }
+alloy-primitives = { workspace = true, features = ["std"] }
+alloy-eips = { workspace = true }
+alloy-rpc-types-engine = { workspace = true }
+serde = { version = "1", default-features = false, features = ["derive"] }
+reth-payload-primitives = { path = "../../payload/primitives", default-features = false }
+reth-primitives-traits = { workspace = true }
+alloy-rlp = { workspace = true }
+reth-payload-builder = { workspace = true }
+reth-chainspec = { path = "../../chainspec" }
+
+# new deps for builder.rs
+reth-basic-payload-builder = { path = "../../payload/basic" }
+reth-revm = { path = "../../revm" }
+reth-storage-api = { path = "../../storage/storage-api" }
+reth-evm = { path = "../../evm/evm" }
+reth-payload-util = { path = "../../payload/util" }
+reth-execution-types = { path = "../../evm/execution-types" }

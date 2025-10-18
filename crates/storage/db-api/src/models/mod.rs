@@ -248,6 +248,14 @@ mod op {
     impl_compression_for_compact!(OpTransactionSigned, OpReceipt);
 }
 
+#[cfg(feature = "arb")]
+mod arb {
+    use super::*;
+    use reth_arbitrum_primitives::{ArbReceipt, ArbTransactionSigned};
+
+    impl_compression_for_compact!(ArbTransactionSigned, ArbReceipt);
+}
+
 macro_rules! impl_compression_fixed_compact {
     ($($name:tt),+) => {
         $(

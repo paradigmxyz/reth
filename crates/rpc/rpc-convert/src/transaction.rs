@@ -1071,6 +1071,7 @@ pub mod op {
             })
         }
     }
+
 }
 
 /// Trait for converting network transaction responses to primitive transaction types.

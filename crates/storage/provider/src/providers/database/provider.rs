@@ -1655,10 +1655,27 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             allowed_addresses.extend(addresses.iter().copied());
         }
 
+        tracing::info!(
+            target: "providers::db",
+            first_block = %first_block,
+            block_count = %block_count,
+            total_receipts = %execution_outcome.receipts.iter().map(|r| r.len()).sum::<usize>(),
+            receipts_per_block = ?execution_outcome.receipts.iter().map(|r| r.len()).collect::<Vec<_>>(),
+            "write_state: processing receipts"
+        );
+
         for (idx, (receipts, first_tx_index)) in
             execution_outcome.receipts.iter().zip(block_indices).enumerate()
         {
             let block_number = first_block + idx as u64;
+
+            tracing::info!(
+                target: "providers::db",
+                block_number = %block_number,
+                receipts_count = %receipts.len(),
+                first_tx_index = %first_tx_index,
+                "write_state: processing block receipts"
+            );
 
             // Increment block number for receipts static file writer
             if let Some(writer) = receipts_static_writer.as_mut() {
@@ -1681,14 +1698,36 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
+                
+                tracing::info!(
+                    target: "providers::db",
+                    receipt_idx = %receipt_idx,
+                    has_logs = %!receipt.logs().is_empty(),
+                    logs_count = %receipt.logs().len(),
+                    prunable_receipts = %prunable_receipts,
+                    has_contract_log_filter = %has_contract_log_filter,
+                    "write_state: processing receipt"
+                );
+                
                 // Skip writing receipt if log filter is active and it does not have any logs to
                 // retain
                 if prunable_receipts &&
                     has_contract_log_filter &&
                     !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
                 {
+                    tracing::warn!(
+                        target: "providers::db",
+                        receipt_idx = %receipt_idx,
+                        "write_state: SKIPPING receipt due to log filter"
+                    );
                     continue
                 }
+
+                tracing::info!(
+                    target: "providers::db",
+                    receipt_idx = %receipt_idx,
+                    "write_state: writing receipt to static file"
+                );
 
                 if let Some(writer) = &mut receipts_static_writer {
                     writer.append_receipt(receipt_idx, receipt)?;

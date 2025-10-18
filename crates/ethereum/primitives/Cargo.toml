@@ -46,7 +46,7 @@ alloy-consensus = { workspace = true, features = ["serde", "arbitrary"] }
 serde_json.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "serde", "serde-bincode-compat"]
 test-utils = [
     "reth-codecs?/test-utils",
     "reth-primitives-traits/test-utils",

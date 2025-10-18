@@ -763,6 +763,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
         }
 
+        if std::env::var("RETH_DISABLE_STATIC_FILES").is_ok() {
+            info!(target: "reth::cli", "Skipping storage consistency verification due to RETH_DISABLE_STATIC_FILES=1");
+            return Ok(None);
+        }
         info!(target: "reth::cli", "Verifying storage consistency.");
 
         let mut unwind_target: Option<BlockNumber> = None;
@@ -1236,7 +1240,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         FS: Fn(&Self) -> ProviderResult<Option<T>>,
         FD: Fn() -> ProviderResult<Option<T>>,
     {
-        // If there is, check the maximum block or transaction number of the segment.
+        if std::env::var("RETH_DISABLE_STATIC_FILES").is_ok() {
+            return fetch_from_database();
+        }
+
         let static_file_upper_bound = if segment.is_block_based() {
             self.get_highest_static_file_block(segment)
         } else {
@@ -1275,9 +1282,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         FD: FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
         P: FnMut(&T) -> bool,
     {
+        if std::env::var("RETH_DISABLE_STATIC_FILES").is_ok() {
+            return fetch_from_database(block_or_tx_range, predicate);
+        }
+
         let mut data = Vec::new();
 
-        // If there is, check the maximum block or transaction number of the segment.
         if let Some(static_file_upper_bound) = if segment.is_block_based() {
             self.get_highest_static_file_block(segment)
         } else {

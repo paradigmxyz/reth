@@ -1,0 +1,75 @@
+# Added by Devin: deps for follower execution path
+
+[package]
+name = "reth-arbitrum-node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth core
+reth-chainspec.workspace = true
+reth-primitives-traits = { workspace = true, features = ["secp256k1", "rayon"] }
+reth-payload-builder.workspace = true
+reth-consensus.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
+reth-tracing.workspace = true
+reth-provider.workspace = true
+reth-transaction-pool.workspace = true
+reth-network.workspace = true
+reth-evm.workspace = true
+reth-trie-db.workspace = true
+reth-rpc-server-types.workspace = true
+reth-tasks = { workspace = true, optional = true }
+reth-trie-common.workspace = true
+reth-node-core.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-engine-local.workspace = true
+reth-engine-tree.workspace = true
+
+reth-rpc-api.workspace = true
+reth-ethereum-consensus.workspace = true
+reth-engine-primitives.workspace = true
+reth-payload-primitives.workspace = true
+reth-execution-types.workspace = true
+reth-consensus-common.workspace = true
+reth-chain-state.workspace = true
+reth-storage-api.workspace = true
+
+reth-revm.workspace = true
+
+
+
+# arbitrum-specific crates
+reth-arbitrum-evm = { workspace = true }
+reth-arbitrum-rpc = { workspace = true }
+reth-arbitrum-payload = { workspace = true }
+reth-arbitrum-chainspec = { workspace = true }
+reth-arbitrum-primitives = { workspace = true }
+reth-arbitrum-txpool = { workspace = true }
+reth-arbitrum-storage = { workspace = true }
+
+# ethereum/alloy types
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-eth.workspace = true
+arb-alloy-consensus.workspace = true
+alloy-eips.workspace = true
+
+alloy-consensus.workspace = true
+
+alloy-rlp.workspace = true
+
+# misc
+clap.workspace = true
+serde.workspace = true
+eyre.workspace = true
+tokio.workspace = true

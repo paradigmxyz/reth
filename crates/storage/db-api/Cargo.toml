@@ -27,6 +27,8 @@ alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 
+# arbitrum
+reth-arbitrum-primitives = { workspace = true, optional = true }
 # optimism
 reth-optimism-primitives = { workspace = true, optional = true, features = ["serde", "reth-codec"] }
 
@@ -89,5 +91,8 @@ op = [
     "dep:reth-optimism-primitives",
     "reth-codecs/op",
     "reth-primitives-traits/op",
+]
+arb = [
+    "dep:reth-arbitrum-primitives",
 ]
 bench = []

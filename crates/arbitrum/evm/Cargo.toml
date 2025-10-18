@@ -1,0 +1,66 @@
+[package]
+name = "reth-arbitrum-evm"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[features]
+default = ["std"]
+std = [
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-evm/std",
+    "reth-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-evm/std",
+    "reth-arbitrum-chainspec/std",
+]
+rpc = ["dep:reth-rpc-eth-api"]
+
+[dependencies]
+# Reth
+reth-evm = { path = "../../evm/evm", default-features = false, features = ["std"] }
+reth-primitives = { path = "../../primitives", default-features = false, features = ["std"] }
+reth-primitives-traits = { path = "../../primitives-traits", default-features = false, features = ["std"] }
+reth-arbitrum-primitives = { path = "../primitives", default-features = false, features = ["std", "serde", "reth-codec"] }
+reth-arbitrum-chainspec = { path = "../chainspec", default-features = false, features = ["std"] }
+reth-rpc-eth-api = { path = "../../rpc/rpc-eth-api", default-features = false, optional = true }
+reth-arbitrum-payload = { path = "../payload", default-features = false, features = ["std"] }
+
+reth-storage-api = { path = "../../storage/storage-api", default-features = false, features = ["std"] }
+# Additional workspace deps mirroring Optimism patterns
+reth-execution-errors.workspace = true
+reth-execution-types.workspace = true
+reth-storage-errors.workspace = true
+reth-tracing.workspace = true
+
+reth-payload-primitives = { path = "../../payload/primitives", default-features = false, features = ["std"] }
+reth-payload-builder = { path = "../../payload/builder" }
+
+# ethereum evm adapter
+reth-evm-ethereum = { path = "../../ethereum/evm", default-features = false, features = ["std"] }
+
+# revm (workspace)
+revm.workspace = true
+revm-state.workspace = true
+revm-database.workspace = true
+
+# Compression
+brotli.workspace = true
+
+# Encoding
+hex = "0.4"
+
+# arb-alloy
+arb-alloy-predeploys = { workspace = true, features = ["alloc"] }
+arb-alloy-consensus = { workspace = true, features = ["alloc"] }
+arb-alloy-util = { workspace = true, features = ["alloc"] }
+
+# alloy
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-evm.workspace = true
+alloy-eips.workspace = true
+revm-context-interface.workspace = true
+tracing.workspace = true

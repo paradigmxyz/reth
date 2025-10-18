@@ -1083,7 +1083,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     }
 
     /// Adds a custom transaction type to the validator.
-    pub const fn with_custom_tx_type(mut self, tx_type: u8) -> Self {
+    pub fn with_custom_tx_type(mut self, tx_type: u8) -> Self {
         self.other_tx_types.set_bit(tx_type as usize, true);
         self
     }

@@ -74,7 +74,7 @@ impl EngineNodeLauncher {
         >,
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-            + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
     {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
@@ -381,8 +381,8 @@ where
     >,
     CB: NodeComponentsBuilder<T> + 'static,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
-        + 'static,
+    + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
+    + 'static,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
     type Future = Pin<Box<dyn Future<Output = eyre::Result<Self::Node>> + Send>>;

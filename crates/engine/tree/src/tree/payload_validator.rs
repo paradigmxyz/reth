@@ -380,7 +380,6 @@ where
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
-            // this is pre-validated in the tree
             return Err(InsertBlockError::new(
                 self.convert_to_block(input)?.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),

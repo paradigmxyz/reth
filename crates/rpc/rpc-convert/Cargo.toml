@@ -33,6 +33,10 @@ op-alloy-network = { workspace = true, optional = true }
 reth-optimism-primitives = { workspace = true, optional = true }
 op-revm = { workspace = true, optional = true }
 
+# arbitrum
+arb-alloy-network = { workspace = true, optional = true }
+reth-arbitrum-primitives = { workspace = true, optional = true }
+
 # revm
 revm-context.workspace = true
 
@@ -59,4 +63,9 @@ op = [
     "dep:op-revm",
     "reth-evm/op",
     "reth-primitives-traits/op",
+]
+arb = [
+    "dep:arb-alloy-network",
+    "dep:reth-arbitrum-primitives",
+    "dep:reth-storage-api",
 ]

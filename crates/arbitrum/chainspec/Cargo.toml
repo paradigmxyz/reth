@@ -1,0 +1,27 @@
+[package]
+name = "reth-arbitrum-chainspec"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+revm.workspace = true
+reth-chainspec = { path = "../../chainspec", default-features = false, features = ["std"] }
+reth-cli.workspace = true
+eyre.workspace = true
+anyhow.workspace = true
+alloy-chains.workspace = true
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-genesis.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64 = "0.22"
+libflate = "2.0"
+reth-primitives-traits = { path = "../../primitives-traits" }
+reth-trie-common = { path = "../../trie/common" }

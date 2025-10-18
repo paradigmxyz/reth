@@ -708,6 +708,7 @@ where
             components,
             task_executor: self.task_executor().clone(),
             provider: blockchain_db,
+            provider_factory: self.provider_factory().clone(),
         };
 
         debug!(target: "reth::cli", "calling on_component_initialized hook");
