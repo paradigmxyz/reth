@@ -197,17 +197,21 @@ where
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
+    // Get senders for error mapping
+    let senders: Vec<alloy_primitives::Address> =
+        block.transactions_with_sender().map(|(sender, _)| *sender).collect();
+
     let mut log_index = 0;
     for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error = T::Error::from_evm_halt(reason, tx.gas_limit());
+                // Try to map to eth_simulateV1 specific error codes
+                let sender = senders.get(index).copied().unwrap_or(alloy_primitives::Address::ZERO);
+                let (code, message) = map_simulatev1_error(&error, sender);
                 SimCallResult {
                     return_data: Bytes::new(),
-                    error: Some(SimulateError {
-                        message: error.to_string(),
-                        code: error.into().code(),
-                    }),
+                    error: Some(SimulateError { message, code }),
                     gas_used,
                     logs: Vec::new(),
                     status: false,
@@ -258,4 +262,79 @@ where
         |header, size| tx_resp_builder.convert_header(header, size),
     )?;
     Ok(SimulatedBlock { inner: block, calls })
+}
+
+/// Maps errors to `eth_simulateV1` specific error codes where applicable.
+///
+/// This function checks if an error corresponds to a specific `eth_simulateV1` error
+/// and returns the appropriate error code. If the error doesn't have a specific
+/// `eth_simulateV1` code, it returns the original error code.
+fn map_simulatev1_error<E: std::error::Error>(
+    error: &E,
+    sender: alloy_primitives::Address,
+) -> (i32, String) {
+    let error_str = error.to_string();
+
+    // Try to detect specific error patterns from the error message
+    // Check for transaction validation errors
+    if error_str.contains("nonce too low") {
+        // Try to extract nonce values from error message
+        if let Some((tx_nonce, state_nonce)) = extract_nonce_values(&error_str) {
+            return (
+                -38010,
+                format!("nonce too low: next nonce {state_nonce}, tx nonce {tx_nonce}"),
+            );
+        }
+        return (-38010, error_str);
+    }
+    if error_str.contains("nonce too high") {
+        return (-38011, "nonce too high".to_string());
+    }
+    if error_str.contains("max fee per gas less than block base fee") ||
+        error_str.contains("fee cap less than block base fee")
+    {
+        return (-38012, "max fee per gas less than block base fee".to_string());
+    }
+    if error_str.contains("intrinsic gas too low") || error_str.contains("gas too low") {
+        return (-38013, "intrinsic gas too low".to_string());
+    }
+    if error_str.contains("insufficient funds") {
+        return (-38014, format!("insufficient funds for gas * price + value: address {sender}"));
+    }
+    if error_str.contains("sender not an EOA") || error_str.contains("sender is not an EOA") {
+        return (-38024, "sender not an EOA".to_string());
+    }
+    if error_str.contains("max init code size exceeded") {
+        return (-38025, "max init code size exceeded".to_string());
+    }
+
+    // Check for consensus errors (block validation)
+    if error_str.contains("block number") && error_str.contains("does not match parent") {
+        return (-38020, error_str);
+    }
+    if error_str.contains("timestamp") && error_str.contains("is in the past") {
+        return (-38021, error_str);
+    }
+
+    // Return default error code if no special mapping applies
+    // Use -32000 as default for internal errors
+    (-32000, error_str)
+}
+
+/// Helper to extract nonce values from error message
+fn extract_nonce_values(error_str: &str) -> Option<(u64, u64)> {
+    // Try to parse pattern like "nonce too low: next nonce X, tx nonce Y"
+    if let Some(next_pos) = error_str.find("next nonce") &&
+        let Some(tx_pos) = error_str.find("tx nonce")
+    {
+        let next_str = &error_str[next_pos + 10..];
+        let tx_str = &error_str[tx_pos + 8..];
+
+        let next_nonce =
+            next_str.split(|c: char| !c.is_ascii_digit()).next()?.parse::<u64>().ok()?;
+        let tx_nonce = tx_str.split(|c: char| !c.is_ascii_digit()).next()?.parse::<u64>().ok()?;
+
+        return Some((tx_nonce, next_nonce));
+    }
+    None
 }
