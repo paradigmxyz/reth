@@ -12,16 +12,16 @@ use crate::transaction::signed::RecoveryError;
 /// # Example
 ///
 /// ```rust
-/// use alloy_consensus::{Block, BlockBody, EthereumTxEnvelope, Header, Signed, TxLegacy};
+/// use alloy_consensus::{Block, BlockBody, Header, Signed, TxEnvelope, TxLegacy};
 /// use alloy_primitives::{Signature, B256};
 /// use reth_primitives_traits::{block::error::SealedBlockRecoveryError, SealedBlock};
 ///
 /// // Create a simple block for demonstration
 /// let header = Header::default();
 /// let tx = TxLegacy::default();
-/// let signed_tx = Signed::new_unchecked(tx, Signature::default());
-/// let envelope = EthereumTxEnvelope::Legacy(signed_tx);
-/// let body: BlockBody<EthereumTxEnvelope, Header> = BlockBody::new(vec![envelope], vec![]);
+/// let signed_tx = Signed::new_unchecked(tx, Signature::test_signature(), B256::ZERO);
+/// let envelope = TxEnvelope::Legacy(signed_tx);
+/// let body = BlockBody { transactions: vec![envelope], ommers: vec![], withdrawals: None };
 /// let block = Block::new(header, body);
 /// let sealed_block = SealedBlock::new_unchecked(block, B256::ZERO);
 ///
