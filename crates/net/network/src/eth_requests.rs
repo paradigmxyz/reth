@@ -15,6 +15,7 @@ use reth_eth_wire::{
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
+use reth_network_types::ReputationChangeKind;
 use reth_primitives_traits::Block;
 use reth_storage_api::{BlockReader, HeaderProvider};
 use std::{
@@ -56,8 +57,6 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
     client: C,
     /// Used for reporting peers.
-    // TODO use to report spammers
-    #[expect(dead_code)]
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
     incoming_requests: ReceiverStream<IncomingEthRequest<N>>,
@@ -147,24 +146,94 @@ where
         headers
     }
 
+    /// Reports spam behavior to the peer reputation system
+    fn report_spam(&self, peer_id: PeerId, reason: ReputationChangeKind) {
+        self.peers.reputation_change(peer_id, reason);
+    }
+
+    /// Checks if a `GetBlockHeaders` request is spam and reports it
+    fn check_headers_spam(&self, peer_id: PeerId, request: &GetBlockHeaders) -> bool {
+        // Empty request - asking for 0 headers
+        if request.limit == 0 {
+            self.report_spam(peer_id, ReputationChangeKind::BadMessage);
+            return true;
+        }
+
+        // Excessive request - asking for too many headers
+        if request.limit as usize > MAX_HEADERS_SERVE {
+            self.report_spam(peer_id, ReputationChangeKind::BadMessage);
+            return true;
+        }
+
+        false
+    }
+
+    /// Checks if a `GetBlockBodies` request is spam and reports it
+    fn check_bodies_spam(&self, peer_id: PeerId, request: &GetBlockBodies) -> bool {
+        // Empty request - asking for 0 bodies
+        if request.0.is_empty() {
+            self.report_spam(peer_id, ReputationChangeKind::BadMessage);
+            return true;
+        }
+
+        // Excessive request - asking for too many bodies
+        if request.0.len() > MAX_BODIES_SERVE {
+            self.report_spam(peer_id, ReputationChangeKind::BadMessage);
+            return true;
+        }
+
+        false
+    }
+
+    /// Checks if a `GetReceipts` request is spam and reports it
+    fn check_receipts_spam(&self, peer_id: PeerId, request: &GetReceipts) -> bool {
+        // Empty request - asking for 0 receipts
+        if request.0.is_empty() {
+            self.report_spam(peer_id, ReputationChangeKind::BadMessage);
+            return true;
+        }
+
+        // Excessive request - asking for too many receipts
+        if request.0.len() > MAX_RECEIPTS_SERVE {
+            self.report_spam(peer_id, ReputationChangeKind::BadMessage);
+            return true;
+        }
+
+        false
+    }
+
     fn on_headers_request(
         &self,
-        _peer_id: PeerId,
+        peer_id: PeerId,
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders<C::Header>>>,
     ) {
         self.metrics.eth_headers_requests_received_total.increment(1);
+
+        // Check for spam and return early if detected
+        if self.check_headers_spam(peer_id, &request) {
+            let _ = response.send(Ok(BlockHeaders(vec![])));
+            return;
+        }
+
         let headers = self.get_headers_response(request);
         let _ = response.send(Ok(BlockHeaders(headers)));
     }
 
     fn on_bodies_request(
         &self,
-        _peer_id: PeerId,
+        peer_id: PeerId,
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies<<C::Block as Block>::Body>>>,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
+
+        // Check for spam and return early if detected
+        if self.check_bodies_spam(peer_id, &request) {
+            let _ = response.send(Ok(BlockBodies(vec![])));
+            return;
+        }
+
         let mut bodies = Vec::new();
 
         let mut total_bytes = 0;
@@ -188,11 +257,17 @@ where
 
     fn on_receipts_request(
         &self,
-        _peer_id: PeerId,
+        peer_id: PeerId,
         request: GetReceipts,
         response: oneshot::Sender<RequestResult<Receipts<C::Receipt>>>,
     ) {
         self.metrics.eth_receipts_requests_received_total.increment(1);
+
+        // Check for spam and return early if detected
+        if self.check_receipts_spam(peer_id, &request) {
+            let _ = response.send(Ok(Receipts(vec![])));
+            return;
+        }
 
         let receipts = self.get_receipts_response(request, |receipts_by_block| {
             receipts_by_block.into_iter().map(ReceiptWithBloom::from).collect::<Vec<_>>()
@@ -203,11 +278,17 @@ where
 
     fn on_receipts69_request(
         &self,
-        _peer_id: PeerId,
+        peer_id: PeerId,
         request: GetReceipts,
         response: oneshot::Sender<RequestResult<Receipts69<C::Receipt>>>,
     ) {
         self.metrics.eth_receipts_requests_received_total.increment(1);
+
+        // Check for spam and return early if detected
+        if self.check_receipts_spam(peer_id, &request) {
+            let _ = response.send(Ok(Receipts69(vec![])));
+            return;
+        }
 
         let receipts = self.get_receipts_response(request, |receipts_by_block| {
             // skip bloom filter for eth69
