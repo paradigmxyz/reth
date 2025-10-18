@@ -14,12 +14,12 @@ use crate::transaction::signed::RecoveryError;
 /// ```rust
 /// use reth_primitives_traits::block::error::SealedBlockRecoveryError;
 /// use reth_primitives_traits::SealedBlock;
-/// use alloy_consensus::{Block, Header, BlockBody};
+/// use alloy_consensus::{Block, Header, BlockBody, TxLegacy};
 /// use alloy_primitives::B256;
 ///
 /// // Create a simple block for demonstration
 /// let header = Header::default();
-/// let body: BlockBody<alloy_consensus::Transaction, Header> = BlockBody::default();
+/// let body: BlockBody<TxLegacy, Header> = BlockBody::default();
 /// let block = Block::new(header, body);
 /// let sealed_block = SealedBlock::new_unchecked(block, B256::ZERO);
 ///
