@@ -73,9 +73,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         "cargo:rustc-env=RETH_LONG_VERSION_2=Build Timestamp: {}",
         env::var("VERGEN_BUILD_TIMESTAMP")?
     );
+    // Collect enabled features for this crate using CARGO_FEATURE_* env vars
+    // This is more accurate than VERGEN_CARGO_FEATURES for the actual build
+    let mut features = Vec::new();
+    
+    if env::var("CARGO_FEATURE_JEMALLOC").is_ok() {
+        features.push("jemalloc");
+    }
+    if env::var("CARGO_FEATURE_ASM_KECCAK").is_ok() {
+        features.push("asm-keccak");
+    }
+    if env::var("CARGO_FEATURE_OTLP").is_ok() {
+        features.push("otlp");
+    }
+    
+    let features_str = if features.is_empty() {
+        String::from("none")
+    } else {
+        features.join(",")
+    };
+    
     println!(
         "cargo:rustc-env=RETH_LONG_VERSION_3=Build Features: {}",
-        env::var("VERGEN_CARGO_FEATURES")?
+        features_str
     );
     println!("cargo:rustc-env=RETH_LONG_VERSION_4=Build Profile: {profile}");
 
