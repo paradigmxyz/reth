@@ -14,7 +14,7 @@ use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
     EngineNodeLauncher, Node, NodeBuilder, NodeConfig,
 };
-use reth_node_core::args::DatadirArgs;
+use reth_node_core::args::{DatadirArgs, DiscoveryArgs, NetworkArgs};
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_optimism_node::{
     args::RollupArgs,
@@ -92,8 +92,7 @@ fn build_components<Node>(
 where
     Node: FullNodeTypes<Types: OpNodeTypes>,
 {
-    let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } =
-        RollupArgs::default();
+    let RollupArgs { disable_txpool_gossip, compute_pending_block, .. } = RollupArgs::default();
     ComponentsBuilder::default()
         .node_types::<Node>()
         .pool(OpPoolBuilder::default())
@@ -102,7 +101,7 @@ where
             OpPayloadBuilder::new(compute_pending_block)
                 .with_transactions(CustomTxPriority { chain_id }),
         ))
-        .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
+        .network(OpNetworkBuilder::new(disable_txpool_gossip, true))
         .consensus(OpConsensusBuilder::default())
 }
 
@@ -120,10 +119,15 @@ async fn test_custom_block_priority_config() {
     let wallet = Arc::new(Mutex::new(Wallet::default().with_chain_id(chain_spec.chain().into())));
 
     // Configure and launch the node.
-    let config = NodeConfig::new(chain_spec).with_datadir_args(DatadirArgs {
-        datadir: reth_db::test_utils::tempdir_path().into(),
-        ..Default::default()
-    });
+    let config = NodeConfig::new(chain_spec)
+        .with_datadir_args(DatadirArgs {
+            datadir: reth_db::test_utils::tempdir_path().into(),
+            ..Default::default()
+        })
+        .with_network(NetworkArgs {
+            discovery: DiscoveryArgs { disable_discovery: true, ..Default::default() },
+            ..Default::default()
+        });
     let db = create_test_rw_db_with_path(
         config
             .datadir
