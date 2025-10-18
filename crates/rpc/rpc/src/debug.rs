@@ -1013,7 +1013,10 @@ where
         rlp_block: Bytes,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
+        let _permit = self
+            .acquire_trace_permit()
+            .await
+            .map_err(|err| internal_rpc_err(format!("failed to acquire trace permit: {err}")))?;
         Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1025,7 +1028,10 @@ where
         block: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
+        let _permit = self
+            .acquire_trace_permit()
+            .await
+            .map_err(|err| internal_rpc_err(format!("failed to acquire trace permit: {err}")))?;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1037,7 +1043,10 @@ where
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
+        let _permit = self
+            .acquire_trace_permit()
+            .await
+            .map_err(|err| internal_rpc_err(format!("failed to acquire trace permit: {err}")))?;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1049,7 +1058,10 @@ where
         tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTrace> {
-        let _permit = self.acquire_trace_permit().await;
+        let _permit = self
+            .acquire_trace_permit()
+            .await
+            .map_err(|err| internal_rpc_err(format!("failed to acquire trace permit: {err}")))?;
         Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1062,7 +1074,10 @@ where
         block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace> {
-        let _permit = self.acquire_trace_permit().await;
+        let _permit = self
+            .acquire_trace_permit()
+            .await
+            .map_err(|err| internal_rpc_err(format!("failed to acquire trace permit: {err}")))?;
         Self::debug_trace_call(self, request, block_id, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1074,7 +1089,10 @@ where
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>> {
-        let _permit = self.acquire_trace_permit().await;
+        let _permit = self
+            .acquire_trace_permit()
+            .await
+            .map_err(|err| internal_rpc_err(format!("failed to acquire trace permit: {err}")))?;
         Self::debug_trace_call_many(self, bundles, state_context, opts).await.map_err(Into::into)
     }
 
@@ -1083,7 +1101,10 @@ where
         &self,
         block: BlockNumberOrTag,
     ) -> RpcResult<ExecutionWitness> {
-        let _permit = self.acquire_trace_permit().await;
+        let _permit = self
+            .acquire_trace_permit()
+            .await
+            .map_err(|err| internal_rpc_err(format!("failed to acquire trace permit: {err}")))?;
         Self::debug_execution_witness(self, block).await.map_err(Into::into)
     }
 
@@ -1092,7 +1113,10 @@ where
         &self,
         hash: B256,
     ) -> RpcResult<ExecutionWitness> {
-        let _permit = self.acquire_trace_permit().await;
+        let _permit = self
+            .acquire_trace_permit()
+            .await
+            .map_err(|err| internal_rpc_err(format!("failed to acquire trace permit: {err}")))?;
         Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
     }
 
