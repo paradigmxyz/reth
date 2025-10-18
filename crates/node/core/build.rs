@@ -76,7 +76,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Collect enabled features for this crate using CARGO_FEATURE_* env vars
     // This is more accurate than VERGEN_CARGO_FEATURES for the actual build
     let mut features = Vec::new();
-    
+
     if env::var("CARGO_FEATURE_JEMALLOC").is_ok() {
         features.push("jemalloc");
     }
@@ -86,17 +86,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     if env::var("CARGO_FEATURE_OTLP").is_ok() {
         features.push("otlp");
     }
-    
-    let features_str = if features.is_empty() {
-        String::from("none")
-    } else {
-        features.join(",")
-    };
-    
-    println!(
-        "cargo:rustc-env=RETH_LONG_VERSION_3=Build Features: {}",
-        features_str
-    );
+
+    let features_str = if features.is_empty() { String::from("none") } else { features.join(",") };
+
+    println!("cargo:rustc-env=RETH_LONG_VERSION_3=Build Features: {}", features_str);
     println!("cargo:rustc-env=RETH_LONG_VERSION_4=Build Profile: {profile}");
 
     // The version information for reth formatted for P2P (devp2p).
