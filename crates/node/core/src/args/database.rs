@@ -6,7 +6,7 @@ use crate::version::default_client_version;
 use clap::{
     builder::{PossibleValue, TypedValueParser},
     error::ErrorKind,
-    Arg, Args, Command, Error,
+    value_parser, Arg, Args, Command, Error,
 };
 use reth_db::{
     mdbx::{MaxReadTransactionDuration, SyncMode},
@@ -40,7 +40,7 @@ pub struct DatabaseArgs {
     /// Controls how aggressively the database synchronizes data to disk.
     #[arg(
         long = "db.sync-mode",
-        value_parser = SyncModeValueParser::default(),
+        value_parser = value_parser!(SyncMode),
     )]
     pub sync_mode: Option<SyncMode>,
 }
@@ -183,64 +183,6 @@ impl fmt::Display for ByteSize {
 /// Value parser function that supports various formats.
 fn parse_byte_size(s: &str) -> Result<usize, String> {
     s.parse::<ByteSize>().map(Into::into)
-}
-
-/// clap value parser for [`SyncMode`].
-#[derive(Clone, Debug, Default)]
-#[non_exhaustive]
-struct SyncModeValueParser;
-
-impl TypedValueParser for SyncModeValueParser {
-    type Value = SyncMode;
-
-    fn parse_ref(
-        &self,
-        _cmd: &Command,
-        arg: Option<&Arg>,
-        value: &std::ffi::OsStr,
-    ) -> Result<Self::Value, Error> {
-        let raw =
-            value.to_str().ok_or_else(|| Error::raw(ErrorKind::InvalidUtf8, "Invalid UTF-8"))?;
-        let val = raw.trim().to_ascii_lowercase();
-
-        let parsed = match val.as_str() {
-            "durable" => SyncMode::Durable,
-            "safe-no-sync" | "safenosync" | "safe_no_sync" => SyncMode::SafeNoSync,
-            _ => {
-                let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-                let possible_values = [
-                    PossibleValue::new("durable")
-                        .help("Flushes data to disk on commit; highest durability (slower writes)"),
-                    PossibleValue::new("safe-no-sync").help(
-                        "Skips some fsyncs; faster writes with risk of losing latest txns on crash",
-                    ),
-                ];
-                let rendered = possible_values
-                    .iter()
-                    .map(|v| {
-                        let help = v.get_help().map(|s| s.to_string()).unwrap_or_default();
-                        format!("- {}: {}", v.get_name(), help)
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                let msg =
-                    format!("Invalid value '{raw}' for {arg}.\n    Possible values:\n{rendered}");
-                return Err(Error::raw(clap::error::ErrorKind::InvalidValue, msg));
-            }
-        };
-        Ok(parsed)
-    }
-
-    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        let values = vec![
-            PossibleValue::new("durable")
-                .help("Flushes data to disk on commit; highest durability (slower writes)"),
-            PossibleValue::new("safe-no-sync")
-                .help("Skips some fsyncs; faster writes with risk of losing latest txns on crash"),
-        ];
-        Some(Box::new(values.into_iter()))
-    }
 }
 
 #[cfg(test)]
