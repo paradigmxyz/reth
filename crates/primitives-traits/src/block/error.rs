@@ -13,9 +13,15 @@ use crate::transaction::signed::RecoveryError;
 ///
 /// ```rust
 /// use reth_primitives_traits::block::error::SealedBlockRecoveryError;
+/// use reth_primitives_traits::{SealedBlock, Block};
+///
+/// // Simulate a block recovery operation that fails
+/// let sealed_block = SealedBlock::new_unchecked(Block::default(), Default::default());
+/// let block_recovery_result: Result<_, SealedBlockRecoveryError<_>> =
+///     Err(SealedBlockRecoveryError::new(sealed_block));
 ///
 /// // When block recovery fails, you get the error with the original block
-/// let error: SealedBlockRecoveryError<Block> = block_recovery_result.unwrap_err();
+/// let error = block_recovery_result.unwrap_err();
 /// let failed_block = error.into_inner();
 /// // Now you can inspect the failed block or try recovery again
 /// ```
