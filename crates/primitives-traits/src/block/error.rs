@@ -26,7 +26,7 @@ use crate::transaction::signed::RecoveryError;
 /// let sealed_block = SealedBlock::new_unchecked(block, B256::ZERO);
 ///
 /// // Simulate a block recovery operation that fails
-/// let block_recovery_result: Result<_, SealedBlockRecoveryError<_>> =
+/// let block_recovery_result: Result<(), SealedBlockRecoveryError<_>> =
 ///     Err(SealedBlockRecoveryError::new(sealed_block));
 ///
 /// // When block recovery fails, you get the error with the original block
