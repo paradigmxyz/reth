@@ -105,29 +105,31 @@ pub struct DatabaseArguments {
     max_readers: Option<u64>,
     /// Defines the synchronization strategy used by the MDBX database when writing data to disk.
     ///
-    /// This determines how aggressively MDBX ensures data durability versus prioritizing performance.
-    /// The available modes are:
+    /// This determines how aggressively MDBX ensures data durability versus prioritizing
+    /// performance. The available modes are:
     ///
-    /// - [`SyncMode::Durable`]: Ensures all transactions are fully flushed to disk before they are considered committed.  
-    ///   This provides the highest level of durability and crash safety but may have a performance cost.
-    /// - [`SyncMode::SafeNoSync`]: Skips certain fsync operations to improve write performance.  
-    ///   This mode still maintains database integrity but may lose the most recent transactions
-    ///   if the system crashes unexpectedly.
+    /// - [`SyncMode::Durable`]: Ensures all transactions are fully flushed to disk before they are
+    ///   considered committed.   This provides the highest level of durability and crash safety
+    ///   but may have a performance cost.
+    /// - [`SyncMode::SafeNoSync`]: Skips certain fsync operations to improve write performance.
+    ///   This mode still maintains database integrity but may lose the most recent transactions if
+    ///   the system crashes unexpectedly.
     ///
-    /// Choose `Durable` if consistency and crash safety are critical (e.g., production environments).  
-    /// Choose `SafeNoSync` if performance is more important and occasional data loss is acceptable (e.g., testing or ephemeral data).
+    /// Choose `Durable` if consistency and crash safety are critical (e.g., production
+    /// environments). Choose `SafeNoSync` if performance is more important and occasional data
+    /// loss is acceptable (e.g., testing or ephemeral data).
     sync_mode: SyncMode,
 }
 
 impl Default for DatabaseArguments {
     fn default() -> Self {
-        Self::new(ClientVersion::default(), SyncMode::Durable)
+        Self::new(ClientVersion::default())
     }
 }
 
 impl DatabaseArguments {
     /// Create new database arguments with given client version.
-    pub fn new(client_version: ClientVersion, sync_mode: SyncMode) -> Self {
+    pub fn new(client_version: ClientVersion) -> Self {
         Self {
             client_version,
             geometry: Geometry {
@@ -140,7 +142,7 @@ impl DatabaseArguments {
             max_read_transaction_duration: None,
             exclusive: None,
             max_readers: None,
-            sync_mode,
+            sync_mode: SyncMode::Durable,
         }
     }
 
@@ -149,6 +151,15 @@ impl DatabaseArguments {
         if let Some(max_size) = max_size {
             self.geometry.size = Some(0..max_size);
         }
+        self
+    }
+
+    /// Sets the database sync mode.
+    pub const fn with_sync_mode(mut self, sync_mode: Option<SyncMode>) -> Self {
+        if let Some(sync_mode) = sync_mode {
+            self.sync_mode = sync_mode;
+        }
+
         self
     }
 
@@ -459,7 +470,7 @@ impl DatabaseEnv {
                     LogLevel::Extra => 7,
                 });
             } else {
-                return Err(DatabaseError::LogLevelUnavailable(log_level));
+                return Err(DatabaseError::LogLevelUnavailable(log_level))
             }
         }
 
@@ -603,12 +614,9 @@ mod tests {
 
     /// Create database for testing with specified path
     fn create_test_db_with_path(kind: DatabaseEnvKind, path: &Path) -> DatabaseEnv {
-        let mut env = DatabaseEnv::open(
-            path,
-            kind,
-            DatabaseArguments::new(ClientVersion::default(), SyncMode::SafeNoSync),
-        )
-        .expect(ERROR_DB_CREATION);
+        let mut env =
+            DatabaseEnv::open(path, kind, DatabaseArguments::new(ClientVersion::default()))
+                .expect(ERROR_DB_CREATION);
         env.create_tables().expect(ERROR_TABLE_CREATION);
         env
     }
@@ -1277,7 +1285,7 @@ mod tests {
         let env = DatabaseEnv::open(
             &path,
             DatabaseEnvKind::RO,
-            DatabaseArguments::new(ClientVersion::default(), SyncMode::SafeNoSync),
+            DatabaseArguments::new(ClientVersion::default()),
         )
         .expect(ERROR_DB_CREATION);
 

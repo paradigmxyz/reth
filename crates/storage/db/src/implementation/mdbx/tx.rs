@@ -437,7 +437,7 @@ impl DbTxMut for Tx<RW> {
 mod tests {
     use crate::{mdbx::DatabaseArguments, tables, DatabaseEnv, DatabaseEnvKind};
     use reth_db_api::{database::Database, models::ClientVersion, transaction::DbTx};
-    use reth_libmdbx::{MaxReadTransactionDuration, SyncMode};
+    use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;
     use std::{sync::atomic::Ordering, thread::sleep, time::Duration};
     use tempfile::tempdir;
@@ -447,7 +447,7 @@ mod tests {
         const MAX_DURATION: Duration = Duration::from_secs(1);
 
         let dir = tempdir().unwrap();
-        let args = DatabaseArguments::new(ClientVersion::default(), SyncMode::SafeNoSync)
+        let args = DatabaseArguments::new(ClientVersion::default())
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
                 MAX_DURATION,
             )));
@@ -473,7 +473,7 @@ mod tests {
         const MAX_DURATION: Duration = Duration::from_secs(1);
 
         let dir = tempdir().unwrap();
-        let args = DatabaseArguments::new(ClientVersion::default(), SyncMode::SafeNoSync)
+        let args = DatabaseArguments::new(ClientVersion::default())
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
                 MAX_DURATION,
             )));

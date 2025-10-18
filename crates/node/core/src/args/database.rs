@@ -43,7 +43,7 @@ pub struct DatabaseArgs {
         value_parser = SyncModeValueParser::default(),
         default_value = "durable"
     )]
-    pub sync_mode: SyncMode,
+    pub sync_mode: Option<SyncMode>,
 }
 
 impl DatabaseArgs {
@@ -64,13 +64,14 @@ impl DatabaseArgs {
             Some(secs) => Some(MaxReadTransactionDuration::Set(Duration::from_secs(secs))),
         };
 
-        reth_db::mdbx::DatabaseArguments::new(client_version, self.sync_mode)
+        reth_db::mdbx::DatabaseArguments::new(client_version)
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
             .with_max_read_transaction_duration(max_read_transaction_duration)
             .with_geometry_max_size(self.max_size)
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
+            .with_sync_mode(self.sync_mode)
     }
 }
 
@@ -261,7 +262,7 @@ mod tests {
         let default_args = DatabaseArgs::default();
         let args = CommandParser::<DatabaseArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
-        assert!(matches!(args.sync_mode, SyncMode::Durable));
+        assert!(matches!(args.sync_mode, Some(SyncMode::Durable)));
     }
 
     #[test]
@@ -415,7 +416,7 @@ mod tests {
         let cmd =
             CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "durable"])
                 .unwrap();
-        assert!(matches!(cmd.args.sync_mode, SyncMode::Durable));
+        assert!(matches!(cmd.args.sync_mode, Some(SyncMode::Durable)));
     }
 
     #[test]
@@ -426,7 +427,7 @@ mod tests {
             "safe-no-sync",
         ])
         .unwrap();
-        assert!(matches!(cmd.args.sync_mode, SyncMode::SafeNoSync));
+        assert!(matches!(cmd.args.sync_mode, Some(SyncMode::SafeNoSync)));
     }
 
     #[test]

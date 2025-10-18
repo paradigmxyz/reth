@@ -589,7 +589,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
-        mdbx::{DatabaseArguments, SyncMode},
+        mdbx::DatabaseArguments,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
     use reth_db_api::tables;
@@ -632,7 +632,7 @@ mod tests {
         let factory = ProviderFactory::<MockNodeTypesWithDB<DatabaseEnv>>::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
             Arc::new(chain_spec),
-            DatabaseArguments::new(Default::default(), SyncMode::SafeNoSync),
+            DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
         )
         .unwrap();
