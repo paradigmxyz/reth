@@ -433,7 +433,11 @@ where
         .map(|(i, tx)| {
             tx.signature()
                 .recover_from_prehash(&tx.signature_hash())
-                .map(|keys| keys.to_encoded_point(false).as_bytes().try_into().unwrap())
+                .map(|keys| {
+                    UncompressedPublicKey(
+                        keys.to_encoded_point(false).as_bytes().try_into().unwrap(),
+                    )
+                })
                 .map_err(|e| format!("failed to recover signature for tx #{i}: {e}").into())
         })
         .collect::<Result<Vec<UncompressedPublicKey>, _>>()
