@@ -59,8 +59,9 @@ url.workspace = true
 dirs-next.workspace = true
 shellexpand.workspace = true
 
-# tracing
+# obs
 tracing.workspace = true
+reth-tracing-otlp.workspace = true
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
