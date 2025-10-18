@@ -9,11 +9,18 @@ use reth_storage_errors::db::DatabaseError;
 pub struct NoopTrieCursorFactory;
 
 impl TrieCursorFactory for NoopTrieCursorFactory {
-    type AccountTrieCursor = NoopAccountTrieCursor;
-    type StorageTrieCursor = NoopStorageTrieCursor;
+    type AccountTrieCursor<'a>
+        = NoopAccountTrieCursor
+    where
+        Self: 'a;
+
+    type StorageTrieCursor<'a>
+        = NoopStorageTrieCursor
+    where
+        Self: 'a;
 
     /// Generates a noop account trie cursor.
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         Ok(NoopAccountTrieCursor::default())
     }
 
@@ -21,7 +28,7 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
     fn storage_trie_cursor(
         &self,
         _hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         Ok(NoopStorageTrieCursor::default())
     }
 }
