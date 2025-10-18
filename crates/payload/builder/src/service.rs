@@ -131,7 +131,11 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         attr: T::PayloadBuilderAttributes,
     ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, tx));
+        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(
+            attr,
+            tx,
+            tracing::Span::current(),
+        ));
         rx
     }
 
@@ -426,33 +430,35 @@ where
             // drain all requests
             while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                 match cmd {
-                    PayloadServiceCommand::BuildNewPayload(attr, tx) => {
-                        let id = attr.payload_id();
-                        let mut res = Ok(id);
+                    PayloadServiceCommand::BuildNewPayload(attr, tx, span) => {
+                        span.in_scope(|| {
+                            let id = attr.payload_id();
+                            let mut res = Ok(id);
 
-                        if this.contains_payload(id) {
-                            debug!(target: "payload_builder",%id, parent = %attr.parent(), "Payload job already in progress, ignoring.");
-                        } else {
-                            // no job for this payload yet, create one
-                            let parent = attr.parent();
-                            match this.generator.new_payload_job(attr.clone()) {
-                                Ok(job) => {
-                                    info!(target: "payload_builder", %id, %parent, "New payload job created");
-                                    this.metrics.inc_initiated_jobs();
-                                    new_job = true;
-                                    this.payload_jobs.push((job, id));
-                                    this.payload_events.send(Events::Attributes(attr.clone())).ok();
-                                }
-                                Err(err) => {
-                                    this.metrics.inc_failed_jobs();
-                                    warn!(target: "payload_builder", %err, %id, "Failed to create payload builder job");
-                                    res = Err(err);
+                            if this.contains_payload(id) {
+                                info!(target: "payload_builder",%id, parent = %attr.parent(), "Payload job already in progress, ignoring.");
+                            } else {
+                                // no job for this payload yet, create one
+                                let parent = attr.parent();
+                                match this.generator.new_payload_job(attr.clone()) {
+                                    Ok(job) => {
+                                        info!(target: "payload_builder", %id, %parent, "New payload job created");
+                                        this.metrics.inc_initiated_jobs();
+                                        new_job = true;
+                                        this.payload_jobs.push((job, id));
+                                        this.payload_events.send(Events::Attributes(attr.clone())).ok();
+                                    }
+                                    Err(err) => {
+                                        this.metrics.inc_failed_jobs();
+                                        warn!(target: "payload_builder", %err, %id, "Failed to create payload builder job");
+                                        res = Err(err);
+                                    }
                                 }
                             }
-                        }
 
-                        // return the id of the payload
-                        let _ = tx.send(res);
+                            // return the id of the payload
+                            let _ = tx.send(res);
+                        })
                     }
                     PayloadServiceCommand::BestPayload(id, tx) => {
                         let _ = tx.send(this.best_payload(id));
@@ -472,7 +478,7 @@ where
             }
 
             if !new_job {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -484,6 +490,7 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     BuildNewPayload(
         T::PayloadBuilderAttributes,
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
+        tracing::Span,
     ),
     /// Get the best payload so far
     BestPayload(PayloadId, oneshot::Sender<Option<Result<T::BuiltPayload, PayloadBuilderError>>>),
@@ -505,8 +512,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::BuildNewPayload(f0, f1) => {
-                f.debug_tuple("BuildNewPayload").field(&f0).field(&f1).finish()
+            Self::BuildNewPayload(f0, f1, f2) => {
+                f.debug_tuple("BuildNewPayload").field(&f0).field(&f1).field(&f2).finish()
             }
             Self::BestPayload(f0, f1) => {
                 f.debug_tuple("BestPayload").field(&f0).field(&f1).finish()
