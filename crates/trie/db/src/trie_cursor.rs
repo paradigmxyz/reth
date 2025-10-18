@@ -22,10 +22,14 @@ impl<T> DatabaseTrieCursorFactory<T> {
     }
 }
 
-impl<TX> TrieCursorFactory for DatabaseTrieCursorFactory<&TX>
-where
-    TX: DbTx,
-{
+impl<'a, TX> From<&'a TX> for DatabaseTrieCursorFactory<&'a TX> {
+    fn from(tx: &'a TX) -> Self {
+        Self::new(tx)
+    }
+}
+
+/// Implementation of the trie cursor factory for a database transaction.
+impl<TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<&TX> {
     type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
     type StorageTrieCursor =
         DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;

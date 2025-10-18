@@ -1,4 +1,4 @@
-use super::{BranchNodeCompact, Nibbles, StoredNibblesSubKey};
+use super::{BranchNodeCompact, StoredNibblesSubKey};
 
 /// Account storage trie node.
 ///
@@ -61,7 +61,7 @@ impl reth_codecs::Compact for TrieChangeSetsEntry {
         if len == 0 {
             // Return an empty entry without trying to parse anything
             return (
-                Self { nibbles: StoredNibblesSubKey::from(Nibbles::default()), node: None },
+                Self { nibbles: StoredNibblesSubKey::from(super::Nibbles::default()), node: None },
                 buf,
             )
         }
