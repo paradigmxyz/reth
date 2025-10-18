@@ -267,9 +267,25 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
         let data_dir =
             path.unwrap_or_chain_default(self.config.chain.chain(), self.config.datadir.clone());
 
-        let db = reth_db::test_utils::create_test_rw_db_with_path(data_dir.db());
+        // Create the database at data_dir.db() but pass the full data_dir path to TempDatabase
+        // so it cleans up the entire temporary directory, not just the db subdirectory
+        let db_path = data_dir.db();
+        let db = reth_db::init_db(
+            &db_path,
+            reth_db::mdbx::DatabaseArguments::new(reth_db_api::models::ClientVersion::default())
+                .with_max_read_transaction_duration(Some(
+                    reth_db::mdbx::MaxReadTransactionDuration::Unbounded,
+                )),
+        )
+        .expect("Failed to create test database");
+        
+        // Use the parent data_dir for cleanup, not just the db subdirectory
+        let temp_db = Arc::new(reth_db::test_utils::TempDatabase::new(
+            db,
+            data_dir.data_dir().to_path_buf(),
+        ));
 
-        WithLaunchContext { builder: self.with_database(db), task_executor }
+        WithLaunchContext { builder: self.with_database(temp_db), task_executor }
     }
 }
 
