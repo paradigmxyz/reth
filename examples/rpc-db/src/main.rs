@@ -23,10 +23,7 @@ use reth_ethereum::{
     node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthereumNode},
     pool::noop::NoopTransactionPool,
     provider::{
-        db::{
-            mdbx::{DatabaseArguments, SyncMode},
-            open_db_read_only, ClientVersion, DatabaseEnv,
-        },
+        db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv},
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
     },
