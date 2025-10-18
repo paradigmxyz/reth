@@ -570,7 +570,7 @@ pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     /// The executed block that determines the state after this block has been executed.
     block: ExecutedBlock<N>,
     /// The block's parent block if it exists.
-    parent: Option<Arc<BlockState<N>>>,
+    parent: Option<Arc<Self>>,
 }
 
 impl<N: NodePrimitives> BlockState<N> {
