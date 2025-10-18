@@ -42,7 +42,7 @@ use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
     DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
-use reth_storage_api::{BlockBodyIndicesProvider, DBProvider};
+use reth_storage_api::{BlockBodyIndicesProvider, ChangeSetReader, DBProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
@@ -775,6 +775,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         for segment in StaticFileSegment::iter() {
+            // Skip AccountChangeSets if no static files exist for it yet (backward compatibility)
+            if segment == StaticFileSegment::AccountChangeSets &&
+                self.get_highest_static_file_block(segment).is_none()
+            {
+                continue
+            }
+
             if provider.prune_modes_ref().has_receipts_pruning() && segment.is_receipts() {
                 // Pruned nodes (including full node) do not store receipts as static files.
                 continue
@@ -881,6 +888,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         highest_tx,
                         highest_block,
                     )?,
+                StaticFileSegment::AccountChangeSets => self
+                    .ensure_invariants::<_, tables::AccountChangeSets>(
+                        provider,
+                        segment,
+                        highest_tx,
+                        highest_block,
+                    )?,
             } {
                 update_unwind_target(unwind);
             }
@@ -966,7 +980,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .get_stage_checkpoint(match segment {
                 StaticFileSegment::Headers => StageId::Headers,
                 StaticFileSegment::Transactions => StageId::Bodies,
-                StaticFileSegment::Receipts => StageId::Execution,
+                StaticFileSegment::Receipts | StaticFileSegment::AccountChangeSets => {
+                    StageId::Execution
+                }
             })?
             .unwrap_or_default()
             .block_number;
@@ -1066,6 +1082,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             headers: self.get_highest_static_file_block(StaticFileSegment::Headers),
             receipts: self.get_highest_static_file_block(StaticFileSegment::Receipts),
             transactions: self.get_highest_static_file_block(StaticFileSegment::Transactions),
+            account_change_sets: self
+                .get_highest_static_file_block(StaticFileSegment::AccountChangeSets),
         }
     }
 
@@ -1110,6 +1128,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     {
         let mut result = Vec::with_capacity((range.end - range.start).min(100) as usize);
 
+        // TODO(rjected): what kind of change do we need here for account changeset?
         /// Resolves to the provider for the given block or transaction number.
         ///
         /// If the static file is missing, the `result` is returned.
@@ -1311,6 +1330,46 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
         &self.static_files_tx_index
     }
+
+    /// Get account changesets for a range of blocks, checking both static files and database.
+    pub fn get_account_changesets_range<FD>(
+        &self,
+        block_range: Range<BlockNumber>,
+        mut fetch_from_database: FD,
+    ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>>
+    where
+        FD: FnMut(
+            Range<BlockNumber>,
+        ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>>,
+    {
+        let mut changesets = Vec::new();
+        let highest_static_block =
+            self.get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+
+        if let Some(highest) = highest_static_block {
+            // Get from static files for blocks that are available
+            let static_end = block_range.end.min(highest + 1);
+            if block_range.start < static_end {
+                for block in block_range.start..static_end {
+                    let block_changesets = self.account_block_changeset(block)?;
+                    for changeset in block_changesets {
+                        changesets.push((block, changeset));
+                    }
+                }
+            }
+
+            // Get remaining from database
+            if block_range.end > highest + 1 {
+                let db_range = (highest + 1)..block_range.end;
+                changesets.extend(fetch_from_database(db_range)?);
+            }
+        } else {
+            // All from database
+            changesets = fetch_from_database(block_range)?;
+        }
+
+        Ok(changesets)
+    }
 }
 
 /// Helper trait to manage different [`StaticFileProviderRW`] of an `Arc<StaticFileProvider`
@@ -1370,6 +1429,109 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
 
     fn has_unwind_queued(&self) -> bool {
         self.writers.has_unwind_queued()
+    }
+}
+
+impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
+    fn account_block_changeset(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<Vec<reth_db::models::AccountBeforeTx>> {
+        let provider = match self.get_segment_provider_from_block(
+            StaticFileSegment::AccountChangeSets,
+            block_number,
+            None,
+        ) {
+            Ok(provider) => provider,
+            Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(Vec::new()),
+            Err(err) => return Err(err),
+        };
+
+        if let Some(offset) = provider.user_header().changeset_offset(block_number) {
+            let mut cursor = provider.cursor()?;
+            let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
+
+            for i in offset.changeset_range() {
+                if let Some(change) =
+                    cursor.get_one::<reth_db::static_file::AccountChangesetMask>(i.into())?
+                {
+                    changeset.push(change)
+                }
+            }
+            Ok(changeset)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    fn get_account_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<reth_db::models::AccountBeforeTx>> {
+        let provider = match self.get_segment_provider_from_block(
+            StaticFileSegment::AccountChangeSets,
+            block_number,
+            None,
+        ) {
+            Ok(provider) => provider,
+            Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+
+        if let Some(offset) = provider.user_header().changeset_offset(block_number) {
+            let mut cursor = provider.cursor()?;
+            let range = offset.changeset_range();
+            let mut low = range.start;
+            let mut high = range.end;
+
+            while low < high {
+                let mid = low + (high - low) / 2;
+                if let Some(change) =
+                    cursor.get_one::<reth_db::static_file::AccountChangesetMask>(mid.into())?
+                {
+                    if change.address < address {
+                        low = mid + 1;
+                    } else {
+                        high = mid;
+                    }
+                } else {
+                    // This is unexpected in a consistent file. The binary search can't
+                    // proceed reliably. For safety, we abort the search.
+                    low = range.end;
+                    break;
+                }
+            }
+
+            if low < range.end &&
+                let Some(change) = cursor
+                    .get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
+                    .filter(|change| change.address == address)
+            {
+                return Ok(Some(change));
+            }
+
+            Ok(None)
+        } else {
+            // TODO(rjected) right thing to return here?
+            Ok(None)
+        }
+    }
+
+    fn account_changesets_range(
+        &self,
+        range: core::ops::Range<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>> {
+        let mut changesets = Vec::new();
+
+        for block_num in range {
+            let block_changesets = self.account_block_changeset(block_num)?;
+            for changeset in block_changesets {
+                changesets.push((block_num, changeset));
+            }
+        }
+
+        Ok(changesets)
     }
 }
 

@@ -96,7 +96,8 @@ where
                     Receipt: Value + Compact,
                 >,
             > + StageCheckpointReader
-                          + BlockReader,
+                          + BlockReader
+                          + reth_provider::ChangeSetReader,
         >,
 {
     /// Listen for events on the `static_file_producer`.
@@ -140,6 +141,9 @@ where
         if let Some(block_range) = targets.receipts.clone() {
             segments.push((Box::new(segments::Receipts), block_range));
         }
+        if let Some(block_range) = targets.account_changesets.clone() {
+            segments.push((Box::new(segments::AccountChangeSets), block_range));
+        }
 
         segments.par_iter().try_for_each(|(segment, block_range)| -> ProviderResult<()> {
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, "StaticFileProducer segment");
@@ -178,15 +182,19 @@ where
     /// Returns highest block numbers for all static file segments.
     pub fn copy_to_static_files(&self) -> ProviderResult<HighestStaticFiles> {
         let provider = self.provider.database_provider_ro()?;
-        let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
-            .into_iter()
-            .map(|stage| provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number)))
-            .collect::<Result<Vec<_>, _>>()?;
+        let stages_checkpoints =
+            [StageId::Headers, StageId::Execution, StageId::Bodies, StageId::Execution]
+                .into_iter()
+                .map(|stage| {
+                    provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
         let highest_static_files = HighestStaticFiles {
             headers: stages_checkpoints[0],
             receipts: stages_checkpoints[1],
             transactions: stages_checkpoints[2],
+            account_change_sets: stages_checkpoints[3],
         };
         let targets = self.get_static_file_targets(highest_static_files)?;
         self.run(targets)?;
@@ -226,6 +234,17 @@ where
                     finalized_block_number,
                 )
             }),
+            // StaticFile account changesets
+            account_changesets: if self.prune_modes.account_history.is_none() {
+                finalized_block_numbers.account_change_sets.and_then(|finalized_block_number| {
+                    self.get_static_file_target(
+                        highest_static_files.account_change_sets,
+                        finalized_block_number,
+                    )
+                })
+            } else {
+                None
+            },
         };
 
         trace!(
@@ -319,6 +338,7 @@ mod tests {
                 headers: Some(1),
                 receipts: Some(1),
                 transactions: Some(1),
+                account_change_sets: Some(1),
             })
             .expect("get static file targets");
         assert_eq!(
@@ -326,13 +346,19 @@ mod tests {
             StaticFileTargets {
                 headers: Some(0..=1),
                 receipts: Some(0..=1),
-                transactions: Some(0..=1)
+                transactions: Some(0..=1),
+                account_changesets: Some(0..=1)
             }
         );
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(1), receipts: Some(1), transactions: Some(1) }
+            HighestStaticFiles {
+                headers: Some(1),
+                receipts: Some(1),
+                transactions: Some(1),
+                account_change_sets: Some(1)
+            }
         );
 
         let targets = static_file_producer
@@ -340,6 +366,7 @@ mod tests {
                 headers: Some(3),
                 receipts: Some(3),
                 transactions: Some(3),
+                account_change_sets: Some(3),
             })
             .expect("get static file targets");
         assert_eq!(
@@ -347,13 +374,19 @@ mod tests {
             StaticFileTargets {
                 headers: Some(2..=3),
                 receipts: Some(2..=3),
-                transactions: Some(2..=3)
+                transactions: Some(2..=3),
+                account_changesets: Some(2..=3)
             }
         );
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles {
+                headers: Some(3),
+                receipts: Some(3),
+                transactions: Some(3),
+                account_change_sets: Some(3)
+            }
         );
 
         let targets = static_file_producer
@@ -361,6 +394,7 @@ mod tests {
                 headers: Some(4),
                 receipts: Some(4),
                 transactions: Some(4),
+                account_change_sets: Some(4),
             })
             .expect("get static file targets");
         assert_eq!(
@@ -368,7 +402,8 @@ mod tests {
             StaticFileTargets {
                 headers: Some(4..=4),
                 receipts: Some(4..=4),
-                transactions: Some(4..=4)
+                transactions: Some(4..=4),
+                account_changesets: Some(4..=4)
             }
         );
         assert_matches!(
@@ -377,7 +412,12 @@ mod tests {
         );
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles {
+                headers: Some(3),
+                receipts: Some(3),
+                transactions: Some(3),
+                account_change_sets: Some(3)
+            }
         );
     }
 
@@ -405,6 +445,7 @@ mod tests {
                         headers: Some(1),
                         receipts: Some(1),
                         transactions: Some(1),
+                        account_change_sets: Some(1),
                     })
                     .expect("get static file targets");
                 assert_matches!(locked_producer.run(targets.clone()), Ok(_));

@@ -2,7 +2,8 @@ use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
     static_file::{
-        ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+        AccountChangesetMask, ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask,
+        ReceiptMask, TransactionMask,
     },
     RawDupSort,
 };
@@ -50,6 +51,10 @@ enum Subcommand {
         #[arg(value_parser = maybe_json_value_parser)]
         key: String,
 
+        /// The subkey to get content for, for example address in changeset
+        #[arg(value_parser = maybe_json_value_parser)]
+        subkey: Option<String>,
+
         /// Output bytes instead of human-readable decoded value
         #[arg(long)]
         raw: bool,
@@ -63,17 +68,22 @@ impl Command {
             Subcommand::Mdbx { table, key, subkey, raw } => {
                 table.view(&GetValueViewer { tool, key, subkey, raw })?
             }
-            Subcommand::StaticFile { segment, key, raw } => {
-                let (key, mask): (u64, _) = match segment {
+            Subcommand::StaticFile { segment, key, subkey, raw } => {
+                let (key, subkey, mask): (u64, _, _) = match segment {
                     StaticFileSegment::Headers => (
                         table_key::<tables::Headers>(&key)?,
+                        None,
                         <HeaderWithHashMask<HeaderTy<N>>>::MASK,
                     ),
                     StaticFileSegment::Transactions => {
-                        (table_key::<tables::Transactions>(&key)?, <TransactionMask<TxTy<N>>>::MASK)
+                        (table_key::<tables::Transactions>(&key)?, None, <TransactionMask<TxTy<N>>>::MASK)
                     }
                     StaticFileSegment::Receipts => {
-                        (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
+                        (table_key::<tables::Receipts>(&key)?, None, <ReceiptMask<ReceiptTy<N>>>::MASK)
+                    }
+                    StaticFileSegment::AccountChangeSets => {
+                        let subkey = table_subkey::<tables::AccountChangeSets>(subkey.as_deref())?;
+                        (table_key::<tables::AccountChangeSets>(&key)?, Some(subkey), AccountChangesetMask::MASK)
                     }
                 };
 
@@ -115,6 +125,13 @@ impl Command {
                                         content[0].as_slice(),
                                     )?;
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
+                                }
+                                StaticFileSegment::AccountChangeSets => {
+                                    let changeset =
+                                        <<tables::AccountChangeSets as Table>::Value>::decompress(
+                                            content[0].as_slice(),
+                                        )?;
+                                    println!("{}", serde_json::to_string_pretty(&changeset)?);
                                 }
                             }
                         }
