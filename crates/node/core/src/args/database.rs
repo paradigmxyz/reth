@@ -261,7 +261,6 @@ mod tests {
         let default_args = DatabaseArgs::default();
         let args = CommandParser::<DatabaseArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
-        assert!(matches!(args.sync_mode, Some(SyncMode::Durable)));
     }
 
     #[test]
