@@ -6,11 +6,11 @@ use crate::{
     HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider, TrieReader,
+    StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
-use crate::{DBProvider, DatabaseProviderFactory};
+use crate::{DBProvider, DatabaseProviderFactory, TrieReader};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -25,6 +25,7 @@ use core::{
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 #[cfg(feature = "db-api")]
 use reth_db_api::mock::{DatabaseMock, TxMock};
+#[cfg(feature = "db-api")]
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
@@ -33,9 +34,8 @@ use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
-#[cfg(feature = "db-api")]
-use reth_prune_types::PruneModes;
-use reth_prune_types::{PruneCheckpoint, PruneSegment};
+
+use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::trie_cursor::TrieCursorFactory;
@@ -629,15 +629,15 @@ impl<C: Send + Sync, N: Send + Sync> BlockBodyIndicesProvider for NoopProvider<C
 impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<ChainSpec, N> {
     type Tx = TxMock;
 
-    fn tx_ref(&self) -> &Self::Tx {
+    fn tx_ref(&self) -> &<Self as DBProvider>::Tx {
         &self.tx
     }
 
-    fn tx_mut(&mut self) -> &mut Self::Tx {
+    fn tx_mut(&mut self) -> &mut <Self as DBProvider>::Tx {
         &mut self.tx
     }
 
-    fn into_tx(self) -> Self::Tx {
+    fn into_tx(self) -> <Self as DBProvider>::Tx {
         self.tx
     }
 
@@ -652,6 +652,7 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<Chai
     }
 }
 
+#[cfg(feature = "db-api")]
 impl<C: Send + Sync, N: NodePrimitives> TrieReader for NoopProvider<C, N> {
     fn trie_reverts(&self, _from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
         Ok(TrieUpdatesSorted::default())
@@ -689,11 +690,13 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DatabaseProviderFactory
     type Provider = Self;
     type ProviderRW = Self;
 
-    fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+    fn database_provider_ro(&self) -> ProviderResult<<Self as DatabaseProviderFactory>::Provider> {
         Ok(self.clone())
     }
 
-    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+    fn database_provider_rw(
+        &self,
+    ) -> ProviderResult<<Self as DatabaseProviderFactory>::ProviderRW> {
         Ok(self.clone())
     }
 }

@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use alloy_primitives::{Address, BlockNumber, Bytes, B256};
+#[cfg(feature = "db-api")]
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
@@ -95,6 +96,7 @@ pub trait StateProofProvider: Send + Sync {
 }
 
 /// Trie Reader
+#[cfg(feature = "db-api")]
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait TrieReader: Send + Sync {
     /// Returns the [`TrieUpdatesSorted`] for reverting the trie database to its state prior to the
