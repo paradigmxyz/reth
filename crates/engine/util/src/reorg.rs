@@ -285,8 +285,8 @@ where
         .with_bundle_update()
         .with_bal_builder()
         .build();
-    
-      state.bal_index = 0;
+
+    state.bal_index = 0;
     state.bal_builder = Some(revm::state::bal::Bal::new());
 
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;

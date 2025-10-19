@@ -236,7 +236,8 @@ pub trait LoadPendingBlock:
             .history_by_block_hash(parent.hash())
             .map_err(Self::Error::from_eth_err)?;
         let state = StateProviderDatabase::new(&state_provider);
-        let mut db = State::builder().with_database(state).with_bundle_update().with_bal_builder().build();
+        let mut db =
+            State::builder().with_database(state).with_bundle_update().with_bal_builder().build();
 
         db.bal_index = 0;
         db.bal_builder = Some(revm::state::bal::Bal::new());
