@@ -7,7 +7,7 @@ use crate::{
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::Bytes;
 use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum::{
     node::api::{
@@ -172,7 +172,7 @@ impl BuiltPayload for CustomBuiltPayload {
         self.0.fees()
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<Self::Primitives>> {
+    fn executed_block(&self) -> Option<ExecutedBlock<Self::Primitives>> {
         self.0.executed_block()
     }
 

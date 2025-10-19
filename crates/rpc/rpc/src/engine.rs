@@ -16,7 +16,7 @@ use tracing_futures::Instrument;
 
 macro_rules! engine_span {
     () => {
-        tracing::trace_span!(target: "rpc", "engine")
+        tracing::info_span!(target: "rpc", "engine")
     };
 }
 

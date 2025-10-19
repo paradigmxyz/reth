@@ -741,13 +741,24 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // Update subtrie hashes in parallel
         {
             use rayon::iter::{IntoParallelIterator, ParallelIterator};
+            use tracing::info_span;
+
             let (tx, rx) = mpsc::channel();
 
             let branch_node_tree_masks = &self.branch_node_tree_masks;
             let branch_node_hash_masks = &self.branch_node_hash_masks;
+            let span = tracing::Span::current();
             changed_subtries
                 .into_par_iter()
                 .map(|mut changed_subtrie| {
+                    let _enter = info_span!(
+                        target: "trie::sparse::parallel",
+                        parent: span.clone(),
+                        "subtrie",
+                        index = changed_subtrie.index
+                    )
+                    .entered();
+
                     #[cfg(feature = "metrics")]
                     let start = std::time::Instant::now();
                     changed_subtrie.subtrie.update_hashes(
@@ -861,6 +872,16 @@ impl SparseTrieInterface for ParallelSparseTrie {
                 }
             }
         }
+    }
+
+    fn node_capacity(&self) -> usize {
+        self.upper_subtrie.node_capacity() +
+            self.lower_subtries.iter().map(|trie| trie.node_capacity()).sum::<usize>()
+    }
+
+    fn value_capacity(&self) -> usize {
+        self.upper_subtrie.value_capacity() +
+            self.lower_subtries.iter().map(|trie| trie.value_capacity()).sum::<usize>()
     }
 }
 
@@ -1282,6 +1303,7 @@ impl ParallelSparseTrie {
 
     /// Drains any [`SparseTrieUpdatesAction`]s from the given subtrie, and applies each action to
     /// the given `updates` set. If the given set is None then this is a no-op.
+    #[instrument(target = "trie::sparse::parallel", skip_all)]
     fn apply_subtrie_update_actions(
         &mut self,
         update_actions: impl Iterator<Item = SparseTrieUpdatesAction>,
@@ -1305,7 +1327,7 @@ impl ParallelSparseTrie {
     }
 
     /// Updates hashes for the upper subtrie, using nodes from both upper and lower subtries.
-    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, ret)]
+    #[instrument(target = "trie::parallel_sparse", skip_all, ret(level = "trace"))]
     fn update_upper_subtrie_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
         trace!(target: "trie::parallel_sparse", "Updating upper subtrie hashes");
 
@@ -1383,6 +1405,7 @@ impl ParallelSparseTrie {
     ///
     /// IMPORTANT: The method removes the subtries from `lower_subtries`, and the caller is
     /// responsible for returning them back into the array.
+    #[instrument(target = "trie::sparse::parallel", skip_all, fields(prefix_set_len = prefix_set.len()))]
     fn take_changed_lower_subtries(
         &mut self,
         prefix_set: &mut PrefixSet,
@@ -1539,6 +1562,7 @@ impl ParallelSparseTrie {
 
     /// Return updated subtries back to the trie after executing any actions required on the
     /// top-level `SparseTrieUpdates`.
+    #[instrument(target = "trie::sparse::parallel", skip_all)]
     fn insert_changed_subtries(
         &mut self,
         changed_subtries: impl IntoIterator<Item = ChangedSubtrie>,
@@ -2026,7 +2050,7 @@ impl SparseSubtrie {
     /// # Panics
     ///
     /// If the node at the root path does not exist.
-    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret)]
+    #[instrument(target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret(level = "trace"))]
     fn update_hashes(
         &mut self,
         prefix_set: &mut PrefixSet,
@@ -2076,6 +2100,16 @@ impl SparseSubtrie {
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.inner.clear();
+    }
+
+    /// Returns the capacity of the map containing trie nodes.
+    pub(crate) fn node_capacity(&self) -> usize {
+        self.nodes.capacity()
+    }
+
+    /// Returns the capacity of the map containing trie values.
+    pub(crate) fn value_capacity(&self) -> usize {
+        self.inner.value_capacity()
     }
 }
 
@@ -2409,6 +2443,11 @@ impl SparseSubtrieInner {
     fn clear(&mut self) {
         self.values.clear();
         self.buffers.clear();
+    }
+
+    /// Returns the capacity of the map storing leaf values
+    fn value_capacity(&self) -> usize {
+        self.values.capacity()
     }
 }
 
@@ -4998,9 +5037,12 @@ mod tests {
                             state.keys().copied(),
                         );
 
+                    // Extract account nodes before moving hash_builder_updates
+                    let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();
+
                     // Write trie updates to the database
                     let provider_rw = provider_factory.provider_rw().unwrap();
-                    provider_rw.write_trie_updates(&hash_builder_updates).unwrap();
+                    provider_rw.write_trie_updates(hash_builder_updates).unwrap();
                     provider_rw.commit().unwrap();
 
                     // Assert that the sparse trie root matches the hash builder root
@@ -5008,7 +5050,7 @@ mod tests {
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         BTreeMap::from_iter(sparse_updates.updated_nodes),
-                        BTreeMap::from_iter(hash_builder_updates.account_nodes)
+                        BTreeMap::from_iter(hash_builder_account_nodes)
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_parallel_sparse_trie_proof_nodes(
@@ -5043,9 +5085,12 @@ mod tests {
                             state.keys().copied(),
                         );
 
+                    // Extract account nodes before moving hash_builder_updates
+                    let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();
+
                     // Write trie updates to the database
                     let provider_rw = provider_factory.provider_rw().unwrap();
-                    provider_rw.write_trie_updates(&hash_builder_updates).unwrap();
+                    provider_rw.write_trie_updates(hash_builder_updates).unwrap();
                     provider_rw.commit().unwrap();
 
                     // Assert that the sparse trie root matches the hash builder root
@@ -5053,7 +5098,7 @@ mod tests {
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         BTreeMap::from_iter(sparse_updates.updated_nodes),
-                        BTreeMap::from_iter(hash_builder_updates.account_nodes)
+                        BTreeMap::from_iter(hash_builder_account_nodes)
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_parallel_sparse_trie_proof_nodes(

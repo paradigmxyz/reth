@@ -39,7 +39,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64},
         Arc,
     },
-    time::Instant,
+    time::{Instant, SystemTime},
 };
 use tokio::sync::Mutex;
 
@@ -396,7 +396,7 @@ where
                     // max possible tx fee is (gas_price * gas_limit)
                     // (if EIP1559) max possible tx fee is (max_fee_per_gas * gas_limit)
                     let gas_price = transaction.max_fee_per_gas();
-                    let max_tx_fee_wei = gas_price.saturating_mul(transaction.gas_limit() as u128);
+                    let max_tx_fee_wei = gas_price.saturating_mul(transaction_gas_limit as u128);
                     if max_tx_fee_wei > tx_fee_cap_wei {
                         return Err(TransactionValidationOutcome::Invalid(
                             transaction,
@@ -673,7 +673,7 @@ where
                                 Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
                             ))
                         }
-                    } else if sidecar.is_eip7594() {
+                    } else if sidecar.is_eip7594() && !self.allow_7594_sidecars() {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
                         ))
@@ -748,6 +748,9 @@ where
         if self.chain_spec().is_amsterdam_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.amsterdam.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+        self.fork_tracker
+            .tip_timestamp
+            .store(new_tip_block.timestamp(), std::sync::atomic::Ordering::Relaxed);
 
         if let Some(blob_params) =
             self.chain_spec().blob_params_at_timestamp(new_tip_block.timestamp())
@@ -762,6 +765,24 @@ where
 
     fn max_gas_limit(&self) -> u64 {
         self.block_gas_limit.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns whether EIP-7594 sidecars are allowed
+    fn allow_7594_sidecars(&self) -> bool {
+        let tip_timestamp = self.fork_tracker.tip_timestamp();
+
+        // If next block is Osaka, allow 7594 sidecars
+        if self.chain_spec().is_osaka_active_at_timestamp(tip_timestamp.saturating_add(12)) {
+            true
+        } else if self.chain_spec().is_osaka_active_at_timestamp(tip_timestamp.saturating_add(24)) {
+            let current_timestamp =
+                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+
+            // Allow after 4 seconds into last non-Osaka slot
+            current_timestamp >= tip_timestamp.saturating_add(4)
+        } else {
+            false
+        }
     }
 }
 
@@ -817,6 +838,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     osaka: bool,
     /// Fork indicator whether we are in the Amsterdam hardfork.
     amsterdam: bool,
+    /// Timestamp of the tip block.
+    tip_timestamp: u64,
     /// Max blob count at the block's timestamp.
     max_blob_count: u64,
     /// Whether using EIP-2718 type transactions is allowed
@@ -893,6 +916,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
             // amsterdam not yet activated
             amsterdam: true,
+            tip_timestamp: 0,
 
             // max blob count is prague by default
             max_blob_count: BlobParams::prague().max_blobs_per_tx,
@@ -1021,6 +1045,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self.cancun = self.client.chain_spec().is_cancun_active_at_timestamp(timestamp);
         self.prague = self.client.chain_spec().is_prague_active_at_timestamp(timestamp);
         self.osaka = self.client.chain_spec().is_osaka_active_at_timestamp(timestamp);
+        self.tip_timestamp = timestamp;
         self.max_blob_count = self
             .client
             .chain_spec()
@@ -1082,6 +1107,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             prague,
             osaka,
             amsterdam,
+            tip_timestamp,
             eip2718,
             eip1559,
             eip4844,
@@ -1105,6 +1131,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             prague: AtomicBool::new(prague),
             osaka: AtomicBool::new(osaka),
             amsterdam: AtomicBool::new(amsterdam),
+            tip_timestamp: AtomicU64::new(tip_timestamp),
             max_blob_count: AtomicU64::new(max_blob_count),
         };
 
@@ -1188,6 +1215,8 @@ pub struct ForkTracker {
     pub amsterdam: AtomicBool,
     /// Tracks max blob count per transaction at the block's timestamp.
     pub max_blob_count: AtomicU64,
+    /// Tracks the timestamp of the tip block.
+    pub tip_timestamp: AtomicU64,
 }
 
 impl ForkTracker {
@@ -1214,6 +1243,10 @@ impl ForkTracker {
     /// Returns `true` if Amsterdam fork is activated.
     pub fn is_amsterdam_activated(&self) -> bool {
         self.amsterdam.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    /// Returns the timestamp of the tip block.
+    pub fn tip_timestamp(&self) -> u64 {
+        self.tip_timestamp.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Returns the max allowed blob count per transaction.
@@ -1258,6 +1291,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1291,6 +1325,7 @@ mod tests {
             prague: false.into(),
             osaka: false.into(),
             amsterdam: false.into(),
+            tip_timestamp: 0.into(),
             max_blob_count: 0.into(),
         };
 

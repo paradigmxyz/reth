@@ -1,28 +1,18 @@
 //! Functionality related to tree state.
 
 use crate::engine::EngineApiKind;
-use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash};
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256,
 };
-use reth_chain_state::{EthPrimitives, ExecutedBlockWithTrieUpdates};
+use reth_chain_state::{EthPrimitives, ExecutedBlock};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
-use reth_trie::updates::TrieUpdates;
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     ops::Bound,
-    sync::Arc,
 };
 use tracing::debug;
-
-/// Default number of blocks to retain persisted trie updates
-const DEFAULT_PERSISTED_TRIE_UPDATES_RETENTION: u64 = EPOCH_SLOTS * 2;
-
-/// Number of blocks to retain persisted trie updates for OP Stack chains
-/// OP Stack chains only need `EPOCH_SLOTS` as reorgs are relevant only when
-/// op-node reorgs to the same chain twice
-const OPSTACK_PERSISTED_TRIE_UPDATES_RETENTION: u64 = EPOCH_SLOTS;
 
 /// Keeps track of the state of the tree.
 ///
@@ -35,19 +25,15 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// __All__ unique executed blocks by block hash that are connected to the canonical chain.
     ///
     /// This includes blocks of all forks.
-    pub(crate) blocks_by_hash: HashMap<B256, ExecutedBlockWithTrieUpdates<N>>,
+    pub(crate) blocks_by_hash: HashMap<B256, ExecutedBlock<N>>,
     /// Executed blocks grouped by their respective block number.
     ///
     /// This maps unique block number to all known blocks for that height.
     ///
     /// Note: there can be multiple blocks at the same height due to forks.
-    pub(crate) blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlockWithTrieUpdates<N>>>,
+    pub(crate) blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock<N>>>,
     /// Map of any parent block hash to its children.
     pub(crate) parent_to_child: HashMap<B256, HashSet<B256>>,
-    /// Map of hash to trie updates for canonical blocks that are persisted but not finalized.
-    ///
-    /// Contains the block number for easy removal.
-    pub(crate) persisted_trie_updates: HashMap<B256, (BlockNumber, Arc<TrieUpdates>)>,
     /// Currently tracked canonical head of the chain.
     pub(crate) current_canonical_head: BlockNumHash,
     /// The engine API variant of this handler
@@ -62,7 +48,6 @@ impl<N: NodePrimitives> TreeState<N> {
             blocks_by_number: BTreeMap::new(),
             current_canonical_head,
             parent_to_child: HashMap::default(),
-            persisted_trie_updates: HashMap::default(),
             engine_kind,
         }
     }
@@ -77,11 +62,8 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_hash.len()
     }
 
-    /// Returns the [`ExecutedBlockWithTrieUpdates`] by hash.
-    pub(crate) fn executed_block_by_hash(
-        &self,
-        hash: B256,
-    ) -> Option<&ExecutedBlockWithTrieUpdates<N>> {
+    /// Returns the [`ExecutedBlock`] by hash.
+    pub(crate) fn executed_block_by_hash(&self, hash: B256) -> Option<&ExecutedBlock<N>> {
         self.blocks_by_hash.get(&hash)
     }
 
@@ -97,10 +79,7 @@ impl<N: NodePrimitives> TreeState<N> {
     /// newest to oldest. And the parent hash of the oldest block that is missing from the buffer.
     ///
     /// Returns `None` if the block for the given hash is not found.
-    pub(crate) fn blocks_by_hash(
-        &self,
-        hash: B256,
-    ) -> Option<(B256, Vec<ExecutedBlockWithTrieUpdates<N>>)> {
+    pub(crate) fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock<N>>)> {
         let block = self.blocks_by_hash.get(&hash).cloned()?;
         let mut parent_hash = block.recovered_block().parent_hash();
         let mut blocks = vec![block];
@@ -113,7 +92,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Insert executed block into the state.
-    pub(crate) fn insert_executed(&mut self, executed: ExecutedBlockWithTrieUpdates<N>) {
+    pub(crate) fn insert_executed(&mut self, executed: ExecutedBlock<N>) {
         let hash = executed.recovered_block().hash();
         let parent_hash = executed.recovered_block().parent_hash();
         let block_number = executed.recovered_block().number();
@@ -138,10 +117,7 @@ impl<N: NodePrimitives> TreeState<N> {
     /// ## Returns
     ///
     /// The removed block and the block hashes of its children.
-    fn remove_by_hash(
-        &mut self,
-        hash: B256,
-    ) -> Option<(ExecutedBlockWithTrieUpdates<N>, HashSet<B256>)> {
+    fn remove_by_hash(&mut self, hash: B256) -> Option<(ExecutedBlock<N>, HashSet<B256>)> {
         let executed = self.blocks_by_hash.remove(&hash)?;
 
         // Remove this block from collection of children of its parent block.
@@ -215,39 +191,10 @@ impl<N: NodePrimitives> TreeState<N> {
             if executed.recovered_block().number() <= upper_bound {
                 let num_hash = executed.recovered_block().num_hash();
                 debug!(target: "engine::tree", ?num_hash, "Attempting to remove block walking back from the head");
-                if let Some((mut removed, _)) =
-                    self.remove_by_hash(executed.recovered_block().hash())
-                {
-                    debug!(target: "engine::tree", ?num_hash, "Removed block walking back from the head");
-                    // finally, move the trie updates
-                    let Some(trie_updates) = removed.trie.take_present() else {
-                        debug!(target: "engine::tree", ?num_hash, "No trie updates found for persisted block");
-                        continue;
-                    };
-                    self.persisted_trie_updates.insert(
-                        removed.recovered_block().hash(),
-                        (removed.recovered_block().number(), trie_updates),
-                    );
-                }
+                self.remove_by_hash(executed.recovered_block().hash());
             }
         }
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removed canonical blocks from the tree");
-    }
-
-    /// Prunes old persisted trie updates based on the current block number
-    /// and chain type (OP Stack or regular)
-    pub(crate) fn prune_persisted_trie_updates(&mut self) {
-        let retention_blocks = if self.engine_kind.is_opstack() {
-            OPSTACK_PERSISTED_TRIE_UPDATES_RETENTION
-        } else {
-            DEFAULT_PERSISTED_TRIE_UPDATES_RETENTION
-        };
-
-        let earliest_block_to_retain =
-            self.current_canonical_head.number.saturating_sub(retention_blocks);
-
-        self.persisted_trie_updates
-            .retain(|_, (block_number, _)| *block_number > earliest_block_to_retain);
     }
 
     /// Removes all blocks that are below the finalized block, as well as removing non-canonical
@@ -273,8 +220,6 @@ impl<N: NodePrimitives> TreeState<N> {
                 debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain block");
             }
         }
-
-        self.prune_persisted_trie_updates();
 
         // The only block that should remain at the `finalized` number now, is the finalized
         // block, if it exists.

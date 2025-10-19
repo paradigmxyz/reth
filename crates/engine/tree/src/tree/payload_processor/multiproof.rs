@@ -32,7 +32,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, instrument, trace};
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
@@ -553,7 +553,7 @@ impl MultiproofManager {
 
             let proof_result: Result<DecodedMultiProof, ParallelStateRootError> = (|| {
                 let receiver = account_proof_worker_handle
-                    .queue_account_multiproof(input)
+                    .dispatch_account_multiproof(input)
                     .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
                 receiver
@@ -718,6 +718,7 @@ impl MultiProofTask {
     /// Handles request for proof prefetch.
     ///
     /// Returns a number of proofs that were spawned.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip_all, fields(accounts = targets.len()))]
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
@@ -844,6 +845,7 @@ impl MultiProofTask {
     /// Handles state updates.
     ///
     /// Returns a number of proofs that were spawned.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip(self, update), fields(accounts = update.len()))]
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
@@ -973,6 +975,7 @@ impl MultiProofTask {
     ///      currently being calculated, or if there are any pending proofs in the proof sequencer
     ///      left to be revealed by checking the pending tasks.
     /// 6. This task exits after all pending proofs are processed.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip_all)]
     pub(crate) fn run(mut self) {
         // TODO convert those into fields
         let mut prefetch_proofs_requested = 0;
@@ -1228,8 +1231,7 @@ mod tests {
         );
         let consistent_view = ConsistentDbView::new(factory, None);
         let proof_handle =
-            ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1)
-                .expect("Failed to spawn proof workers");
+            ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1);
         let channel = channel();
 
         MultiProofTask::new(config, executor, proof_handle, channel.0, 1, None)

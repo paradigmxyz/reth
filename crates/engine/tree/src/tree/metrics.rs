@@ -79,7 +79,7 @@ impl EngineApiMetrics {
             for tx in transactions {
                 let tx = tx?;
                 let span =
-                    debug_span!(target: "engine::tree", "execute_tx", tx_hash=?tx.tx().tx_hash());
+                    debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
                 let _enter = span.enter();
                 trace!(target: "engine::tree", "Executing transaction");
                 executor.execute_transaction(tx)?;
@@ -122,6 +122,10 @@ pub(crate) struct TreeMetrics {
     pub reorgs: Counter,
     /// The latest reorg depth
     pub latest_reorg_depth: Gauge,
+    /// The current safe block height (this is required by optimism)
+    pub safe_block_height: Gauge,
+    /// The current finalized block height (this is required by optimism)
+    pub finalized_block_height: Gauge,
 }
 
 /// Metrics for the `EngineApi`.
@@ -311,6 +315,7 @@ mod tests {
                     requests: Requests::default(),
                     gas_used: 1000,
                     block_access_list: None,
+                    blob_gas_used: 0,
                 },
             ))
         }

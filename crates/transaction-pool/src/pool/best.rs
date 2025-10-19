@@ -16,6 +16,8 @@ use std::{
 use tokio::sync::broadcast::{error::TryRecvError, Receiver};
 use tracing::debug;
 
+const MAX_NEW_TRANSACTIONS_PER_BATCH: usize = 16;
+
 /// An iterator that returns transactions that can be executed on the current state (*best*
 /// transactions).
 ///
@@ -165,13 +167,17 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// Checks for new transactions that have come into the `PendingPool` after this iterator was
     /// created and inserts them
     fn add_new_transactions(&mut self) {
-        while let Some(pending_tx) = self.try_recv() {
-            //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
-            let tx_id = *pending_tx.transaction.id();
-            if self.ancestor(&tx_id).is_none() {
-                self.independent.insert(pending_tx.clone());
+        for _ in 0..MAX_NEW_TRANSACTIONS_PER_BATCH {
+            if let Some(pending_tx) = self.try_recv() {
+                //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
+                let tx_id = *pending_tx.transaction.id();
+                if self.ancestor(&tx_id).is_none() {
+                    self.independent.insert(pending_tx.clone());
+                }
+                self.all.insert(tx_id, pending_tx);
+            } else {
+                break;
             }
-            self.all.insert(tx_id, pending_tx);
         }
     }
 }

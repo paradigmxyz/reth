@@ -222,6 +222,12 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     ///
     /// This is useful for reusing the trie without needing to reallocate memory.
     fn clear(&mut self);
+
+    /// This returns the capacity of any inner data structures which store nodes.
+    fn node_capacity(&self) -> usize;
+
+    /// This returns the capacity of any inner data structures which store leaf values.
+    fn value_capacity(&self) -> usize;
 }
 
 /// Struct for passing around branch node mask information.

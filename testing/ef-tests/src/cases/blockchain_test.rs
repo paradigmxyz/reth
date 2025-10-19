@@ -10,17 +10,20 @@ use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
-use reth_ethereum_primitives::Block;
+use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{Block as BlockTrait, RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
     StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
-use reth_stateless::{validation::stateless_validation, ExecutionWitness};
+use reth_stateless::{
+    trie::StatelessSparseTrie, validation::stateless_validation_with_trie, ExecutionWitness,
+    UncompressedPublicKey,
+};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 use std::{
@@ -363,9 +366,16 @@ fn run_case(
     }
 
     // Now validate using the stateless client if everything else passes
-    for (block, execution_witness) in &program_inputs {
-        stateless_validation(
-            block.clone(),
+    for (recovered_block, execution_witness) in &program_inputs {
+        let block = recovered_block.clone().into_block();
+
+        // Recover the actual public keys from the transaction signatures
+        let public_keys = recover_signers(block.body().transactions())
+            .expect("Failed to recover public keys from transaction signatures");
+
+        stateless_validation_with_trie::<StatelessSparseTrie, _, _>(
+            block,
+            public_keys,
             execution_witness.clone(),
             chain_spec.clone(),
             EthEvmConfig::new(chain_spec.clone()),
@@ -418,6 +428,26 @@ fn pre_execution_checks(
     consensus.validate_block_pre_execution(block)?;
 
     Ok(())
+}
+
+/// Recover public keys from transaction signatures.
+fn recover_signers<'a, I>(txs: I) -> Result<Vec<UncompressedPublicKey>, Box<dyn std::error::Error>>
+where
+    I: IntoIterator<Item = &'a TransactionSigned>,
+{
+    txs.into_iter()
+        .enumerate()
+        .map(|(i, tx)| {
+            tx.signature()
+                .recover_from_prehash(&tx.signature_hash())
+                .map(|keys| {
+                    UncompressedPublicKey(
+                        keys.to_encoded_point(false).as_bytes().try_into().unwrap(),
+                    )
+                })
+                .map_err(|e| format!("failed to recover signature for tx #{i}: {e}").into())
+        })
+        .collect::<Result<Vec<UncompressedPublicKey>, _>>()
 }
 
 /// Returns whether the test at the given path should be skipped.

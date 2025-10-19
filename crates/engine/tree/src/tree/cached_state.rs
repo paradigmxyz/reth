@@ -18,7 +18,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{sync::Arc, time::Duration};
-use tracing::trace;
+use tracing::{debug_span, instrument, trace};
 
 pub(crate) type Cache<K, V> =
     mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
@@ -354,6 +354,7 @@ impl ExecutionCache {
     }
 
     /// Invalidates the storage for all addresses in the set
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(accounts = addresses.len()))]
     pub(crate) fn invalidate_storages(&self, addresses: HashSet<&Address>) {
         // NOTE: this must collect because the invalidate function should not be called while we
         // hold an iter for it
@@ -385,12 +386,25 @@ impl ExecutionCache {
     /// ## Error Handling
     ///
     /// Returns an error if the state updates are inconsistent and should be discarded.
+    #[instrument(level = "debug", target = "engine::tree", skip_all)]
     pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
+        let _enter =
+            debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
+                .entered();
         // Insert bytecodes
         for (code_hash, bytecode) in &state_updates.contracts {
             self.code_cache.insert(*code_hash, Some(Bytecode(bytecode.clone())));
         }
+        drop(_enter);
 
+        let _enter = debug_span!(
+            target: "engine::tree",
+            "accounts",
+            accounts = state_updates.state.len(),
+            storages =
+                state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
+        )
+        .entered();
         let mut invalidated_accounts = HashSet::default();
         for (addr, account) in &state_updates.state {
             // If the account was not modified, as in not changed and not destroyed, then we have
@@ -474,9 +488,9 @@ impl ExecutionCacheBuilder {
             .build_with_hasher(DefaultHashBuilder::default());
 
         let account_cache = CacheBuilder::new(self.account_cache_entries)
-            .weigher(|_key: &Address, _value: &Option<Account>| -> u32 {
+            .weigher(|_key: &Address, value: &Option<Account>| -> u32 {
                 // Account has a fixed size (none, balance,code_hash)
-                size_of::<Option<Account>>() as u32
+                20 + size_of_val(value) as u32
             })
             .max_capacity(account_cache_size)
             .time_to_live(EXPIRY_TIME)
@@ -485,13 +499,19 @@ impl ExecutionCacheBuilder {
 
         let code_cache = CacheBuilder::new(self.code_cache_entries)
             .weigher(|_key: &B256, value: &Option<Bytecode>| -> u32 {
-                match value {
+                let code_size = match value {
                     Some(bytecode) => {
-                        // base weight + actual bytecode size
-                        (40 + bytecode.len()) as u32
+                        // base weight + actual (padded) bytecode size + size of the jump table
+                        (size_of_val(value) +
+                            bytecode.bytecode().len() +
+                            bytecode
+                                .legacy_jump_table()
+                                .map(|table| table.as_slice().len())
+                                .unwrap_or_default()) as u32
                     }
-                    None => 8, // size of None variant
-                }
+                    None => size_of_val(value) as u32,
+                };
+                32 + code_size
             })
             .max_capacity(code_cache_size)
             .time_to_live(EXPIRY_TIME)

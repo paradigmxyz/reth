@@ -840,6 +840,7 @@ mod tests {
                 requests: Requests::default(),
                 gas_used: 0,
                 block_access_list: Default::default(),
+                blob_gas_used: 0,
             },
         };
 

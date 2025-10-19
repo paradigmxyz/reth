@@ -28,6 +28,7 @@ alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-rlp.workspace = true
+alloy-eip7928.workspace = true
 
 # Misc
 parking_lot = { workspace = true, optional = true }

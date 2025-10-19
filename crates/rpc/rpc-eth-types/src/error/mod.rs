@@ -69,7 +69,7 @@ pub enum EthApiError {
     InvalidTransactionSignature,
     /// Errors related to the transaction pool
     #[error(transparent)]
-    PoolError(RpcPoolError),
+    PoolError(#[from] RpcPoolError),
     /// Header not found for block hash/number/tag
     #[error("header not found")]
     HeaderNotFound(BlockId),
@@ -186,6 +186,16 @@ pub enum EthApiError {
     /// Error thrown when batch tx send channel fails
     #[error("Batch transaction sender channel closed")]
     BatchTxSendError,
+    /// Error that occurred during `call_many` execution with bundle and transaction context
+    #[error("call_many error in bundle {bundle_index} and transaction {tx_index}: {}", .error.message())]
+    CallManyError {
+        /// Bundle index where the error occurred
+        bundle_index: usize,
+        /// Transaction index within the bundle where the error occurred  
+        tx_index: usize,
+        /// The underlying error object
+        error: jsonrpsee_types::ErrorObject<'static>,
+    },
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -195,6 +205,15 @@ impl EthApiError {
     /// crates a new [`EthApiError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
+    }
+
+    /// Creates a new [`EthApiError::CallManyError`] variant.
+    pub const fn call_many_error(
+        bundle_index: usize,
+        tx_index: usize,
+        error: jsonrpsee_types::ErrorObject<'static>,
+    ) -> Self {
+        Self::CallManyError { bundle_index, tx_index, error }
     }
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
@@ -303,6 +322,16 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
             EthApiError::BatchTxSendError => {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())
+            }
+            EthApiError::CallManyError { bundle_index, tx_index, error } => {
+                jsonrpsee_types::error::ErrorObject::owned(
+                    error.code(),
+                    format!(
+                        "call_many error in bundle {bundle_index} and transaction {tx_index}: {}",
+                        error.message()
+                    ),
+                    error.data(),
+                )
             }
         }
     }
@@ -681,7 +710,7 @@ impl RpcInvalidTransactionError {
     /// Converts the halt error
     ///
     /// Takes the configured gas limit of the transaction which is attached to the error
-    pub const fn halt(reason: HaltReason, gas_limit: u64) -> Self {
+    pub fn halt(reason: HaltReason, gas_limit: u64) -> Self {
         match reason {
             HaltReason::OutOfGas(err) => Self::out_of_gas(err, gas_limit),
             HaltReason::NonceOverflow => Self::NonceMaxValue,
@@ -762,10 +791,7 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobVersionedHashesNotSupported => {
                 Self::BlobVersionedHashesNotSupported
             }
-            InvalidTransaction::BlobGasPriceGreaterThanMax {
-                block_blob_gas_price: _,
-                tx_max_fee_per_blob_gas: _,
-            } => Self::BlobFeeCapTooLow,
+            InvalidTransaction::BlobGasPriceGreaterThanMax { .. } => Self::BlobFeeCapTooLow,
             InvalidTransaction::EmptyBlobs => Self::BlobTransactionMissingBlobHashes,
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
             InvalidTransaction::TooManyBlobs { have, .. } => Self::TooManyBlobs { have },
@@ -783,7 +809,7 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::Eip7873MissingTarget => {
                 Self::other(internal_rpc_err(err.to_string()))
             }
-            InvalidTransaction::Str(_) => todo!(),
+            InvalidTransaction::Str(_) => Self::other(internal_rpc_err(err.to_string())),
         }
     }
 }

@@ -29,7 +29,6 @@ use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
-    ProviderResult,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -112,14 +111,20 @@ enum StorageWorkerJob {
 /// # Shutdown
 ///
 /// Worker shuts down when the crossbeam channel closes (all senders dropped).
-fn storage_worker_loop<Tx>(
-    proof_tx: ProofTaskTx<Tx>,
+fn storage_worker_loop<Factory>(
+    view: ConsistentDbView<Factory>,
+    task_ctx: ProofTaskCtx,
     work_rx: CrossbeamReceiver<StorageWorkerJob>,
     worker_id: usize,
     #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
 ) where
-    Tx: DbTx,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>,
 {
+    // Create db transaction before entering work loop
+    let provider =
+        view.provider_ro().expect("Storage worker failed to initialize: database unavailable");
+    let proof_tx = ProofTaskTx::new(provider.into_tx(), task_ctx, worker_id);
+
     tracing::debug!(
         target: "trie::proof_task",
         worker_id,
@@ -258,15 +263,21 @@ fn storage_worker_loop<Tx>(
 /// # Shutdown
 ///
 /// Worker shuts down when the crossbeam channel closes (all senders dropped).
-fn account_worker_loop<Tx>(
-    proof_tx: ProofTaskTx<Tx>,
+fn account_worker_loop<Factory>(
+    view: ConsistentDbView<Factory>,
+    task_ctx: ProofTaskCtx,
     work_rx: CrossbeamReceiver<AccountWorkerJob>,
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     worker_id: usize,
     #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
 ) where
-    Tx: DbTx,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>,
 {
+    // Create db transaction before entering work loop
+    let provider =
+        view.provider_ro().expect("Account worker failed to initialize: database unavailable");
+    let proof_tx = ProofTaskTx::new(provider.into_tx(), task_ctx, worker_id);
+
     tracing::debug!(
         target: "trie::proof_task",
         worker_id,
@@ -308,7 +319,7 @@ fn account_worker_loop<Tx>(
                 );
                 tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-                let storage_proof_receivers = match queue_storage_proofs(
+                let storage_proof_receivers = match dispatch_storage_proofs(
                     &storage_work_tx,
                     &input.targets,
                     &mut storage_prefix_sets,
@@ -568,7 +579,7 @@ where
 /// computation. This enables interleaved parallelism for better performance.
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
-fn queue_storage_proofs(
+fn dispatch_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     targets: &MultiProofTargets,
     storage_prefix_sets: &mut B256Map<PrefixSet>,
@@ -682,7 +693,7 @@ where
             multi_added_removed_keys.unwrap_or_else(|| Arc::new(MultiAddedRemovedKeys::new()));
         let added_removed_keys = multi_added_removed_keys.get_storage(&hashed_address);
 
-        let span = tracing::trace_span!(
+        let span = tracing::info_span!(
             target: "trie::proof_task",
             "Storage proof calculation",
             hashed_address = ?hashed_address,
@@ -864,9 +875,9 @@ impl ProofWorkerHandle {
         task_ctx: ProofTaskCtx,
         storage_worker_count: usize,
         account_worker_count: usize,
-    ) -> ProviderResult<Self>
+    ) -> Self
     where
-        Factory: DatabaseProviderFactory<Provider: BlockReader>,
+        Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
@@ -880,9 +891,8 @@ impl ProofWorkerHandle {
 
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
-            let provider_ro = view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let view_clone = view.clone();
+            let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = storage_work_rx.clone();
 
             executor.spawn_blocking(move || {
@@ -890,7 +900,8 @@ impl ProofWorkerHandle {
                 let metrics = ProofTaskTrieMetrics::default();
 
                 storage_worker_loop(
-                    proof_task_tx,
+                    view_clone,
+                    task_ctx_clone,
                     work_rx_clone,
                     worker_id,
                     #[cfg(feature = "metrics")]
@@ -907,9 +918,8 @@ impl ProofWorkerHandle {
 
         // Spawn account workers
         for worker_id in 0..account_worker_count {
-            let provider_ro = view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let view_clone = view.clone();
+            let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = account_work_rx.clone();
             let storage_work_tx_clone = storage_work_tx.clone();
 
@@ -918,7 +928,8 @@ impl ProofWorkerHandle {
                 let metrics = ProofTaskTrieMetrics::default();
 
                 account_worker_loop(
-                    proof_task_tx,
+                    view_clone,
+                    task_ctx_clone,
                     work_rx_clone,
                     storage_work_tx_clone,
                     worker_id,
@@ -934,7 +945,7 @@ impl ProofWorkerHandle {
             );
         }
 
-        Ok(Self::new_handle(storage_work_tx, account_work_tx))
+        Self::new_handle(storage_work_tx, account_work_tx)
     }
 
     /// Creates a new [`ProofWorkerHandle`] with direct access to worker pools.
@@ -947,8 +958,8 @@ impl ProofWorkerHandle {
         Self { storage_work_tx, account_work_tx }
     }
 
-    /// Queue a storage proof computation
-    pub fn queue_storage_proof(
+    /// Dispatch a storage proof computation to storage worker pool
+    pub fn dispatch_storage_proof(
         &self,
         input: StorageProofInput,
     ) -> Result<Receiver<StorageProofResult>, ProviderError> {
@@ -963,7 +974,7 @@ impl ProofWorkerHandle {
     }
 
     /// Queue an account multiproof computation
-    pub fn queue_account_multiproof(
+    pub fn dispatch_account_multiproof(
         &self,
         input: AccountMultiproofInput,
     ) -> Result<Receiver<AccountMultiproofResult>, ProviderError> {
@@ -977,8 +988,8 @@ impl ProofWorkerHandle {
         Ok(rx)
     }
 
-    /// Internal: Queue blinded storage node request
-    fn queue_blinded_storage_node(
+    /// Dispatch blinded storage node request to storage worker pool
+    pub(crate) fn dispatch_blinded_storage_node(
         &self,
         account: B256,
         path: Nibbles,
@@ -993,8 +1004,8 @@ impl ProofWorkerHandle {
         Ok(rx)
     }
 
-    /// Internal: Queue blinded account node request
-    fn queue_blinded_account_node(
+    /// Dispatch blinded account node request to account worker pool
+    pub(crate) fn dispatch_blinded_account_node(
         &self,
         path: Nibbles,
     ) -> Result<Receiver<TrieNodeProviderResult>, ProviderError> {
@@ -1044,13 +1055,13 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
         match self {
             Self::AccountNode { handle } => {
                 let rx = handle
-                    .queue_blinded_account_node(*path)
+                    .dispatch_blinded_account_node(*path)
                     .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
                 rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
             Self::StorageNode { handle, account } => {
                 let rx = handle
-                    .queue_blinded_storage_node(*account, *path)
+                    .dispatch_blinded_storage_node(*account, *path)
                     .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
                 rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
@@ -1091,7 +1102,7 @@ mod tests {
             let view = ConsistentDbView::new(factory, None);
             let ctx = test_ctx();
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), view, ctx, 5, 3).unwrap();
+            let proof_handle = ProofWorkerHandle::new(handle.clone(), view, ctx, 5, 3);
 
             // Verify handle can be cloned
             let _cloned_handle = proof_handle.clone();

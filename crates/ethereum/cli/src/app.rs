@@ -82,10 +82,7 @@ where
         ) -> Result<()>,
     ) -> Result<()>
     where
-        N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader: CliHeader>,
-            ChainSpec: Hardforks + EthChainSpec,
-        >,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let runner = match self.runner.take() {
@@ -119,7 +116,7 @@ where
                 layers.with_span_layer(
                     "reth".to_string(),
                     output_type.clone(),
-                    self.cli.traces.otlp_level,
+                    self.cli.traces.otlp_filter.clone(),
                 )?;
             }
 

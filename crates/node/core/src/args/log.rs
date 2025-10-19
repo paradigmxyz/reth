@@ -139,7 +139,7 @@ impl LogArgs {
 pub enum ColorMode {
     /// Colors on
     Always,
-    /// Colors on
+    /// Auto-detect
     Auto,
     /// Colors off
     Never,
