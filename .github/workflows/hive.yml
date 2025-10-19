@@ -48,7 +48,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ./hive_assets
-          key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/assets/hive/build_simulators.sh') }}
+          key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/assets/hive/build_simulators.sh', '.github/assets/hive/reth_debug_logging.diff') }}
 
       - name: Build hive assets
         if: steps.cache-hive.outputs.cache-hit != 'true'
