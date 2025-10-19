@@ -49,7 +49,8 @@ where
             execution_ctx: ctx,
             parent,
             transactions,
-            output: BlockExecutionResult { receipts, requests, gas_used, blob_gas_used,block_access_list},
+            output:
+                BlockExecutionResult { receipts, requests, gas_used, blob_gas_used, block_access_list },
             state_root,
             ..
         } = input;

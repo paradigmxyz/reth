@@ -1291,7 +1291,6 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
