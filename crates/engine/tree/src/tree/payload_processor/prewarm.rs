@@ -165,10 +165,9 @@ where
                 handles.push(ctx.spawn_worker(i, &executor, actions_tx.clone(), done_tx.clone()));
             }
 
-            let mut tx_index = 0usize;
-
             // Distribute transactions to workers
-            for tx in core::iter::from_fn(|| pending.recv().ok()) {
+            let mut tx_index = 0usize;
+            while let Ok(tx) = pending.recv() {
                 // Stop distributing if termination was requested
                 if ctx.terminate_execution.load(Ordering::Relaxed) {
                     trace!(
