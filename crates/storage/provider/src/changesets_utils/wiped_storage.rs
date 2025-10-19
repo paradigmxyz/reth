@@ -64,11 +64,7 @@ where
                     // For duplicate values, the address remains the same, so we don't need to check
                     Some((entry.key, entry.value))
                 }
-                Ok(None) => {
-                    self.has_more = false;
-                    None
-                }
-                Err(_) => {
+                Ok(None) | Err(_) => {
                     self.has_more = false;
                     None
                 }
