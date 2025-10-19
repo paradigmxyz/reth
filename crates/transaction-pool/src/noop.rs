@@ -22,6 +22,7 @@ use alloy_eips::{
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
+use reth_storage_api::StateProvider;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -371,6 +372,44 @@ pub struct MockTransactionValidator<T> {
 
 impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
+
+    async fn validate_transaction_stateless(
+        &self,
+        _origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> Result<Self::Transaction, TransactionValidationOutcome<Self::Transaction>> {
+        if self.return_invalid {
+            return Err(TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::Underpriced,
+            ));
+        }
+        // Stateless validation passes, return the transaction for stateful validation
+        Ok(transaction)
+    }
+
+    async fn validate_transaction_stateful(
+        &self,
+        origin: TransactionOrigin,
+        mut transaction: Self::Transaction,
+        _state: &dyn StateProvider,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
+        // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
+        // overdraft
+        TransactionValidationOutcome::Valid {
+            balance: U256::MAX,
+            state_nonce: 0,
+            bytecode_hash: None,
+            transaction: ValidTransaction::new(transaction, maybe_sidecar),
+            propagate: match origin {
+                TransactionOrigin::External => true,
+                TransactionOrigin::Local => self.propagate_local,
+                TransactionOrigin::Private => false,
+            },
+            authorities: None,
+        }
+    }
 
     async fn validate_transaction(
         &self,
