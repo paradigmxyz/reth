@@ -21,6 +21,7 @@ reth-primitives-traits.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
+reth-trie.workspace = true
 reth-trie-common.workspace = true
 revm-database.workspace = true
 reth-ethereum-primitives.workspace = true

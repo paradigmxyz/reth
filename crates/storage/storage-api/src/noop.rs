@@ -34,6 +34,7 @@ use reth_prune_types::PruneModes;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie::trie_cursor::TrieCursorFactory;
 use reth_trie_common::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
@@ -655,6 +656,8 @@ impl<C: Send + Sync, N: NodePrimitives> TrieReader for NoopProvider<C, N> {
     fn get_block_trie_updates(
         &self,
         _block_number: BlockNumber,
+        _cached_reverts: Option<&TrieUpdatesSorted>,
+        _cursor_factory: &impl TrieCursorFactory,
     ) -> ProviderResult<TrieUpdatesSorted> {
         Ok(TrieUpdatesSorted::default())
     }

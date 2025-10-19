@@ -29,12 +29,13 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, HashedPostStateProvider,
-    ProviderError, StateProviderBox, StateProviderFactory, StateReader, TransactionVariant,
-    TrieReader,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    HashedPostStateProvider, ProviderError, StateProviderBox, StateProviderFactory, StateReader,
+    TransactionVariant, TrieReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_trie_db::DatabaseTrieCursorFactory;
 use revm::state::EvmState;
 use state::TreeState;
 use std::{
@@ -1749,7 +1750,10 @@ where
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
         let hashed_state = self.provider.hashed_post_state(execution_output.state());
-        let trie_updates = self.provider.get_block_trie_updates(block.number())?;
+        let db_provider = self.provider.database_provider_ro()?;
+        let cursor_factory = DatabaseTrieCursorFactory::new(db_provider.tx_ref());
+        let trie_updates =
+            self.provider.get_block_trie_updates(block.number(), None, &cursor_factory)?;
 
         Ok(Some(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),

@@ -25,13 +25,14 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, KeccakKeyHasher};
+use reth_trie::{updates::TrieUpdatesSorted,trie_cursor::TrieCursorFactory,HashedPostState, KeccakKeyHasher};
 use revm_database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
+
 use tracing::trace;
 
 /// The main type for interacting with the blockchain.
@@ -743,12 +744,18 @@ impl<N: ProviderNodeTypes> TrieReader for BlockchainProvider<N> {
     fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
         self.consistent_provider()?.trie_reverts(from)
     }
-
+   
     fn get_block_trie_updates(
         &self,
         block_number: BlockNumber,
+        cached_reverts: Option<&TrieUpdatesSorted>,
+        cursor_factory: &impl TrieCursorFactory,
     ) -> ProviderResult<TrieUpdatesSorted> {
-        self.consistent_provider()?.get_block_trie_updates(block_number)
+        self.consistent_provider()?.get_block_trie_updates(
+            block_number,
+            cached_reverts,
+            cursor_factory,
+        )
     }
 }
 

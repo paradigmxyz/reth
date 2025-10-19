@@ -1513,8 +1513,10 @@ impl<N: ProviderNodeTypes> TrieReader for ConsistentProvider<N> {
     fn get_block_trie_updates(
         &self,
         block_number: BlockNumber,
+        cached_reverts: Option<&TrieUpdatesSorted>,
+        cursor_factory: &impl reth_trie::trie_cursor::TrieCursorFactory,
     ) -> ProviderResult<TrieUpdatesSorted> {
-        self.storage_provider.get_block_trie_updates(block_number)
+        self.storage_provider.get_block_trie_updates(block_number, cached_reverts, cursor_factory)
     }
 }
 

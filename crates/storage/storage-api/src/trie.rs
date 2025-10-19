@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 use alloy_primitives::{Address, BlockNumber, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie::trie_cursor::TrieCursorFactory;
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
@@ -100,6 +101,8 @@ pub trait TrieReader: Send + Sync {
     fn get_block_trie_updates(
         &self,
         block_number: BlockNumber,
+        cached_reverts: Option<&TrieUpdatesSorted>,
+        cursor_factory: &impl TrieCursorFactory,
     ) -> ProviderResult<TrieUpdatesSorted>;
 }
 

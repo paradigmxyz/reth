@@ -62,10 +62,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    trie_cursor::{
-        InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
-        TrieCursorIter,
-    },
+    trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieCursorIter},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     BranchNodeCompact, HashedPostStateSorted, Nibbles, StoredNibbles, StoredNibblesSubKey,
     TrieChangeSetsEntry,
@@ -276,16 +273,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         debug!(target: "providers::db", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
-        // TODO: Do performant / batched writes for each type of object
-        // instead of a loop over all blocks,
-        // meaning:
-        //  * blocks
-        //  * state
-        //  * hashed state
-        //  * trie updates (cannot naively extend, need helper)
-        //  * indices (already done basically)
+        // Create cursors once outside the loop for reuse - as suggested in the issue
+        let tx = self.tx_ref();
+        let db_cursor_factory = DatabaseTrieCursorFactory::new(tx);
+        let mut accounts_trie_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
+        let mut storages_trie_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
+
         // Insert the blocks
-        for ExecutedBlock { recovered_block, execution_output, hashed_state, trie_updates } in
+        for ExecutedBlock { recovered_block, execution_output, hashed_state, trie_updates: _ } in
             blocks
         {
             let block_number = recovered_block.number();
@@ -298,10 +293,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // insert hashes and intermediate merkle nodes
             self.write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
 
-            // sort trie updates and insert changesets
-            let trie_updates_sorted = (*trie_updates).clone().into_sorted();
-            self.write_trie_changesets(block_number, &trie_updates_sorted, None)?;
-            self.write_trie_updates_sorted(&trie_updates_sorted)?;
+            // Get trie updates using the pre-created cursor factory to avoid recreating cursors
+            let trie_updates = self.get_block_trie_updates(block_number, None, &db_cursor_factory)?;
+            self.write_trie_changesets(block_number, &trie_updates, None)?;
+
+            // Write trie updates
+            self.write_trie_updates_sorted(&trie_updates)?;
         }
 
         // update history indices
@@ -2116,7 +2113,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         let mut num_entries = 0;
 
         let tx = self.tx_ref();
-        let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+        let mut account_trie_cursor: <TX as DbTxMut>::CursorMut<tables::AccountsTrie> = tx.cursor_write::<tables::AccountsTrie>()?;
 
         // Process sorted account nodes
         for (key, updated_node) in &trie_updates.account_nodes {
@@ -2281,36 +2278,36 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         Ok(TrieUpdatesSorted { account_nodes, storage_tries })
     }
 
+    //karl_todo : 修改这个函数名为 get_block_trie_updates_with_cursors
     fn get_block_trie_updates(
         &self,
         block_number: BlockNumber,
+        cached_reverts: Option<&TrieUpdatesSorted>,
+        cursor_factory: &impl TrieCursorFactory,
     ) -> ProviderResult<TrieUpdatesSorted> {
-        let tx = self.tx_ref();
+        if let Some(reverts) = cached_reverts {
+            return Ok(reverts.clone());
+        }
 
-        // Step 1: Get the trie reverts for the state after the target block
-        let reverts = self.trie_reverts(block_number + 1)?;
-
-        // Step 2: Create an InMemoryTrieCursorFactory with the reverts
-        // This gives us the trie state as it was after the target block was processed
-        let db_cursor_factory = DatabaseTrieCursorFactory::new(tx);
-        let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
-
-        // Step 3: Collect all account trie nodes that changed in the target block
+        // let tx = self.tx_ref();
+        // Step 1: Collect all account trie nodes that changed in the target block
         let mut trie_updates = TrieUpdatesSorted::default();
 
         // Walk through all account trie changes for this block
-        let mut accounts_trie_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
+        // let mut accounts_trie_cursor =
+        //     tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
         let mut account_cursor = cursor_factory.account_trie_cursor()?;
 
         for entry in accounts_trie_cursor.walk_dup(Some(block_number), None)? {
             let (_, TrieChangeSetsEntry { nibbles, .. }) = entry?;
-            // Look up the current value of this trie node using the overlay cursor
+            // Look up the current value of this trie node using the provided cursor factory
             let node_value = account_cursor.seek_exact(nibbles.0)?.map(|(_, node)| node);
             trie_updates.account_nodes.push((nibbles.0, node_value));
         }
 
-        // Step 4: Collect all storage trie nodes that changed in the target block
-        let mut storages_trie_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
+        // Step 2: Collect all storage trie nodes that changed in the target block
+        // let mut storages_trie_cursor =
+        //     tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
         let storage_range_start = BlockNumberHashedAddress((block_number, B256::ZERO));
         let storage_range_end = BlockNumberHashedAddress((block_number + 1, B256::ZERO));
 
@@ -4589,7 +4586,8 @@ mod tests {
 
         // Now test get_block_trie_updates
         let provider = factory.provider().unwrap();
-        let result = provider.get_block_trie_updates(target_block).unwrap();
+        let cursor_factory = DatabaseTrieCursorFactory::new(provider.tx_ref());
+        let result = provider.get_block_trie_updates(target_block, None, &cursor_factory).unwrap();
 
         // Verify account trie updates
         assert_eq!(result.account_nodes.len(), 2, "Should have 2 account trie updates");
