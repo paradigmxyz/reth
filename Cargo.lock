@@ -8084,7 +8084,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-revm",
  "reth-storage-api",
- "revm-state",
+ "revm",
  "serde",
  "serde_json",
  "tokio",
