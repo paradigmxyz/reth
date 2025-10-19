@@ -26,7 +26,9 @@ reth-payload-primitives.workspace = true
 # alloy
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
-revm-state.workspace = true
+
+# revm
+revm.workspace = true
 
 # async
 tokio = { workspace = true, default-features = false }
