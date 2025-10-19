@@ -1,6 +1,7 @@
 use crate::{
     changesets_utils::{
         storage_trie_wiped_changeset_iter, StorageRevertsIter, StorageTrieCurrentValuesIter,
+        WipedStorageIter,
     },
     providers::{
         database::{chain::ChainStorage, metrics},
@@ -20,6 +21,7 @@ use crate::{
     StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, TrieReader, TrieWriter,
 };
+
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, TxReceipt,
@@ -1731,34 +1733,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 // storage state has to be taken from the database and written to storage history.
                 // See [StorageWipe::Primary] for more details.
                 //
-                // TODO(mediocregopher): This could be rewritten in a way which doesn't require
-                // collecting wiped entries into a Vec like this, see
-                // `write_storage_trie_changesets`.
-                let mut wiped_storage = Vec::new();
-                if wiped {
+                // intermediate Vec allocation
+                let wiped_storage_iter: Option<WipedStorageIter<'_, _>> = if wiped {
                     tracing::trace!(?address, "Wiping storage");
-
-                    // Pre-allocate based on common case and extend efficiently
-                    if let Some((_, first_entry)) = storages_cursor.seek_exact(address)? {
-                        wiped_storage.reserve(16);
-                        wiped_storage.push((first_entry.key, first_entry.value));
-
-                        while let Some(entry) = storages_cursor.next_dup_val()? {
-                            wiped_storage.push((entry.key, entry.value));
-                        }
-                    }
-
-                    tracing::trace!(?address, ?storage, "Writing storage reverts");
-                    for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                        storage_changeset_cursor
-                            .append_dup(storage_id, StorageEntry { key, value })?;
-                    }
+                    Some(WipedStorageIter::new(&mut storages_cursor, address)?)
                 } else {
-                    tracing::trace!(?address, ?storage, "Writing storage reverts");
-                    for (key, value) in StorageRevertsIter::new(storage, Vec::new()) {
-                        storage_changeset_cursor
-                            .append_dup(storage_id, StorageEntry { key, value })?;
-                    }
+                    None
+                };
+
+                tracing::trace!(?address, ?storage, "Writing storage reverts");
+                for (key, value) in
+                    StorageRevertsIter::new(storage, wiped_storage_iter.into_iter().flatten())
+                {
+                    storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
                 }
             }
         }
