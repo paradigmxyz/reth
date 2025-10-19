@@ -1737,17 +1737,28 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 let mut wiped_storage = Vec::new();
                 if wiped {
                     tracing::trace!(?address, "Wiping storage");
-                    if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
-                        wiped_storage.push((entry.key, entry.value));
+
+                    // Pre-allocate based on common case and extend efficiently
+                    if let Some((_, first_entry)) = storages_cursor.seek_exact(address)? {
+                        wiped_storage.reserve(16);
+                        wiped_storage.push((first_entry.key, first_entry.value));
+
                         while let Some(entry) = storages_cursor.next_dup_val()? {
-                            wiped_storage.push((entry.key, entry.value))
+                            wiped_storage.push((entry.key, entry.value));
                         }
                     }
-                }
 
-                tracing::trace!(?address, ?storage, "Writing storage reverts");
-                for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                    storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
+                    tracing::trace!(?address, ?storage, "Writing storage reverts");
+                    for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
+                        storage_changeset_cursor
+                            .append_dup(storage_id, StorageEntry { key, value })?;
+                    }
+                } else {
+                    tracing::trace!(?address, ?storage, "Writing storage reverts");
+                    for (key, value) in StorageRevertsIter::new(storage, Vec::new()) {
+                        storage_changeset_cursor
+                            .append_dup(storage_id, StorageEntry { key, value })?;
+                    }
                 }
             }
         }
