@@ -29,7 +29,9 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdatesSorted,trie_cursor::TrieCursorFactory,HashedPostState, KeccakKeyHasher};
+use reth_trie::{
+    trie_cursor::TrieCursorFactory, updates::TrieUpdatesSorted, HashedPostState, KeccakKeyHasher,
+};
 use revm_database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -752,8 +754,10 @@ impl<N: ProviderNodeTypes> TrieReader for BlockchainProvider<N> {
     fn trie_reverts_with_cursors(
         &self,
         from: BlockNumber,
-        accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets> + DbCursorRO<AccountsTrieChangeSets>),
-        storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets> + DbCursorRO<StoragesTrieChangeSets>),
+        accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets>
+                  + DbCursorRO<AccountsTrieChangeSets>),
+        storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets>
+                  + DbCursorRO<StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted> {
         self.consistent_provider()?.trie_reverts_with_cursors(
             from,
@@ -761,14 +765,16 @@ impl<N: ProviderNodeTypes> TrieReader for BlockchainProvider<N> {
             storages_trie_cursor,
         )
     }
-   
+
     fn get_block_trie_updates_with_cursors(
         &self,
         block_number: BlockNumber,
         cached_reverts: Option<&TrieUpdatesSorted>,
         cursor_factory: &impl TrieCursorFactory,
-        _accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets> + DbCursorRO<AccountsTrieChangeSets>),
-        _storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets> + DbCursorRO<StoragesTrieChangeSets>),
+        _accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets>
+                  + DbCursorRO<AccountsTrieChangeSets>),
+        _storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets>
+                  + DbCursorRO<StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted> {
         self.consistent_provider()?.get_block_trie_updates_with_cursors(
             block_number,

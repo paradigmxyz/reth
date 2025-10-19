@@ -1,6 +1,9 @@
 use alloc::vec::Vec;
 use alloy_primitives::{Address, BlockNumber, Bytes, B256};
-use reth_db_api::{cursor::{DbCursorRO, DbDupCursorRO}, tables};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    tables,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::trie_cursor::TrieCursorFactory;
 use reth_trie_common::{
@@ -100,12 +103,15 @@ pub trait TrieReader: Send + Sync {
 
     /// Returns the [`TrieUpdatesSorted`] for reverting the trie database to its state prior to the
     /// given block and onwards having been processed, using provided cursors for efficiency.
-    /// This method allows reusing cursors across multiple calls to improve database interaction efficiency.
+    /// This method allows reusing cursors across multiple calls to improve database interaction
+    /// efficiency.
     fn trie_reverts_with_cursors(
         &self,
         from: BlockNumber,
-        accounts_trie_cursor: &mut (impl DbDupCursorRO<tables::AccountsTrieChangeSets> + DbCursorRO<tables::AccountsTrieChangeSets>),
-        storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets> + DbCursorRO<tables::StoragesTrieChangeSets>),
+        accounts_trie_cursor: &mut (impl DbDupCursorRO<tables::AccountsTrieChangeSets>
+                  + DbCursorRO<tables::AccountsTrieChangeSets>),
+        storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets>
+                  + DbCursorRO<tables::StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted>;
 
     /// Get trie updates for a block with external cursors for reuse.
@@ -114,8 +120,10 @@ pub trait TrieReader: Send + Sync {
         block_number: BlockNumber,
         cached_reverts: Option<&TrieUpdatesSorted>,
         cursor_factory: &impl TrieCursorFactory,
-        accounts_trie_cursor: &mut (impl DbDupCursorRO<tables::AccountsTrieChangeSets> + DbCursorRO<tables::AccountsTrieChangeSets>),
-        storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets> + DbCursorRO<tables::StoragesTrieChangeSets>),
+        accounts_trie_cursor: &mut (impl DbDupCursorRO<tables::AccountsTrieChangeSets>
+                  + DbCursorRO<tables::AccountsTrieChangeSets>),
+        storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets>
+                  + DbCursorRO<tables::StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted>;
 }
 

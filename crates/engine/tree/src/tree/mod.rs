@@ -17,6 +17,7 @@ use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
+use reth_db::{tables, transaction::DbTx};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
     ForkchoiceStateTracker, OnForkChoiceUpdated,
@@ -33,7 +34,6 @@ use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProviderBox, StateProviderFactory, StateReader,
     TransactionVariant, TrieReader,
 };
-use reth_db::{transaction::DbTx, tables};
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie_db::DatabaseTrieCursorFactory;
@@ -1753,11 +1753,13 @@ where
         let hashed_state = self.provider.hashed_post_state(execution_output.state());
         let db_provider = self.provider.database_provider_ro()?;
         let cursor_factory = DatabaseTrieCursorFactory::new(db_provider.tx_ref());
-        
+
         // Create cursors for the new method
-        let mut accounts_trie_cursor = db_provider.tx_ref().cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
-        let mut storages_trie_cursor = db_provider.tx_ref().cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
-        
+        let mut accounts_trie_cursor =
+            db_provider.tx_ref().cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
+        let mut storages_trie_cursor =
+            db_provider.tx_ref().cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
+
         let trie_updates = self.provider.get_block_trie_updates_with_cursors(
             block.number(),
             None,

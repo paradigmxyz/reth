@@ -295,11 +295,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Get trie updates using the pre-created cursors to avoid recreating them
             let trie_updates = self.get_block_trie_updates_with_cursors(
-                block_number, 
-                None, 
+                block_number,
+                None,
                 &db_cursor_factory,
                 &mut accounts_trie_cursor,
-                &mut storages_trie_cursor
+                &mut storages_trie_cursor,
             )?;
             self.write_trie_changesets(block_number, &trie_updates, None)?;
 
@@ -2119,7 +2119,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         let mut num_entries = 0;
 
         let tx = self.tx_ref();
-        let mut account_trie_cursor: <TX as DbTxMut>::CursorMut<tables::AccountsTrie> = tx.cursor_write::<tables::AccountsTrie>()?;
+        let mut account_trie_cursor: <TX as DbTxMut>::CursorMut<tables::AccountsTrie> =
+            tx.cursor_write::<tables::AccountsTrie>()?;
 
         // Process sorted account nodes
         for (key, updated_node) in &trie_updates.account_nodes {
@@ -2287,8 +2288,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
     fn trie_reverts_with_cursors(
         &self,
         from: BlockNumber,
-        accounts_trie_cursor: &mut (impl DbDupCursorRO<tables::AccountsTrieChangeSets> + DbCursorRO<tables::AccountsTrieChangeSets>),
-        storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets> + DbCursorRO<tables::StoragesTrieChangeSets>),
+        accounts_trie_cursor: &mut (impl DbDupCursorRO<tables::AccountsTrieChangeSets>
+                  + DbCursorRO<tables::AccountsTrieChangeSets>),
+        storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets>
+                  + DbCursorRO<tables::StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted> {
         // Read account trie changes directly into a Vec - data is already sorted by nibbles
         // within each block, and we want the oldest (first) version of each node
@@ -2340,7 +2343,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         cached_reverts: Option<&TrieUpdatesSorted>,
         cursor_factory: &impl TrieCursorFactory,
         accounts_trie_cursor: &mut impl DbDupCursorRO<tables::AccountsTrieChangeSets>,
-        storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets> + DbCursorRO<tables::StoragesTrieChangeSets>),
+        storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets>
+                  + DbCursorRO<tables::StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted> {
         if let Some(reverts) = cached_reverts {
             return Ok(reverts.clone());
@@ -4638,15 +4642,19 @@ mod tests {
         // Now test get_block_trie_updates_with_cursors
         let provider = factory.provider().unwrap();
         let cursor_factory = DatabaseTrieCursorFactory::new(provider.tx_ref());
-        let mut accounts_trie_cursor = provider.tx_ref().cursor_dup_read::<tables::AccountsTrieChangeSets>().unwrap();
-        let mut storages_trie_cursor = provider.tx_ref().cursor_dup_read::<tables::StoragesTrieChangeSets>().unwrap();
-        let result = provider.get_block_trie_updates_with_cursors(
-            target_block, 
-            None, 
-            &cursor_factory,
-            &mut accounts_trie_cursor,
-            &mut storages_trie_cursor
-        ).unwrap();
+        let mut accounts_trie_cursor =
+            provider.tx_ref().cursor_dup_read::<tables::AccountsTrieChangeSets>().unwrap();
+        let mut storages_trie_cursor =
+            provider.tx_ref().cursor_dup_read::<tables::StoragesTrieChangeSets>().unwrap();
+        let result = provider
+            .get_block_trie_updates_with_cursors(
+                target_block,
+                None,
+                &cursor_factory,
+                &mut accounts_trie_cursor,
+                &mut storages_trie_cursor,
+            )
+            .unwrap();
 
         // Verify account trie updates
         assert_eq!(result.account_nodes.len(), 2, "Should have 2 account trie updates");

@@ -1517,8 +1517,10 @@ impl<N: ProviderNodeTypes> TrieReader for ConsistentProvider<N> {
     fn trie_reverts_with_cursors(
         &self,
         from: BlockNumber,
-        accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets> + DbCursorRO<AccountsTrieChangeSets>),
-        storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets> + DbCursorRO<StoragesTrieChangeSets>),
+        accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets>
+                  + DbCursorRO<AccountsTrieChangeSets>),
+        storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets>
+                  + DbCursorRO<StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted> {
         self.storage_provider.trie_reverts_with_cursors(
             from,
@@ -1532,8 +1534,10 @@ impl<N: ProviderNodeTypes> TrieReader for ConsistentProvider<N> {
         block_number: BlockNumber,
         cached_reverts: Option<&TrieUpdatesSorted>,
         cursor_factory: &impl reth_trie::trie_cursor::TrieCursorFactory,
-        accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets> + DbCursorRO<AccountsTrieChangeSets>),
-        storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets> + DbCursorRO<StoragesTrieChangeSets>),
+        accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets>
+                  + DbCursorRO<AccountsTrieChangeSets>),
+        storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets>
+                  + DbCursorRO<StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted> {
         self.storage_provider.get_block_trie_updates_with_cursors(
             block_number,
