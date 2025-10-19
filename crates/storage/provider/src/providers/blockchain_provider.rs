@@ -17,7 +17,11 @@ use reth_chain_state::{
     MemoryOverlayStateProvider,
 };
 use reth_chainspec::ChainInfo;
-use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices},
+    tables::{AccountsTrieChangeSets, StoragesTrieChangeSets},
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry};
@@ -744,17 +748,34 @@ impl<N: ProviderNodeTypes> TrieReader for BlockchainProvider<N> {
     fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
         self.consistent_provider()?.trie_reverts(from)
     }
+
+    fn trie_reverts_with_cursors(
+        &self,
+        from: BlockNumber,
+        accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets> + DbCursorRO<AccountsTrieChangeSets>),
+        storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets> + DbCursorRO<StoragesTrieChangeSets>),
+    ) -> ProviderResult<TrieUpdatesSorted> {
+        self.consistent_provider()?.trie_reverts_with_cursors(
+            from,
+            accounts_trie_cursor,
+            storages_trie_cursor,
+        )
+    }
    
-    fn get_block_trie_updates(
+    fn get_block_trie_updates_with_cursors(
         &self,
         block_number: BlockNumber,
         cached_reverts: Option<&TrieUpdatesSorted>,
         cursor_factory: &impl TrieCursorFactory,
+        _accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets> + DbCursorRO<AccountsTrieChangeSets>),
+        _storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets> + DbCursorRO<StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted> {
-        self.consistent_provider()?.get_block_trie_updates(
+        self.consistent_provider()?.get_block_trie_updates_with_cursors(
             block_number,
             cached_reverts,
             cursor_factory,
+            _accounts_trie_cursor,
+            _storages_trie_cursor,
         )
     }
 }

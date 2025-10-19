@@ -17,7 +17,11 @@ use alloy_primitives::{
 };
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::ChainInfo;
-use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices},
+    tables::{AccountsTrieChangeSets, StoragesTrieChangeSets},
+};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry};
@@ -1510,13 +1514,34 @@ impl<N: ProviderNodeTypes> TrieReader for ConsistentProvider<N> {
         self.storage_provider.trie_reverts(from)
     }
 
-    fn get_block_trie_updates(
+    fn trie_reverts_with_cursors(
+        &self,
+        from: BlockNumber,
+        accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets> + DbCursorRO<AccountsTrieChangeSets>),
+        storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets> + DbCursorRO<StoragesTrieChangeSets>),
+    ) -> ProviderResult<TrieUpdatesSorted> {
+        self.storage_provider.trie_reverts_with_cursors(
+            from,
+            accounts_trie_cursor,
+            storages_trie_cursor,
+        )
+    }
+
+    fn get_block_trie_updates_with_cursors(
         &self,
         block_number: BlockNumber,
         cached_reverts: Option<&TrieUpdatesSorted>,
         cursor_factory: &impl reth_trie::trie_cursor::TrieCursorFactory,
+        accounts_trie_cursor: &mut (impl DbDupCursorRO<AccountsTrieChangeSets> + DbCursorRO<AccountsTrieChangeSets>),
+        storages_trie_cursor: &mut (impl DbDupCursorRO<StoragesTrieChangeSets> + DbCursorRO<StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted> {
-        self.storage_provider.get_block_trie_updates(block_number, cached_reverts, cursor_factory)
+        self.storage_provider.get_block_trie_updates_with_cursors(
+            block_number,
+            cached_reverts,
+            cursor_factory,
+            accounts_trie_cursor,
+            storages_trie_cursor,
+        )
     }
 }
 

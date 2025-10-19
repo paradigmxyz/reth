@@ -1011,9 +1011,22 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> TrieReader for MockEthProvider<T
         Ok(TrieUpdatesSorted::default())
     }
 
-    fn get_block_trie_updates(
+    fn trie_reverts_with_cursors(
+        &self,
+        _from: BlockNumber,
+        _accounts_trie_cursor: &mut impl reth_db_api::cursor::DbDupCursorRO<reth_db_api::tables::AccountsTrieChangeSets>,
+        _storages_trie_cursor: &mut (impl reth_db_api::cursor::DbDupCursorRO<reth_db_api::tables::StoragesTrieChangeSets> + reth_db_api::cursor::DbCursorRO<reth_db_api::tables::StoragesTrieChangeSets>),
+    ) -> ProviderResult<TrieUpdatesSorted> {
+        Ok(TrieUpdatesSorted::default())
+    }
+
+    fn get_block_trie_updates_with_cursors(
         &self,
         _block_number: BlockNumber,
+        _cached_reverts: Option<&TrieUpdatesSorted>,
+        _cursor_factory: &impl reth_trie::trie_cursor::TrieCursorFactory,
+        _accounts_trie_cursor: &mut (impl reth_db_api::cursor::DbDupCursorRO<reth_db_api::tables::AccountsTrieChangeSets> + reth_db_api::cursor::DbCursorRO<reth_db_api::tables::AccountsTrieChangeSets>),
+        _storages_trie_cursor: &mut (impl reth_db_api::cursor::DbDupCursorRO<reth_db_api::tables::StoragesTrieChangeSets> + reth_db_api::cursor::DbCursorRO<reth_db_api::tables::StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted> {
         Ok(TrieUpdatesSorted::default())
     }

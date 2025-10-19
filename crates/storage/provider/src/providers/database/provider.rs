@@ -293,8 +293,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // insert hashes and intermediate merkle nodes
             self.write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
 
-            // Get trie updates using the pre-created cursor factory to avoid recreating cursors
-            let trie_updates = self.get_block_trie_updates(block_number, None, &db_cursor_factory)?;
+            // Get trie updates using the pre-created cursors to avoid recreating them
+            let trie_updates = self.get_block_trie_updates_with_cursors(
+                block_number, 
+                None, 
+                &db_cursor_factory,
+                &mut accounts_trie_cursor,
+                &mut storages_trie_cursor
+            )?;
             self.write_trie_changesets(block_number, &trie_updates, None)?;
 
             // Write trie updates
@@ -2278,24 +2284,71 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         Ok(TrieUpdatesSorted { account_nodes, storage_tries })
     }
 
-    //karl_todo : 修改这个函数名为 get_block_trie_updates_with_cursors
-    fn get_block_trie_updates(
+    fn trie_reverts_with_cursors(
+        &self,
+        from: BlockNumber,
+        accounts_trie_cursor: &mut (impl DbDupCursorRO<tables::AccountsTrieChangeSets> + DbCursorRO<tables::AccountsTrieChangeSets>),
+        storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets> + DbCursorRO<tables::StoragesTrieChangeSets>),
+    ) -> ProviderResult<TrieUpdatesSorted> {
+        // Read account trie changes directly into a Vec - data is already sorted by nibbles
+        // within each block, and we want the oldest (first) version of each node
+        let mut account_nodes = Vec::new();
+        let mut seen_account_keys = HashSet::new();
+
+        for entry in accounts_trie_cursor.walk_range(from..)? {
+            let (_, TrieChangeSetsEntry { nibbles, node }) = entry?;
+            // Only keep the first (oldest) version of each node
+            if seen_account_keys.insert(nibbles.0) {
+                account_nodes.push((nibbles.0, node));
+            }
+        }
+
+        // Read storage trie changes - data is sorted by (block, hashed_address, nibbles)
+        // Keep track of seen (address, nibbles) pairs to only keep the oldest version
+        let mut storage_tries = B256Map::<Vec<_>>::default();
+        let mut seen_storage_keys = HashSet::new();
+
+        // Create storage range starting from `from` block
+        let storage_range_start = BlockNumberHashedAddress((from, B256::ZERO));
+
+        for entry in storages_trie_cursor.walk_range(storage_range_start..)? {
+            let (
+                BlockNumberHashedAddress((_, hashed_address)),
+                TrieChangeSetsEntry { nibbles, node },
+            ) = entry?;
+
+            // Only keep the first (oldest) version of each node for this address
+            if seen_storage_keys.insert((hashed_address, nibbles.0)) {
+                storage_tries.entry(hashed_address).or_default().push((nibbles.0, node));
+            }
+        }
+
+        // Convert to StorageTrieUpdatesSorted
+        let storage_tries = storage_tries
+            .into_iter()
+            .map(|(address, nodes)| {
+                (address, StorageTrieUpdatesSorted { storage_nodes: nodes, is_deleted: false })
+            })
+            .collect();
+
+        Ok(TrieUpdatesSorted { account_nodes, storage_tries })
+    }
+
+    fn get_block_trie_updates_with_cursors(
         &self,
         block_number: BlockNumber,
         cached_reverts: Option<&TrieUpdatesSorted>,
         cursor_factory: &impl TrieCursorFactory,
+        accounts_trie_cursor: &mut impl DbDupCursorRO<tables::AccountsTrieChangeSets>,
+        storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets> + DbCursorRO<tables::StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted> {
         if let Some(reverts) = cached_reverts {
             return Ok(reverts.clone());
         }
 
-        // let tx = self.tx_ref();
-        // Step 1: Collect all account trie nodes that changed in the target block
         let mut trie_updates = TrieUpdatesSorted::default();
 
-        // Walk through all account trie changes for this block
-        // let mut accounts_trie_cursor =
-        //     tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
+        // Step 1: Collect all account trie nodes that changed in the target block
         let mut account_cursor = cursor_factory.account_trie_cursor()?;
 
         for entry in accounts_trie_cursor.walk_dup(Some(block_number), None)? {
@@ -2306,8 +2359,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         }
 
         // Step 2: Collect all storage trie nodes that changed in the target block
-        // let mut storages_trie_cursor =
-        //     tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
         let storage_range_start = BlockNumberHashedAddress((block_number, B256::ZERO));
         let storage_range_end = BlockNumberHashedAddress((block_number + 1, B256::ZERO));
 
@@ -4584,10 +4635,18 @@ mod tests {
 
         provider_rw.commit().unwrap();
 
-        // Now test get_block_trie_updates
+        // Now test get_block_trie_updates_with_cursors
         let provider = factory.provider().unwrap();
         let cursor_factory = DatabaseTrieCursorFactory::new(provider.tx_ref());
-        let result = provider.get_block_trie_updates(target_block, None, &cursor_factory).unwrap();
+        let mut accounts_trie_cursor = provider.tx_ref().cursor_dup_read::<tables::AccountsTrieChangeSets>().unwrap();
+        let mut storages_trie_cursor = provider.tx_ref().cursor_dup_read::<tables::StoragesTrieChangeSets>().unwrap();
+        let result = provider.get_block_trie_updates_with_cursors(
+            target_block, 
+            None, 
+            &cursor_factory,
+            &mut accounts_trie_cursor,
+            &mut storages_trie_cursor
+        ).unwrap();
 
         // Verify account trie updates
         assert_eq!(result.account_nodes.len(), 2, "Should have 2 account trie updates");

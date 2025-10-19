@@ -25,6 +25,7 @@ use core::{
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 #[cfg(feature = "db-api")]
 use reth_db_api::mock::{DatabaseMock, TxMock};
+use reth_db_api::{cursor::{DbCursorRO, DbDupCursorRO}, tables};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
@@ -653,11 +654,22 @@ impl<C: Send + Sync, N: NodePrimitives> TrieReader for NoopProvider<C, N> {
         Ok(TrieUpdatesSorted::default())
     }
 
-    fn get_block_trie_updates(
+    fn trie_reverts_with_cursors(
+        &self,
+        _from: BlockNumber,
+        _accounts_trie_cursor: &mut impl DbDupCursorRO<tables::AccountsTrieChangeSets>,
+        _storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets> + DbCursorRO<tables::StoragesTrieChangeSets>),
+    ) -> ProviderResult<TrieUpdatesSorted> {
+        Ok(TrieUpdatesSorted::default())
+    }
+
+    fn get_block_trie_updates_with_cursors(
         &self,
         _block_number: BlockNumber,
         _cached_reverts: Option<&TrieUpdatesSorted>,
         _cursor_factory: &impl TrieCursorFactory,
+        _accounts_trie_cursor: &mut (impl DbDupCursorRO<tables::AccountsTrieChangeSets> + DbCursorRO<tables::AccountsTrieChangeSets>),
+        _storages_trie_cursor: &mut (impl DbDupCursorRO<tables::StoragesTrieChangeSets> + DbCursorRO<tables::StoragesTrieChangeSets>),
     ) -> ProviderResult<TrieUpdatesSorted> {
         Ok(TrieUpdatesSorted::default())
     }
