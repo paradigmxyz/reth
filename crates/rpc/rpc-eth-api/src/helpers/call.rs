@@ -96,9 +96,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let mut parent = base_block.sealed_header().clone();
 
             let this = self.clone();
-            self.spawn_with_state_at_block(block, move |state| {
+            self.spawn_with_state_at_block(block, move |state| {//todo?
                 let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
+                    State::builder().with_database(StateProviderDatabase::new(state)).with_bal_builder().build();
+                db.bal_index = 0;
+        db.bal_builder = Some(revm::state::bal::Bal::new());
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
                 for block in block_state_calls {

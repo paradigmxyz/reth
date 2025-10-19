@@ -521,7 +521,6 @@ alloy-transport = { version = "1.0.41" }
 alloy-transport-http = { version = "1.0.41", features = ["reqwest-rustls-tls"], default-features = false }
 alloy-transport-ipc = { version = "1.0.41", default-features = false }
 alloy-transport-ws = { version = "1.0.41", default-features = false }
-alloy-eip7928 = { version = "0.1.0", default-features = false, git = "https://github.com/alloy-rs/eips.git" }
 
 # op
 alloy-op-evm = { version = "0.22.0", default-features = false }

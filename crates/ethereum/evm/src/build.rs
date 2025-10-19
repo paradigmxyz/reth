@@ -3,7 +3,6 @@ use alloy_consensus::{
     proofs::{self, calculate_receipt_root},
     Block, BlockBody, BlockHeader, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eip7928::BlockAccessList;
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
 use alloy_primitives::Bytes;
