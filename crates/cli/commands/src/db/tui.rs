@@ -47,10 +47,10 @@ enum Entries<T: Table> {
 }
 
 impl<T: Table> Entries<T> {
-    /// Creates new empty [Entries] as [`Entries::RawValues`] if `raw_values == true` and as
-    /// [`Entries::Values`] if `raw == false`.
-    const fn new_with_raw_values(raw_values: bool) -> Self {
-        if raw_values {
+    /// Creates a new empty `Entries`.
+    /// If `raw` is true, returns [`Entries::RawValues`]; otherwise returns [`Entries::Values`].
+    const fn new(raw: bool) -> Self {
+        if raw {
             Self::RawValues(Vec::new())
         } else {
             Self::Values(Vec::new())
@@ -148,7 +148,7 @@ where
             mode: ViewMode::Normal,
             input: String::new(),
             list_state: ListState::default(),
-            entries: Entries::new_with_raw_values(raw),
+            entries: Entries::new(raw),
         }
     }
 
