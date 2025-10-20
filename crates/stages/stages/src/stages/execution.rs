@@ -363,6 +363,8 @@ where
                     throughput = format_gas_throughput(cumulative_gas - last_cumulative_gas, execution_duration - last_execution_duration),
                     "Executed block range"
                 );
+                let gas_per_second = (cumulative_gas - last_cumulative_gas) as f64 / (execution_duration - last_execution_duration).as_secs_f64();
+                metrics::histogram!("history_sync_execution_throughput").record(gas_per_second);
 
                 last_block = block_number + 1;
                 last_execution_duration = execution_duration;

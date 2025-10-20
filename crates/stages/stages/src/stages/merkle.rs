@@ -18,6 +18,7 @@ use reth_stages_api::{
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
 use reth_trie_db::DatabaseStateRoot;
 use std::fmt::Debug;
+use std::time::Instant;
 use tracing::*;
 
 // TODO: automate the process outlined below so the user can just send in a debugging package
@@ -238,6 +239,7 @@ where
             });
 
             let tx = provider.tx_ref();
+            let start_time = Instant::now();
             let progress = StateRoot::from_tx(tx)
                 .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
                 .root_with_progress()
@@ -245,6 +247,8 @@ where
                     error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                     StageError::Fatal(Box::new(e))
                 })?;
+            let per_block = start_time.elapsed() / (to_block - current_block_number) as u32;
+            metrics::histogram!("history_sync_merkle_time_per_block").record(per_block);
             match progress {
                 StateRootProgress::Progress(state, hashed_entries_walked, updates) => {
                     provider.write_trie_updates(updates)?;
@@ -311,12 +315,15 @@ where
                     chunk_range = ?chunk_range,
                     "Processing chunk"
                 );
+                let start_time = Instant::now();
                 let (root, updates) =
                 StateRoot::incremental_root_with_updates(provider.tx_ref(), chunk_range)
                     .map_err(|e| {
                         error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                         StageError::Fatal(Box::new(e))
                     })?;
+                let per_block = start_time.elapsed() / (chunk_to - start_block + 1) as u32;
+                metrics::histogram!("history_sync_merkle_time_per_block").record(per_block);
                 provider.write_trie_updates(updates)?;
                 final_root = Some(root);
             }

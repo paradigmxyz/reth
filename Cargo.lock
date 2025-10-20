@@ -10400,6 +10400,7 @@ dependencies = [
  "eyre",
  "futures-util",
  "itertools 0.14.0",
+ "metrics",
  "num-traits",
  "paste",
  "rand 0.9.2",
