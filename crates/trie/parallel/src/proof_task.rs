@@ -693,7 +693,7 @@ where
             multi_added_removed_keys.unwrap_or_else(|| Arc::new(MultiAddedRemovedKeys::new()));
         let added_removed_keys = multi_added_removed_keys.get_storage(&hashed_address);
 
-        let span = tracing::info_span!(
+        let span = tracing::trace_span!(
             target: "trie::proof_task",
             "Storage proof calculation",
             hashed_address = ?hashed_address,

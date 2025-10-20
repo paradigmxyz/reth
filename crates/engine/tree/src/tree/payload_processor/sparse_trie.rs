@@ -15,7 +15,7 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-use tracing::{debug, debug_span, instrument, trace};
+use tracing::{debug, trace, trace_span};
 
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
@@ -61,11 +61,6 @@ where
     ///
     /// - State root computation outcome.
     /// - `SparseStateTrie` that needs to be cleared and reused to avoid reallocations.
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor::sparse_trie",
-        skip_all
-    )]
     pub(super) fn run(
         mut self,
     ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseStateTrie<A, S>) {
@@ -85,14 +80,10 @@ where
         while let Ok(mut update) = self.updates.recv() {
             num_iterations += 1;
             let mut num_updates = 1;
-            let _enter =
-                debug_span!(target: "engine::tree::payload_processor::sparse_trie", "drain updates")
-                    .entered();
             while let Ok(next) = self.updates.try_recv() {
                 update.extend(next);
                 num_updates += 1;
             }
-            drop(_enter);
 
             debug!(
                 target: "engine::root",
@@ -139,7 +130,6 @@ pub struct StateRootComputeOutcome {
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
-#[instrument(level = "debug", target = "engine::tree::payload_processor::sparse_trie", skip_all)]
 pub(crate) fn update_sparse_trie<BPF, A, S>(
     trie: &mut SparseStateTrie<A, S>,
     SparseTrieUpdate { mut state, multiproof }: SparseTrieUpdate,
@@ -165,7 +155,6 @@ where
     );
 
     // Update storage slots with new values and calculate storage roots.
-    let span = tracing::Span::current();
     let (tx, rx) = mpsc::channel();
     state
         .storages
@@ -173,16 +162,14 @@ where
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
         .par_bridge()
         .map(|(address, storage, storage_trie)| {
-            let _enter =
-                debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: span.clone(), "storage trie", ?address)
-                    .entered();
-
-            trace!(target: "engine::tree::payload_processor::sparse_trie", "Updating storage");
+            let span = trace_span!(target: "engine::root::sparse", "Storage trie", ?address);
+            let _enter = span.enter();
+            trace!(target: "engine::root::sparse", "Updating storage");
             let storage_provider = blinded_provider_factory.storage_node_provider(address);
             let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
 
             if storage.wiped {
-                trace!(target: "engine::tree::payload_processor::sparse_trie", "Wiping storage");
+                trace!(target: "engine::root::sparse", "Wiping storage");
                 storage_trie.wipe()?;
             }
 
@@ -200,7 +187,7 @@ where
                     continue;
                 }
 
-                trace!(target: "engine::tree::payload_processor::sparse_trie", ?slot_nibbles, "Updating storage slot");
+                trace!(target: "engine::root::sparse", ?slot_nibbles, "Updating storage slot");
                 storage_trie.update_leaf(
                     slot_nibbles,
                     alloy_rlp::encode_fixed_size(&value).to_vec(),
@@ -232,9 +219,6 @@ where
     let mut removed_accounts = Vec::new();
 
     // Update account storage roots
-    let _enter =
-        tracing::debug_span!(target: "engine::tree::payload_processor::sparse_trie", "account trie")
-            .entered();
     for result in rx {
         let (address, storage_trie) = result?;
         trie.insert_storage_trie(address, storage_trie);
