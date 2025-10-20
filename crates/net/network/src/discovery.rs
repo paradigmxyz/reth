@@ -148,13 +148,15 @@ impl Discovery {
         self.discovery_listeners.retain_mut(|listener| listener.send(event.clone()).is_ok());
     }
 
-    /// Updates the `eth:ForkId` field in discv4.
+    /// Updates the `eth:ForkId` field in discv4/discv5.
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         if let Some(discv4) = &self.discv4 {
             // use forward-compatible forkid entry
             discv4.set_eip868_rlp(b"eth".to_vec(), EnrForkIdEntry::from(fork_id))
         }
-        // todo: update discv5 enr
+        if let Some(discv5) = &self.discv5 {
+            discv5.encode_and_set_eip868_in_local_enr(b"eth".to_vec(), EnrForkIdEntry::from(fork_id))
+        }
     }
 
     /// Bans the [`IpAddr`] in the discovery service.
