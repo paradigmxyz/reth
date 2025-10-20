@@ -969,23 +969,6 @@ impl SparseTrieInterface for SerialSparseTrie {
         full_path: &Nibbles,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
-        // Helper function to check if a value matches the expected value
-        fn check_value_match(
-            actual_value: &Vec<u8>,
-            expected_value: Option<&Vec<u8>>,
-            path: &Nibbles,
-        ) -> Result<(), LeafLookupError> {
-            if let Some(expected) = expected_value &&
-                actual_value != expected
-            {
-                return Err(LeafLookupError::ValueMismatch {
-                    path: *path,
-                    expected: Some(expected.clone()),
-                    actual: actual_value.clone(),
-                });
-            }
-            Ok(())
-        }
 
         let mut current = Nibbles::default(); // Start at the root
 
@@ -996,7 +979,13 @@ impl SparseTrieInterface for SerialSparseTrie {
         // be in the `values` map.
         if let Some(actual_value) = self.values.get(full_path) {
             // We found the leaf, check if the value matches (if expected value was provided)
-            check_value_match(actual_value, expected_value, full_path)?;
+            if expected_value.is_some_and(|expected| actual_value != expected) {
+                return Err(LeafLookupError::ValueMismatch {
+                    path: *full_path,
+                    expected: expected_value.cloned(),
+                    actual: actual_value.clone(),
+                });
+            }
             return Ok(LeafLookup::Exists);
         }
 
@@ -1023,7 +1012,13 @@ impl SparseTrieInterface for SerialSparseTrie {
                     if &current == full_path {
                         // This should have been handled by our initial values map check
                         if let Some(value) = self.values.get(full_path) {
-                            check_value_match(value, expected_value, full_path)?;
+                            if expected_value.is_some_and(|expected| value != expected) {
+                                return Err(LeafLookupError::ValueMismatch {
+                                    path: *full_path,
+                                    expected: expected_value.cloned(),
+                                    actual: value.clone(),
+                                });
+                            }
                             return Ok(LeafLookup::Exists);
                         }
                     }
@@ -3743,4 +3738,3 @@ Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
 
         assert_eq!(alternate_printed, expected);
     }
-}
