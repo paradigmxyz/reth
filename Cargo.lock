@@ -9520,7 +9520,7 @@ dependencies = [
 
 [[package]]
 name = "reth-optimism-exex"
-version = "1.8.2"
+version = "1.9.2"
 dependencies = [
  "alloy-primitives",
  "derive_more",
@@ -9788,7 +9788,7 @@ dependencies = [
 
 [[package]]
 name = "reth-optimism-trie"
-version = "1.8.2"
+version = "1.9.2"
 dependencies = [
  "alloy-primitives",
  "auto_impl",
