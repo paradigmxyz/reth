@@ -57,7 +57,7 @@ use std::{
     time::Instant,
 };
 use tokio::runtime::Handle;
-use tracing::trace;
+use tracing::{debug_span, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskTrieMetrics;
@@ -891,6 +891,7 @@ impl ProofWorkerHandle {
 
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
+            let parent_span = debug_span!(target: "trie::proof_task", "Storage worker", ?worker_id);
             let view_clone = view.clone();
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = storage_work_rx.clone();
@@ -899,6 +900,7 @@ impl ProofWorkerHandle {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
 
+                let _guard = parent_span.enter();
                 storage_worker_loop(
                     view_clone,
                     task_ctx_clone,
@@ -918,6 +920,7 @@ impl ProofWorkerHandle {
 
         // Spawn account workers
         for worker_id in 0..account_worker_count {
+            let parent_span = debug_span!(target: "trie::proof_task", "Account worker", ?worker_id);
             let view_clone = view.clone();
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = account_work_rx.clone();
@@ -927,6 +930,7 @@ impl ProofWorkerHandle {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
 
+                let _guard = parent_span.enter();
                 account_worker_loop(
                     view_clone,
                     task_ctx_clone,

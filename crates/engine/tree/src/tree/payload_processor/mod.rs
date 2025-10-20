@@ -193,6 +193,7 @@ where
             + Clone
             + 'static,
     {
+        let span = tracing::Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task, save the trie input
         let (trie_input, state_root_config) = MultiProofConfig::from_input(trie_input);
@@ -242,7 +243,6 @@ where
         );
 
         // spawn multi-proof task
-        let span = tracing::Span::current();
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
             multi_proof_task.run();

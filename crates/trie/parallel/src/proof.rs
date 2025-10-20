@@ -238,6 +238,7 @@ mod tests {
     use reth_trie::proof::Proof;
     use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
     use tokio::runtime::Runtime;
+    use tracing::Span;
 
     #[test]
     fn random_parallel_proof() {

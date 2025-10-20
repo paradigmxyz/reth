@@ -1217,6 +1217,7 @@ mod tests {
     use reth_trie::{MultiProof, TrieInput};
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
+    use tracing::Span;
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
     where
