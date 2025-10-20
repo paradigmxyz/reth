@@ -186,6 +186,16 @@ pub enum EthApiError {
     /// Error thrown when batch tx send channel fails
     #[error("Batch transaction sender channel closed")]
     BatchTxSendError,
+    /// Error that occurred during `call_many` execution with bundle and transaction context
+    #[error("call_many error in bundle {bundle_index} and transaction {tx_index}: {}", .error.message())]
+    CallManyError {
+        /// Bundle index where the error occurred
+        bundle_index: usize,
+        /// Transaction index within the bundle where the error occurred  
+        tx_index: usize,
+        /// The underlying error object
+        error: jsonrpsee_types::ErrorObject<'static>,
+    },
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -195,6 +205,15 @@ impl EthApiError {
     /// crates a new [`EthApiError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
+    }
+
+    /// Creates a new [`EthApiError::CallManyError`] variant.
+    pub const fn call_many_error(
+        bundle_index: usize,
+        tx_index: usize,
+        error: jsonrpsee_types::ErrorObject<'static>,
+    ) -> Self {
+        Self::CallManyError { bundle_index, tx_index, error }
     }
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
@@ -303,6 +322,16 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
             EthApiError::BatchTxSendError => {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())
+            }
+            EthApiError::CallManyError { bundle_index, tx_index, error } => {
+                jsonrpsee_types::error::ErrorObject::owned(
+                    error.code(),
+                    format!(
+                        "call_many error in bundle {bundle_index} and transaction {tx_index}: {}",
+                        error.message()
+                    ),
+                    error.data(),
+                )
             }
         }
     }

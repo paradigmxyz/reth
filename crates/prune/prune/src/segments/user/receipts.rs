@@ -42,7 +42,7 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
+    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         crate::segments::receipts::prune(provider, input)
     }

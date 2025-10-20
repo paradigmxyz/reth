@@ -45,7 +45,7 @@ use std::sync::{
     mpsc::{self, channel, Sender},
     Arc,
 };
-use tracing::{debug, instrument, warn};
+use tracing::{debug, debug_span, instrument, warn};
 
 mod configured_sparse_trie;
 pub mod executor;
@@ -167,6 +167,12 @@ where
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
     #[allow(clippy::type_complexity)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor",
+        name = "payload processor",
+        skip_all
+    )]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -236,7 +242,9 @@ where
         );
 
         // spawn multi-proof task
+        let span = tracing::Span::current();
         self.executor.spawn_blocking(move || {
+            let _enter = span.entered();
             multi_proof_task.run();
         });
 
@@ -257,6 +265,7 @@ where
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
     ///
     /// Returns a [`PayloadHandle`] to communicate with the task.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     pub(super) fn spawn_cache_exclusive<P, I: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
@@ -353,7 +362,9 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
+            let span = debug_span!(target: "engine::tree::payload_processor", "prewarm task");
             self.executor.spawn_blocking(move || {
+                let _enter = span.entered();
                 prewarm_task.run(transactions, to_prewarm_task);
             });
         }
@@ -370,7 +381,7 @@ where
     ///
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
-    #[instrument(target = "engine::caching", skip(self))]
+    #[instrument(level = "debug", target = "engine::caching", skip(self))]
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
         if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
             debug!("reusing execution cache");
@@ -383,6 +394,7 @@ where
     }
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task<BPF>(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
@@ -421,13 +433,18 @@ where
                 sparse_state_trie,
             );
 
+        let span = tracing::Span::current();
         self.executor.spawn_blocking(move || {
+            let _enter = span.entered();
+
             let (result, trie) = task.run();
             // Send state root computation result
             let _ = state_root_tx.send(result);
 
-            // Clear the SparseStateTrie and replace it back into the mutex _after_ sending results
-            // to the next step, so that time spent clearing doesn't block the step after this one.
+            // Clear the SparseStateTrie and replace it back into the mutex _after_ sending
+            // results to the next step, so that time spent clearing doesn't block the step after
+            // this one.
+            let _enter = debug_span!(target: "engine::tree::payload_processor", "clear").entered();
             cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
         });
     }
@@ -452,6 +469,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.state_root
             .take()

@@ -734,6 +734,11 @@ Dev testnet:
           Parses strings using [`humantime::parse_duration`]
           --dev.block-time 12s
 
+      --dev.mnemonic <MNEMONIC>
+          Derive dev accounts from a fixed mnemonic instead of random ones.
+
+          [default: "test test test test test test test test test test test junk"]
+
 Pruning:
       --full
           Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored
@@ -976,7 +981,7 @@ Logging:
 
           Possible values:
           - always: Colors on
-          - auto:   Colors on
+          - auto:   Auto-detect
           - never:  Colors off
 
           [default: always]

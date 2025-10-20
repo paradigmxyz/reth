@@ -103,7 +103,7 @@ impl MockTrieCursor {
 }
 
 impl TrieCursor for MockTrieCursor {
-    #[instrument(level = "trace", skip(self), ret)]
+    #[instrument(skip(self), ret(level = "trace"))]
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -119,7 +119,7 @@ impl TrieCursor for MockTrieCursor {
         Ok(entry)
     }
 
-    #[instrument(level = "trace", skip(self), ret)]
+    #[instrument(skip(self), ret(level = "trace"))]
     fn seek(
         &mut self,
         key: Nibbles,
@@ -136,7 +136,7 @@ impl TrieCursor for MockTrieCursor {
         Ok(entry)
     }
 
-    #[instrument(level = "trace", skip(self), ret)]
+    #[instrument(skip(self), ret(level = "trace"))]
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let mut iter = self.trie_nodes.iter();
         // Jump to the first key that has a prefix of the current key if it's set, or to the first
@@ -155,7 +155,7 @@ impl TrieCursor for MockTrieCursor {
         Ok(entry)
     }
 
-    #[instrument(level = "trace", skip(self), ret)]
+    #[instrument(skip(self), ret(level = "trace"))]
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.current_key)
     }

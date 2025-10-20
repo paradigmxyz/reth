@@ -2,7 +2,7 @@
 
 use crate::{
     fees::{CallFees, CallFeesError},
-    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes,
+    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest,
 };
 use alloy_consensus::{
     error::ValueError, transaction::Recovered, EthereumTxEnvelope, Sealable, TxEip4844,
@@ -128,7 +128,7 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
 
     /// Associated upper layer JSON-RPC API network requests and responses to convert from and into
     /// types of [`Self::Primitives`].
-    type Network: RpcTypes + Send + Sync + Unpin + Clone + Debug;
+    type Network: RpcTypes<TransactionRequest: SignableTxRequest<TxTy<Self::Primitives>>>;
 
     /// An associated RPC conversion error.
     type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
@@ -901,7 +901,7 @@ impl<N, Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv> RpcConvert
     for RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
 where
     N: NodePrimitives,
-    Network: RpcTypes + Send + Sync + Unpin + Clone + Debug,
+    Network: RpcTypes<TransactionRequest: SignableTxRequest<N::SignedTx>>,
     Evm: ConfigureEvm<Primitives = N> + 'static,
     Receipt: ReceiptConverter<
             N,
