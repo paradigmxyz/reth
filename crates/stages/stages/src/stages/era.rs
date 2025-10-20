@@ -335,7 +335,7 @@ mod tests {
         };
         use reth_ethereum_primitives::TransactionSigned;
         use reth_primitives_traits::{SealedBlock, SealedHeader};
-        use reth_provider::{BlockNumReader, TransactionsProvider};
+        use reth_provider::{BlockNumReader, HeaderProvider, TransactionsProvider};
         use reth_testing_utils::generators::{
             random_block_range, random_signed_tx, BlockRangeParams,
         };
