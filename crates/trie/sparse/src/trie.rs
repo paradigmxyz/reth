@@ -969,7 +969,6 @@ impl SparseTrieInterface for SerialSparseTrie {
         full_path: &Nibbles,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
-
         let mut current = Nibbles::default(); // Start at the root
 
         // Inclusion proof
@@ -3736,6 +3735,6 @@ Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
                 53320 -> Leaf { key: Nibbles(0x0), hash: None }
 ";
 
-         assert_eq!(alternate_printed, expected);
+        assert_eq!(alternate_printed, expected);
     }
 }
