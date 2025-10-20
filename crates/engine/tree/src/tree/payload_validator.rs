@@ -1279,8 +1279,10 @@ where
 
                 // Number of unchecked transactions plus the current tx
                 let unknown_count = (il_len - idx) as u64;
-                self.metrics.ef_excution.record_inclusion_list_transaction_excluded_unknown(unknown_count);
-                
+                self.metrics
+                    .ef_excution
+                    .record_inclusion_list_transaction_excluded_unknown(unknown_count);
+
                 return Err(BlockExecutionError::Validation(
                     BlockValidationError::InvalidInclusionList,
                 ));

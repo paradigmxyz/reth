@@ -43,6 +43,8 @@ use tracing::{debug, trace, warn};
 mod config;
 pub use config::*;
 
+mod metrics;
+
 pub mod validator;
 pub use validator::EthereumExecutionPayloadValidator;
 
@@ -388,6 +390,7 @@ where
         //
         // we should catch this earlier, so that such a transaction does not occupy memory.
         if tx.is_eip4844() {
+            metrics::record_inclusion_list_transaction_excluded("blob_transaction");
             il_bitfield[i] = false;
             i += 1;
             continue;
@@ -395,6 +398,7 @@ where
 
         // transaction gas limit too high
         if cumulative_gas_used + tx.gas_limit() > block_gas_limit {
+            metrics::record_inclusion_list_transaction_excluded("gas_limit");
             il_bitfield[i] = false;
             i += 1;
             continue;
@@ -408,10 +412,22 @@ where
                     .expect("fee is always valid; execution succeeded");
                 total_fees += U256::from(miner_fee) * U256::from(gas_used);
                 cumulative_gas_used += gas_used;
+
+                // Record successful inclusion
+                metrics::record_inclusion_list_transaction_included();
             }
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
             })) => {
+                // Record the reason for exclusion
+                if error.is_nonce_too_high() {
+                    metrics::record_inclusion_list_transaction_excluded("nonce");
+                } else if error.is_lack_of_funds_for_max_fee() {
+                    metrics::record_inclusion_list_transaction_excluded("balance");
+                } else {
+                    metrics::record_inclusion_list_transaction_excluded("unknown");
+                }
+
                 // a transaction whose nonce is too high may become valid.
                 // a transaction whose sender lacks funds may become valid.
                 if !error.is_nonce_too_high() && !error.is_lack_of_funds_for_max_fee() {
