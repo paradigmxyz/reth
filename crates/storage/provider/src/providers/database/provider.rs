@@ -2814,7 +2814,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
         // total difficulty
-        let ttd = self.chain_spec.final_paris_total_difficulty().unwrap_or_default();
+        let ttd = if block_number == 0 {
+            block.header().difficulty()
+        } else {
+            let parent_block_number = block_number - 1;
+            let parent_ttd = self.static_file_provider.header_td_by_number(parent_block_number)?.unwrap_or_default();
+            durations_recorder.record_relative(metrics::Action::GetParentTD);
+            parent_ttd + block.header().difficulty()
+        };
 
         self.static_file_provider
             .get_writer(block_number, StaticFileSegment::Headers)?
