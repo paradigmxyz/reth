@@ -84,7 +84,7 @@ impl RpcModuleSelection {
     /// Returns the number of modules in the selection
     pub fn len(&self) -> usize {
         match self {
-            Self::All => RethRpcModule::variant_count(),
+            Self::All => RethRpcModule::all_variants().len(),
             Self::Standard => Self::STANDARD_MODULES.len(),
             Self::Selection(s) => s.len(),
         }
@@ -135,7 +135,7 @@ impl RpcModuleSelection {
         match (http, ws) {
             // Shortcut for common case to avoid iterating later
             (Some(Self::All), Some(other)) | (Some(other), Some(Self::All)) => {
-                other.len() == RethRpcModule::variant_count()
+                other.len() == RethRpcModule::all_variants().len()
             }
 
             // If either side is disabled, then the other must be empty
@@ -349,11 +349,6 @@ impl RethRpcModule {
         Self::Mev,
     ];
 
-    /// Returns the number of standard variants (excludes Other)
-    pub const fn variant_count() -> usize {
-        Self::STANDARD_VARIANTS.len()
-    }
-
     /// Returns all variant names including Other (for parsing)
     pub const fn all_variant_names() -> &'static [&'static str] {
         <Self as VariantNames>::VARIANTS
@@ -537,7 +532,7 @@ mod test {
     #[test]
     fn test_all_modules() {
         let all_modules = RpcModuleSelection::all_modules();
-        assert_eq!(all_modules.len(), RethRpcModule::variant_count());
+        assert_eq!(all_modules.len(), RethRpcModule::all_variants().len());
     }
 
     #[test]
@@ -567,7 +562,7 @@ mod test {
         let standard = RpcModuleSelection::Standard;
         let selection = RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]);
 
-        assert_eq!(all_modules.len(), RethRpcModule::variant_count());
+        assert_eq!(all_modules.len(), RethRpcModule::all_variants().len());
         assert_eq!(standard.len(), 3);
         assert_eq!(selection.len(), 2);
     }
@@ -587,7 +582,7 @@ mod test {
         let standard = RpcModuleSelection::Standard;
         let selection = RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]);
 
-        assert_eq!(all_modules.iter_selection().count(), RethRpcModule::variant_count());
+        assert_eq!(all_modules.iter_selection().count(), RethRpcModule::all_variants().len());
         assert_eq!(standard.iter_selection().count(), 3);
         assert_eq!(selection.iter_selection().count(), 2);
     }
@@ -845,7 +840,7 @@ mod test {
 
         // But All doesn't explicitly contain custom modules
         // (though contains() returns true for all modules when selection is All)
-        assert_eq!(all_selection.len(), RethRpcModule::variant_count());
+        assert_eq!(all_selection.len(), RethRpcModule::all_variants().len());
     }
 
     #[test]
