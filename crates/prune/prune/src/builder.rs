@@ -30,9 +30,6 @@ pub struct PrunerBuilder {
 }
 
 impl PrunerBuilder {
-    /// Default timeout for a prune run.
-    pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(100);
-
     /// Creates a new [`PrunerBuilder`] from the given [`PruneConfig`].
     pub fn new(pruner_config: PruneConfig) -> Self {
         Self::default()

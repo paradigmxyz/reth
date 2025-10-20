@@ -421,8 +421,6 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
         ChainSpec: reth_chainspec::EthereumHardforks,
     {
         PrunerBuilder::new(self.prune_config().unwrap_or_default())
-            .delete_limit(self.chain_spec().prune_delete_limit())
-            .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
     }
 
     /// Loads the JWT secret for the engine API
