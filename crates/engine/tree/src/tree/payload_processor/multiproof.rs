@@ -975,7 +975,12 @@ impl MultiProofTask {
     ///      currently being calculated, or if there are any pending proofs in the proof sequencer
     ///      left to be revealed by checking the pending tasks.
     /// 6. This task exits after all pending proofs are processed.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip_all)]
+    #[instrument(
+        level = "debug",
+        name = "MultiProofTask::run",
+        target = "engine::tree::payload_processor::multiproof",
+        skip_all
+    )]
     pub(crate) fn run(mut self) {
         // TODO convert those into fields
         let mut prefetch_proofs_requested = 0;
