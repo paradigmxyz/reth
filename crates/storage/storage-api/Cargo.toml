@@ -64,6 +64,7 @@ serde = [
     "reth-primitives-traits/serde",
     "reth-prune-types/serde",
     "reth-stages-types/serde",
+    "reth-trie/serde",
     "reth-trie-common/serde",
     "revm-database/serde",
     "alloy-eips/serde",
