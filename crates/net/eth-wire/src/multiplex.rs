@@ -88,10 +88,12 @@ impl<St> RlpxProtocolMultiplexer<St> {
 
         let (to_primary, from_wire) = mpsc::unbounded_channel();
         let (to_wire, from_primary) = mpsc::unbounded_channel();
+        let (to_disconnect, from_disconnect) = mpsc::unbounded_channel();
         let proxy = ProtocolProxy {
             shared_cap: shared_cap.clone(),
             from_wire: UnboundedReceiverStream::new(from_wire),
             to_wire,
+            to_disconnect,
         };
 
         let st = primary(proxy);
@@ -100,6 +102,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
             primary: PrimaryProtocol {
                 to_primary,
                 from_primary: UnboundedReceiverStream::new(from_primary),
+                from_disconnect: UnboundedReceiverStream::new(from_disconnect),
                 st,
                 shared_cap,
             },
@@ -156,10 +159,12 @@ impl<St> RlpxProtocolMultiplexer<St> {
 
         let (to_primary, from_wire) = mpsc::unbounded_channel();
         let (to_wire, mut from_primary) = mpsc::unbounded_channel();
+        let (to_disconnect, mut from_disconnect) = mpsc::unbounded_channel();
         let proxy = ProtocolProxy {
             shared_cap: shared_cap.clone(),
             from_wire: UnboundedReceiverStream::new(from_wire),
             to_wire,
+            to_disconnect,
         };
 
         let f = handshake(proxy);
@@ -188,6 +193,10 @@ impl<St> RlpxProtocolMultiplexer<St> {
                            return Err(P2PStreamError::UnknownReservedMessageId(offset).into())
                         }
                 }
+                // Handle disconnect requests originating from primary
+                Some(reason) = from_disconnect.recv() => {
+                    self.inner.conn.start_disconnect(reason).map_err(Into::into)?;
+                }
                 Some(msg) = from_primary.recv() => {
                     self.inner.conn.send(msg).await.map_err(Into::into)?;
                 }
@@ -202,6 +211,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
                             primary: PrimaryProtocol {
                                 to_primary,
                                 from_primary: UnboundedReceiverStream::new(from_primary),
+                                from_disconnect: UnboundedReceiverStream::new(from_disconnect),
                                 st,
                                 shared_cap,
                             }
@@ -291,6 +301,8 @@ struct PrimaryProtocol<Primary> {
     to_primary: UnboundedSender<BytesMut>,
     /// Receiver for messages from the primary protocol.
     from_primary: UnboundedReceiverStream<Bytes>,
+    /// Receiver for disconnect requests originating from the primary protocol.
+    from_disconnect: UnboundedReceiverStream<DisconnectReason>,
     /// Shared capability of the primary protocol.
     shared_cap: SharedCapability,
     /// The primary stream.
@@ -307,6 +319,8 @@ pub struct ProtocolProxy {
     from_wire: UnboundedReceiverStream<BytesMut>,
     /// Sends _non-empty_ messages from the wire
     to_wire: UnboundedSender<Bytes>,
+    /// Sends disconnect requests to the underlying connection handler
+    to_disconnect: UnboundedSender<DisconnectReason>,
 }
 
 impl ProtocolProxy {
@@ -385,8 +399,11 @@ impl CanDisconnect<Bytes> for ProtocolProxy {
         &mut self,
         _reason: DisconnectReason,
     ) -> Pin<Box<dyn Future<Output = Result<(), <Self as Sink<Bytes>>::Error>> + Send + '_>> {
-        // TODO handle disconnects
-        Box::pin(async move { Ok(()) })
+        let sender = self.to_disconnect.clone();
+        Box::pin(async move {
+            // Forward disconnect request; map closed channel to BrokenPipe
+            sender.send(_reason).map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe))
+        })
     }
 }
 
@@ -528,6 +545,22 @@ where
             // first drain the primary stream
             if let Poll::Ready(Some(msg)) = this.primary.st.try_poll_next_unpin(cx) {
                 return Poll::Ready(Some(msg))
+            }
+
+            // process disconnect requests from primary protocol
+            loop {
+                match this.primary.from_disconnect.poll_next_unpin(cx) {
+                    Poll::Ready(Some(reason)) => {
+                        if let Err(err) = this.inner.conn.start_disconnect(reason) {
+                            return Poll::Ready(Some(Err(err.into())))
+                        }
+                    }
+                    Poll::Ready(None) => {
+                        // primary closed its disconnect channel; continue
+                        break
+                    }
+                    Poll::Pending => break,
+                }
             }
 
             let mut conn_ready = true;
