@@ -25,7 +25,6 @@ alloy-eips.workspace = true
 
 serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
-rayon = { workspace = true, optional = true }
 
 derive_more.workspace = true
 
@@ -50,7 +49,7 @@ serde = [
     "reth-trie-common/serde",
     "reth-ethereum-primitives/serde",
 ]
-rayon = ["dep:rayon", "reth-trie-common/rayon"]
+rayon = ["reth-trie-common/rayon"]
 serde-bincode-compat = [
     "serde",
     "reth-trie-common/serde-bincode-compat",
