@@ -10,7 +10,7 @@ exclude.workspace = true
 
 [dependencies]
 reth-cli-util.workspace = true
-reth-optimism-cli.workspace = true
+reth-optimism-cli = { workspace = true, default-features = false }
 reth-optimism-rpc.workspace = true
 reth-optimism-node = { workspace = true, features = ["js-tracer"] }
 reth-optimism-chainspec.workspace = true
@@ -27,7 +27,9 @@ tracing.workspace = true
 workspace = true
 
 [features]
-default = ["jemalloc", "reth-optimism-evm/portable"]
+default = ["jemalloc", "otlp", "reth-optimism-evm/portable"]
+
+otlp = ["reth-optimism-cli/otlp"]
 
 jemalloc = ["reth-cli-util/jemalloc", "reth-optimism-cli/jemalloc"]
 jemalloc-prof = ["reth-cli-util/jemalloc-prof"]

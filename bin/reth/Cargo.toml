@@ -28,7 +28,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-ethereum-cli.workspace = true
+reth-ethereum-cli = { workspace = true, default-features = false }
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
@@ -81,7 +81,9 @@ backon.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc", "reth-revm/portable"]
+default = ["jemalloc", "otlp", "reth-revm/portable"]
+
+otlp = ["reth-ethereum-cli/otlp"]
 
 dev = ["reth-ethereum-cli/dev"]
 
