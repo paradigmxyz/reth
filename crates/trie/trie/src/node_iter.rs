@@ -191,10 +191,11 @@ where
     ///
     /// NOTE: The iteration will start from the key of the previous hashed entry if it was supplied.
     #[instrument(
+        level = "trace",
         target = "trie::node_iter",
         skip_all,
         fields(trie_type = ?self.trie_type),
-        ret(level = "trace")
+        ret
     )]
     pub fn try_next(
         &mut self,
