@@ -6,6 +6,7 @@ use reth_db_api::{
     tables,
 };
 use reth_storage_errors::provider::ProviderResult;
+#[cfg(feature = "db-api")]
 use reth_trie::trie_cursor::TrieCursorFactory;
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},

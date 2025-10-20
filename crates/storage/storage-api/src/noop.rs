@@ -35,14 +35,18 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
 
-use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
+#[cfg(feature = "db-api")]
+use reth_prune_types::PruneModes;
+use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+#[cfg(feature = "db-api")]
 use reth_trie::trie_cursor::TrieCursorFactory;
+#[cfg(feature = "db-api")]
+use reth_trie_common::updates::TrieUpdatesSorted;
 use reth_trie_common::{
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
-    StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.

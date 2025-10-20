@@ -1,5 +1,4 @@
-use super::{BranchNodeCompact, StoredNibblesSubKey};
-use crate::Nibbles;
+use super::{BranchNodeCompact, Nibbles, StoredNibblesSubKey};
 
 /// Account storage trie node.
 ///
