@@ -12,7 +12,7 @@ use reth_primitives_traits::{BlockBody, SignedTransaction, SignerRecoverable};
 use reth_rpc_convert::transaction::ConvertReceiptInput;
 use reth_rpc_eth_api::{
     helpers::{
-        receipt::calculate_gas_used_and_next_log_index, spec::SignersForRpc, EthTransactions,
+        receipt::compute_offsets_before_tx, spec::SignersForRpc, EthTransactions,
         LoadReceipt, LoadTransaction,
     },
     try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
@@ -181,7 +181,7 @@ where
                         let all_receipts = &block_and_receipts.receipts;
 
                         let (gas_used, next_log_index) =
-                            calculate_gas_used_and_next_log_index(meta.index, all_receipts);
+                            compute_offsets_before_tx(meta.index, all_receipts);
 
                         return Ok(Some(
                             this.tx_resp_builder()
