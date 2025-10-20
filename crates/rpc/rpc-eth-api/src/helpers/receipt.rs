@@ -9,8 +9,8 @@ use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::{ProviderReceipt, ProviderTx};
 
-/// Calculates the gas used and next log index for a transaction at the given index
-pub fn calculate_gas_used_and_next_log_index(
+/// Computes the cumulative gas and next log index offsets before the transaction at `tx_index`.
+pub fn compute_offsets_before_tx(
     tx_index: u64,
     all_receipts: &[impl TxReceipt],
 ) -> (u64, usize) {
@@ -60,7 +60,7 @@ pub trait LoadReceipt:
                 .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
 
             let (gas_used, next_log_index) =
-                calculate_gas_used_and_next_log_index(meta.index, &all_receipts);
+                compute_offsets_before_tx(meta.index, &all_receipts);
 
             Ok(self
                 .tx_resp_builder()
