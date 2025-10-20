@@ -12,8 +12,7 @@ use crate::{
     interop::{is_stale_interop, is_valid_interop, MaybeInteropTransaction},
     supervisor::SupervisorClient,
 };
-use alloy_consensus::conditional::BlockConditionalAttributes;
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{conditional::BlockConditionalAttributes, BlockHeader};
 use alloy_primitives::TxHash;
 use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
 use metrics::{Gauge, Histogram};
