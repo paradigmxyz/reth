@@ -33,7 +33,7 @@ impl RlpBincode for CustomTransaction {}
 impl reth_codecs::alloy::transaction::Envelope for CustomTransaction {
     fn signature(&self) -> &Signature {
         match self {
-            CustomTransaction::Op(tx) => tx.signature().expect("Expected tx signature"),
+            CustomTransaction::Op(tx) => reth_codecs::alloy::transaction::Envelope::signature(tx),
             CustomTransaction::Payment(tx) => tx.signature(),
         }
     }

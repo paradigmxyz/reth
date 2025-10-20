@@ -409,7 +409,7 @@ mod test {
             l1_blob_base_fee_scalar,
             operator_fee_scalar,
             operator_fee_constant,
-            da_footprint_gas_scalar: _,
+            ..
         } = receipt_meta.l1_block_info;
 
         assert_eq!(
@@ -540,7 +540,7 @@ mod test {
             l1_blob_base_fee_scalar,
             operator_fee_scalar,
             operator_fee_constant,
-            da_footprint_gas_scalar: _,
+            ..
         } = receipt_meta.l1_block_info;
 
         assert_eq!(l1_gas_price, Some(14121491676), "incorrect l1 base fee (former gas price)");

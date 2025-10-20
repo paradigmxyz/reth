@@ -550,7 +550,8 @@ dirs-next = "2.0.0"
 dyn-clone = "1.0.17"
 eyre = "0.6"
 fdlimit = "0.3.0"
-generic-array = "0.14"
+# pinned until downstream crypto libs migrate to 1.0 because 0.14.8 marks all types as deprecated
+generic-array = "=0.14.7"
 humantime = "2.1"
 humantime-serde = "1.1"
 itertools = { version = "0.14", default-features = false }
