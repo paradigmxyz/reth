@@ -52,11 +52,17 @@ impl MockTrieCursorFactory {
 }
 
 impl TrieCursorFactory for MockTrieCursorFactory {
-    type AccountTrieCursor = MockTrieCursor;
-    type StorageTrieCursor = MockTrieCursor;
+    type AccountTrieCursor<'a>
+        = MockTrieCursor
+    where
+        Self: 'a;
+    type StorageTrieCursor<'a>
+        = MockTrieCursor
+    where
+        Self: 'a;
 
     /// Generates a mock account trie cursor.
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         Ok(MockTrieCursor::new(self.account_trie_nodes.clone(), self.visited_account_keys.clone()))
     }
 
@@ -64,7 +70,7 @@ impl TrieCursorFactory for MockTrieCursorFactory {
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         Ok(MockTrieCursor::new(
             self.storage_tries
                 .get(&hashed_address)
