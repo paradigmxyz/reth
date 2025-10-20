@@ -20,12 +20,16 @@ pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
 /// Default [directives](Directive) for [`EnvFilter`] which disables high-frequency debug logs from
 /// `hyper`, `hickory-resolver`, `jsonrpsee-server`, and `discv5`.
-const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 5] = [
+const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 9] = [
     "hyper::proto::h1=off",
     "hickory_resolver=off",
     "hickory_proto=off",
     "discv5=off",
     "jsonrpsee-server=off",
+    "opentelemetry-otlp=off",
+    "opentelemetry_sdk=off",
+    "opentelemetry-http=off",
+    "hyper_util::client::legacy::pool=off",
 ];
 
 /// Manages the collection of layers for a tracing subscriber.
