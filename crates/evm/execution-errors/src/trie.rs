@@ -184,7 +184,7 @@ pub enum SparseTrieErrorKind {
 /// Trie witness errors.
 #[derive(Error, Debug)]
 pub enum TrieWitnessError {
-    /// Error gather proofs.
+    /// Error gathering proofs.
     #[error(transparent)]
     Proof(#[from] StateProofError),
     /// RLP decoding error.
