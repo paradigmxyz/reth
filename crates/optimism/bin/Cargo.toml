@@ -10,7 +10,7 @@ exclude.workspace = true
 
 [dependencies]
 reth-cli-util.workspace = true
-reth-optimism-cli = { workspace = true, default-features = false }
+reth-optimism-cli.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-node = { workspace = true, features = ["js-tracer"] }
 reth-optimism-chainspec.workspace = true
