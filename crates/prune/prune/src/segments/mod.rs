@@ -240,7 +240,10 @@ mod tests {
         let provider = BlockchainProvider::new(factory).unwrap();
 
         // Get the next tx number range
-        let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
+        let range = input
+            .get_next_tx_num_range(&provider)
+            .expect("Expected range")
+            .expect("Range should not be None");
 
         // Calculate the total number of transactions
         let num_txs = blocks.iter().map(|block| block.transaction_count() as u64).sum::<u64>();
@@ -286,7 +289,10 @@ mod tests {
         let provider = BlockchainProvider::new(factory).unwrap();
 
         // Fetch the range and check if it is correct
-        let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
+        let range = input
+            .get_next_tx_num_range(&provider)
+            .expect("Expected range")
+            .expect("Range should not be None");
 
         // Calculate the total number of transactions
         let num_txs = blocks.iter().map(|block| block.transaction_count() as u64).sum::<u64>();

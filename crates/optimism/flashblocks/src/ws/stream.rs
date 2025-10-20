@@ -496,8 +496,11 @@ mod tests {
         let mut stream = WsFlashBlockStream::with_connector(ws_url, connector);
 
         let expected_message = flashblock;
-        let actual_message =
-            stream.next().await.expect("Binary message should not be ignored").unwrap();
+        let actual_message = stream
+            .next()
+            .await
+            .expect("Binary message should not be ignored")
+            .expect("Stream should not be None");
 
         assert_eq!(actual_message, expected_message)
     }
