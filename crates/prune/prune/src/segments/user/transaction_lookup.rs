@@ -38,7 +38,7 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
+    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(
         &self,
         provider: &Provider,

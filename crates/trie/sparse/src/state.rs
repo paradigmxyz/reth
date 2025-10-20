@@ -18,7 +18,7 @@ use reth_trie_common::{
     DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, RlpNode, StorageMultiProof,
     TrieAccount, TrieMask, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use tracing::{instrument, trace};
+use tracing::trace;
 
 /// Provides type-safe re-use of cleared [`SparseStateTrie`]s, which helps to save allocations
 /// across payload runs.
@@ -208,14 +208,6 @@ where
 
     /// Reveal unknown trie paths from decoded multiproof.
     /// NOTE: This method does not extensively validate the proof.
-    #[instrument(
-        target = "trie::sparse",
-        skip_all,
-        fields(
-            account_nodes = multiproof.account_subtree.len(),
-            storages = multiproof.storages.len()
-        )
-    )]
     pub fn reveal_decoded_multiproof(
         &mut self,
         multiproof: DecodedMultiProof,
@@ -540,7 +532,6 @@ where
     /// Calculates the hashes of subtries.
     ///
     /// If the trie has not been revealed, this function does nothing.
-    #[instrument(target = "trie::sparse", skip_all)]
     pub fn calculate_subtries(&mut self) {
         if let SparseTrie::Revealed(trie) = &mut self.state {
             trie.update_subtrie_hashes();
@@ -601,7 +592,6 @@ where
     }
 
     /// Returns sparse trie root and trie updates if the trie has been revealed.
-    #[instrument(target = "trie::sparse", skip_all)]
     pub fn root_with_updates(
         &mut self,
         provider_factory: impl TrieNodeProviderFactory,
@@ -705,7 +695,6 @@ where
     ///
     /// Returns false if the new account info and storage trie are empty, indicating the account
     /// leaf should be removed.
-    #[instrument(target = "trie::sparse", skip_all)]
     pub fn update_account(
         &mut self,
         address: B256,
@@ -748,7 +737,6 @@ where
     ///
     /// Returns false if the new storage root is empty, and the account info was already empty,
     /// indicating the account leaf should be removed.
-    #[instrument(target = "trie::sparse", skip_all)]
     pub fn update_account_storage_root(
         &mut self,
         address: B256,
@@ -796,7 +784,6 @@ where
     }
 
     /// Remove the account leaf node.
-    #[instrument(target = "trie::sparse", skip_all)]
     pub fn remove_account_leaf(
         &mut self,
         path: &Nibbles,

@@ -79,7 +79,7 @@ impl EngineApiMetrics {
             for tx in transactions {
                 let tx = tx?;
                 let span =
-                    debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
+                    debug_span!(target: "engine::tree", "execute_tx", tx_hash=?tx.tx().tx_hash());
                 let _enter = span.enter();
                 trace!(target: "engine::tree", "Executing transaction");
                 executor.execute_transaction(tx)?;
