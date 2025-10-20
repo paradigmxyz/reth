@@ -39,7 +39,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, trace, warn};
+use tracing::{debug, trace, warn};
 
 /// A wrapper for transactions that includes their index in the block.
 #[derive(Clone)]
@@ -139,11 +139,8 @@ where
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
         let transaction_count_hint = self.transaction_count_hint;
-        let span = tracing::Span::current();
 
         self.executor.spawn_blocking(move || {
-            let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
-
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0usize;
 
@@ -160,8 +157,8 @@ where
             };
 
             // Only spawn initial workers as needed
-            for i in 0..workers_needed {
-                handles.push(ctx.spawn_worker(i, &executor, actions_tx.clone(), done_tx.clone()));
+            for _ in 0..workers_needed {
+                handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
             }
 
             let mut tx_index = 0usize;
@@ -251,7 +248,6 @@ where
     /// the new, warmed cache to be inserted.
     ///
     /// This method is called from `run()` only after all execution tasks are complete.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
@@ -288,12 +284,6 @@ where
     ///
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor::prewarm",
-        name = "prewarm",
-        skip_all
-    )]
     pub(super) fn run(
         self,
         pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
@@ -374,7 +364,6 @@ where
 {
     /// Splits this context into an evm, an evm config, metrics, and the atomic bool for terminating
     /// execution.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>)> {
         let Self {
             env,
@@ -391,7 +380,7 @@ where
             Ok(provider) => provider,
             Err(err) => {
                 trace!(
-                    target: "engine::tree::payload_processor::prewarm",
+                    target: "engine::tree",
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
@@ -440,7 +429,6 @@ where
     ///
     /// Note: There are no ordering guarantees; this does not reflect the state produced by
     /// sequential execution.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn transact_batch<Tx>(
         self,
         txs: mpsc::Receiver<IndexedTransaction<Tx>>,
@@ -451,15 +439,7 @@ where
     {
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
-        while let Ok(IndexedTransaction { index, tx }) = {
-            let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx")
-                .entered();
-            txs.recv()
-        } {
-            let _enter =
-                debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
-                    .entered();
-
+        while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
             if terminate_execution.load(Ordering::Relaxed) {
@@ -487,18 +467,12 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
-            drop(_enter);
-
             // Only send outcome for transactions after the first txn
             // as the main execution will be just as fast
             if index > 0 {
-                let _enter =
-                    debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm outcome", index, tx_hash=%tx.tx().tx_hash())
-                        .entered();
                 let (targets, storage_targets) = multiproof_targets_from_state(res.state);
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
                 let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
-                drop(_enter);
             }
 
             metrics.total_runtime.record(start.elapsed());
@@ -511,7 +485,6 @@ where
     /// Spawns a worker task for transaction execution and returns its sender channel.
     fn spawn_worker<Tx>(
         &self,
-        idx: usize,
         executor: &WorkloadExecutor,
         actions_tx: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
@@ -521,11 +494,8 @@ where
     {
         let (tx, rx) = mpsc::channel();
         let ctx = self.clone();
-        let span =
-            debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm worker", idx);
 
         executor.spawn_blocking(move || {
-            let _enter = span.entered();
             ctx.transact_batch(rx, actions_tx, done_tx);
         });
 
