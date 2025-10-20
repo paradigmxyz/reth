@@ -191,6 +191,22 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Apply a function to the config.
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
+    }
+
+    /// Applies a fallible function to the config.
+    pub fn try_apply<F, R>(self, f: F) -> Result<Self, R>
+    where
+        F: FnOnce(Self) -> Result<Self, R>,
+    {
+        f(self)
+    }
+
     /// Sets --dev mode for the node [`NodeConfig::dev`], if `dev` is true.
     pub const fn set_dev(self, dev: bool) -> Self {
         if dev {
