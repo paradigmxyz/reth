@@ -780,7 +780,7 @@ impl MultiProofTask {
         let all_proofs_processed =
             proofs_processed >= state_update_proofs_requested + prefetch_proofs_requested;
         let no_pending = !self.proof_sequencer.has_pending();
-        debug!(
+        trace!(
             target: "engine::root",
             proofs_processed,
             state_update_proofs_requested,
@@ -1016,7 +1016,7 @@ impl MultiProofTask {
                         let storage_targets =
                             targets.values().map(|slots| slots.len()).sum::<usize>();
                         prefetch_proofs_requested += self.on_prefetch_proof(targets);
-                        debug!(
+                        trace!(
                             target: "engine::root",
                             account_targets,
                             storage_targets,
@@ -1037,7 +1037,7 @@ impl MultiProofTask {
 
                         let len = update.len();
                         state_update_proofs_requested += self.on_state_update(source, update);
-                        debug!(
+                        trace!(
                             target: "engine::root",
                             ?source,
                             len,
@@ -1099,7 +1099,7 @@ impl MultiProofTask {
                             .proof_calculation_duration_histogram
                             .record(proof_calculated.elapsed);
 
-                        debug!(
+                        trace!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
                             total_proofs = proofs_processed,
