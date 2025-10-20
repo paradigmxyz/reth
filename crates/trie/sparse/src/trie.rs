@@ -3736,5 +3736,6 @@ Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
                 53320 -> Leaf { key: Nibbles(0x0), hash: None }
 ";
 
-        assert_eq!(alternate_printed, expected);
+         assert_eq!(alternate_printed, expected);
     }
+}
