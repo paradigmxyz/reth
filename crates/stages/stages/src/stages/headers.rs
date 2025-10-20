@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
 use reth_db_api::{
@@ -129,7 +129,7 @@ where
             last_header_number = header.number();
 
             // Append to Headers segment
-            writer.append_header(header, alloy_primitives::U256::ZERO, header_hash)?;
+            writer.append_header(header, U256::ZERO, header_hash)?;
         }
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers hash index");
