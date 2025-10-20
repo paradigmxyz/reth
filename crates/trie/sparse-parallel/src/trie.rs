@@ -883,6 +883,44 @@ impl SparseTrieInterface for ParallelSparseTrie {
         self.upper_subtrie.value_capacity() +
             self.lower_subtries.iter().map(|trie| trie.value_capacity()).sum::<usize>()
     }
+
+    fn shrink_nodes_to(&mut self, size: usize) {
+        // Distribute the capacity across upper and lower subtries
+        // Count how many subtries have capacity (revealed or blind with allocation)
+        let lower_with_capacity =
+            self.lower_subtries.iter().filter(|s| s.node_capacity() > 0).count();
+
+        // Always include upper subtrie, plus any lower subtries with capacity
+        let total_subtries = 1 + lower_with_capacity;
+        let size_per_subtrie = size / total_subtries;
+
+        // Shrink the upper subtrie
+        self.upper_subtrie.shrink_nodes_to(size_per_subtrie);
+
+        // Shrink lower subtries (works for both revealed and blind with allocation)
+        for subtrie in &mut self.lower_subtries {
+            subtrie.shrink_nodes_to(size_per_subtrie);
+        }
+    }
+
+    fn shrink_values_to(&mut self, size: usize) {
+        // Distribute the capacity across upper and lower subtries
+        // Count how many subtries have capacity (revealed or blind with allocation)
+        let lower_with_capacity =
+            self.lower_subtries.iter().filter(|s| s.value_capacity() > 0).count();
+
+        // Always include upper subtrie, plus any lower subtries with capacity
+        let total_subtries = 1 + lower_with_capacity;
+        let size_per_subtrie = size / total_subtries;
+
+        // Shrink the upper subtrie
+        self.upper_subtrie.shrink_values_to(size_per_subtrie);
+
+        // Shrink lower subtries (works for both revealed and blind with allocation)
+        for subtrie in &mut self.lower_subtries {
+            subtrie.shrink_values_to(size_per_subtrie);
+        }
+    }
 }
 
 impl ParallelSparseTrie {
@@ -2110,6 +2148,16 @@ impl SparseSubtrie {
     /// Returns the capacity of the map containing trie values.
     pub(crate) fn value_capacity(&self) -> usize {
         self.inner.value_capacity()
+    }
+
+    /// Shrinks the capacity of the subtrie's node storage.
+    pub(crate) fn shrink_nodes_to(&mut self, size: usize) {
+        self.nodes.shrink_to(size);
+    }
+
+    /// Shrinks the capacity of the subtrie's value storage.
+    pub(crate) fn shrink_values_to(&mut self, size: usize) {
+        self.inner.values.shrink_to(size);
     }
 }
 

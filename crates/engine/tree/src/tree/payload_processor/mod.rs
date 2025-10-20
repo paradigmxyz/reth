@@ -66,6 +66,12 @@ use configured_sparse_trie::ConfiguredSparseTrie;
 pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
     ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
 
+/// Default node capacity for shrinking the sparse trie.
+pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 4_000_000;
+
+/// Default value capacity for shrinking the sparse trie.
+pub const SPARSE_TRIE_MAX_VALUE_SHRINK_CAPACITY: usize = 1_000_000;
+
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
 pub struct PayloadProcessor<Evm>
@@ -439,11 +445,19 @@ where
             // Send state root computation result
             let _ = state_root_tx.send(result);
 
-            // Clear the SparseStateTrie and replace it back into the mutex _after_ sending
+            // Clear the SparseStateTrie, shrink, and replace it back into the mutex _after_ sending
             // results to the next step, so that time spent clearing doesn't block the step after
             // this one.
             let _enter = debug_span!(target: "engine::tree::payload_processor", "clear").entered();
-            cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
+            let mut cleared_trie = ClearedSparseStateTrie::from_state_trie(trie);
+
+            // Shrink the sparse trie so that we don't have ever increasing memory.
+            cleared_trie.shrink_to(
+                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+            );
+
+            cleared_sparse_trie.lock().replace(cleared_trie);
         });
     }
 }
