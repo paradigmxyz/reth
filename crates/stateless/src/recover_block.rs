@@ -2,15 +2,28 @@ use crate::validation::StatelessValidationError;
 use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, Signature, B256};
+use core::ops::Deref;
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_primitives_traits::{Block as _, RecoveredBlock};
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, Bytes};
 
 #[cfg(all(feature = "k256", feature = "secp256k1"))]
 use k256 as _;
 
 /// Serialized uncompressed public key
-pub type UncompressedPublicKey = [u8; 65];
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UncompressedPublicKey(#[serde_as(as = "Bytes")] pub [u8; 65]);
+
+impl Deref for UncompressedPublicKey {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// Verifies all transactions in a block against a list of public keys and signatures.
 ///

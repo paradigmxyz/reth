@@ -272,7 +272,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Set the dev args for the node
-    pub const fn with_dev(mut self, dev: DevArgs) -> Self {
+    pub fn with_dev(mut self, dev: DevArgs) -> Self {
         self.dev = dev;
         self
     }
@@ -519,7 +519,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             builder: self.builder.clone(),
             debug: self.debug.clone(),
             db: self.db,
-            dev: self.dev,
+            dev: self.dev.clone(),
             pruning: self.pruning.clone(),
             datadir: self.datadir.clone(),
             engine: self.engine.clone(),
