@@ -752,7 +752,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                 .into_par_iter()
                 .map(|mut changed_subtrie| {
                     let _enter = info_span!(
-                        target: "trie::sparse::parallel",
+                        target: "trie::parallel_sparse",
                         parent: span.clone(),
                         "subtrie",
                         index = changed_subtrie.index
@@ -1303,7 +1303,7 @@ impl ParallelSparseTrie {
 
     /// Drains any [`SparseTrieUpdatesAction`]s from the given subtrie, and applies each action to
     /// the given `updates` set. If the given set is None then this is a no-op.
-    #[instrument(target = "trie::sparse::parallel", skip_all)]
+    #[instrument(target = "trie::parallel_sparse", skip_all)]
     fn apply_subtrie_update_actions(
         &mut self,
         update_actions: impl Iterator<Item = SparseTrieUpdatesAction>,
@@ -1405,7 +1405,7 @@ impl ParallelSparseTrie {
     ///
     /// IMPORTANT: The method removes the subtries from `lower_subtries`, and the caller is
     /// responsible for returning them back into the array.
-    #[instrument(target = "trie::sparse::parallel", skip_all, fields(prefix_set_len = prefix_set.len()))]
+    #[instrument(target = "trie::parallel_sparse", skip_all, fields(prefix_set_len = prefix_set.len()))]
     fn take_changed_lower_subtries(
         &mut self,
         prefix_set: &mut PrefixSet,
@@ -1562,7 +1562,7 @@ impl ParallelSparseTrie {
 
     /// Return updated subtries back to the trie after executing any actions required on the
     /// top-level `SparseTrieUpdates`.
-    #[instrument(target = "trie::sparse::parallel", skip_all)]
+    #[instrument(target = "trie::parallel_sparse", skip_all)]
     fn insert_changed_subtries(
         &mut self,
         changed_subtries: impl IntoIterator<Item = ChangedSubtrie>,
