@@ -443,7 +443,7 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
 }
 
 /// Spawns the IPC connection onto a new task
-#[instrument(name = "connection", skip_all, fields(conn_id = %params.conn_id), level = "INFO")]
+#[instrument(name = "connection", skip_all, fields(conn_id = %params.conn_id))]
 fn process_connection<RpcMiddleware, HttpMiddleware>(
     params: ProcessConnection<'_, HttpMiddleware, RpcMiddleware>,
 ) where
