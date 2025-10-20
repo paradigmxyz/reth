@@ -88,6 +88,7 @@ std = [
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [
     "dep:serde",
+    "arrayvec/serde",
     "bytes?/serde",
     "nybbles/serde",
     "alloy-primitives/serde",
