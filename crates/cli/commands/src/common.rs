@@ -24,7 +24,7 @@ use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider, StaticFileProvider},
     ProviderFactory, StaticFileProviderFactory,
 };
-use reth_stages::{sets::DefaultStages, Pipeline};
+use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
@@ -126,6 +126,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
+        let has_receipt_pruning = config.prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
         let prune_modes =
             config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default();
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
@@ -136,8 +137,9 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         .with_prune_modes(prune_modes.clone());
 
         // Check for consistency between database and static files.
-        if let Some(unwind_target) =
-            factory.static_file_provider().check_consistency(&factory.provider()?)?
+        if let Some(unwind_target) = factory
+            .static_file_provider()
+            .check_consistency(&factory.provider()?, has_receipt_pruning)?
         {
             if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
@@ -148,7 +150,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             // instead.
             assert_ne!(
                 unwind_target,
-                0,
+                PipelineTarget::Unwind(0),
                 "A static file <> database inconsistency was found that would trigger an unwind to block 0"
             );
 
@@ -173,7 +175,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
             // Move all applicable data from database to static files.
             pipeline.move_to_static_files()?;
-            pipeline.unwind(unwind_target, None)?;
+            pipeline.unwind(unwind_target.unwind_target().expect("should exist"), None)?;
         }
 
         Ok(factory)
