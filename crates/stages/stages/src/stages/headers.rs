@@ -16,15 +16,14 @@ use reth_network_p2p::headers::{
 };
 use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
 use reth_provider::{
-    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider,
-    HeaderSyncGapProvider, StaticFileProviderFactory,
+    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderSyncGapProvider, ProviderError,
+    StaticFileProviderFactory,
 };
 use reth_stages_api::{
     CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput, HeadersCheckpoint, Stage,
     StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_errors::provider::ProviderError;
 use std::task::{ready, Context, Poll};
 
 use tokio::sync::watch;
@@ -110,7 +109,7 @@ where
         // Find the latest total difficulty
         let mut td = static_file_provider
             .header_td_by_number(last_header_number)?
-            .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
+            .ok_or(ProviderError::HeaderNotFound(last_header_number.into()))?;
 
         // Although headers were downloaded in reverse order, the collector iterates it in ascending
         // order
@@ -493,7 +492,8 @@ mod tests {
                 match output {
                     Some(output) if output.checkpoint.block_number > initial_checkpoint => {
                         let provider = self.db.factory.provider()?;
-                        let mut td = provider
+                        let static_file_provider = self.db.factory.static_file_provider();
+                        let mut td = static_file_provider
                             .header_td_by_number(initial_checkpoint.saturating_sub(1))?
                             .unwrap_or_default();
 
@@ -512,7 +512,10 @@ mod tests {
 
                             // validate the header total difficulty
                             td += header.difficulty;
-                            assert_eq!(provider.header_td_by_number(block_num)?, Some(td));
+                            assert_eq!(
+                                static_file_provider.header_td_by_number(block_num)?,
+                                Some(td)
+                            );
                         }
                     }
                     _ => self.check_no_header_entry_above(initial_checkpoint)?,
@@ -639,8 +642,10 @@ mod tests {
                 header.difficulty()
             } else {
                 let parent_block_number = header.number() - 1;
-                let parent_ttd =
-                    provider.header_td_by_number(parent_block_number).unwrap().unwrap_or_default();
+                let parent_ttd = static_file_provider
+                    .header_td_by_number(parent_block_number)
+                    .unwrap()
+                    .unwrap_or_default();
                 parent_ttd + header.difficulty()
             };
 

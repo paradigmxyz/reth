@@ -330,12 +330,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             .header_by_number(head)?
             .expect("the header for the latest block is missing, database is corrupt");
 
-        let total_difficulty = provider
-            .header_td_by_number(head)?
-            // total difficulty is effectively deprecated, but still required in some places, e.g.
-            // p2p
-            .unwrap_or_default();
-
         let hash = provider
             .block_hash(head)?
             .expect("the hash for the latest block is missing, database is corrupt");
@@ -344,7 +338,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             number: head,
             hash,
             difficulty: header.difficulty(),
-            total_difficulty,
+            total_difficulty: U256::ZERO,
             timestamp: header.timestamp(),
         })
     }

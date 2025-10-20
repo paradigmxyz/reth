@@ -19,15 +19,15 @@ use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    providers::StaticFileProviderRWRefMut, BlockWriter, ProviderError, StaticFileProviderFactory,
+    providers::StaticFileProviderRWRefMut, BlockWriter, StaticFileProviderFactory,
     StaticFileSegment, StaticFileWriter,
 };
 use reth_stages_types::{
     CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
 };
 use reth_storage_api::{
-    errors::ProviderResult, DBProvider, DatabaseProviderFactory, HeaderProvider,
-    NodePrimitivesProvider, StageCheckpointWriter,
+    errors::ProviderResult, DBProvider, DatabaseProviderFactory, NodePrimitivesProvider,
+    StageCheckpointWriter,
 };
 use std::{
     collections::Bound,
@@ -85,7 +85,7 @@ where
     // Find the latest total difficulty
     let mut td = static_file_provider
         .header_td_by_number(height)?
-        .ok_or(ProviderError::TotalDifficultyNotFound(height))?;
+        .ok_or_else(|| eyre::eyre!("Total difficulty not found for block {height}"))?;
 
     while let Some(meta) = rx.recv()? {
         let from = height;

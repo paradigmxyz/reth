@@ -15,7 +15,7 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
-    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256,
 };
 use core::{
     fmt::Debug,
@@ -353,14 +353,6 @@ impl<C: Send + Sync, N: NodePrimitives> HeaderProvider for NoopProvider<C, N> {
     }
 
     fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Self::Header>> {
-        Ok(None)
-    }
-
-    fn header_td(&self, _hash: BlockHash) -> ProviderResult<Option<U256>> {
-        Ok(None)
-    }
-
-    fn header_td_by_number(&self, _number: BlockNumber) -> ProviderResult<Option<U256>> {
         Ok(None)
     }
 

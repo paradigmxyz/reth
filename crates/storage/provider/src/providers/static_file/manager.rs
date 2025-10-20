@@ -23,7 +23,7 @@ use reth_db::{
     lockfile::StorageLock,
     static_file::{
         iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
-        StaticFileCursor, TDWithHashMask, TransactionMask,
+        StaticFileCursor, TransactionMask,
     },
 };
 use reth_db_api::{
@@ -1311,6 +1311,26 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
         &self.static_files_tx_index
     }
+
+    /// Fetches the total difficulty for a given block number from static files.
+    ///
+    /// Returns `None` if the block is not found or if the static file is missing.
+    pub fn header_td_by_number(&self, num: BlockNumber) -> ProviderResult<Option<U256>> {
+        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
+            .and_then(|provider| {
+                Ok(provider
+                    .cursor()?
+                    .get_one::<reth_db::static_file::TotalDifficultyMask>(num.into())?
+                    .map(Into::into))
+            })
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
+    }
 }
 
 /// Helper trait to manage different [`StaticFileProviderRW`] of an `Arc<StaticFileProvider`
@@ -1393,27 +1413,6 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvide
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
         self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
             .and_then(|provider| provider.header_by_number(num))
-            .or_else(|err| {
-                if let ProviderError::MissingStaticFileBlock(_, _) = err {
-                    Ok(None)
-                } else {
-                    Err(err)
-                }
-            })
-    }
-
-    fn header_td(&self, block_hash: BlockHash) -> ProviderResult<Option<U256>> {
-        self.find_static_file(StaticFileSegment::Headers, |jar_provider| {
-            Ok(jar_provider
-                .cursor()?
-                .get_two::<TDWithHashMask>((&block_hash).into())?
-                .and_then(|(td, hash)| (hash == block_hash).then_some(td.0)))
-        })
-    }
-
-    fn header_td_by_number(&self, num: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
-            .and_then(|provider| provider.header_td_by_number(num))
             .or_else(|err| {
                 if let ProviderError::MissingStaticFileBlock(_, _) = err {
                     Ok(None)
