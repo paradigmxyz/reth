@@ -12,9 +12,7 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
-use alloy_primitives::{
-    b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
-};
+use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
@@ -1310,26 +1308,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
         &self.static_files_tx_index
-    }
-
-    /// Fetches the total difficulty for a given block number from static files.
-    ///
-    /// Returns `None` if the block is not found or if the static file is missing.
-    pub fn header_td_by_number(&self, num: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
-            .and_then(|provider| {
-                Ok(provider
-                    .cursor()?
-                    .get_one::<reth_db::static_file::TotalDifficultyMask>(num.into())?
-                    .map(Into::into))
-            })
-            .or_else(|err| {
-                if let ProviderError::MissingStaticFileBlock(_, _) = err {
-                    Ok(None)
-                } else {
-                    Err(err)
-                }
-            })
     }
 }
 

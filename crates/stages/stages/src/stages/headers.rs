@@ -16,7 +16,7 @@ use reth_network_p2p::headers::{
 };
 use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
 use reth_provider::{
-    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderSyncGapProvider, ProviderError,
+    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderSyncGapProvider,
     StaticFileProviderFactory,
 };
 use reth_stages_api::{
@@ -106,11 +106,6 @@ where
             .get_highest_static_file_block(StaticFileSegment::Headers)
             .unwrap_or_default();
 
-        // Find the latest total difficulty
-        let mut td = static_file_provider
-            .header_td_by_number(last_header_number)?
-            .ok_or(ProviderError::HeaderNotFound(last_header_number.into()))?;
-
         // Although headers were downloaded in reverse order, the collector iterates it in ascending
         // order
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
@@ -133,11 +128,8 @@ where
             }
             last_header_number = header.number();
 
-            // Increase total difficulty
-            td += header.difficulty();
-
             // Append to Headers segment
-            writer.append_header(header, td, header_hash)?;
+            writer.append_header(header, alloy_primitives::U256::ZERO, header_hash)?;
         }
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers hash index");
@@ -398,7 +390,7 @@ mod tests {
     use crate::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
-    use alloy_primitives::B256;
+    use alloy_primitives::{B256, U256};
     use assert_matches::assert_matches;
     use reth_provider::{DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
@@ -492,10 +484,6 @@ mod tests {
                 match output {
                     Some(output) if output.checkpoint.block_number > initial_checkpoint => {
                         let provider = self.db.factory.provider()?;
-                        let static_file_provider = self.db.factory.static_file_provider();
-                        let mut td = static_file_provider
-                            .header_td_by_number(initial_checkpoint.saturating_sub(1))?
-                            .unwrap_or_default();
 
                         for block_num in initial_checkpoint..output.checkpoint.block_number {
                             // look up the header hash
@@ -509,13 +497,6 @@ mod tests {
                             assert!(header.is_some());
                             let header = SealedHeader::seal_slow(header.unwrap());
                             assert_eq!(header.hash(), hash);
-
-                            // validate the header total difficulty
-                            td += header.difficulty;
-                            assert_eq!(
-                                static_file_provider.header_td_by_number(block_num)?,
-                                Some(td)
-                            );
                         }
                     }
                     _ => self.check_no_header_entry_above(initial_checkpoint)?,
@@ -638,18 +619,7 @@ mod tests {
         let static_file_provider = provider.static_file_provider();
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
         for header in sealed_headers {
-            let ttd = if header.number() == 0 {
-                header.difficulty()
-            } else {
-                let parent_block_number = header.number() - 1;
-                let parent_ttd = static_file_provider
-                    .header_td_by_number(parent_block_number)
-                    .unwrap()
-                    .unwrap_or_default();
-                parent_ttd + header.difficulty()
-            };
-
-            writer.append_header(header.header(), ttd, &header.hash()).unwrap();
+            writer.append_header(header.header(), U256::ZERO, &header.hash()).unwrap();
         }
         drop(writer);
 

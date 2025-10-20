@@ -10,8 +10,8 @@ use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_primitives_traits::{FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    BlockReader, BlockWriter, DBProvider, ProviderError, StageCheckpointWriter,
-    StaticFileProviderFactory, StaticFileWriter,
+    BlockReader, BlockWriter, DBProvider, StageCheckpointWriter, StaticFileProviderFactory,
+    StaticFileWriter,
 };
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_static_file_types::StaticFileSegment;
@@ -175,11 +175,6 @@ where
                 .get_highest_static_file_block(StaticFileSegment::Headers)
                 .unwrap_or_default();
 
-            // Find the latest total difficulty
-            let mut td = static_file_provider
-                .header_td_by_number(last_header_number)?
-                .ok_or(ProviderError::HeaderNotFound(last_header_number.into()))?;
-
             // Although headers were downloaded in reverse order, the collector iterates it in
             // ascending order
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
@@ -189,7 +184,6 @@ where
                 &mut writer,
                 provider,
                 &mut self.hash_collector,
-                &mut td,
                 last_header_number..=input.target(),
             )
             .map_err(|e| StageError::Fatal(e.into()))?;
@@ -446,10 +440,6 @@ mod tests {
                 match output {
                     Some(output) if output.checkpoint.block_number > initial_checkpoint => {
                         let provider = self.db.factory.provider()?;
-                        let static_file_provider = self.db.factory.static_file_provider();
-                        let mut td = static_file_provider
-                            .header_td_by_number(initial_checkpoint.saturating_sub(1))?
-                            .unwrap_or_default();
 
                         for block_num in initial_checkpoint..
                             output
@@ -469,13 +459,6 @@ mod tests {
                             assert!(header.is_some());
                             let header = SealedHeader::seal_slow(header.unwrap());
                             assert_eq!(header.hash(), hash);
-
-                            // validate the header total difficulty
-                            td += header.difficulty;
-                            assert_eq!(
-                                static_file_provider.header_td_by_number(block_num)?,
-                                Some(td)
-                            );
                         }
 
                         self.validate_db_blocks(

@@ -28,7 +28,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
@@ -2813,19 +2813,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
-        // total difficulty
-        let ttd = if block_number == 0 {
-            block.header().difficulty()
-        } else {
-            let parent_block_number = block_number - 1;
-            let parent_ttd = self.static_file_provider.header_td_by_number(parent_block_number)?.unwrap_or_default();
-            durations_recorder.record_relative(metrics::Action::GetParentTD);
-            parent_ttd + block.header().difficulty()
-        };
-
         self.static_file_provider
             .get_writer(block_number, StaticFileSegment::Headers)?
-            .append_header(block.header(), ttd, &block.hash())?;
+            .append_header(block.header(), U256::ZERO, &block.hash())?;
 
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);
