@@ -300,10 +300,16 @@ fn account_worker_loop<Factory>(
     while let Ok(job) = work_rx.recv() {
         match job {
             AccountWorkerJob::AccountMultiproof { mut input, result_sender } => {
+                let span = tracing::debug_span!(
+                    target: "trie::proof_task",
+                    "Account multiproof calculation",
+                    targets = input.targets.len(),
+                    worker_id,
+                );
+                let _span_guard = span.enter();
+
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
-                    targets = input.targets.len(),
                     "Processing account multiproof"
                 );
 
@@ -370,18 +376,24 @@ fn account_worker_loop<Factory>(
 
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
                     proof_time_us = proof_elapsed.as_micros(),
                     total_processed = account_proofs_processed,
                     "Account multiproof completed"
                 );
+                drop(_span_guard);
             }
 
             AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
+                let span = tracing::debug_span!(
+                    target: "trie::proof_task",
+                    "Blinded account node calculation",
+                    ?path,
+                    worker_id,
+                );
+                let _span_guard = span.enter();
+
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
-                    ?path,
                     "Processing blinded account node"
                 );
 
@@ -403,12 +415,11 @@ fn account_worker_loop<Factory>(
 
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
-                    ?path,
                     node_time_us = elapsed.as_micros(),
                     total_processed = account_nodes_processed,
                     "Blinded account node completed"
                 );
+                drop(_span_guard);
             }
         }
     }
