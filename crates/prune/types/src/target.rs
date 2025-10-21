@@ -101,7 +101,7 @@ pub struct PruneModes {
     pub merkle_changesets: PruneMode,
     /// Receipts log filtering has been deprecated and will be removed in a future release.
     #[deprecated]
-    #[serde(skip)]
+    #[cfg_attr(any(test, feature = "serde"), serde(skip))]
     pub receipts_log_filter: (),
 }
 
