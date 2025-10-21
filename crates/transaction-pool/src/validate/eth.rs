@@ -326,10 +326,10 @@ where
             if tx_input_len > self.max_tx_input_bytes {
                 return Err(TransactionValidationOutcome::Invalid(
                     transaction,
-                    InvalidPoolTransactionError::OversizedData(
-                        tx_input_len,
-                        self.max_tx_input_bytes,
-                    ),
+                    InvalidPoolTransactionError::OversizedData {
+                        size: tx_input_len,
+                        limit: self.max_tx_input_bytes,
+                    },
                 ))
             }
         } else {
@@ -338,7 +338,10 @@ where
             if tx_size > self.max_tx_input_bytes {
                 return Err(TransactionValidationOutcome::Invalid(
                     transaction,
-                    InvalidPoolTransactionError::OversizedData(tx_size, self.max_tx_input_bytes),
+                    InvalidPoolTransactionError::OversizedData {
+                        size: tx_size,
+                        limit: self.max_tx_input_bytes,
+                    },
                 ))
             }
         }
