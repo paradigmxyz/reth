@@ -976,6 +976,13 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> BlockBodyIndicesProvider
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
         Ok(vec![])
     }
+
+    fn block_body_indices_range_map(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, StoredBlockBodyIndices)>> {
+        Ok(vec![])
+    }
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvider<T, ChainSpec> {

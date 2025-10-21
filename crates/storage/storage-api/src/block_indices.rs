@@ -17,4 +17,11 @@ pub trait BlockBodyIndicesProvider: Send + Sync {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>>;
+
+    /// Return the block body indices within the requested range matching number from storage
+    /// mapped to the Block Number.
+    fn block_body_indices_range_map(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, StoredBlockBodyIndices)>>;
 }

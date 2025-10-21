@@ -1212,6 +1212,22 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ConsistentProvider<N> {
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
         range.map_while(|b| self.block_body_indices(b).transpose()).collect()
     }
+
+    fn block_body_indices_range_map(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, StoredBlockBodyIndices)>> {
+        let mut result = Vec::new();
+
+        for b in range {
+            // because of key, we can't use map_while directly
+            match self.block_body_indices(b)? {
+                Some(body_indices) => result.push((b, body_indices)),
+                None => break, // stop at first None
+            }
+        }
+        Ok(result)
+    }
 }
 
 impl<N: ProviderNodeTypes> StageCheckpointReader for ConsistentProvider<N> {

@@ -429,6 +429,13 @@ where
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn block_body_indices_range_map(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, StoredBlockBodyIndices)>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl<P, Node, N> BlockReader for RpcBlockchainProvider<P, Node, N>
@@ -1894,6 +1901,14 @@ where
         &self,
         _range: RangeInclusive<u64>,
     ) -> Result<Vec<reth_db_api::models::StoredBlockBodyIndices>, ProviderError> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block_body_indices_range_map(
+        &self,
+        _range: RangeInclusive<u64>,
+    ) -> Result<Vec<(BlockNumber, reth_db_api::models::StoredBlockBodyIndices)>, ProviderError>
+    {
         Err(ProviderError::UnsupportedProvider)
     }
 }

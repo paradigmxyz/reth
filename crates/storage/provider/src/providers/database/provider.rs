@@ -1458,6 +1458,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
         self.cursor_read_collect::<tables::BlockBodyIndices>(range)
     }
+
+    fn block_body_indices_range_map(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, StoredBlockBodyIndices)>> {
+        self.cursor_read_collect_map::<tables::BlockBodyIndices>(range)
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> StageCheckpointReader for DatabaseProvider<TX, N> {

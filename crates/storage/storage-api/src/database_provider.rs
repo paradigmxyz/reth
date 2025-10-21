@@ -77,6 +77,21 @@ pub trait DBProvider: Sized {
         self.cursor_collect_with_capacity(&mut cursor, range, capacity)
     }
 
+    /// Iterates over read only values in the given table and collects them into a mapped vector.
+    ///
+    /// Early-returns if the range is empty, without opening a cursor transaction.
+    fn cursor_read_collect_map<T: Table<Key = u64>>(
+        &self,
+        range: impl RangeBounds<T::Key>,
+    ) -> ProviderResult<Vec<(T::Key, T::Value)>> {
+        let capacity = match range_size_hint(&range) {
+            Some(0) | None => return Ok(Vec::new()),
+            Some(capacity) => capacity,
+        };
+        let mut cursor = self.tx_ref().cursor_read::<T>()?;
+        self.cursor_collect_with_capacity_and_map(&mut cursor, range, capacity)
+    }
+
     /// Iterates over read only values in the given table and collects them into a vector.
     fn cursor_collect<T: Table<Key = u64>>(
         &self,
@@ -98,6 +113,22 @@ pub trait DBProvider: Sized {
         let mut items = Vec::with_capacity(capacity);
         for entry in cursor.walk_range(range)? {
             items.push(entry?.1);
+        }
+        Ok(items)
+    }
+
+    /// Iterates over read only values in the given table and collects them into a mapped vector
+    /// with capacity.
+    fn cursor_collect_with_capacity_and_map<T: Table<Key = u64>>(
+        &self,
+        cursor: &mut impl DbCursorRO<T>,
+        range: impl RangeBounds<T::Key>,
+        capacity: usize,
+    ) -> ProviderResult<Vec<(T::Key, T::Value)>> {
+        let mut items = Vec::with_capacity(capacity);
+        for entry in cursor.walk_range(range)? {
+            let (key, value) = entry?;
+            items.push((key, value));
         }
         Ok(items)
     }

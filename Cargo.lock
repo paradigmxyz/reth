@@ -10438,6 +10438,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-testing-utils",
  "reth-tokio-util",
+ "rustc-hash 2.1.1",
  "tempfile",
  "tracing",
 ]

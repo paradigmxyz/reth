@@ -1829,6 +1829,13 @@ impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileProvider<N> {
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn block_body_indices_range_map(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, StoredBlockBodyIndices)>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl<N: NodePrimitives> StatsReader for StaticFileProvider<N> {

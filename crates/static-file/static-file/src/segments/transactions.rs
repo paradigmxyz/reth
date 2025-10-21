@@ -1,13 +1,16 @@
 use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
 use reth_codecs::Compact;
-use reth_db_api::{cursor::DbCursorRO, table::Value, tables, transaction::DbTx};
+use reth_db_api::{
+    cursor::DbCursorRO, models::StoredBlockBodyIndices, table::Value, tables, transaction::DbTx,
+};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, DBProvider, StaticFileProviderFactory,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use rustc_hash::FxHashMap;
 use std::ops::RangeInclusive;
 
 /// Static File segment responsible for [`StaticFileSegment::Transactions`] part of data.
@@ -35,16 +38,24 @@ where
         let mut static_file_writer = static_file_provider
             .get_writer(*block_range.start(), StaticFileSegment::Transactions)?;
 
+        // Used FxHashMap as it is much faster than regular HashMap, and optimized for integer keys
+        // As there is no threat to DoS attacks, it is safe to use it
+        let indices = provider
+            .block_body_indices_range_map(block_range.clone())?
+            .into_iter()
+            .collect::<FxHashMap<BlockNumber, StoredBlockBodyIndices>>();
+
+        let mut transactions_cursor = provider.tx_ref().cursor_read::<tables::Transactions<
+            <Provider::Primitives as NodePrimitives>::SignedTx,
+        >>()?;
+
         for block in block_range {
             static_file_writer.increment_block(block)?;
 
-            let block_body_indices = provider
-                .block_body_indices(block)?
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
+            let block_body_indices =
+                indices.get(&block).ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
-            let mut transactions_cursor = provider.tx_ref().cursor_read::<tables::Transactions<
-                <Provider::Primitives as NodePrimitives>::SignedTx,
-            >>()?;
+            // Reuse cursor with walk_range
             let transactions_walker =
                 transactions_cursor.walk_range(block_body_indices.tx_num_range())?;
 

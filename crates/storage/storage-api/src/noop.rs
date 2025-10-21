@@ -618,6 +618,13 @@ impl<C: Send + Sync, N: Send + Sync> BlockBodyIndicesProvider for NoopProvider<C
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
         Ok(Vec::new())
     }
+
+    fn block_body_indices_range_map(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, StoredBlockBodyIndices)>> {
+        Ok(Vec::new())
+    }
 }
 
 #[cfg(feature = "db-api")]
@@ -636,14 +643,14 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<Chai
         self.tx
     }
 
-    fn prune_modes_ref(&self) -> &PruneModes {
-        &self.prune_modes
-    }
-
     fn commit(self) -> ProviderResult<bool> {
         use reth_db_api::transaction::DbTx;
 
         Ok(self.tx.commit()?)
+    }
+
+    fn prune_modes_ref(&self) -> &PruneModes {
+        &self.prune_modes
     }
 }
 
