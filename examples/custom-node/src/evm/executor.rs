@@ -45,7 +45,9 @@ where
             CustomTransaction::Op(op_tx) => self
                 .inner
                 .execute_transaction_without_commit(Recovered::new_unchecked(op_tx, *tx.signer())),
-            CustomTransaction::Payment(..) => todo!(),
+            CustomTransaction::Payment(..) => Err(BlockExecutionError::msg(
+                "CustomTransaction::Payment is not supported by OpBlockExecutor",
+            )),
         }
     }
 
@@ -58,7 +60,9 @@ where
             CustomTransaction::Op(op_tx) => {
                 self.inner.commit_transaction(output, Recovered::new_unchecked(op_tx, *tx.signer()))
             }
-            CustomTransaction::Payment(..) => todo!(),
+            CustomTransaction::Payment(..) => Err(BlockExecutionError::msg(
+                "CustomTransaction::Payment is not supported by OpBlockExecutor",
+            )),
         }
     }
 
