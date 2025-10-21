@@ -1733,7 +1733,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 // storage state has to be taken from the database and written to storage history.
                 // See [StorageWipe::Primary] for more details.
                 //
-                // intermediate Vec allocation
+                // Note: This code performs an intermediate Vec allocation to collect storage slot changes before sorting.
                 let wiped_storage_iter: Option<WipedStorageIter<'_, _>> = if wiped {
                     tracing::trace!(?address, "Wiping storage");
                     Some(WipedStorageIter::new(&mut storages_cursor, address)?)
