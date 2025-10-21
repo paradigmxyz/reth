@@ -42,8 +42,6 @@ where
 {
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
-    is_dev: bool,
-    tree_config: reth_node_api::TreeConfig,
     attributes_generator: F,
     connect_nodes: bool,
     tree_config_modifier: Option<TreeConfigModifier>,
@@ -62,18 +60,10 @@ where
         PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
     /// Creates a new builder with the required parameters.
-    pub fn new(
-        num_nodes: usize,
-        chain_spec: Arc<N::ChainSpec>,
-        is_dev: bool,
-        tree_config: reth_node_api::TreeConfig,
-        attributes_generator: F,
-    ) -> Self {
+    pub fn new(num_nodes: usize, chain_spec: Arc<N::ChainSpec>, attributes_generator: F) -> Self {
         Self {
             num_nodes,
             chain_spec,
-            is_dev,
-            tree_config,
             attributes_generator,
             connect_nodes: true,
             tree_config_modifier: None,
@@ -127,9 +117,9 @@ where
 
         // Apply tree config modifier if present
         let tree_config = if let Some(modifier) = self.tree_config_modifier {
-            modifier(self.tree_config)
+            modifier(reth_node_api::TreeConfig::default())
         } else {
-            self.tree_config
+            reth_node_api::TreeConfig::default()
         };
 
         let mut nodes: Vec<NodeTestContext<_, _>> = Vec::with_capacity(self.num_nodes);
@@ -144,8 +134,7 @@ where
                         .with_unused_ports()
                         .with_http()
                         .with_http_api(RpcModuleSelection::All),
-                )
-                .set_dev(self.is_dev);
+                );
 
             // Apply node config modifier if present
             let node_config = if let Some(modifier) = &self.node_config_modifier {
@@ -213,7 +202,6 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("E2ETestSetupBuilder")
             .field("num_nodes", &self.num_nodes)
-            .field("is_dev", &self.is_dev)
             .field("connect_nodes", &self.connect_nodes)
             .field("tree_config_modifier", &self.tree_config_modifier.as_ref().map(|_| "<closure>"))
             .field("node_config_modifier", &self.node_config_modifier.as_ref().map(|_| "<closure>"))

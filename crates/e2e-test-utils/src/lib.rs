@@ -57,15 +57,10 @@ where
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes>,
 {
-    E2ETestSetupBuilder::new(
-        num_nodes,
-        chain_spec,
-        is_dev,
-        reth_node_api::TreeConfig::default(),
-        attributes_generator,
-    )
-    .build()
-    .await
+    E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
+        .with_node_config_modifier(move |config| config.set_dev(is_dev))
+        .build()
+        .await
 }
 
 /// Creates the initial setup with `num_nodes` started and interconnected.
@@ -114,7 +109,9 @@ where
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
-    E2ETestSetupBuilder::new(num_nodes, chain_spec, is_dev, tree_config, attributes_generator)
+    E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
+        .with_tree_config_modifier(move |_| tree_config.clone())
+        .with_node_config_modifier(move |config| config.set_dev(is_dev))
         .with_connect_nodes(connect_nodes)
         .build()
         .await
