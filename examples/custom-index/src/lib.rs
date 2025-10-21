@@ -17,9 +17,10 @@ use reth_ethereum::{
     EthPrimitives,
 };
 
-use crate::storage::CustomStorage;
-
 mod storage;
+use storage::CustomStorage;
+
+mod provider;
 
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
