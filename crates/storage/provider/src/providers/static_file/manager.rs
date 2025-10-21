@@ -33,7 +33,7 @@ use reth_db_api::{
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
-use reth_node_types::{FullNodePrimitives, NodePrimitives};
+use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{RecoveredBlock, SealedHeader, SignedTransaction};
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_static_file_types::{
@@ -1524,8 +1524,8 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> Rec
     }
 }
 
-impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
-    TransactionsProviderExt for StaticFileProvider<N>
+impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> TransactionsProviderExt
+    for StaticFileProvider<N>
 {
     fn transaction_hashes_by_range(
         &self,
@@ -1723,7 +1723,7 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileProvider<N> {
 
 /* Cannot be successfully implemented but must exist for trait requirements */
 
-impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> BlockReader
+impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> BlockReader
     for StaticFileProvider<N>
 {
     type Block = N::Block;
