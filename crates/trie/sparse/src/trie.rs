@@ -970,7 +970,6 @@ impl SparseTrieInterface for SerialSparseTrie {
         full_path: &Nibbles,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
-
         let mut current = Nibbles::default(); // Start at the root
 
         // Inclusion proof
