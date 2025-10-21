@@ -23,6 +23,7 @@ pub struct Config {
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
     /// Configuration for pruning.
+    #[cfg_attr(feature = "serde", serde(default))]
     pub prune: PruneConfig,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
