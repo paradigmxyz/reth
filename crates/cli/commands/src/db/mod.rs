@@ -11,6 +11,7 @@ use std::{
 mod checksum;
 mod clear;
 mod diff;
+mod find_unhashed;
 mod get;
 mod list;
 mod repair_trie;
@@ -51,6 +52,8 @@ pub enum Subcommands {
     Clear(clear::Command),
     /// Verifies trie consistency and outputs any inconsistencies
     RepairTrie(repair_trie::Command),
+    /// Finds the unhashed address that corresponds to a hashed account
+    FindUnhashed(find_unhashed::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -142,6 +145,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 let access_rights =
                     if command.dry_run { AccessRights::RO } else { AccessRights::RW };
                 let Environment { provider_factory, .. } = self.env.init::<N>(access_rights)?;
+                command.execute(provider_factory)?;
+            }
+            Subcommands::FindUnhashed(command) => {
+                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
                 command.execute(provider_factory)?;
             }
             Subcommands::Version => {
