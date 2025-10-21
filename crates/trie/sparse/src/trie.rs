@@ -964,11 +964,13 @@ impl SparseTrieInterface for SerialSparseTrie {
         self.rlp_buf.clear();
     }
 
+    #[inline]
     fn find_leaf(
         &self,
         full_path: &Nibbles,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
+
         let mut current = Nibbles::default(); // Start at the root
 
         // Inclusion proof
@@ -1058,7 +1060,13 @@ impl SparseTrieInterface for SerialSparseTrie {
                 // We found a leaf with an empty key (exact match)
                 // This should be handled by the values map check above
                 if let Some(value) = self.values.get(full_path) {
-                    check_value_match(value, expected_value, full_path)?;
+                    if expected_value.is_some_and(|expected| value != expected) {
+                        return Err(LeafLookupError::ValueMismatch {
+                            path: *full_path,
+                            expected: expected_value.cloned(),
+                            actual: value.clone(),
+                        });
+                    }
                     return Ok(LeafLookup::Exists);
                 }
             }
