@@ -21,8 +21,7 @@ use reth_network::{
     NetworkPrimitives,
 };
 use reth_node_api::{
-    FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
-    NodeTypesWithDBAdapter,
+    FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
@@ -397,7 +396,6 @@ where
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
         >,
-        N::Primitives: FullNodePrimitives,
         EngineNodeLauncher: LaunchNode<
             NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
         >,

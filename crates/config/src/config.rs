@@ -23,8 +23,8 @@ pub struct Config {
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
     /// Configuration for pruning.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub prune: Option<PruneConfig>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub prune: PruneConfig,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
     /// Configuration for peer sessions.
@@ -34,7 +34,7 @@ pub struct Config {
 impl Config {
     /// Sets the pruning configuration.
     pub const fn set_prune_config(&mut self, prune_config: PruneConfig) {
-        self.prune = Some(prune_config);
+        self.prune = prune_config;
     }
 }
 
@@ -445,6 +445,11 @@ impl Default for PruneConfig {
 }
 
 impl PruneConfig {
+    /// Returns whether this configuration is the default one.
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+
     /// Returns whether there is any kind of receipt pruning configuration.
     pub const fn has_receipts_pruning(&self) -> bool {
         self.segments.receipts.is_some()
@@ -452,8 +457,7 @@ impl PruneConfig {
 
     /// Merges another `PruneConfig` into this one, taking values from the other config if and only
     /// if the corresponding value in this config is not set.
-    pub fn merge(&mut self, other: Option<Self>) {
-        let Some(other) = other else { return };
+    pub fn merge(&mut self, other: Self) {
         #[expect(deprecated)]
         let Self {
             block_interval,
@@ -1021,7 +1025,7 @@ receipts = 'full'
             },
         };
 
-        config1.merge(Some(config2));
+        config1.merge(config2);
 
         // Check that the configuration has been merged. Any configuration present in config1
         // should not be overwritten by config2

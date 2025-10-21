@@ -1,5 +1,7 @@
 //! Pruning and full node arguments
 
+use std::ops::Not;
+
 use crate::primitives::EthereumHardfork;
 use alloy_primitives::BlockNumber;
 use clap::{builder::RangedU64ValueParser, Args};
@@ -104,6 +106,9 @@ pub struct PruningArgs {
 
 impl PruningArgs {
     /// Returns pruning configuration.
+    ///
+    /// Returns [`None`] if no parameters are specified and default pruning configuration should be
+    /// used.
     pub fn prune_config<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneConfig>
     where
         ChainSpec: EthereumHardforks,
@@ -162,7 +167,7 @@ impl PruningArgs {
             );
         }
 
-        Some(config)
+        config.is_default().not().then_some(config)
     }
 
     fn bodies_prune_mode<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneMode>

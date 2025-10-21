@@ -160,11 +160,11 @@ impl TestStageDB {
                 for block_number in 0..header.number {
                     let mut prev = header.clone_header();
                     prev.number = block_number;
-                    writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
+                    writer.append_header(&prev, &B256::ZERO)?;
                 }
             }
 
-            writer.append_header(header.header(), td, &header.hash())?;
+            writer.append_header(header.header(), &header.hash())?;
         } else {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
             tx.put::<tables::HeaderTerminalDifficulties>(header.number, td.into())?;
