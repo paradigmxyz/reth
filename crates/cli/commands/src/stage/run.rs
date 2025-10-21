@@ -151,7 +151,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
 
         let etl_config = config.stages.etl.clone();
-        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
+        let prune_modes = config.prune.segments.clone();
 
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
