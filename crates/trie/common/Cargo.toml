@@ -53,6 +53,7 @@ alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-trie = { workspace = true, features = ["arbitrary", "serde"] }
 bytes.workspace = true
+arrayvec.workspace = true
 hash-db.workspace = true
 plain_hasher.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
@@ -75,6 +76,7 @@ std = [
     "alloy-rpc-types-eth?/std",
     "alloy-serde?/std",
     "alloy-trie/std",
+    "arrayvec?/std",
     "bytes?/std",
     "derive_more/std",
     "nybbles/std",
@@ -84,7 +86,6 @@ std = [
     "serde_json/std",
     "revm-database/std",
     "revm-state/std",
-    "arrayvec?/std",
 ]
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [
