@@ -10,7 +10,7 @@ use core::{
     str::FromStr,
 };
 use derive_more::Display;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use strum::{AsRefStr, EnumString};
 
 #[derive(
@@ -202,7 +202,7 @@ impl ChangesetOffset {
 }
 
 /// A segment header that contains information common to all segments. Used for storage.
-#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, Serialize, Eq, PartialEq, Hash, Clone)]
 pub struct SegmentHeader {
     /// Defines the expected block range for a static file segment. This attribute is crucial for
     /// scenarios where the file contains no data, allowing for a representation beyond a
@@ -219,15 +219,46 @@ pub struct SegmentHeader {
     changeset_offsets: Option<Vec<ChangesetOffset>>,
 }
 
-impl Serialize for SegmentHeader {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+struct SegmentHeaderVisitor;
+
+impl<'de> Visitor<'de> for SegmentHeaderVisitor {
+    type Value = SegmentHeader;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a header struct with 4 or 5 fields")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where
-        S: Serializer,
+        A: serde::de::SeqAccess<'de>,
     {
-        // For backward compatibility, only serialize 4 fields (without changeset_offsets)
-        // This matches what we deserialize from old files
-        (&self.expected_block_range, &self.block_range, &self.tx_range, &self.segment)
-            .serialize(serializer)
+        // First 4 fields are always present in both old and new format
+        let expected_block_range =
+            seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+
+        let block_range =
+            seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+
+        let tx_range =
+            seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+
+        let segment =
+            seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+
+        // Try to read the 5th field (changeset_offsets)
+        // If it doesn't exist (old format), this will return None
+        let changeset_offsets = match seq.next_element()? {
+            Some(Some(offsets)) => Some(offsets), // New format with Some(vec)
+            Some(None) | None => None,
+        };
+
+        Ok(SegmentHeader {
+            expected_block_range,
+            block_range,
+            tx_range,
+            segment,
+            changeset_offsets,
+        })
     }
 }
 
@@ -236,25 +267,13 @@ impl<'de> Deserialize<'de> for SegmentHeader {
     where
         D: Deserializer<'de>,
     {
-        // Old format without changeset_offsets (for backward compatibility)
-        #[derive(Deserialize)]
-        struct OldHeader {
-            expected_block_range: SegmentRangeInclusive,
-            block_range: Option<SegmentRangeInclusive>,
-            tx_range: Option<SegmentRangeInclusive>,
-            segment: StaticFileSegment,
-        }
+        // Tell the deserializer we're expecting a struct
+        // The field names are for formats that use them
+        // Bincode ignores these and just uses the sequence order
+        const FIELDS: &[&str] =
+            &["expected_block_range", "block_range", "tx_range", "segment", "changeset_offsets"];
 
-        // For existing files created before changeset_offsets was added
-        let header = OldHeader::deserialize(deserializer)?;
-
-        Ok(Self {
-            expected_block_range: header.expected_block_range,
-            block_range: header.block_range,
-            tx_range: header.tx_range,
-            segment: header.segment,
-            changeset_offsets: None,
-        })
+        deserializer.deserialize_struct("YourStruct", FIELDS, SegmentHeaderVisitor)
     }
 }
 

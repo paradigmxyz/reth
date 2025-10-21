@@ -14,7 +14,7 @@ use reth_db_api::{
 use reth_db_common::DbTool;
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
+use reth_provider::{providers::ProviderNodeTypes, ChangeSetReader, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use tracing::error;
 
@@ -75,17 +75,48 @@ impl Command {
                         None,
                         <HeaderWithHashMask<HeaderTy<N>>>::MASK,
                     ),
-                    StaticFileSegment::Transactions => {
-                        (table_key::<tables::Transactions>(&key)?, None, <TransactionMask<TxTy<N>>>::MASK)
-                    }
-                    StaticFileSegment::Receipts => {
-                        (table_key::<tables::Receipts>(&key)?, None, <ReceiptMask<ReceiptTy<N>>>::MASK)
-                    }
+                    StaticFileSegment::Transactions => (
+                        table_key::<tables::Transactions>(&key)?,
+                        None,
+                        <TransactionMask<TxTy<N>>>::MASK,
+                    ),
+                    StaticFileSegment::Receipts => (
+                        table_key::<tables::Receipts>(&key)?,
+                        None,
+                        <ReceiptMask<ReceiptTy<N>>>::MASK,
+                    ),
                     StaticFileSegment::AccountChangeSets => {
                         let subkey = table_subkey::<tables::AccountChangeSets>(subkey.as_deref())?;
-                        (table_key::<tables::AccountChangeSets>(&key)?, Some(subkey), AccountChangesetMask::MASK)
+                        (
+                            table_key::<tables::AccountChangeSets>(&key)?,
+                            Some(subkey),
+                            AccountChangesetMask::MASK,
+                        )
                     }
                 };
+
+                // handle account changesets differently if a subkey is provided.
+                if let StaticFileSegment::AccountChangeSets = segment {
+                    let Some(subkey) = subkey else {
+                        error!(target: "reth::cli", "Subkey is required for `db get` account changesets");
+                        return Ok(())
+                    };
+                    let account = tool
+                        .provider_factory
+                        .static_file_provider()
+                        .get_account_before_block(key, subkey)?;
+
+                    if let Some(account) = account {
+                        println!("{}", serde_json::to_string_pretty(&account)?);
+                    } else {
+                        error!(target: "reth::cli", "No content for the given table key.");
+                    }
+
+                    return Ok(())
+                };
+
+                // TODO: if someone doesnt input a subkey then return early because it's basically
+                // required for account changesets
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(
                     segment,
@@ -127,11 +158,7 @@ impl Command {
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
                                 }
                                 StaticFileSegment::AccountChangeSets => {
-                                    let changeset =
-                                        <<tables::AccountChangeSets as Table>::Value>::decompress(
-                                            content[0].as_slice(),
-                                        )?;
-                                    println!("{}", serde_json::to_string_pretty(&changeset)?);
+                                    todo!()
                                 }
                             }
                         }
