@@ -36,7 +36,7 @@ use tracing::{debug, error, trace};
 
 /// Default upper bound for inflight multiproof calculations. These would be sitting in the queue
 /// waiting to be processed.
-const DEFAULT_MULTIPROOF_INFLIGHT_LIMIT: usize = 256;
+const DEFAULT_MULTIPROOF_INFLIGHT_LIMIT: usize = 128;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
