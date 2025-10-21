@@ -211,10 +211,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
-      - name: Check dashboard JSON with jq
-        uses: sergeysova/jq-action@v2
-        with:
-          cmd: jq empty etc/grafana/dashboards/overview.json
+      - uses: dcarbone/install-jq-action@v3
+      - name: Check dashboard JSON files with jq
+        run: |
+          for file in etc/grafana/dashboards/*.json; do
+            echo "Checking $file"
+            jq empty "$file" || exit 1
+          done
 
   no-test-deps:
     runs-on: ubuntu-latest
