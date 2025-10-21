@@ -149,6 +149,16 @@ where
 
         debug!("Final file name {}", era1_id.to_file_name());
         let file_path = config.dir.join(era1_id.to_file_name());
+
+        // Check if file already exists to prevent accidental overwrites
+        if file_path.exists() {
+            warn!(
+                target: "era::history::export",
+                "ERA1 file already exists: {file_path:?}, skipping to prevent data loss"
+            );
+            continue;
+        }
+
         let file = std::fs::File::create(&file_path)?;
         let mut writer = Era1Writer::new(file);
         writer.write_version()?;
