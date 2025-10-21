@@ -55,9 +55,7 @@ pub(crate) fn insert_headers(
         .expect("failed to create writer");
 
     for header in headers {
-        writer
-            .append_header(header.header(), U256::ZERO, &header.hash())
-            .expect("failed to append header");
+        writer.append_header(header.header(), &header.hash()).expect("failed to append header");
     }
     drop(writer);
     provider_rw.commit().expect("failed to commit");

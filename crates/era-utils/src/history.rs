@@ -305,7 +305,7 @@ where
         last_header_number = number;
 
         // Append to Headers segment
-        writer.append_header(&header, U256::ZERO, &hash)?;
+        writer.append_header(&header, &hash)?;
 
         // Write bodies to database.
         provider.append_block_bodies(vec![(header.number(), Some(body))])?;

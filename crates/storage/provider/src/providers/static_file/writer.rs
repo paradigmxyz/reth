@@ -531,12 +531,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// blocks.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
-    pub fn append_header(
-        &mut self,
-        header: &N::BlockHeader,
-        total_difficulty: U256,
-        hash: &BlockHash,
-    ) -> ProviderResult<()>
+    pub fn append_header(&mut self, header: &N::BlockHeader, hash: &BlockHash) -> ProviderResult<()>
     where
         N::BlockHeader: Compact,
     {
@@ -548,7 +543,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.increment_block(header.number())?;
 
         self.append_column(header)?;
-        self.append_column(CompactU256::from(total_difficulty))?;
+        self.append_column(CompactU256::from(U256::ZERO))?; // deprecated total difficulty
         self.append_column(hash)?;
 
         if let Some(metrics) = &self.metrics {

@@ -133,7 +133,7 @@ where
             for block_num in 1..=target_height {
                 // TODO: should we fill with real parent_hash?
                 let header = header_factory(block_num);
-                writer.append_header(&header, U256::ZERO, &B256::ZERO)?;
+                writer.append_header(&header, &B256::ZERO)?;
             }
             Ok(())
         });

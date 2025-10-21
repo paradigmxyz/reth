@@ -2815,7 +2815,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         self.static_file_provider
             .get_writer(block_number, StaticFileSegment::Headers)?
-            .append_header(block.header(), U256::ZERO, &block.hash())?;
+            .append_header(block.header(), &block.hash())?;
 
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);

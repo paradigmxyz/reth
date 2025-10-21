@@ -54,7 +54,7 @@ where
             debug_assert_eq!(header_block, header_td_block);
             debug_assert_eq!(header_td_block, canonical_header_block);
 
-            static_file_writer.append_header(&header, header_td.0, &canonical_header)?;
+            static_file_writer.append_header(&header, &canonical_header)?;
         }
 
         Ok(())

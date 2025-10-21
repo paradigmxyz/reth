@@ -129,7 +129,7 @@ where
             last_header_number = header.number();
 
             // Append to Headers segment
-            writer.append_header(header, U256::ZERO, header_hash)?;
+            writer.append_header(header, header_hash)?;
         }
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers hash index");
@@ -619,7 +619,7 @@ mod tests {
         let static_file_provider = provider.static_file_provider();
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
         for header in sealed_headers {
-            writer.append_header(header.header(), U256::ZERO, &header.hash()).unwrap();
+            writer.append_header(header.header(), &header.hash()).unwrap();
         }
         drop(writer);
 
