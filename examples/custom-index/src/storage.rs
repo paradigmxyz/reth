@@ -1,11 +1,25 @@
 use reth_ethereum::{
     chainspec::EthereumHardforks,
-    evm::revm::primitives::alloy_primitives::BlockNumber,
+    evm::revm::primitives::{
+        alloy_primitives::{BlockNumber, TxNonce, TxNumber},
+        Address,
+    },
     primitives::Header,
-    provider::{db::transaction::DbTxMut, ChainSpecProvider, ProviderResult},
+    provider::{
+        db::{tables, transaction::DbTxMut},
+        ChainSpecProvider, ProviderResult,
+    },
     storage::{ChainStorageReader, ChainStorageWriter, DBProvider, EthStorage},
     BlockBody, EthPrimitives, TransactionSigned,
 };
+
+tables! {
+    table NonceToTransaction {
+        type Key = Address;
+        type Value = TxNumber;
+        type SubKey = TxNonce;
+    }
+}
 
 /// Custom storage implementation.
 #[derive(Debug, Default, Clone, Copy)]

@@ -36,7 +36,6 @@ use reth_trie_common::{
     BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
 };
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -138,8 +137,8 @@ macro_rules! tables {
 
             // Ideally this implementation wouldn't exist, but it is necessary to derive `Debug`
             // when a type is generic over `T: Table`. See: https://github.com/rust-lang/rust/issues/26925
-            impl$(<$($generic),*>)? fmt::Debug for $name$(<$($generic),*>)? {
-                fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+            impl$(<$($generic),*>)? core::fmt::Debug for $name$(<$($generic),*>)? {
+                fn fmt(&self, _: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                     unreachable!("this type cannot be instantiated")
                 }
             }
@@ -157,7 +156,7 @@ macro_rules! tables {
             }
 
             $(
-                impl DupSort for $name {
+                impl $crate::table::DupSort for $name {
                     type SubKey = $subkey;
                 }
             )?
@@ -200,18 +199,18 @@ macro_rules! tables {
             }
 
             /// The type of the given table in database.
-            pub const fn table_type(&self) -> TableType {
+            pub const fn table_type(&self) -> $crate::tables::TableType {
                 if self.is_dupsort() {
-                    TableType::DupSort
+                    $crate::tables::TableType::DupSort
                 } else {
-                    TableType::Table
+                    $crate::tables::TableType::Table
                 }
             }
 
             /// Allows to operate on specific table type
             pub fn view<T, R>(&self, visitor: &T) -> Result<R, T::Error>
             where
-                T: ?Sized + TableViewer<R>,
+                T: ?Sized + $crate::tables::TableViewer<R>,
             {
                 match self {
                     $(
@@ -221,16 +220,16 @@ macro_rules! tables {
             }
         }
 
-        impl fmt::Debug for Tables {
+        impl core::fmt::Debug for Tables {
             #[inline]
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 f.write_str(self.name())
             }
         }
 
-        impl fmt::Display for Tables {
+        impl core::fmt::Display for Tables {
             #[inline]
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 self.name().fmt(f)
             }
         }
@@ -248,7 +247,7 @@ macro_rules! tables {
             }
         }
 
-        impl TableInfo for Tables {
+        impl $crate::table::TableInfo for Tables {
             fn name(&self) -> &'static str {
                 self.name()
             }
@@ -258,9 +257,9 @@ macro_rules! tables {
             }
         }
 
-        impl TableSet for Tables {
-            fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>> {
-                Box::new(Self::ALL.iter().map(|table| Box::new(*table) as Box<dyn TableInfo>))
+        impl $crate::TableSet for Tables {
+            fn tables() -> Box<dyn Iterator<Item = Box<dyn $crate::table::TableInfo>>> {
+                Box::new(Self::ALL.iter().map(|table| Box::new(*table) as Box<dyn $crate::table::TableInfo>))
             }
         }
 
