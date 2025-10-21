@@ -237,6 +237,7 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
     blob_params: BlobParams,
 ) -> Result<(), ConsensusError> {
     let blob_gas_used = header.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
+    let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
     if header.parent_beacon_block_root().is_none() {
         return Err(ConsensusError::ParentBeaconBlockRootMissing)
@@ -245,6 +246,13 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
     if !blob_gas_used.is_multiple_of(DATA_GAS_PER_BLOB) {
         return Err(ConsensusError::BlobGasUsedNotMultipleOfBlobGasPerBlob {
             blob_gas_used,
+            blob_gas_per_blob: DATA_GAS_PER_BLOB,
+        })
+    }
+
+    if !excess_blob_gas.is_multiple_of(DATA_GAS_PER_BLOB) {
+        return Err(ConsensusError::ExcessBlobGasNotMultipleOfBlobGasPerBlob {
+            excess_blob_gas,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,
         })
     }
