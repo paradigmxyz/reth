@@ -582,7 +582,7 @@ mod tests {
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
         TransactionsProvider,
     };
-    use alloy_primitives::{TxNumber, B256, U256};
+    use alloy_primitives::{TxNumber, B256};
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
