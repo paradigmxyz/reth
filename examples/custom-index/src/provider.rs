@@ -16,6 +16,7 @@ use reth_ethereum::{
 
 use crate::{storage::SenderTransactions, CustomNode};
 
+#[expect(dead_code)]
 pub trait SenderTxReader: TransactionsProvider {
     /// Get a transaction by sender and transaction index.
     fn transaction_by_sender_and_idx(
