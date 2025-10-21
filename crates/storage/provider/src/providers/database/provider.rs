@@ -25,11 +25,7 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{
-    keccak256,
-    map::{hash_map, B256Map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
-};
+use alloy_primitives::{keccak256, map::{hash_map, B256Map, HashMap, HashSet}, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
@@ -1812,8 +1808,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage.storage_slots_sorted() {
-                let entry = StorageEntry { key: hashed_slot, value };
+            for (hashed_slot, value) in storage.storage_slots_ref() {
+                let v = match value {
+                    Some(value) => *value,
+                    None => U256::ZERO,
+                };
+                let entry = StorageEntry { key: *hashed_slot, value: v };
+
                 if let Some(db_entry) =
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
                     db_entry.key == entry.key
