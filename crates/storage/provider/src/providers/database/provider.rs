@@ -2788,7 +2788,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// tables:
     /// * [`StaticFileSegment::Headers`]
     /// * [`tables::HeaderNumbers`]
-    /// * [`tables::HeaderTerminalDifficulties`]
     /// * [`tables::BlockBodyIndices`]
     ///
     /// If there are transactions in the block, the following static file segments and tables will

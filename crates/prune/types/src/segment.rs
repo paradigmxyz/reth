@@ -24,8 +24,7 @@ pub enum PruneSegment {
     AccountHistory,
     /// Prune segment responsible for the `StorageChangeSets` and `StoragesHistory` tables.
     StorageHistory,
-    /// Prune segment responsible for the `CanonicalHeaders`, `Headers` and
-    /// `HeaderTerminalDifficulties` tables.
+    /// Prune segment responsible for the `CanonicalHeaders`, `Headers` tables.
     Headers,
     /// Prune segment responsible for the `Transactions` table.
     Transactions,
