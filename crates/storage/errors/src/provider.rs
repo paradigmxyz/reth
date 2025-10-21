@@ -58,9 +58,6 @@ pub enum ProviderError {
         /// The account address.
         address: Address,
     },
-    /// The total difficulty for a block is missing.
-    #[error("total difficulty not found for block #{_0}")]
-    TotalDifficultyNotFound(BlockNumber),
     /// When required header related data was not found but was required.
     #[error("no header found for {_0:?}")]
     HeaderNotFound(BlockHashOrNumber),

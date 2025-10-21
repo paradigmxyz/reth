@@ -292,24 +292,6 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderP
         Ok(lock.values().find(|h| h.number() == num).cloned())
     }
 
-    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
-        let lock = self.headers.lock();
-        Ok(lock.get(&hash).map(|target| {
-            lock.values()
-                .filter(|h| h.number() < target.number())
-                .fold(target.difficulty(), |td, h| td + h.difficulty())
-        }))
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        let lock = self.headers.lock();
-        let sum = lock
-            .values()
-            .filter(|h| h.number() <= number)
-            .fold(U256::ZERO, |td, h| td + h.difficulty());
-        Ok(Some(sum))
-    }
-
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
