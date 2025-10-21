@@ -17,6 +17,7 @@ use alloy_rpc_types_eth::{
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_rpc_convert::RpcTxReq;
+use reth_rpc_eth_types::FillTransactionRes;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use tracing::trace;
 
@@ -227,6 +228,10 @@ pub trait EthApi<TxReq: RpcObject, T: RpcObject, B: RpcObject, R: RpcObject, H: 
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<Bytes>;
+
+    /// Fills the defaults on a given unsigned transaction.
+    #[method(name = "fillTransaction")]
+    async fn fill_transaction(&self, request: TxReq) -> RpcResult<FillTransactionRes<TxReq>>;
 
     /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the
     /// optionality of state overrides
@@ -680,6 +685,15 @@ where
             EvmOverrides::new(state_overrides, block_overrides),
         )
         .await?)
+    }
+
+    /// Handler for: `eth_fillTransaction`
+    async fn fill_transaction(
+        &self,
+        request: RpcTxReq<T::NetworkTypes>,
+    ) -> RpcResult<FillTransactionRes<RpcTxReq<T::NetworkTypes>>> {
+        trace!(target: "rpc::eth", ?request, "Serving eth_fillTransaction");
+        Ok(EthTransactions::fill_transaction(self, request).await?)
     }
 
     /// Handler for: `eth_callMany`

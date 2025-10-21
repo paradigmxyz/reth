@@ -22,8 +22,8 @@ use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    utils::binary_search, EthApiError, EthApiError::TransactionConfirmationTimeout, SignError,
-    TransactionSource,
+    utils::binary_search, EthApiError, EthApiError::TransactionConfirmationTimeout,
+    FillTransactionRes, SignError, TransactionSource,
 };
 use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
@@ -433,6 +433,23 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .map_err(Self::Error::from_eth_err)?;
 
             Ok(hash)
+        }
+    }
+
+    /// Fills the defaults on a given unsigned transaction.
+    fn fill_transaction(
+        &self,
+        request: RpcTxReq<Self::NetworkTypes>,
+    ) -> impl Future<Output = Result<FillTransactionRes<RpcTxReq<Self::NetworkTypes>>, Self::Error>> + Send
+    where
+        Self: EthApiSpec,
+    {
+        async move {
+            // TODO: implement transaction filling logic
+            let _ = request;
+            Err(Self::Error::from_eth_err(EthApiError::Unsupported(
+                "eth_fillTransaction not yet implemented",
+            )))
         }
     }
 
