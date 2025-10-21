@@ -59,17 +59,6 @@ pub enum EngineApiError {
         /// Requested number of items
         count: u64,
     },
-    /// Terminal total difficulty mismatch during transition configuration exchange.
-    #[error(
-        "invalid transition terminal total difficulty: \
-         execution: {execution}, consensus: {consensus}"
-    )]
-    TerminalTD {
-        /// Execution terminal total difficulty value.
-        execution: U256,
-        /// Consensus terminal total difficulty value.
-        consensus: U256,
-    },
     /// Terminal block hash mismatch during transition configuration exchange.
     #[error(
         "invalid transition terminal block hash: \
@@ -202,7 +191,6 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 }
             },
             // Any other server error
-            EngineApiError::TerminalTD { .. } |
             EngineApiError::TerminalBlockHash { .. } |
             EngineApiError::NewPayload(_) |
             EngineApiError::Internal(_) |

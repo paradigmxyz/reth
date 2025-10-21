@@ -333,7 +333,6 @@ where
                 (input.unwind_to + 1)..,
             )?;
         provider.tx_ref().unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-
         let unfinalized_headers_unwound =
             provider.tx_ref().unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
@@ -458,7 +457,7 @@ mod tests {
                 let start = input.checkpoint().block_number;
                 let headers = random_header_range(&mut rng, 0..start + 1, B256::ZERO);
                 let head = headers.last().cloned().unwrap();
-                self.db.insert_headers_with_td(headers.iter())?;
+                self.db.insert_headers(headers.iter())?;
 
                 // use previous checkpoint as seed size
                 let end = input.target.unwrap_or_default() + 1;
@@ -549,7 +548,6 @@ mod tests {
                     .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
                 self.db.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
                 self.db.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
-
                 Ok(())
             }
 

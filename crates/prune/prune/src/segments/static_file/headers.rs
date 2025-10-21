@@ -21,6 +21,7 @@ use std::num::NonZeroUsize;
 use tracing::trace;
 
 /// Number of header tables to prune in one step
+///
 /// Note: `HeaderTerminalDifficulties` is no longer pruned after Paris/Merge as it's read-only
 const HEADER_TABLES_TO_PRUNE: usize = 2;
 
@@ -202,7 +203,7 @@ mod tests {
         static_file::headers::HEADER_TABLES_TO_PRUNE, PruneInput, PruneLimiter, Segment,
         SegmentOutput,
     };
-    use alloy_primitives::{BlockNumber, B256, U256};
+    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::{tables, transaction::DbTx};
     use reth_provider::{
@@ -227,7 +228,7 @@ mod tests {
         let headers = random_header_range(&mut rng, 0..100, B256::ZERO);
         let tx = db.factory.provider_rw().unwrap().into_tx();
         for header in &headers {
-            TestStageDB::insert_header(None, &tx, header, U256::ZERO).unwrap();
+            TestStageDB::insert_header(None, &tx, header).unwrap();
         }
         tx.commit().unwrap();
 
