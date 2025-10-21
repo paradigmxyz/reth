@@ -118,12 +118,10 @@ mod tests {
         {
             let manager = factory.static_file_provider();
             let mut writer = manager.latest_writer(StaticFileSegment::Headers).unwrap();
-            let mut td = U256::ZERO;
 
             for header in headers.clone() {
-                td += header.header().difficulty;
                 let hash = header.hash();
-                writer.append_header(&header.unseal(), td, &hash).unwrap();
+                writer.append_header(&header.unseal(), &hash).unwrap();
             }
             writer.commit().unwrap();
         }
@@ -148,12 +146,6 @@ mod tests {
                 // Compare Header
                 assert_eq!(header, db_provider.header(header_hash).unwrap().unwrap());
                 assert_eq!(header, jar_provider.header_by_number(header.number).unwrap().unwrap());
-
-                // Compare HeaderTerminalDifficulties
-                assert_eq!(
-                    db_provider.header_td(header_hash).unwrap().unwrap(),
-                    jar_provider.header_td_by_number(header.number).unwrap().unwrap()
-                );
             }
         }
     }
@@ -180,9 +172,7 @@ mod tests {
             let mut header = Header::default();
             for num in 0..=tip {
                 header.number = num;
-                header_writer
-                    .append_header(&header, U256::default(), &BlockHash::default())
-                    .unwrap();
+                header_writer.append_header(&header, &BlockHash::default()).unwrap();
             }
             header_writer.commit().unwrap();
         }
