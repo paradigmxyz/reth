@@ -11,6 +11,7 @@ use reth_db_api::{
     DbTxUnwindExt,
 };
 use reth_db_models::StoredBlockWithdrawals;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{FullBlockHeader, NodePrimitives};
 use reth_storage_errors::provider::ProviderResult;
 
@@ -33,6 +34,24 @@ pub trait ChainStorageWriter<Provider, N: NodePrimitives> {
         provider: &Provider,
         block: BlockNumber,
     ) -> ProviderResult<()>;
+
+    /// Hook to write any custom indices or state that is not covered by other methods.
+    fn write_custom_state(
+        &self,
+        _provider: &Provider,
+        _state: &ExecutionOutcome<N::Receipt>,
+    ) -> ProviderResult<()> {
+        Ok(())
+    }
+
+    /// Hook to revert any [`ChainStorageWriter::write_custom_state`] changes.
+    fn remove_custom_state_above(
+        &self,
+        _provider: &Provider,
+        _block: BlockNumber,
+    ) -> ProviderResult<()> {
+        Ok(())
+    }
 }
 
 /// Trait that implements how chain-specific types are read from storage.

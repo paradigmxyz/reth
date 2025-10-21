@@ -3427,6 +3427,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-index"
+version = "0.0.0"
+dependencies = [
+ "reth-ethereum",
+]
+
+[[package]]
 name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [

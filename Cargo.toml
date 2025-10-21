@@ -146,6 +146,7 @@ members = [
     "examples/custom-node/",
     "examples/custom-engine-types/",
     "examples/custom-evm/",
+    "examples/custom-index/",
     "examples/custom-inspector/",
     "examples/custom-node-components/",
     "examples/custom-payload-builder/",

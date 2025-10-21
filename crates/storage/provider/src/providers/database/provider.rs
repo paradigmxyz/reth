@@ -1584,6 +1584,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
         let tip = self.last_block_number()?.max(last_block);
 
+        self.storage.writer().write_custom_state(self, execution_outcome)?;
+
         let (plain_state, reverts) =
             execution_outcome.bundle.to_plain_state_and_reverts(is_value_known);
 
@@ -1879,6 +1881,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         if range.is_empty() {
             return Ok(());
         }
+
+        self.storage.writer().remove_custom_state_above(self, block)?;
 
         // We are not removing block meta as it is used to get block changesets.
         let block_bodies = self.block_body_indices_range(range.clone())?;

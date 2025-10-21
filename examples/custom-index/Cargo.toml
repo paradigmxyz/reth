@@ -1,0 +1,10 @@
+[package]
+name = "example-custom-index"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# reth
+reth-ethereum = { workspace = true, features = ["full"] }
