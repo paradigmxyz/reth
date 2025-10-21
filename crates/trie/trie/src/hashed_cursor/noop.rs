@@ -9,17 +9,23 @@ use reth_storage_errors::db::DatabaseError;
 pub struct NoopHashedCursorFactory;
 
 impl HashedCursorFactory for NoopHashedCursorFactory {
-    type AccountCursor = NoopHashedAccountCursor;
-    type StorageCursor = NoopHashedStorageCursor;
+    type AccountCursor<'a>
+        = NoopHashedAccountCursor
+    where
+        Self: 'a;
+    type StorageCursor<'a>
+        = NoopHashedStorageCursor
+    where
+        Self: 'a;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         Ok(NoopHashedAccountCursor::default())
     }
 
     fn hashed_storage_cursor(
         &self,
         _hashed_address: B256,
-    ) -> Result<Self::StorageCursor, DatabaseError> {
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         Ok(NoopHashedStorageCursor::default())
     }
 }

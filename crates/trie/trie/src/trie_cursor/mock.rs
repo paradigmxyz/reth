@@ -52,11 +52,17 @@ impl MockTrieCursorFactory {
 }
 
 impl TrieCursorFactory for MockTrieCursorFactory {
-    type AccountTrieCursor = MockTrieCursor;
-    type StorageTrieCursor = MockTrieCursor;
+    type AccountTrieCursor<'a>
+        = MockTrieCursor
+    where
+        Self: 'a;
+    type StorageTrieCursor<'a>
+        = MockTrieCursor
+    where
+        Self: 'a;
 
     /// Generates a mock account trie cursor.
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         Ok(MockTrieCursor::new(self.account_trie_nodes.clone(), self.visited_account_keys.clone()))
     }
 
@@ -64,7 +70,7 @@ impl TrieCursorFactory for MockTrieCursorFactory {
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         Ok(MockTrieCursor::new(
             self.storage_tries
                 .get(&hashed_address)
@@ -103,7 +109,7 @@ impl MockTrieCursor {
 }
 
 impl TrieCursor for MockTrieCursor {
-    #[instrument(skip(self), ret(level = "trace"))]
+    #[instrument(level = "trace", skip(self), ret)]
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -119,7 +125,7 @@ impl TrieCursor for MockTrieCursor {
         Ok(entry)
     }
 
-    #[instrument(skip(self), ret(level = "trace"))]
+    #[instrument(level = "trace", skip(self), ret)]
     fn seek(
         &mut self,
         key: Nibbles,
@@ -136,7 +142,7 @@ impl TrieCursor for MockTrieCursor {
         Ok(entry)
     }
 
-    #[instrument(skip(self), ret(level = "trace"))]
+    #[instrument(level = "trace", skip(self), ret)]
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let mut iter = self.trie_nodes.iter();
         // Jump to the first key that has a prefix of the current key if it's set, or to the first
@@ -155,7 +161,7 @@ impl TrieCursor for MockTrieCursor {
         Ok(entry)
     }
 
-    #[instrument(skip(self), ret(level = "trace"))]
+    #[instrument(level = "trace", skip(self), ret)]
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.current_key)
     }

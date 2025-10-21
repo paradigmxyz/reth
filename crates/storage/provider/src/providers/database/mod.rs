@@ -9,7 +9,7 @@ use crate::{
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
@@ -110,11 +110,6 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Consumes Self and returns DB
     pub fn into_db(self) -> N::DB {
         self.db
-    }
-
-    /// Returns reference to the prune modes.
-    pub const fn prune_modes_ref(&self) -> &PruneModes {
-        &self.prune_modes
     }
 }
 
@@ -245,14 +240,6 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
         self.static_file_provider.header_by_number(num)
-    }
-
-    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
-        self.provider()?.header_td(hash)
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.static_file_provider.header_td_by_number(number)
     }
 
     fn headers_range(
@@ -590,7 +577,7 @@ mod tests {
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
         TransactionsProvider,
     };
-    use alloy_primitives::{TxNumber, B256, U256};
+    use alloy_primitives::{TxNumber, B256};
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
@@ -735,7 +722,7 @@ mod tests {
         let static_file_provider = provider.static_file_provider();
         let mut static_file_writer =
             static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-        static_file_writer.append_header(head.header(), U256::ZERO, &head.hash()).unwrap();
+        static_file_writer.append_header(head.header(), &head.hash()).unwrap();
         static_file_writer.commit().unwrap();
         drop(static_file_writer);
 

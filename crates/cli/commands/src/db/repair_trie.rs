@@ -52,7 +52,7 @@ fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre
     // Create the verifier
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
-    let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
 
     let mut inconsistent_nodes = 0;
     let start_time = Instant::now();
@@ -136,7 +136,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(
     let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
 
     // Create the verifier
-    let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
 
     let mut inconsistent_nodes = 0;
     let start_time = Instant::now();

@@ -117,6 +117,9 @@ impl EngineNodeLauncher {
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
+        // Try to expire pre-merge transaction history if configured
+        ctx.expire_pre_merge_transactions()?;
+
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
 
@@ -138,7 +141,7 @@ impl EngineNodeLauncher {
 
         let consensus = Arc::new(ctx.components().consensus().clone());
 
-        let mut pipeline = build_networked_pipeline(
+        let pipeline = build_networked_pipeline(
             &ctx.toml_config().stages,
             network_client.clone(),
             consensus.clone(),
@@ -154,18 +157,7 @@ impl EngineNodeLauncher {
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
-        pipeline.ensure_static_files_consistency().await?;
-
-        // Try to expire pre-merge transaction history if configured
-        ctx.expire_pre_merge_transactions()?;
-
-        let initial_target = if let Some(tip) = ctx.node_config().debug.tip {
-            Some(tip)
-        } else {
-            pipeline.initial_backfill_target()?
-        };
-
-        ctx.ensure_chain_specific_db_checks()?;
+        pipeline.move_to_static_files()?;
 
         let pipeline_events = pipeline.events();
 
@@ -176,7 +168,7 @@ impl EngineNodeLauncher {
         }
         let pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
         let pruner_events = pruner.events();
-        info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
+        info!(target: "reth::cli", prune_config=?ctx.prune_config(), "Pruner initialized");
 
         let event_sender = EventSender::default();
 
@@ -258,6 +250,7 @@ impl EngineNodeLauncher {
             add_ons.launch_add_ons(add_ons_ctx).await?;
 
         // Run consensus engine to completion
+        let initial_target = ctx.initial_backfill_target()?;
         let mut built_payloads = ctx
             .components()
             .payload_builder_handle()
