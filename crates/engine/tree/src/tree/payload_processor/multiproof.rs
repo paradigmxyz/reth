@@ -34,6 +34,10 @@ use std::{
 };
 use tracing::{debug, error, trace};
 
+/// Default upper bound for inflight multiproof calculations. These would be sitting in the queue
+/// waiting to 
+pub const DEFAULT_MULTIPROOF_INFLIGHT_LIMIT: usize = 256;
+
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
@@ -338,8 +342,8 @@ impl MultiproofInput {
 /// availability has been signaled.
 #[derive(Debug)]
 pub struct MultiproofManager {
-    /// Maximum number of concurrent calculations.
-    max_concurrent: usize,
+    /// Maximum number of proof calculations allowed to be inflight at once.
+    inflight_limit: usize,
     /// Currently running calculations.
     inflight: usize,
     /// Queued calculations.
@@ -370,11 +374,10 @@ impl MultiproofManager {
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
         proof_worker_handle: ProofWorkerHandle,
-        max_concurrent: usize,
     ) -> Self {
         Self {
-            pending: VecDeque::with_capacity(max_concurrent),
-            max_concurrent,
+            pending: VecDeque::with_capacity(DEFAULT_MULTIPROOF_INFLIGHT_LIMIT),
+            inflight_limit: DEFAULT_MULTIPROOF_INFLIGHT_LIMIT,
             executor,
             inflight: 0,
             metrics,
@@ -383,12 +386,11 @@ impl MultiproofManager {
         }
     }
 
-    const fn is_full(&self) -> bool {
-        self.inflight >= self.max_concurrent
+    fn is_full(&self) -> bool {
+        self.inflight >= self.inflight_limit
     }
 
-    /// Spawns a new multiproof calculation or enqueues it for later if
-    /// `max_concurrent` are already inflight.
+    /// Spawns a new multiproof calculation or enqueues it if the inflight limit is reached.
     fn spawn_or_queue(&mut self, input: PendingMultiproofTask) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets_is_empty() {
@@ -685,7 +687,6 @@ impl MultiProofTask {
         executor: WorkloadExecutor,
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: Sender<SparseTrieUpdate>,
-        max_concurrency: usize,
         chunk_size: Option<usize>,
     ) -> Self {
         let (tx, rx) = channel();
@@ -704,7 +705,6 @@ impl MultiProofTask {
                 executor,
                 metrics.clone(),
                 proof_worker_handle,
-                max_concurrency,
             ),
             metrics,
         }
@@ -1231,7 +1231,7 @@ mod tests {
             ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1);
         let channel = channel();
 
-        MultiProofTask::new(config, executor, proof_handle, channel.0, 1, None)
+        MultiProofTask::new(config, executor, proof_handle, channel.0, Some(1))
     }
 
     #[test]
