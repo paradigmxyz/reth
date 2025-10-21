@@ -6,21 +6,21 @@ use reth_primitives_traits::{FullBlockHeader, FullSignedTx};
 use reth_storage_api::{ChainStorageReader, ChainStorageWriter, EmptyBodyStorage, EthStorage};
 
 /// Trait that provides access to implementations of [`ChainStorage`]
-pub trait ChainStorage<Primitives: NodePrimitives>: Send + Sync {
+pub trait ChainStorage<N: NodePrimitives>: Send + Sync {
     /// Provides access to the chain reader.
-    fn reader<TX, Types>(&self) -> impl ChainStorageReader<DatabaseProvider<TX, Types>, Primitives>
+    fn reader<TX, Types>(&self) -> impl ChainStorageReader<DatabaseProvider<TX, Types>, N>
     where
         TX: DbTx + 'static,
-        Types: NodeTypesForProvider<Primitives = Primitives>;
+        Types: NodeTypesForProvider<Primitives = N>;
 
     /// Provides access to the chain writer.
-    fn writer<TX, Types>(&self) -> impl ChainStorageWriter<DatabaseProvider<TX, Types>, Primitives>
+    fn writer<TX, Types>(&self) -> impl ChainStorageWriter<DatabaseProvider<TX, Types>, N>
     where
         TX: DbTxMut + DbTx + 'static,
-        Types: NodeTypesForProvider<Primitives = Primitives>;
+        Types: NodeTypesForProvider<Primitives = N>;
 }
 
-impl<N, T, H> ChainStorage<N> for EthStorage<T, H>
+impl<N, T, H> ChainStorage<N> for EthStorage
 where
     T: FullSignedTx,
     H: FullBlockHeader,
@@ -48,16 +48,11 @@ where
     }
 }
 
-impl<N, T, H> ChainStorage<N> for EmptyBodyStorage<T, H>
+impl<N, T, H> ChainStorage<N> for EmptyBodyStorage
 where
     T: FullSignedTx,
     H: FullBlockHeader,
-    N: NodePrimitives<
-        Block = alloy_consensus::Block<T, H>,
-        BlockHeader = H,
-        BlockBody = alloy_consensus::BlockBody<T, H>,
-        SignedTx = T,
-    >,
+    N: NodePrimitives<BlockHeader = H, BlockBody = alloy_consensus::BlockBody<T, H>, SignedTx = T>,
 {
     fn reader<TX, Types>(&self) -> impl ChainStorageReader<DatabaseProvider<TX, Types>, N>
     where

@@ -9563,9 +9563,7 @@ dependencies = [
 name = "reth-optimism-storage"
 version = "1.8.2"
 dependencies = [
- "alloy-consensus",
  "reth-codecs",
- "reth-optimism-primitives",
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-api",
