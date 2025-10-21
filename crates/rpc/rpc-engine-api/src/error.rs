@@ -1,4 +1,4 @@
-use alloy_primitives::{B256, U256};
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceUpdateError, INVALID_FORK_CHOICE_STATE_ERROR, INVALID_FORK_CHOICE_STATE_ERROR_MSG,
     INVALID_PAYLOAD_ATTRIBUTES_ERROR, INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
