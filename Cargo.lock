@@ -3431,6 +3431,7 @@ name = "example-custom-index"
 version = "0.0.0"
 dependencies = [
  "reth-ethereum",
+ "serde",
 ]
 
 [[package]]

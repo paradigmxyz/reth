@@ -8,3 +8,5 @@ license.workspace = true
 [dependencies]
 # reth
 reth-ethereum = { workspace = true, features = ["full"] }
+
+serde.workspace = true
