@@ -107,7 +107,7 @@ impl<T> MockHashedCursor<T> {
 impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
     type Value = T;
 
-    #[instrument(level = "trace", skip(self), ret)]
+    #[instrument(skip(self), ret(level = "trace"))]
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         // Find the first key that is greater than or equal to the given key.
         let entry = self.values.iter().find_map(|(k, v)| (k >= &key).then(|| (*k, v.clone())));
@@ -121,7 +121,7 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
         Ok(entry)
     }
 
-    #[instrument(level = "trace", skip(self), ret)]
+    #[instrument(skip(self), ret(level = "trace"))]
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         let mut iter = self.values.iter();
         // Jump to the first key that has a prefix of the current key if it's set, or to the first
