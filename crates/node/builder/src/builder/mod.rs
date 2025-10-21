@@ -21,7 +21,7 @@ use reth_network::{
     NetworkPrimitives,
 };
 use reth_node_api::{
-    FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
+    FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodePrimitives, NodeTypes,
     NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
@@ -397,7 +397,7 @@ where
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
         >,
-        N::Primitives: FullNodePrimitives,
+        N::Primitives: NodePrimitives,
         EngineNodeLauncher: LaunchNode<
             NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
         >,
