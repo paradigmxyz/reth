@@ -386,7 +386,7 @@ impl MultiproofManager {
         }
     }
 
-    fn is_full(&self) -> bool {
+    const fn is_full(&self) -> bool {
         self.inflight >= self.inflight_limit
     }
 
