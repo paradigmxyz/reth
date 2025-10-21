@@ -462,7 +462,6 @@ impl From<reth_errors::ProviderError> for EthApiError {
             }
             ProviderError::BestBlockNotFound => Self::HeaderNotFound(BlockId::latest()),
             ProviderError::BlockNumberForTransactionIndexNotFound => Self::UnknownBlockOrTxIndex,
-            ProviderError::TotalDifficultyNotFound(num) => Self::HeaderNotFound(num.into()),
             ProviderError::FinalizedBlockNotFound => Self::HeaderNotFound(BlockId::finalized()),
             ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
             err => Self::Internal(err.into()),

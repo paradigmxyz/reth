@@ -10,7 +10,7 @@ use crate::{
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
@@ -174,14 +174,6 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
         self.consistent_provider()?.header_by_number(num)
-    }
-
-    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
-        self.consistent_provider()?.header_td(hash)
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.consistent_provider()?.header_td_by_number(number)
     }
 
     fn headers_range(
@@ -1287,23 +1279,11 @@ mod tests {
             BlockRangeParams::default(),
         )?;
 
-        let database_block = database_blocks.first().unwrap().clone();
-        let in_memory_block = in_memory_blocks.last().unwrap().clone();
         // make sure that the finalized block is on db
         let finalized_block = database_blocks.get(database_blocks.len() - 3).unwrap();
         provider.set_finalized(finalized_block.clone_sealed_header());
 
         let blocks = [database_blocks, in_memory_blocks].concat();
-
-        assert_eq!(
-            provider.header_td_by_number(database_block.number)?,
-            Some(database_block.difficulty)
-        );
-
-        assert_eq!(
-            provider.header_td_by_number(in_memory_block.number)?,
-            Some(in_memory_block.difficulty)
-        );
 
         assert_eq!(
             provider.sealed_headers_while(0..=10, |header| header.number <= 8)?,

@@ -6,7 +6,7 @@ use clap::{builder::RangedU64ValueParser, Args};
 use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
 use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Not};
 
 /// Parameters for pruning and full node
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
@@ -107,6 +107,9 @@ pub struct PruningArgs {
 
 impl PruningArgs {
     /// Returns pruning configuration.
+    ///
+    /// Returns [`None`] if no parameters are specified and default pruning configuration should be
+    /// used.
     pub fn prune_config<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneConfig>
     where
         ChainSpec: EthereumHardforks,
@@ -163,7 +166,7 @@ impl PruningArgs {
             config.segments.receipts.take();
         }
 
-        Some(config)
+        config.is_default().not().then_some(config)
     }
 
     fn bodies_prune_mode<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneMode>

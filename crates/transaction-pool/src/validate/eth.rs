@@ -39,7 +39,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64},
         Arc,
     },
-    time::Instant,
+    time::{Instant, SystemTime},
 };
 use tokio::sync::Mutex;
 
@@ -673,7 +673,7 @@ where
                                 Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
                             ))
                         }
-                    } else if sidecar.is_eip7594() {
+                    } else if sidecar.is_eip7594() && !self.allow_7594_sidecars() {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
                         ))
@@ -745,6 +745,10 @@ where
             self.fork_tracker.osaka.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
+        self.fork_tracker
+            .tip_timestamp
+            .store(new_tip_block.timestamp(), std::sync::atomic::Ordering::Relaxed);
+
         if let Some(blob_params) =
             self.chain_spec().blob_params_at_timestamp(new_tip_block.timestamp())
         {
@@ -758,6 +762,24 @@ where
 
     fn max_gas_limit(&self) -> u64 {
         self.block_gas_limit.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns whether EIP-7594 sidecars are allowed
+    fn allow_7594_sidecars(&self) -> bool {
+        let tip_timestamp = self.fork_tracker.tip_timestamp();
+
+        // If next block is Osaka, allow 7594 sidecars
+        if self.chain_spec().is_osaka_active_at_timestamp(tip_timestamp.saturating_add(12)) {
+            true
+        } else if self.chain_spec().is_osaka_active_at_timestamp(tip_timestamp.saturating_add(24)) {
+            let current_timestamp =
+                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+
+            // Allow after 4 seconds into last non-Osaka slot
+            current_timestamp >= tip_timestamp.saturating_add(4)
+        } else {
+            false
+        }
     }
 }
 
@@ -811,6 +833,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     prague: bool,
     /// Fork indicator whether we are in the Osaka hardfork.
     osaka: bool,
+    /// Timestamp of the tip block.
+    tip_timestamp: u64,
     /// Max blob count at the block's timestamp.
     max_blob_count: u64,
     /// Whether using EIP-2718 type transactions is allowed
@@ -884,6 +908,8 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
             // osaka not yet activated
             osaka: false,
+
+            tip_timestamp: 0,
 
             // max blob count is prague by default
             max_blob_count: BlobParams::prague().max_blobs_per_tx,
@@ -1012,6 +1038,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self.cancun = self.client.chain_spec().is_cancun_active_at_timestamp(timestamp);
         self.prague = self.client.chain_spec().is_prague_active_at_timestamp(timestamp);
         self.osaka = self.client.chain_spec().is_osaka_active_at_timestamp(timestamp);
+        self.tip_timestamp = timestamp;
         self.max_blob_count = self
             .client
             .chain_spec()
@@ -1072,6 +1099,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             cancun,
             prague,
             osaka,
+            tip_timestamp,
             eip2718,
             eip1559,
             eip4844,
@@ -1094,6 +1122,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             cancun: AtomicBool::new(cancun),
             prague: AtomicBool::new(prague),
             osaka: AtomicBool::new(osaka),
+            tip_timestamp: AtomicU64::new(tip_timestamp),
             max_blob_count: AtomicU64::new(max_blob_count),
         };
 
@@ -1175,6 +1204,8 @@ pub struct ForkTracker {
     pub osaka: AtomicBool,
     /// Tracks max blob count per transaction at the block's timestamp.
     pub max_blob_count: AtomicU64,
+    /// Tracks the timestamp of the tip block.
+    pub tip_timestamp: AtomicU64,
 }
 
 impl ForkTracker {
@@ -1196,6 +1227,11 @@ impl ForkTracker {
     /// Returns `true` if Osaka fork is activated.
     pub fn is_osaka_activated(&self) -> bool {
         self.osaka.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns the timestamp of the tip block.
+    pub fn tip_timestamp(&self) -> u64 {
+        self.tip_timestamp.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Returns the max allowed blob count per transaction.
@@ -1272,6 +1308,7 @@ mod tests {
             cancun: false.into(),
             prague: false.into(),
             osaka: false.into(),
+            tip_timestamp: 0.into(),
             max_blob_count: 0.into(),
         };
 

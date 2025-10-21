@@ -104,6 +104,10 @@ pub struct PruneModes {
     ///
     /// The [`BlockNumber`](`crate::BlockNumber`) represents the starting block from which point
     /// onwards the receipts are preserved.
+    #[cfg_attr(
+        any(test, feature = "serde"),
+        serde(skip_serializing_if = "ReceiptsLogPruneConfig::is_empty")
+    )]
     pub receipts_log_filter: ReceiptsLogPruneConfig,
 }
 

@@ -28,12 +28,12 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
@@ -969,26 +969,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
         self.static_file_provider.header_by_number(num)
-    }
-
-    fn header_td(&self, block_hash: BlockHash) -> ProviderResult<Option<U256>> {
-        if let Some(num) = self.block_number(block_hash)? {
-            self.header_td_by_number(num)
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        if self.chain_spec.is_paris_active_at_block(number) &&
-            let Some(td) = self.chain_spec.final_paris_total_difficulty()
-        {
-            // if this block is higher than the final paris(merge) block, return the final paris
-            // difficulty
-            return Ok(Some(td))
-        }
-
-        self.static_file_provider.header_td_by_number(number)
     }
 
     fn headers_range(
@@ -2815,7 +2795,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// tables:
     /// * [`StaticFileSegment::Headers`]
     /// * [`tables::HeaderNumbers`]
-    /// * [`tables::HeaderTerminalDifficulties`]
     /// * [`tables::BlockBodyIndices`]
     ///
     /// If there are transactions in the block, the following static file segments and tables will
@@ -2840,19 +2819,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
-        // total difficulty
-        let ttd = if block_number == 0 {
-            block.header().difficulty()
-        } else {
-            let parent_block_number = block_number - 1;
-            let parent_ttd = self.header_td_by_number(parent_block_number)?.unwrap_or_default();
-            durations_recorder.record_relative(metrics::Action::GetParentTD);
-            parent_ttd + block.header().difficulty()
-        };
-
         self.static_file_provider
             .get_writer(block_number, StaticFileSegment::Headers)?
-            .append_header(block.header(), ttd, &block.hash())?;
+            .append_header(block.header(), &block.hash())?;
 
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);

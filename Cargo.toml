@@ -525,15 +525,16 @@ alloy-transport-ws = { version = "1.0.41", default-features = false }
 # op
 alloy-op-evm = { version = "0.22.0", default-features = false }
 alloy-op-hardforks = "0.4.0"
-op-alloy-rpc-types = { version = "0.20.0", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.20.0", default-features = false }
-op-alloy-network = { version = "0.20.0", default-features = false }
-op-alloy-consensus = { version = "0.20.0", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.20.0", default-features = false }
+op-alloy-rpc-types = { version = "0.21.0", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.21.0", default-features = false }
+op-alloy-network = { version = "0.21.0", default-features = false }
+op-alloy-consensus = { version = "0.21.0", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.21.0", default-features = false }
 op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc
 either = { version = "1.15.0", default-features = false }
+arrayvec = { version = "0.7.6", default-features = false }
 aquamarine = "0.6"
 auto_impl = "1"
 backon = { version = "1.2", default-features = false, features = ["std-blocking-sleep", "tokio-sleep"] }
@@ -550,7 +551,8 @@ dirs-next = "2.0.0"
 dyn-clone = "1.0.17"
 eyre = "0.6"
 fdlimit = "0.3.0"
-generic-array = "0.14"
+# pinned until downstream crypto libs migrate to 1.0 because 0.14.8 marks all types as deprecated
+generic-array = "=0.14.7"
 humantime = "2.1"
 humantime-serde = "1.1"
 itertools = { version = "0.14", default-features = false }

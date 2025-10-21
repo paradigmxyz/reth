@@ -69,7 +69,6 @@ pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
 
     generate!([
         (CanonicalHeaders, PER_TABLE, TABLE),
-        (HeaderTerminalDifficulties, PER_TABLE, TABLE),
         (HeaderNumbers, PER_TABLE, TABLE),
         (Headers<Header>, PER_TABLE, TABLE),
         (BlockBodyIndices, PER_TABLE, TABLE),
