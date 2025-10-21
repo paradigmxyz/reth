@@ -4,7 +4,6 @@ use reth_db_api::{
     tables::PlainStorageState,
     DatabaseError,
 };
-use std::iter::Iterator;
 
 /// Iterator over wiped storage entries that reads directly from the database cursor.
 /// This avoids the need to collect all wiped entries into a Vec first.
