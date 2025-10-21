@@ -10,7 +10,7 @@ root of the new state.
 4. Compares the root with the one received in the block header.
 5. Considers the block valid.
 
-This document describes the lifecycle of a payload with the focus on state root calculation,
+This document describes the lifecycle of a payload with a focus on state root calculation,
 from the moment the payload is received, to the moment we have a new state root.
 
 We will look at the following components:
@@ -26,7 +26,7 @@ We will look at the following components:
 It all starts with the `engine_newPayload` request coming from the [Consensus Client](https://ethereum.org/en/developers/docs/nodes-and-clients/#consensus-clients).
 
 We extract the block from the payload, and eventually pass it to the `EngineApiTreeHandler::insert_block_inner`
-method which executes the block and calculates the state root. 
+method that executes the block and calculates the state root. 
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2359-L2362
 
 Let's walk through the steps involved in the process.
@@ -166,7 +166,7 @@ and send `StateRootMessage::ProofCalculated` to the [State Root Task](#state-roo
 
 ### Exhausting the pending queue
 
-To exhaust the pending queue from the step 2 of the `spawn_or_queue` described above,
+To exhaust the pending queue from step 2 of the `spawn_or_queue` described above,
 the [State Root Task](#state-root-task) calls into another method `on_calculation_complete` every time
 a proof is calculated.
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L379-L387
@@ -230,11 +230,11 @@ https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1093
 3. Update accounts trie
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1133
-4. Calculate keccak hashes of the nodes below the certain level
+4. Calculate keccak hashes of the nodes below a certain level
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1139
 
 As you can see, we do not calculate the state root hash of the accounts trie
-(the one that will be the result of the whole task), but instead calculate only the certain hashes.
+(the one that will be the result of the whole task), but instead calculate only certain hashes.
 
 This is an optimization that comes from the fact that we will likely update the top 2-3 levels of the trie
 in every transaction, so doing that work every time would be wasteful.

@@ -60,9 +60,7 @@ rayon.workspace = true
 num-traits.workspace = true
 tempfile = { workspace = true, optional = true }
 bincode.workspace = true
-blake3.workspace = true
 reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots", "blocking"] }
-serde = { workspace = true, features = ["derive"] }
 eyre.workspace = true
 
 [dev-dependencies]
@@ -72,22 +70,19 @@ reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
 reth-ethereum-consensus.workspace = true
 reth-evm-ethereum.workspace = true
-reth-execution-errors.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
-reth-revm.workspace = true
 reth-static-file.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-network-peers.workspace = true
-reth-tracing.workspace = true
 
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
 alloy-rlp.workspace = true
-itertools.workspace = true
+
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 assert_matches.workspace = true
 rand.workspace = true

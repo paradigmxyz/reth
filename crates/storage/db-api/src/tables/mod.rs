@@ -21,8 +21,8 @@ use crate::{
         accounts::BlockNumberAddress,
         blocks::{HeaderHash, StoredBlockOmmers},
         storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
-        StoredBlockBodyIndices, StoredBlockWithdrawals,
+        AccountBeforeTx, BlockNumberHashedAddress, ClientVersion, CompactU256, IntegerList,
+        ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
     table::{Decode, DupSort, Encode, Table, TableInfo},
 };
@@ -32,7 +32,9 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
-use reth_trie_common::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
+use reth_trie_common::{
+    BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -491,6 +493,20 @@ tables! {
         type SubKey = StoredNibblesSubKey;
     }
 
+    /// Stores the state of a node in the accounts trie prior to a particular block being executed.
+    table AccountsTrieChangeSets {
+        type Key = BlockNumber;
+        type Value = TrieChangeSetsEntry;
+        type SubKey = StoredNibblesSubKey;
+    }
+
+    /// Stores the state of a node in a storage trie prior to a particular block being executed.
+    table StoragesTrieChangeSets {
+        type Key = BlockNumberHashedAddress;
+        type Value = TrieChangeSetsEntry;
+        type SubKey = StoredNibblesSubKey;
+    }
+
     /// Stores the transaction sender for each canonical transaction.
     /// It is needed to speed up execution stage and allows fetching signer without doing
     /// transaction signed recovery
@@ -535,8 +551,8 @@ tables! {
 pub enum ChainStateKey {
     /// Last finalized block key
     LastFinalizedBlock,
-    /// Last finalized block key
-    LastSafeBlockBlock,
+    /// Last safe block key
+    LastSafeBlock,
 }
 
 impl Encode for ChainStateKey {
@@ -545,7 +561,7 @@ impl Encode for ChainStateKey {
     fn encode(self) -> Self::Encoded {
         match self {
             Self::LastFinalizedBlock => [0],
-            Self::LastSafeBlockBlock => [1],
+            Self::LastSafeBlock => [1],
         }
     }
 }
@@ -554,7 +570,7 @@ impl Decode for ChainStateKey {
     fn decode(value: &[u8]) -> Result<Self, crate::DatabaseError> {
         match value {
             [0] => Ok(Self::LastFinalizedBlock),
-            [1] => Ok(Self::LastSafeBlockBlock),
+            [1] => Ok(Self::LastSafeBlock),
             _ => Err(crate::DatabaseError::Decode),
         }
     }

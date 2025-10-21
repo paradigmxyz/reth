@@ -1,16 +1,13 @@
 //! API of a signed transaction.
 
-use crate::{
-    crypto::secp256k1::recover_signer_unchecked, InMemorySize, MaybeCompact, MaybeSerde,
-    MaybeSerdeBincodeCompat,
-};
-use alloc::{fmt, vec::Vec};
+use crate::{InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat};
+use alloc::fmt;
 use alloy_consensus::{
-    transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable},
+    transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
     EthereumTxEnvelope, SignableTransaction,
 };
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, Signature, TxHash, B256};
+use alloy_primitives::{keccak256, Address, Signature, B256};
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 
@@ -48,10 +45,8 @@ pub trait SignedTransaction:
     + MaybeSerde
     + InMemorySize
     + SignerRecoverable
+    + TxHashRef
 {
-    /// Returns reference to transaction hash.
-    fn tx_hash(&self) -> &TxHash;
-
     /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
     /// network.
     ///
@@ -77,14 +72,6 @@ pub trait SignedTransaction:
         self.recover_signer_unchecked()
     }
 
-    /// Same as [`SignerRecoverable::recover_signer_unchecked`] but receives a buffer to operate on.
-    /// This is used during batch recovery to avoid allocating a new buffer for each
-    /// transaction.
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError>;
-
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
     fn recalculate_hash(&self) -> B256 {
@@ -95,6 +82,12 @@ pub trait SignedTransaction:
     #[auto_impl(keep_default_for(&, Arc))]
     fn try_clone_into_recovered(&self) -> Result<Recovered<Self>, RecoveryError> {
         self.recover_signer().map(|signer| Recovered::new_unchecked(self.clone(), signer))
+    }
+
+    /// Tries to recover signer and return [`Recovered`] by cloning the type.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn try_clone_into_recovered_unchecked(&self) -> Result<Recovered<Self>, RecoveryError> {
+        self.recover_signer_unchecked().map(|signer| Recovered::new_unchecked(self.clone(), signer))
     }
 
     /// Tries to recover signer and return [`Recovered`].
@@ -141,30 +134,6 @@ where
     T: RlpEcdsaEncodableTx + SignableTransaction<Signature> + Unpin,
     Self: Clone + PartialEq + Eq + Decodable + Decodable2718 + MaybeSerde + InMemorySize,
 {
-    fn tx_hash(&self) -> &TxHash {
-        match self {
-            Self::Legacy(tx) => tx.hash(),
-            Self::Eip2930(tx) => tx.hash(),
-            Self::Eip1559(tx) => tx.hash(),
-            Self::Eip7702(tx) => tx.hash(),
-            Self::Eip4844(tx) => tx.hash(),
-        }
-    }
-
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        match self {
-            Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip4844(tx) => tx.tx().encode_for_signing(buf),
-        }
-        let signature_hash = keccak256(buf);
-        recover_signer_unchecked(self.signature(), signature_hash)
-    }
 }
 
 #[cfg(feature = "op")]
@@ -172,62 +141,7 @@ mod op {
     use super::*;
     use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 
-    impl SignedTransaction for OpPooledTransaction {
-        fn tx_hash(&self) -> &TxHash {
-            match self {
-                Self::Legacy(tx) => tx.hash(),
-                Self::Eip2930(tx) => tx.hash(),
-                Self::Eip1559(tx) => tx.hash(),
-                Self::Eip7702(tx) => tx.hash(),
-            }
-        }
+    impl SignedTransaction for OpPooledTransaction {}
 
-        fn recover_signer_unchecked_with_buf(
-            &self,
-            buf: &mut Vec<u8>,
-        ) -> Result<Address, RecoveryError> {
-            match self {
-                Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
-            }
-            let signature_hash = keccak256(buf);
-            recover_signer_unchecked(self.signature(), signature_hash)
-        }
-    }
-
-    impl SignedTransaction for OpTxEnvelope {
-        fn tx_hash(&self) -> &TxHash {
-            match self {
-                Self::Legacy(tx) => tx.hash(),
-                Self::Eip2930(tx) => tx.hash(),
-                Self::Eip1559(tx) => tx.hash(),
-                Self::Eip7702(tx) => tx.hash(),
-                Self::Deposit(tx) => tx.hash_ref(),
-            }
-        }
-
-        fn recover_signer_unchecked_with_buf(
-            &self,
-            buf: &mut Vec<u8>,
-        ) -> Result<Address, RecoveryError> {
-            match self {
-                Self::Deposit(tx) => return Ok(tx.from),
-                Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
-            }
-            let signature_hash = keccak256(buf);
-            let signature = match self {
-                Self::Legacy(tx) => tx.signature(),
-                Self::Eip2930(tx) => tx.signature(),
-                Self::Eip1559(tx) => tx.signature(),
-                Self::Eip7702(tx) => tx.signature(),
-                Self::Deposit(_) => unreachable!("Deposit transactions should not be handled here"),
-            };
-            recover_signer_unchecked(signature, signature_hash)
-        }
-    }
+    impl SignedTransaction for OpTxEnvelope {}
 }

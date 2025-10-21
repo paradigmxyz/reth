@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -144,5 +144,35 @@ mod tests {
         let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.holesky.ethdisco.net";
         let chain: Chain = NamedChain::Holesky.into();
         assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
+    }
+
+    #[test]
+    fn test_centralized_base_fee_calculation() {
+        use crate::{ChainSpec, EthChainSpec};
+        use alloy_consensus::Header;
+        use alloy_eips::eip1559::INITIAL_BASE_FEE;
+
+        fn parent_header() -> Header {
+            Header {
+                gas_used: 15_000_000,
+                gas_limit: 30_000_000,
+                base_fee_per_gas: Some(INITIAL_BASE_FEE),
+                timestamp: 1_000,
+                ..Default::default()
+            }
+        }
+
+        let spec = ChainSpec::default();
+        let parent = parent_header();
+
+        // For testing, assume next block has timestamp 12 seconds later
+        let next_timestamp = parent.timestamp + 12;
+
+        let expected = parent
+            .next_block_base_fee(spec.base_fee_params_at_timestamp(next_timestamp))
+            .unwrap_or_default();
+
+        let got = spec.next_block_base_fee(&parent, next_timestamp).unwrap_or_default();
+        assert_eq!(expected, got, "Base fee calculation does not match expected value");
     }
 }

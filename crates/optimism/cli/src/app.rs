@@ -6,26 +6,28 @@ use reth_cli_runner::CliRunner;
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_node::{OpExecutorProvider, OpNetworkPrimitives, OpNode};
+use reth_optimism_node::{OpExecutorProvider, OpNode};
+use reth_rpc_server_types::RpcModuleValidator;
 use reth_tracing::{FileWorkerGuard, Layers};
-use std::fmt;
+use std::{fmt, sync::Arc};
 use tracing::info;
 
 /// A wrapper around a parsed CLI that handles command execution.
 #[derive(Debug)]
-pub struct CliApp<Spec: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
-    cli: Cli<Spec, Ext>,
+pub struct CliApp<Spec: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> {
+    cli: Cli<Spec, Ext, Rpc>,
     runner: Option<CliRunner>,
     layers: Option<Layers>,
     guard: Option<FileWorkerGuard>,
 }
 
-impl<C, Ext> CliApp<C, Ext>
+impl<C, Ext, Rpc> CliApp<C, Ext, Rpc>
 where
     C: ChainSpecParser<ChainSpec = OpChainSpec>,
     Ext: clap::Args + fmt::Debug,
+    Rpc: RpcModuleValidator,
 {
-    pub(crate) fn new(cli: Cli<C, Ext>) -> Self {
+    pub(crate) fn new(cli: Cli<C, Ext, Rpc>) -> Self {
         Self { cli, runner: None, layers: Some(Layers::new()), guard: None }
     }
 
@@ -65,8 +67,20 @@ where
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
+        let components = |spec: Arc<OpChainSpec>| {
+            (OpExecutorProvider::optimism(spec.clone()), Arc::new(OpBeaconConsensus::new(spec)))
+        };
+
         match self.cli.command {
             Commands::Node(command) => {
+                // Validate RPC modules using the configured validator
+                if let Some(http_api) = &command.rpc.http_api {
+                    Rpc::validate_selection(http_api, "http.api").map_err(|e| eyre!("{e}"))?;
+                }
+                if let Some(ws_api) = &command.rpc.ws_api {
+                    Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre!("{e}"))?;
+                }
+
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
             Commands::Init(command) => {
@@ -83,21 +97,17 @@ where
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
-            Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<OpNode, _, _, OpNetworkPrimitives>(ctx, |spec| {
-                    (OpExecutorProvider::optimism(spec.clone()), OpBeaconConsensus::new(spec))
-                })
-            }),
-            Commands::P2P(command) => {
-                runner.run_until_ctrl_c(command.execute::<OpNetworkPrimitives>())
+            Commands::Stage(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<OpNode, _>(ctx, components))
             }
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Recover(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
-            }
             Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::ReExecute(command) => {
+                runner.run_until_ctrl_c(command.execute::<OpNode>(components))
+            }
         }
     }
 
@@ -106,7 +116,18 @@ where
     /// If file logging is enabled, this function stores guard to the struct.
     pub fn init_tracing(&mut self) -> Result<()> {
         if self.guard.is_none() {
-            let layers = self.layers.take().unwrap_or_default();
+            let mut layers = self.layers.take().unwrap_or_default();
+
+            #[cfg(feature = "otlp")]
+            if let Some(output_type) = &self.cli.traces.otlp {
+                info!(target: "reth::cli", "Starting OTLP tracing export to {:?}", output_type);
+                layers.with_span_layer(
+                    "reth".to_string(),
+                    output_type.clone(),
+                    self.cli.traces.otlp_filter.clone(),
+                )?;
+            }
+
             self.guard = self.cli.logs.init_tracing_with_layers(layers)?;
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
         }

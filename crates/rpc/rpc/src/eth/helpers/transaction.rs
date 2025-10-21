@@ -1,24 +1,39 @@
 //! Contains RPC handler implementations specific to transactions
 
-use crate::EthApi;
-use alloy_primitives::{Bytes, B256};
-use reth_rpc_eth_api::{
-    helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
-};
-use reth_rpc_eth_types::utils::recover_raw_transaction;
-use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
-use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use std::time::Duration;
 
-impl<Provider, Pool, Network, EvmConfig> EthTransactions
-    for EthApi<Provider, Pool, Network, EvmConfig>
+use crate::EthApi;
+use alloy_consensus::BlobTransactionValidationError;
+use alloy_eips::{eip7594::BlobTransactionSidecarVariant, BlockId, Typed2718};
+use alloy_primitives::{hex, Bytes, B256};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_primitives_traits::AlloyBlockHeader;
+use reth_rpc_convert::RpcConvert;
+use reth_rpc_eth_api::{
+    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
+    FromEvmError, RpcNodeCore,
+};
+use reth_rpc_eth_types::{error::RpcPoolError, utils::recover_raw_transaction, EthApiError};
+use reth_storage_api::BlockReaderIdExt;
+use reth_transaction_pool::{
+    error::Eip4844PoolTransactionError, AddedTransactionOutcome, EthBlobTransactionSidecar,
+    EthPoolTransaction, PoolTransaction, TransactionPool,
+};
+
+impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>,
-    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
+    fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
+    }
+
+    #[inline]
+    fn send_raw_transaction_sync_timeout(&self) -> Duration {
+        self.inner.send_raw_transaction_sync_timeout()
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.
@@ -27,49 +42,104 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction(&tx)?;
 
+        let mut pool_transaction =
+            <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+
+        // TODO: remove this after Osaka transition
+        // Convert legacy blob sidecars to EIP-7594 format
+        if pool_transaction.is_eip4844() {
+            let EthBlobTransactionSidecar::Present(sidecar) = pool_transaction.take_blob() else {
+                return Err(EthApiError::PoolError(RpcPoolError::Eip4844(
+                    Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+                )));
+            };
+
+            let sidecar = match sidecar {
+                BlobTransactionSidecarVariant::Eip4844(sidecar) => {
+                    let latest = self
+                        .provider()
+                        .latest_header()?
+                        .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+                    // Convert to EIP-7594 if next block is Osaka
+                    if self
+                        .provider()
+                        .chain_spec()
+                        .is_osaka_active_at_timestamp(latest.timestamp().saturating_add(12))
+                    {
+                        BlobTransactionSidecarVariant::Eip7594(
+                            self.blob_sidecar_converter().convert(sidecar).await.ok_or_else(
+                                || {
+                                    RpcPoolError::Eip4844(
+                                        Eip4844PoolTransactionError::InvalidEip4844Blob(
+                                            BlobTransactionValidationError::InvalidProof,
+                                        ),
+                                    )
+                                },
+                            )?,
+                        )
+                    } else {
+                        BlobTransactionSidecarVariant::Eip4844(sidecar)
+                    }
+                }
+                sidecar => sidecar,
+            };
+
+            pool_transaction =
+                EthPoolTransaction::try_from_eip4844(pool_transaction.into_consensus(), sidecar)
+                    .ok_or_else(|| {
+                        RpcPoolError::Eip4844(
+                            Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+                        )
+                    })?;
+        }
+
+        // forward the transaction to the specific endpoint if configured.
+        if let Some(client) = self.raw_tx_forwarder() {
+            tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to forwarder");
+            let rlp_hex = hex::encode_prefixed(&tx);
+
+            // broadcast raw transaction to subscribers if there is any.
+            self.broadcast_raw_transaction(tx);
+
+            let hash =
+                client.request("eth_sendRawTransaction", (rlp_hex,)).await.inspect_err(|err| {
+                    tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
+                }).map_err(EthApiError::other)?;
+
+            // Retain tx in local tx pool after forwarding, for local RPC usage.
+            let _ = self.inner.add_pool_transaction(pool_transaction).await;
+
+            return Ok(hash);
+        }
+
         // broadcast raw transaction to subscribers if there is any.
         self.broadcast_raw_transaction(tx);
 
-        let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
-
         // submit the transaction to the pool with a `Local` origin
-        let hash = self
-            .pool()
-            .add_transaction(TransactionOrigin::Local, pool_transaction)
-            .await
-            .map_err(Self::Error::from_eth_err)?;
+        let AddedTransactionOutcome { hash, .. } =
+            self.inner.add_pool_transaction(pool_transaction).await?;
 
         Ok(hash)
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadTransaction
-    for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N, Rpc> LoadTransaction for EthApi<N, Rpc>
 where
-    Self: SpawnBlocking
-        + FullEthApiTypes
-        + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>,
-    Provider: BlockReader,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{hex_literal::hex, Bytes};
     use reth_chainspec::ChainSpecProvider;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::NoopProvider;
     use reth_rpc_eth_api::helpers::EthTransactions;
-    use reth_rpc_eth_types::{
-        EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
-    };
-    use reth_rpc_server_types::constants::{
-        DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
-    };
-    use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
     #[tokio::test]
@@ -80,22 +150,9 @@ mod tests {
         let pool = testing_pool();
 
         let evm_config = EthEvmConfig::new(noop_provider.chain_spec());
-        let cache = EthStateCache::spawn(noop_provider.clone(), Default::default());
-        let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
-        let eth_api = EthApi::new(
-            noop_provider.clone(),
-            pool.clone(),
-            noop_network_provider,
-            cache.clone(),
-            GasPriceOracle::new(noop_provider, Default::default(), cache.clone()),
-            ETHEREUM_BLOCK_GAS_LIMIT_30M,
-            DEFAULT_MAX_SIMULATE_BLOCKS,
-            DEFAULT_ETH_PROOF_WINDOW,
-            BlockingTaskPool::build().expect("failed to build tracing pool"),
-            fee_history_cache,
-            evm_config,
-            DEFAULT_PROOF_PERMITS,
-        );
+        let eth_api =
+            EthApi::builder(noop_provider.clone(), pool.clone(), noop_network_provider, evm_config)
+                .build();
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
         let tx_1 = Bytes::from(hex!(

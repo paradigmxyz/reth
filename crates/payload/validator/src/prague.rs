@@ -10,8 +10,8 @@ use alloy_rpc_types_engine::{PayloadError, PraguePayloadFields};
 /// - Prague fields are not present unless Prague is active
 /// - does not contain EIP-7702 transactions if Prague is not active
 #[inline]
-pub fn ensure_well_formed_fields<T: Typed2718>(
-    block_body: &BlockBody<T>,
+pub fn ensure_well_formed_fields<T: Typed2718, H>(
+    block_body: &BlockBody<T, H>,
     prague_fields: Option<&PraguePayloadFields>,
     is_prague_active: bool,
 ) -> Result<(), PayloadError> {
@@ -36,8 +36,8 @@ pub const fn ensure_well_formed_sidecar_fields(
 /// Checks that transactions field doesn't contain EIP-7702 transactions if Prague is not
 /// active.
 #[inline]
-pub fn ensure_well_formed_transactions_field<T: Typed2718>(
-    block_body: &BlockBody<T>,
+pub fn ensure_well_formed_transactions_field<T: Typed2718, H>(
+    block_body: &BlockBody<T, H>,
     is_prague_active: bool,
 ) -> Result<(), PayloadError> {
     if !is_prague_active && block_body.has_eip7702_transactions() {

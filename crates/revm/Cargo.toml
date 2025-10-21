@@ -27,7 +27,6 @@ revm.workspace = true
 [dev-dependencies]
 reth-trie.workspace = true
 reth-ethereum-forks.workspace = true
-alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 
 [features]
@@ -57,3 +56,15 @@ serde = [
     "reth-storage-api/serde",
 ]
 portable = ["revm/portable"]
+optional-balance-check = ["revm/optional_balance_check"]
+optional-block-gas-limit = ["revm/optional_block_gas_limit"]
+optional-eip3541 = ["revm/optional_eip3541"]
+optional-eip3607 = ["revm/optional_eip3607"]
+optional-no-base-fee = ["revm/optional_no_base_fee"]
+optional-checks = [
+    "optional-balance-check",
+    "optional-block-gas-limit",
+    "optional-eip3541",
+    "optional-eip3607",
+    "optional-no-base-fee",
+]

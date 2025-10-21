@@ -10,11 +10,21 @@ use crate::{
 #[non_exhaustive]
 pub struct OkValidator<T = EthPooledTransaction> {
     _phantom: PhantomData<T>,
+    /// Whether to mark transactions as propagatable.
+    propagate: bool,
+}
+
+impl<T> OkValidator<T> {
+    /// Determines whether transactions should be allowed to be propagated
+    pub const fn set_propagate_transactions(mut self, propagate: bool) -> Self {
+        self.propagate = propagate;
+        self
+    }
 }
 
 impl<T> Default for OkValidator<T> {
     fn default() -> Self {
-        Self { _phantom: Default::default() }
+        Self { _phantom: Default::default(), propagate: false }
     }
 }
 
@@ -38,7 +48,7 @@ where
             state_nonce: transaction.nonce(),
             bytecode_hash: None,
             transaction: ValidTransaction::Valid(transaction),
-            propagate: false,
+            propagate: self.propagate,
             authorities,
         }
     }

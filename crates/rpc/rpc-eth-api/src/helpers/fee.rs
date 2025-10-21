@@ -10,15 +10,19 @@ use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_types::{
-    fee_history::calculate_reward_percentiles_for_block, EthApiError, FeeHistoryCache,
-    FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
+    fee_history::calculate_reward_percentiles_for_block, utils::checked_blob_gas_used_ratio,
+    EthApiError, FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
-use reth_storage_api::{BlockIdReader, BlockReaderIdExt, HeaderProvider};
+use reth_storage_api::{BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderHeader};
 use tracing::debug;
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
-pub trait EthFees: LoadFee {
+pub trait EthFees:
+    LoadFee<
+    Provider: ChainSpecProvider<ChainSpec: EthChainSpec<Header = ProviderHeader<Self::Provider>>>,
+>
+{
     /// Returns a suggestion for a gas price for legacy transactions.
     ///
     /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
@@ -105,10 +109,10 @@ pub trait EthFees: LoadFee {
             // need to validate that they are monotonically
             // increasing and 0 <= p <= 100
             // Note: The types used ensure that the percentiles are never < 0
-            if let Some(percentiles) = &reward_percentiles {
-                if percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.) {
-                    return Err(EthApiError::InvalidRewardPercentiles.into())
-                }
+            if let Some(percentiles) = &reward_percentiles &&
+                percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.)
+            {
+                return Err(EthApiError::InvalidRewardPercentiles.into())
             }
 
             // Fetch the headers and ensure we got all of them
@@ -136,7 +140,8 @@ pub trait EthFees: LoadFee {
                 }
 
                 for entry in &fee_entries {
-                    base_fee_per_gas.push(entry.base_fee_per_gas as u128);
+                    base_fee_per_gas
+                        .push(entry.header.base_fee_per_gas().unwrap_or_default() as u128);
                     gas_used_ratio.push(entry.gas_used_ratio);
                     base_fee_per_blob_gas.push(entry.base_fee_per_blob_gas.unwrap_or_default());
                     blob_gas_used_ratio.push(entry.blob_gas_used_ratio);
@@ -153,8 +158,12 @@ pub trait EthFees: LoadFee {
 
                 // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the
                 // next block
-                base_fee_per_gas
-                    .push(last_entry.next_block_base_fee(self.provider().chain_spec()) as u128);
+                base_fee_per_gas.push(
+                    self.provider()
+                        .chain_spec()
+                        .next_block_base_fee(&last_entry.header, last_entry.header.timestamp())
+                        .unwrap_or_default() as u128,
+                );
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
@@ -166,20 +175,21 @@ pub trait EthFees: LoadFee {
                     return Err(EthApiError::InvalidBlockRange.into())
                 }
 
-
+                let chain_spec = self.provider().chain_spec();
                 for header in &headers {
                     base_fee_per_gas.push(header.base_fee_per_gas().unwrap_or_default() as u128);
                     gas_used_ratio.push(header.gas_used() as f64 / header.gas_limit() as f64);
 
-                    let blob_params = self.provider()
-                        .chain_spec()
+                    let blob_params = chain_spec
                         .blob_params_at_timestamp(header.timestamp())
                         .unwrap_or_else(BlobParams::cancun);
 
                     base_fee_per_blob_gas.push(header.blob_fee(blob_params).unwrap_or_default());
                     blob_gas_used_ratio.push(
-                        header.blob_gas_used().unwrap_or_default() as f64
-                            / blob_params.max_blob_gas_per_block() as f64,
+                        checked_blob_gas_used_ratio(
+                            header.blob_gas_used().unwrap_or_default(),
+                            blob_params.max_blob_gas_per_block(),
+                        )
                     );
 
                     // Percentiles were specified, so we need to collect reward percentile info
@@ -209,18 +219,16 @@ pub trait EthFees: LoadFee {
                 // The unwrap is safe since we checked earlier that we got at least 1 header.
                 let last_header = headers.last().expect("is present");
                 base_fee_per_gas.push(
-                    last_header.next_block_base_fee(
-                    self.provider()
-                        .chain_spec()
-                        .base_fee_params_at_timestamp(last_header.timestamp())).unwrap_or_default() as u128
+                    chain_spec
+                        .next_block_base_fee(last_header.header(), last_header.timestamp())
+                        .unwrap_or_default() as u128,
                 );
-
                 // Same goes for the `base_fee_per_blob_gas`:
                 // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
                 base_fee_per_blob_gas.push(
                     last_header
                     .maybe_next_block_blob_fee(
-                        self.provider().chain_spec().blob_params_at_timestamp(last_header.timestamp())
+                        chain_spec.blob_params_at_timestamp(last_header.timestamp())
                     ).unwrap_or_default()
                 );
             };
@@ -238,7 +246,11 @@ pub trait EthFees: LoadFee {
 
     /// Approximates reward at a given percentile for a specific block
     /// Based on the configured resolution
-    fn approximate_percentile(&self, entry: &FeeHistoryEntry, requested_percentile: f64) -> u128 {
+    fn approximate_percentile(
+        &self,
+        entry: &FeeHistoryEntry<ProviderHeader<Self::Provider>>,
+        requested_percentile: f64,
+    ) -> u128 {
         let resolution = self.fee_history_cache().resolution();
         let rounded_percentile =
             (requested_percentile * resolution as f64).round() / resolution as f64;
@@ -266,7 +278,7 @@ where
     /// Returns a handle for reading fee history data from memory.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn fee_history_cache(&self) -> &FeeHistoryCache;
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<Self::Provider>>;
 
     /// Returns the gas price if it is set, otherwise fetches a suggested gas price for legacy
     /// transactions.

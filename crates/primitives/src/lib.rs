@@ -15,7 +15,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 mod block;
@@ -54,9 +54,6 @@ pub use transaction::{PooledTransactionsElementEcRecovered, TransactionSignedEcR
 
 // Re-exports
 pub use reth_ethereum_forks::*;
-
-#[cfg(any(test, feature = "arbitrary"))]
-pub use arbitrary;
 
 #[cfg(feature = "c-kzg")]
 pub use c_kzg as kzg;

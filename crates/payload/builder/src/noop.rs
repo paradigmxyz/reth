@@ -50,7 +50,7 @@ where
                     tx.send(Ok(id)).ok()
                 }
                 PayloadServiceCommand::BestPayload(_, tx) => tx.send(None).ok(),
-                PayloadServiceCommand::PayloadAttributes(_, tx) => tx.send(None).ok(),
+                PayloadServiceCommand::PayloadTimestamp(_, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::Resolve(_, _, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::Subscribe(_) => None,
             };
@@ -62,5 +62,12 @@ impl<T: PayloadTypes> Default for NoopPayloadBuilderService<T> {
     fn default() -> Self {
         let (service, _) = Self::new();
         service
+    }
+}
+
+impl<T: PayloadTypes> PayloadBuilderHandle<T> {
+    /// Returns a new noop instance.
+    pub fn noop() -> Self {
+        Self::new(mpsc::unbounded_channel().0)
     }
 }

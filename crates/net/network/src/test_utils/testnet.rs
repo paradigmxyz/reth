@@ -786,9 +786,9 @@ impl NetworkEventStream {
         peers
     }
 
-    /// Ensures that the first two events are a [`NetworkEvent::Peer(PeerEvent::PeerAdded`] and
-    /// [`NetworkEvent::ActivePeerSession`], returning the [`PeerId`] of the established
-    /// session.
+    /// Ensures that the first two events are a [`NetworkEvent::Peer`] and
+    /// [`PeerEvent::PeerAdded`][`NetworkEvent::ActivePeerSession`], returning the [`PeerId`] of the
+    /// established session.
     pub async fn peer_added_and_established(&mut self) -> Option<PeerId> {
         let peer_id = match self.inner.next().await {
             Some(NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id))) => peer_id,

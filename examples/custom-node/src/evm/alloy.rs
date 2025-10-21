@@ -40,6 +40,7 @@ where
     type Error = EVMError<DB::Error, OpTransactionError>;
     type HaltReason = OpHaltReason;
     type Spec = OpSpecId;
+    type BlockEnv = BlockEnv;
     type Precompiles = P;
     type Inspector = I;
 
@@ -70,10 +71,6 @@ where
         self.inner.transact_system_call(caller, contract, data)
     }
 
-    fn db_mut(&mut self) -> &mut Self::DB {
-        self.inner.db_mut()
-    }
-
     fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>) {
         self.inner.finish()
     }
@@ -82,20 +79,12 @@ where
         self.inner.set_inspector_enabled(enabled)
     }
 
-    fn precompiles(&self) -> &Self::Precompiles {
-        self.inner.precompiles()
+    fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) {
+        self.inner.components()
     }
 
-    fn precompiles_mut(&mut self) -> &mut Self::Precompiles {
-        self.inner.precompiles_mut()
-    }
-
-    fn inspector(&self) -> &Self::Inspector {
-        self.inner.inspector()
-    }
-
-    fn inspector_mut(&mut self) -> &mut Self::Inspector {
-        self.inner.inspector_mut()
+    fn components_mut(&mut self) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
+        self.inner.components_mut()
     }
 }
 
@@ -115,6 +104,7 @@ impl EvmFactory for CustomEvmFactory {
     type Error<DBError: Error + Send + Sync + 'static> = EVMError<DBError, OpTransactionError>;
     type HaltReason = OpHaltReason;
     type Spec = OpSpecId;
+    type BlockEnv = BlockEnv;
     type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database>(

@@ -1,15 +1,15 @@
 //! Pool component for the node builder.
 
+use crate::{BuilderContext, FullNodeTypes};
 use alloy_primitives::Address;
 use reth_chain_state::CanonStateSubscriptions;
-use reth_node_api::TxTy;
+use reth_chainspec::EthereumHardforks;
+use reth_node_api::{NodeTypes, TxTy};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction, SubPoolLimit,
     TransactionPool, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use std::{collections::HashSet, future::Future};
-
-use crate::{BuilderContext, FullNodeTypes};
 
 /// A type that knows how to build the transaction pool.
 pub trait PoolBuilder<Node: FullNodeTypes>: Send {
@@ -126,9 +126,10 @@ impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
     }
 }
 
-impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, TransactionValidationTaskExecutor<V>>
+impl<'a, Node, V> TxPoolBuilder<'a, Node, TransactionValidationTaskExecutor<V>>
 where
-    V: TransactionValidator + Clone + 'static,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    V: TransactionValidator + 'static,
     V::Transaction:
         PoolTransaction<Consensus = TxTy<Node::Types>> + reth_transaction_pool::EthPoolTransaction,
 {
@@ -166,14 +167,12 @@ where
 pub fn create_blob_store<Node: FullNodeTypes>(
     ctx: &BuilderContext<Node>,
 ) -> eyre::Result<DiskFileBlobStore> {
-    let data_dir = ctx.config().datadir();
-    Ok(reth_transaction_pool::blobstore::DiskFileBlobStore::open(
-        data_dir.blobstore(),
-        Default::default(),
-    )?)
+    let cache_size = Some(ctx.config().txpool.max_cached_entries);
+    create_blob_store_with_cache(ctx, cache_size)
 }
 
-/// Create blob store with custom cache size configuration.
+/// Create blob store with custom cache size configuration for how many blobs should be cached in
+/// memory.
 pub fn create_blob_store_with_cache<Node: FullNodeTypes>(
     ctx: &BuilderContext<Node>,
     cache_size: Option<u32>,
@@ -230,7 +229,7 @@ fn spawn_pool_maintenance_task<Node, Pool>(
     pool_config: &PoolConfig,
 ) -> eyre::Result<()>
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
     Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
     Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
 {
@@ -256,13 +255,13 @@ where
 }
 
 /// Spawn all maintenance tasks for a transaction pool (backup + main maintenance).
-fn spawn_maintenance_tasks<Node, Pool>(
+pub fn spawn_maintenance_tasks<Node, Pool>(
     ctx: &BuilderContext<Node>,
     pool: Pool,
     pool_config: &PoolConfig,
 ) -> eyre::Result<()>
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
     Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
     Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
 {

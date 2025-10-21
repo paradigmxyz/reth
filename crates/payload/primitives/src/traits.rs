@@ -1,6 +1,7 @@
 //! Core traits for working with execution payloads.
 
-use alloc::vec::Vec;
+use crate::PayloadBuilderError;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     eip7685::Requests,
@@ -8,8 +9,8 @@ use alloy_eips::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use reth_chain_state::ExecutedBlock;
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
 /// Represents a successfully built execution payload (block).
 ///
@@ -29,7 +30,7 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
     /// Returns the complete execution result including state updates.
     ///
     /// Returns `None` if execution data is not available or not tracked.
-    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<Self::Primitives>> {
+    fn executed_block(&self) -> Option<ExecutedBlock<Self::Primitives>> {
         None
     }
 
@@ -44,11 +45,11 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
 ///
 /// Extends basic payload attributes with additional context needed during the
 /// building process, tracking in-progress payload jobs and their parameters.
-pub trait PayloadBuilderAttributes: Send + Sync + fmt::Debug {
+pub trait PayloadBuilderAttributes: Send + Sync + Unpin + fmt::Debug + 'static {
     /// The external payload attributes format this type can be constructed from.
-    type RpcPayloadAttributes;
+    type RpcPayloadAttributes: Send + Sync + 'static;
     /// The error type used in [`PayloadBuilderAttributes::try_new`].
-    type Error: core::error::Error;
+    type Error: core::error::Error + Send + Sync + 'static;
 
     /// Constructs new builder attributes from external payload attributes.
     ///
@@ -143,4 +144,48 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
 pub trait PayloadAttributesBuilder<Attributes>: Send + Sync + 'static {
     /// Constructs new payload attributes for the given timestamp.
     fn build(&self, timestamp: u64) -> Attributes;
+}
+
+impl<Attributes, F> PayloadAttributesBuilder<Attributes> for F
+where
+    F: Fn(u64) -> Attributes + Send + Sync + 'static,
+{
+    fn build(&self, timestamp: u64) -> Attributes {
+        self(timestamp)
+    }
+}
+
+impl<Attributes, L, R> PayloadAttributesBuilder<Attributes> for either::Either<L, R>
+where
+    L: PayloadAttributesBuilder<Attributes>,
+    R: PayloadAttributesBuilder<Attributes>,
+{
+    fn build(&self, timestamp: u64) -> Attributes {
+        match self {
+            Self::Left(l) => l.build(timestamp),
+            Self::Right(r) => r.build(timestamp),
+        }
+    }
+}
+
+impl<Attributes> PayloadAttributesBuilder<Attributes>
+    for Box<dyn PayloadAttributesBuilder<Attributes>>
+where
+    Attributes: 'static,
+{
+    fn build(&self, timestamp: u64) -> Attributes {
+        self.as_ref().build(timestamp)
+    }
+}
+
+/// Trait to build the EVM environment for the next block from the given payload attributes.
+///
+/// Accepts payload attributes from CL, parent header and additional payload builder context.
+pub trait BuildNextEnv<Attributes, Header, Ctx>: Sized {
+    /// Builds the EVM environment for the next block from the given payload attributes.
+    fn build_next_env(
+        attributes: &Attributes,
+        parent: &SealedHeader<Header>,
+        ctx: &Ctx,
+    ) -> Result<Self, PayloadBuilderError>;
 }

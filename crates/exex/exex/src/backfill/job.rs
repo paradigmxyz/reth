@@ -124,7 +124,7 @@ where
             blocks.push(block);
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
-                block_number - *self.range.start(),
+                block_number - *self.range.start() + 1,
                 executor.size_hint() as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
@@ -243,7 +243,10 @@ impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        backfill::test_utils::{blocks_and_execution_outputs, chain_spec, to_execution_outcome},
+        backfill::{
+            job::ExecutionStageThresholds,
+            test_utils::{blocks_and_execution_outputs, chain_spec, to_execution_outcome},
+        },
         BackfillJobFactory,
     };
     use reth_db_common::init::init_genesis;
@@ -330,6 +333,49 @@ mod tests {
             assert_eq!(block, expected_block);
             assert_eq!(&execution_output, expected_output);
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_backfill_with_batch_threshold() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        // Create a key pair for the sender
+        let key_pair = generators::generate_key(&mut generators::rng());
+        let address = public_key_to_address(key_pair.public_key());
+
+        let chain_spec = chain_spec(address);
+
+        let executor = EthEvmConfig::ethereum(chain_spec.clone());
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(&provider_factory)?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
+
+        let blocks_and_execution_outputs =
+            blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
+        let (block1, output1) = blocks_and_execution_outputs[0].clone();
+        let (block2, output2) = blocks_and_execution_outputs[1].clone();
+
+        // Backfill with max_blocks=1, expect two separate chains
+        let factory = BackfillJobFactory::new(executor, blockchain_db).with_thresholds(
+            ExecutionStageThresholds { max_blocks: Some(1), ..Default::default() },
+        );
+        let job = factory.backfill(1..=2);
+        let chains = job.collect::<Result<Vec<_>, _>>()?;
+
+        // Assert two chains, each with one block
+        assert_eq!(chains.len(), 2);
+
+        let mut chain1 = chains[0].clone();
+        chain1.execution_outcome_mut().bundle.reverts.sort();
+        assert_eq!(chain1.blocks(), &[(1, block1)].into());
+        assert_eq!(chain1.execution_outcome(), &to_execution_outcome(1, &output1));
+
+        let mut chain2 = chains[1].clone();
+        chain2.execution_outcome_mut().bundle.reverts.sort();
+        assert_eq!(chain2.blocks(), &[(2, block2)].into());
+        assert_eq!(chain2.execution_outcome(), &to_execution_outcome(2, &output2));
 
         Ok(())
     }

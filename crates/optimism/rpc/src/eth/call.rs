@@ -1,49 +1,30 @@
-use super::OpNodeCore;
-use crate::{OpEthApi, OpEthApiError};
-use op_revm::OpTransaction;
-use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmFactory, TxEnvFor};
-use reth_node_api::NodePrimitives;
+use crate::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
 use reth_rpc_eth_api::{
-    helpers::{estimate::EstimateCall, Call, EthCall, LoadBlock, LoadState, SpawnBlocking},
-    FromEvmError, FullEthApiTypes, RpcConvert,
+    helpers::{estimate::EstimateCall, Call, EthCall},
+    FromEvmError, RpcConvert,
 };
-use reth_storage_api::{errors::ProviderError, ProviderHeader, ProviderTx};
-use revm::context::TxEnv;
 
-impl<N> EthCall for OpEthApi<N>
+impl<N, Rpc> EthCall for OpEthApi<N, Rpc>
 where
-    Self: EstimateCall + LoadBlock + FullEthApiTypes,
-    N: OpNodeCore,
+    N: RpcNodeCore,
+    OpEthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError, Evm = N::Evm>,
 {
 }
 
-impl<N> EstimateCall for OpEthApi<N>
+impl<N, Rpc> EstimateCall for OpEthApi<N, Rpc>
 where
-    Self: Call,
-    Self::Error: From<OpEthApiError>,
-    N: OpNodeCore,
+    N: RpcNodeCore,
+    OpEthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError, Evm = N::Evm>,
 {
 }
 
-impl<N> Call for OpEthApi<N>
+impl<N, Rpc> Call for OpEthApi<N, Rpc>
 where
-    Self: LoadState<
-            Evm: ConfigureEvm<
-                Primitives: NodePrimitives<
-                    BlockHeader = ProviderHeader<Self::Provider>,
-                    SignedTx = ProviderTx<Self::Provider>,
-                >,
-                BlockExecutorFactory: BlockExecutorFactory<
-                    EvmFactory: EvmFactory<Tx = OpTransaction<TxEnv>>,
-                >,
-            >,
-            RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
-            Error: FromEvmError<Self::Evm>
-                       + From<<Self::RpcConvert as RpcConvert>::Error>
-                       + From<ProviderError>,
-        > + SpawnBlocking,
-    Self::Error: From<OpEthApiError>,
-    N: OpNodeCore,
+    N: RpcNodeCore,
+    OpEthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError, Evm = N::Evm>,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {

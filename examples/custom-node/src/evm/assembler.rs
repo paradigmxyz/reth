@@ -1,9 +1,9 @@
 use crate::{
     chainspec::CustomChainSpec,
+    evm::executor::CustomBlockExecutionCtx,
     primitives::{Block, CustomHeader, CustomTransaction},
 };
 use alloy_evm::block::{BlockExecutionError, BlockExecutorFactory};
-use alloy_op_evm::OpBlockExecutionCtx;
 use reth_ethereum::{
     evm::primitives::execute::{BlockAssembler, BlockAssemblerInput},
     primitives::Receipt,
@@ -25,7 +25,7 @@ impl CustomBlockAssembler {
 impl<F> BlockAssembler<F> for CustomBlockAssembler
 where
     F: for<'a> BlockExecutorFactory<
-        ExecutionCtx<'a> = OpBlockExecutionCtx,
+        ExecutionCtx<'a> = CustomBlockExecutionCtx,
         Transaction = CustomTransaction,
         Receipt: Receipt + DepositReceipt,
     >,

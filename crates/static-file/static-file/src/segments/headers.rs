@@ -3,9 +3,7 @@ use alloy_primitives::BlockNumber;
 use reth_codecs::Compact;
 use reth_db_api::{cursor::DbCursorRO, table::Value, tables, transaction::DbTx};
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{
-    providers::StaticFileWriter, ChainSpecProvider, DBProvider, StaticFileProviderFactory,
-};
+use reth_provider::{providers::StaticFileWriter, DBProvider, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeInclusive;
@@ -17,7 +15,7 @@ pub struct Headers;
 impl<Provider> Segment<Provider> for Headers
 where
     Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact + Value>>
-        + DBProvider
+        + DBProvider,
 {
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::Headers
@@ -38,25 +36,17 @@ where
             )?;
         let headers_walker = headers_cursor.walk_range(block_range.clone())?;
 
-        let mut header_td_cursor =
-            provider.tx_ref().cursor_read::<tables::HeaderTerminalDifficulties>()?;
-        let header_td_walker = header_td_cursor.walk_range(block_range.clone())?;
-
         let mut canonical_headers_cursor =
             provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?;
         let canonical_headers_walker = canonical_headers_cursor.walk_range(block_range)?;
 
-        for ((header_entry, header_td_entry), canonical_header_entry) in
-            headers_walker.zip(header_td_walker).zip(canonical_headers_walker)
-        {
+        for (header_entry, canonical_header_entry) in headers_walker.zip(canonical_headers_walker) {
             let (header_block, header) = header_entry?;
-            let (header_td_block, header_td) = header_td_entry?;
             let (canonical_header_block, canonical_header) = canonical_header_entry?;
 
-            debug_assert_eq!(header_block, header_td_block);
-            debug_assert_eq!(header_td_block, canonical_header_block);
+            debug_assert_eq!(header_block, canonical_header_block);
 
-            static_file_writer.append_header(&header, header_td.0, &canonical_header)?;
+            static_file_writer.append_header(&header, &canonical_header)?;
         }
 
         Ok(())

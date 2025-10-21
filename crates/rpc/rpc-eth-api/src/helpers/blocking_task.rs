@@ -60,6 +60,29 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
         async move { rx.await.map_err(|_| EthApiError::InternalEthError)? }
     }
 
+    /// Executes the future on a new blocking task.
+    ///
+    /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
+    /// or CPU bound operations in general use [`spawn_tracing`](Self::spawn_tracing).
+    fn spawn_blocking_io_fut<F, R, Fut>(
+        &self,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        Fut: Future<Output = Result<R, Self::Error>> + Send + 'static,
+        F: FnOnce(Self) -> Fut + Send + 'static,
+        R: Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let this = self.clone();
+        self.io_task_spawner().spawn_blocking(Box::pin(async move {
+            let res = f(this).await;
+            let _ = tx.send(res);
+        }));
+
+        async move { rx.await.map_err(|_| EthApiError::InternalEthError)? }
+    }
+
     /// Executes a blocking task on the tracing pool.
     ///
     /// Note: This is expected for futures that are predominantly CPU bound, as it uses `rayon`

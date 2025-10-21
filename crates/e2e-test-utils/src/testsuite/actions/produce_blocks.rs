@@ -8,7 +8,7 @@ use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
     payload::ExecutionPayloadEnvelopeV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
+use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::{EngineTypes, PayloadTypes};
@@ -73,13 +73,16 @@ where
             let engine_client = node_client.engine.http_client();
 
             // get the latest block to use as parent
-            let latest_block =
-                EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
-                    rpc_client,
-                    alloy_eips::BlockNumberOrTag::Latest,
-                    false,
-                )
-                .await?;
+            let latest_block = EthApiClient::<
+                TransactionRequest,
+                Transaction,
+                Block,
+                Receipt,
+                Header,
+            >::block_by_number(
+                rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
+            )
+            .await?;
 
             let latest_block = latest_block.ok_or_else(|| eyre::eyre!("Latest block not found"))?;
             let parent_hash = latest_block.header.hash;
@@ -339,14 +342,17 @@ where
             } else {
                 // fallback to RPC query
                 let rpc_client = &env.node_clients[0].rpc;
-                let current_head_block =
-                    EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
-                        rpc_client,
-                        alloy_eips::BlockNumberOrTag::Latest,
-                        false,
-                    )
-                    .await?
-                    .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
+                let current_head_block = EthApiClient::<
+                    TransactionRequest,
+                    Transaction,
+                    Block,
+                    Receipt,
+                    Header,
+                >::block_by_number(
+                    rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
+                )
+                .await?
+                .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
                 debug!("Using RPC latest block hash as head: {}", current_head_block.header.hash);
                 current_head_block.header.hash
             };
@@ -409,14 +415,17 @@ where
         Box::pin(async move {
             // get the latest block from the first client to update environment state
             let rpc_client = &env.node_clients[0].rpc;
-            let latest_block =
-                EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
-                    rpc_client,
-                    alloy_eips::BlockNumberOrTag::Latest,
-                    false,
-                )
-                .await?
-                .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
+            let latest_block = EthApiClient::<
+                TransactionRequest,
+                Transaction,
+                Block,
+                Receipt,
+                Header,
+            >::block_by_number(
+                rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
+            )
+            .await?
+            .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
 
             // update environment with the new block information
             env.set_current_block_info(BlockInfo {
@@ -501,7 +510,7 @@ where
         Box::pin(async move {
             let mut accepted_check: bool = false;
 
-            let mut latest_block = env
+            let latest_block = env
                 .current_block_info()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
@@ -516,13 +525,17 @@ where
                 let rpc_client = &client.rpc;
 
                 // get the last header by number using latest_head_number
-                let rpc_latest_header =
-                    EthApiClient::<Transaction, Block, Receipt, Header>::header_by_number(
-                        rpc_client,
-                        alloy_eips::BlockNumberOrTag::Latest,
-                    )
-                    .await?
-                    .ok_or_else(|| eyre::eyre!("No latest header found from rpc"))?;
+                let rpc_latest_header = EthApiClient::<
+                    TransactionRequest,
+                    Transaction,
+                    Block,
+                    Receipt,
+                    Header,
+                >::header_by_number(
+                    rpc_client, alloy_eips::BlockNumberOrTag::Latest
+                )
+                .await?
+                .ok_or_else(|| eyre::eyre!("No latest header found from rpc"))?;
 
                 // perform several checks
                 let next_new_payload = env
@@ -577,14 +590,19 @@ where
                 // at least one client passes all the check, save the header in Env
                 if !accepted_check {
                     accepted_check = true;
-                    // save the header in Env
-                    env.active_node_state_mut()?.latest_header_time = next_new_payload.timestamp;
+                    // save the current block info in Env
+                    env.set_current_block_info(BlockInfo {
+                        hash: rpc_latest_header.hash,
+                        number: rpc_latest_header.inner.number,
+                        timestamp: rpc_latest_header.inner.timestamp,
+                    })?;
 
-                    // add it to header history
+                    // align latest header time and forkchoice state with the accepted canonical
+                    // head
+                    env.active_node_state_mut()?.latest_header_time =
+                        rpc_latest_header.inner.timestamp;
                     env.active_node_state_mut()?.latest_fork_choice_state.head_block_hash =
                         rpc_latest_header.hash;
-                    latest_block.hash = rpc_latest_header.hash;
-                    latest_block.number = rpc_latest_header.inner.number;
                 }
             }
 

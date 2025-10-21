@@ -7,7 +7,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
     config_cmd, db, dump_genesis, init_cmd,
     node::{self, NoArgs},
-    p2p, prune, recover, stage,
+    p2p, prune, re_execute, stage,
 };
 use std::{fmt, sync::Arc};
 
@@ -20,7 +20,6 @@ pub mod test_vectors;
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-#[expect(clippy::large_enum_variant)]
 pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
 {
     /// Start the node
@@ -48,13 +47,10 @@ pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + f
     Stage(Box<stage::Command<Spec>>),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
-    P2P(p2p::Command<Spec>),
+    P2P(Box<p2p::Command<Spec>>),
     /// Write config to stdout
     #[command(name = "config")]
     Config(config_cmd::Command),
-    /// Scripts for node recovery
-    #[command(name = "recover")]
-    Recover(recover::Command<Spec>),
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
     Prune(prune::PruneCommand<Spec>),
@@ -62,6 +58,9 @@ pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + f
     #[cfg(feature = "dev")]
     #[command(name = "test-vectors")]
     TestVectors(test_vectors::Command),
+    /// Re-execute blocks in parallel to verify historical sync correctness.
+    #[command(name = "re-execute")]
+    ReExecute(re_execute::Command<Spec>),
 }
 
 impl<
@@ -80,12 +79,12 @@ impl<
             Self::Stage(cmd) => cmd.chain_spec(),
             Self::P2P(cmd) => cmd.chain_spec(),
             Self::Config(_) => None,
-            Self::Recover(cmd) => cmd.chain_spec(),
             Self::Prune(cmd) => cmd.chain_spec(),
             Self::ImportOp(cmd) => cmd.chain_spec(),
             Self::ImportReceiptsOp(cmd) => cmd.chain_spec(),
             #[cfg(feature = "dev")]
             Self::TestVectors(_) => None,
+            Self::ReExecute(cmd) => cmd.chain_spec(),
         }
     }
 }

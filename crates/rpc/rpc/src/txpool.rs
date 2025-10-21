@@ -10,8 +10,8 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_api::TxPoolApiServer;
+use reth_rpc_convert::{RpcConvert, RpcTypes};
 use reth_rpc_eth_api::RpcTransaction;
-use reth_rpc_types_compat::{RpcConvert, RpcTypes};
 use reth_transaction_pool::{
     AllPoolTransactions, PoolConsensusTx, PoolTransaction, TransactionPool,
 };
@@ -45,7 +45,7 @@ where
             tx: &Tx,
             content: &mut BTreeMap<
                 Address,
-                BTreeMap<String, <RpcTxB::Network as RpcTypes>::Transaction>,
+                BTreeMap<String, <RpcTxB::Network as RpcTypes>::TransactionResponse>,
             >,
             resp_builder: &RpcTxB,
         ) -> Result<(), RpcTxB::Error>
@@ -88,8 +88,8 @@ where
     /// Handler for `txpool_status`
     async fn txpool_status(&self) -> RpcResult<TxpoolStatus> {
         trace!(target: "rpc::eth", "Serving txpool_status");
-        let all = self.pool.all_transactions();
-        Ok(TxpoolStatus { pending: all.pending.len() as u64, queued: all.queued.len() as u64 })
+        let (pending, queued) = self.pool.pending_and_queued_txn_count();
+        Ok(TxpoolStatus { pending: pending as u64, queued: queued as u64 })
     }
 
     /// Returns a summary of all the transactions currently pending for inclusion in the next

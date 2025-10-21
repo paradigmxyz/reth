@@ -104,9 +104,20 @@ where
 
         for _ in 0..limit {
             if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
+                let number = header.number();
+                let parent_hash = header.parent_hash();
+
+                total_bytes += header.length();
+                headers.push(header);
+
+                if headers.len() >= MAX_HEADERS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
+                    break
+                }
+
                 match direction {
                     HeadersDirection::Rising => {
-                        if let Some(next) = (header.number() + 1).checked_add(skip) {
+                        if let Some(next) = number.checked_add(1).and_then(|n| n.checked_add(skip))
+                        {
                             block = next.into()
                         } else {
                             break
@@ -117,23 +128,16 @@ where
                             // prevent under flows for block.number == 0 and `block.number - skip <
                             // 0`
                             if let Some(next) =
-                                header.number().checked_sub(1).and_then(|num| num.checked_sub(skip))
+                                number.checked_sub(1).and_then(|num| num.checked_sub(skip))
                             {
                                 block = next.into()
                             } else {
                                 break
                             }
                         } else {
-                            block = header.parent_hash().into()
+                            block = parent_hash.into()
                         }
                     }
-                }
-
-                total_bytes += header.length();
-                headers.push(header);
-
-                if headers.len() >= MAX_HEADERS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
                 }
             } else {
                 break

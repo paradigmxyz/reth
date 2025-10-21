@@ -5,7 +5,7 @@ use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
-use reth_engine_primitives::BeaconConsensusEngineHandle;
+use reth_engine_primitives::ConsensusEngineHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
@@ -13,6 +13,7 @@ use reth_payload_primitives::{
 use reth_provider::BlockReader;
 use reth_transaction_pool::TransactionPool;
 use std::{
+    collections::VecDeque,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
@@ -24,19 +25,31 @@ use tracing::error;
 
 /// A mining mode for the local dev engine.
 #[derive(Debug)]
-pub enum MiningMode {
+pub enum MiningMode<Pool: TransactionPool + Unpin> {
     /// In this mode a block is built as soon as
     /// a valid transaction reaches the pool.
-    Instant(Fuse<ReceiverStream<TxHash>>),
+    /// If `max_transactions` is set, a block is built when that many transactions have
+    /// accumulated.
+    Instant {
+        /// The transaction pool.
+        pool: Pool,
+        /// Stream of transaction notifications.
+        rx: Fuse<ReceiverStream<TxHash>>,
+        /// Maximum number of transactions to accumulate before mining a block.
+        /// If None, mine immediately when any transaction arrives.
+        max_transactions: Option<usize>,
+        /// Counter for accumulated transactions (only used when `max_transactions` is set).
+        accumulated: usize,
+    },
     /// In this mode a block is built at a fixed interval.
     Interval(Interval),
 }
 
-impl MiningMode {
+impl<Pool: TransactionPool + Unpin> MiningMode<Pool> {
     /// Constructor for a [`MiningMode::Instant`]
-    pub fn instant<Pool: TransactionPool>(pool: Pool) -> Self {
+    pub fn instant(pool: Pool, max_transactions: Option<usize>) -> Self {
         let rx = pool.pending_transactions_listener();
-        Self::Instant(ReceiverStream::new(rx).fuse())
+        Self::Instant { pool, rx: ReceiverStream::new(rx).fuse(), max_transactions, accumulated: 0 }
     }
 
     /// Constructor for a [`MiningMode::Interval`]
@@ -46,16 +59,29 @@ impl MiningMode {
     }
 }
 
-impl Future for MiningMode {
+impl<Pool: TransactionPool + Unpin> Future for MiningMode<Pool> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         match this {
-            Self::Instant(rx) => {
-                // drain all transactions notifications
-                if let Poll::Ready(Some(_)) = rx.poll_next_unpin(cx) {
-                    return Poll::Ready(())
+            Self::Instant { pool, rx, max_transactions, accumulated } => {
+                // Poll for new transaction notifications
+                while let Poll::Ready(Some(_)) = rx.poll_next_unpin(cx) {
+                    if pool.pending_and_queued_txn_count().0 == 0 {
+                        continue;
+                    }
+                    if let Some(max_tx) = max_transactions {
+                        *accumulated += 1;
+                        // If we've reached the max transactions threshold, mine a block
+                        if *accumulated >= *max_tx {
+                            *accumulated = 0; // Reset counter for next block
+                            return Poll::Ready(());
+                        }
+                    } else {
+                        // If no max_transactions is set, mine immediately
+                        return Poll::Ready(());
+                    }
                 }
                 Poll::Pending
             }
@@ -69,34 +95,35 @@ impl Future for MiningMode {
     }
 }
 
-/// Local miner advancing the chain/
+/// Local miner advancing the chain
 #[derive(Debug)]
-pub struct LocalMiner<T: PayloadTypes, B> {
+pub struct LocalMiner<T: PayloadTypes, B, Pool: TransactionPool + Unpin> {
     /// The payload attribute builder for the engine
     payload_attributes_builder: B,
     /// Sender for events to engine.
-    to_engine: BeaconConsensusEngineHandle<T>,
+    to_engine: ConsensusEngineHandle<T>,
     /// The mining mode for the engine
-    mode: MiningMode,
+    mode: MiningMode<Pool>,
     /// The payload builder for the engine
     payload_builder: PayloadBuilderHandle<T>,
     /// Timestamp for the next block.
     last_timestamp: u64,
     /// Stores latest mined blocks.
-    last_block_hashes: Vec<B256>,
+    last_block_hashes: VecDeque<B256>,
 }
 
-impl<T, B> LocalMiner<T, B>
+impl<T, B, Pool> LocalMiner<T, B, Pool>
 where
     T: PayloadTypes,
     B: PayloadAttributesBuilder<<T as PayloadTypes>::PayloadAttributes>,
+    Pool: TransactionPool + Unpin,
 {
     /// Spawns a new [`LocalMiner`] with the given parameters.
     pub fn new(
         provider: impl BlockReader,
         payload_attributes_builder: B,
-        to_engine: BeaconConsensusEngineHandle<T>,
-        mode: MiningMode,
+        to_engine: ConsensusEngineHandle<T>,
+        mode: MiningMode<Pool>,
         payload_builder: PayloadBuilderHandle<T>,
     ) -> Self {
         let latest_header =
@@ -108,7 +135,7 @@ where
             mode,
             payload_builder,
             last_timestamp: latest_header.timestamp(),
-            last_block_hashes: vec![latest_header.hash()],
+            last_block_hashes: VecDeque::from([latest_header.hash()]),
         }
     }
 
@@ -136,7 +163,7 @@ where
     /// Returns current forkchoice state.
     fn forkchoice_state(&self) -> ForkchoiceState {
         ForkchoiceState {
-            head_block_hash: *self.last_block_hashes.last().expect("at least 1 block exists"),
+            head_block_hash: *self.last_block_hashes.back().expect("at least 1 block exists"),
             safe_block_hash: *self
                 .last_block_hashes
                 .get(self.last_block_hashes.len().saturating_sub(32))
@@ -150,13 +177,14 @@ where
 
     /// Sends a FCU to the engine.
     async fn update_forkchoice_state(&self) -> eyre::Result<()> {
+        let state = self.forkchoice_state();
         let res = self
             .to_engine
-            .fork_choice_updated(self.forkchoice_state(), None, EngineApiMessageVersion::default())
+            .fork_choice_updated(state, None, EngineApiMessageVersion::default())
             .await?;
 
         if !res.is_valid() {
-            eyre::bail!("Invalid fork choice update")
+            eyre::bail!("Invalid fork choice update {state:?}: {res:?}")
         }
 
         Ok(())
@@ -166,7 +194,7 @@ where
     /// through newPayload.
     async fn advance(&mut self) -> eyre::Result<()> {
         let timestamp = std::cmp::max(
-            self.last_timestamp + 1,
+            self.last_timestamp.saturating_add(1),
             std::time::SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("cannot be earlier than UNIX_EPOCH")
@@ -204,11 +232,10 @@ where
         }
 
         self.last_timestamp = timestamp;
-        self.last_block_hashes.push(block.hash());
+        self.last_block_hashes.push_back(block.hash());
         // ensure we keep at most 64 blocks
         if self.last_block_hashes.len() > 64 {
-            self.last_block_hashes =
-                self.last_block_hashes.split_off(self.last_block_hashes.len() - 64);
+            self.last_block_hashes.pop_front();
         }
 
         Ok(())

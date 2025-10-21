@@ -18,7 +18,7 @@ pub struct ClientVersion {
 
 impl ClientVersion {
     /// Returns `true` if no version fields are set.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.version.is_empty() && self.git_sha.is_empty() && self.build_timestamp.is_empty()
     }
 }

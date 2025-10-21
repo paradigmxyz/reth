@@ -63,6 +63,60 @@ async fn test_get_body() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_get_body_range() {
+    reth_tracing::init_test_tracing();
+    let mut rng = rand::rng();
+    let mock_provider = Arc::new(MockEthProvider::default());
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+
+    let mut net = Testnet::create_with(2, mock_provider.clone()).await;
+
+    // install request handlers
+    net.for_each_mut(|peer| peer.install_request_handler());
+
+    let handle0 = net.peers()[0].handle();
+    let mut events0 = NetworkEventStream::new(handle0.event_listener());
+
+    let handle1 = net.peers()[1].handle();
+
+    let _handle = net.spawn();
+
+    let fetch0 = handle0.fetch_client().await.unwrap();
+
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    let connected = events0.next_session_established().await.unwrap();
+    assert_eq!(connected, *handle1.peer_id());
+
+    let mut all_blocks = Vec::new();
+    let mut block_hashes = Vec::new();
+    // add some blocks
+    for _ in 0..100 {
+        let block_hash = rng.random();
+        let mut block: Block = Block::default();
+        block.body.transactions.push(tx_gen.gen_eip4844());
+
+        mock_provider.add_block(block_hash, block.clone());
+        all_blocks.push(block);
+        block_hashes.push(block_hash);
+    }
+
+    // ensure we can fetch the correct bodies
+    for idx in 0..100 {
+        let count = std::cmp::min(100 - idx, 10); // Limit to 10 bodies per request
+        let hashes_to_fetch = &block_hashes[idx..idx + count];
+
+        let res = fetch0.get_block_bodies(hashes_to_fetch.to_vec()).await;
+        assert!(res.is_ok(), "{res:?}");
+
+        let bodies = res.unwrap().1;
+        assert_eq!(bodies.len(), count);
+        for i in 0..bodies.len() {
+            assert_eq!(bodies[i], all_blocks[idx + i].body);
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_get_header() {
     reth_tracing::init_test_tracing();
     let mut rng = rand::rng();
@@ -105,6 +159,124 @@ async fn test_get_header() {
         let headers = res.unwrap().1;
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0], header);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_get_header_range() {
+    reth_tracing::init_test_tracing();
+    let mut rng = rand::rng();
+    let mock_provider = Arc::new(MockEthProvider::default());
+
+    let mut net = Testnet::create_with(2, mock_provider.clone()).await;
+
+    // install request handlers
+    net.for_each_mut(|peer| peer.install_request_handler());
+
+    let handle0 = net.peers()[0].handle();
+    let mut events0 = NetworkEventStream::new(handle0.event_listener());
+
+    let handle1 = net.peers()[1].handle();
+
+    let _handle = net.spawn();
+
+    let fetch0 = handle0.fetch_client().await.unwrap();
+
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    let connected = events0.next_session_established().await.unwrap();
+    assert_eq!(connected, *handle1.peer_id());
+
+    let start: u64 = rng.random();
+    let mut hash = rng.random();
+    let mut all_headers = Vec::new();
+    // add some headers
+    for idx in 0..100 {
+        // Set a new random header to the mock storage and request it via the network
+        let header = Header { number: start + idx, parent_hash: hash, ..Default::default() };
+        hash = rng.random();
+        mock_provider.add_header(hash, header.clone());
+        all_headers.push(header.seal(hash));
+    }
+
+    // ensure we can fetch the correct headers
+    for idx in 0..100 {
+        let count = 100 - idx;
+        let header = &all_headers[idx];
+        let req = HeadersRequest {
+            start: header.hash().into(),
+            limit: count as u64,
+            direction: HeadersDirection::Rising,
+        };
+
+        let res = fetch0.get_headers(req).await;
+        assert!(res.is_ok(), "{res:?}");
+
+        let headers = res.unwrap().1;
+        assert_eq!(headers.len(), count);
+        assert_eq!(headers[0].number, start + idx as u64);
+        for i in 0..headers.len() {
+            assert_eq!(&headers[i], all_headers[idx + i].inner());
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_get_header_range_falling() {
+    reth_tracing::init_test_tracing();
+    let mut rng = rand::rng();
+    let mock_provider = Arc::new(MockEthProvider::default());
+
+    let mut net = Testnet::create_with(2, mock_provider.clone()).await;
+
+    // install request handlers
+    net.for_each_mut(|peer| peer.install_request_handler());
+
+    let handle0 = net.peers()[0].handle();
+    let mut events0 = NetworkEventStream::new(handle0.event_listener());
+
+    let handle1 = net.peers()[1].handle();
+
+    let _handle = net.spawn();
+
+    let fetch0 = handle0.fetch_client().await.unwrap();
+
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    let connected = events0.next_session_established().await.unwrap();
+    assert_eq!(connected, *handle1.peer_id());
+
+    let start: u64 = rng.random();
+    let mut hash = rng.random();
+    let mut all_headers = Vec::new();
+    // add some headers
+    for idx in 0..100 {
+        // Set a new random header to the mock storage
+        let header = Header { number: start + idx, parent_hash: hash, ..Default::default() };
+        hash = rng.random();
+        mock_provider.add_header(hash, header.clone());
+        all_headers.push(header.seal(hash));
+    }
+
+    // ensure we can fetch the correct headers in falling direction
+    // start from the last header and work backwards
+    for idx in (0..100).rev() {
+        let count = std::cmp::min(idx + 1, 100); // Can't fetch more than idx+1 headers when going backwards
+        let header = &all_headers[idx];
+        let req = HeadersRequest {
+            start: header.hash().into(),
+            limit: count as u64,
+            direction: HeadersDirection::Falling,
+        };
+
+        let res = fetch0.get_headers(req).await;
+        assert!(res.is_ok(), "{res:?}");
+
+        let headers = res.unwrap().1;
+        assert_eq!(headers.len(), count);
+        assert_eq!(headers[0].number, start + idx as u64);
+        // When fetching in Falling direction, headers come in reverse order
+        for i in 0..headers.len() {
+            assert_eq!(&headers[i], all_headers[idx - i].inner());
+        }
     }
 }
 
@@ -336,7 +508,7 @@ async fn test_eth69_get_receipts() {
         let (tx, rx) = oneshot::channel();
         handle0.send_request(
             *handle1.peer_id(),
-            reth_network::PeerRequest::GetReceipts {
+            reth_network::PeerRequest::GetReceipts69 {
                 request: reth_eth_wire::GetReceipts(vec![block_hash]),
                 response: tx,
             },
@@ -349,9 +521,8 @@ async fn test_eth69_get_receipts() {
         };
         assert_eq!(receipts_response.0.len(), 1);
         assert_eq!(receipts_response.0[0].len(), 2);
-        // When using GetReceipts request with ETH69 peers, the response should still include bloom
-        // filters The protocol version handling is done at a lower level
-        assert_eq!(receipts_response.0[0][0].receipt.cumulative_gas_used, 21000);
-        assert_eq!(receipts_response.0[0][1].receipt.cumulative_gas_used, 42000);
+        // ETH69 receipts do not include bloom filters - verify the structure
+        assert_eq!(receipts_response.0[0][0].cumulative_gas_used, 21000);
+        assert_eq!(receipts_response.0[0][1].cumulative_gas_used, 42000);
     }
 }

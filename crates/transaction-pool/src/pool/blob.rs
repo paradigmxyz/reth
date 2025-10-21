@@ -15,7 +15,7 @@ use std::{
 /// worst blob transactions once the sub-pool is full.
 ///
 /// This expects that certain constraints are met:
-///   - blob transactions are always gap less
+///   - blob transactions are always gapless
 #[derive(Debug, Clone)]
 pub struct BlobTransactions<T: PoolTransaction> {
     /// Keeps track of transactions inserted in the pool.
@@ -83,7 +83,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
 
     /// Returns all transactions that satisfy the given basefee and blobfee.
     ///
-    /// Note: This does not remove any the transactions from the pool.
+    /// Note: This does not remove any of the transactions from the pool.
     pub(crate) fn satisfy_attributes(
         &self,
         best_transactions_attributes: BestTransactionsAttributes,
@@ -584,7 +584,7 @@ mod tests {
                 ],
                 network_fees: PendingFees { base_fee: 0, blob_fee: 1999 },
             },
-            // If both basefee and blobfee is specified, sort by the larger distance
+            // If both basefee and blobfee are specified, sort by the larger distance
             // of the two from the current network conditions, splitting same (loglog)
             // ones via the tip.
             //

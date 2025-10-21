@@ -18,6 +18,7 @@ reth-consensus.workspace = true
 reth-db.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
+reth-execution-types.workspace = true
 reth-evm = { workspace = true, features = ["metrics"] }
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
@@ -32,6 +33,7 @@ reth-tasks.workspace = true
 reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
+reth-trie-sparse-parallel = { workspace = true, features = ["std"] }
 reth-trie.workspace = true
 
 # alloy
@@ -50,18 +52,19 @@ futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 mini-moka = { workspace = true, features = ["sync"] }
+smallvec.workspace = true
 
 # metrics
 metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
+dashmap.workspace = true
 schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
 parking_lot.workspace = true
-itertools.workspace = true
 
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }
@@ -71,28 +74,25 @@ reth-tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-chainspec.workspace = true
 reth-db-common.workspace = true
 reth-ethereum-consensus.workspace = true
+metrics-util = { workspace = true, features = ["debugging"] }
 reth-ethereum-engine-primitives.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-exex-types.workspace = true
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-prune-types.workspace = true
-reth-prune.workspace = true
-reth-rpc-types-compat.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-static-file.workspace = true
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
-reth-trie-db.workspace = true
 reth-node-ethereum.workspace = true
 reth-e2e-test-utils.workspace = true
 
 # alloy
-alloy-rlp.workspace = true
 revm-state.workspace = true
 
 assert_matches.workspace = true
@@ -139,3 +139,7 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-evm-ethereum/test-utils",
 ]
+
+[[test]]
+name = "e2e_testsuite"
+path = "tests/e2e-testsuite/main.rs"

@@ -98,6 +98,10 @@ impl PayloadJob for TestPayloadJob {
         Ok(self.attr.clone())
     }
 
+    fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
+        Ok(self.attr.timestamp)
+    }
+
     fn resolve_kind(
         &mut self,
         _kind: PayloadKind,

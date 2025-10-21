@@ -69,8 +69,6 @@ rand.workspace = true
 rand_08.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-test-fuzz.workspace = true
-modular-bitfield.workspace = true
 
 [features]
 default = ["std"]
@@ -126,6 +124,8 @@ serde-bincode-compat = [
     "alloy-eips/serde-bincode-compat",
     "op-alloy-consensus?/serde",
     "op-alloy-consensus?/serde-bincode-compat",
+    "alloy-genesis/serde-bincode-compat",
+    "alloy-rpc-types-eth?/serde-bincode-compat",
 ]
 serde = [
     "dep:serde",

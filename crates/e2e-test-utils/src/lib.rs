@@ -33,11 +33,17 @@ pub mod wallet;
 /// Helper for payload operations
 mod payload;
 
+/// Helper for setting up nodes with pre-imported chain data
+pub mod setup_import;
+
 /// Helper for network operations
 mod network;
 
 /// Helper for rpc operations
 mod rpc;
+
+/// Utilities for creating and writing RLP test data
+pub mod test_rlp_utils;
 
 /// Creates the initial setup with `num_nodes` started and interconnected.
 pub async fn setup<N>(
@@ -90,10 +96,11 @@ where
         }
 
         // Connect last node with the first if there are more than two
-        if idx + 1 == num_nodes && num_nodes > 2 {
-            if let Some(first_node) = nodes.first_mut() {
-                node.connect(first_node).await;
-            }
+        if idx + 1 == num_nodes &&
+            num_nodes > 2 &&
+            let Some(first_node) = nodes.first_mut()
+        {
+            node.connect(first_node).await;
         }
 
         nodes.push(node);
@@ -201,10 +208,11 @@ where
             }
 
             // Connect last node with the first if there are more than two
-            if idx + 1 == num_nodes && num_nodes > 2 {
-                if let Some(first_node) = nodes.first_mut() {
-                    node.connect(first_node).await;
-                }
+            if idx + 1 == num_nodes &&
+                num_nodes > 2 &&
+                let Some(first_node) = nodes.first_mut()
+            {
+                node.connect(first_node).await;
             }
         }
 

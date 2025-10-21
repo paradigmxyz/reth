@@ -2,7 +2,7 @@
 
 use crate::{MessageValidationKind, PayloadAttributes};
 use alloc::vec::Vec;
-use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
+use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, eip7685::Requests, BlockNumHash};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
@@ -24,6 +24,16 @@ pub trait ExecutionPayload:
 
     /// Returns this block's number (height).
     fn block_number(&self) -> u64;
+
+    /// Returns this block's number hash.
+    fn num_hash(&self) -> BlockNumHash {
+        BlockNumHash::new(self.block_number(), self.block_hash())
+    }
+
+    /// Returns a [`BlockWithParent`] for this block.
+    fn block_with_parent(&self) -> BlockWithParent {
+        BlockWithParent::new(self.parent_hash(), self.num_hash())
+    }
 
     /// Returns the withdrawals included in this payload.
     ///

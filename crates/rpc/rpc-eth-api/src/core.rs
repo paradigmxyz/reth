@@ -1,5 +1,9 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
+use crate::{
+    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
+    RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
+};
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
@@ -7,24 +11,20 @@ use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
 use alloy_rpc_types_eth::{
     simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    transaction::TransactionRequest,
     BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index,
     StateContext, SyncStatus, Work,
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_rpc_convert::RpcTxReq;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use tracing::trace;
-
-use crate::{
-    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
-    RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
-};
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
 pub trait FullEthApiServer:
     EthApiServer<
+        RpcTxReq<Self::NetworkTypes>,
         RpcTransaction<Self::NetworkTypes>,
         RpcBlock<Self::NetworkTypes>,
         RpcReceipt<Self::NetworkTypes>,
@@ -36,6 +36,7 @@ pub trait FullEthApiServer:
 
 impl<T> FullEthApiServer for T where
     T: EthApiServer<
+            RpcTxReq<T::NetworkTypes>,
             RpcTransaction<T::NetworkTypes>,
             RpcBlock<T::NetworkTypes>,
             RpcReceipt<T::NetworkTypes>,
@@ -45,10 +46,10 @@ impl<T> FullEthApiServer for T where
 {
 }
 
-/// Eth rpc interface: <https://ethereum.github.io/execution-apis/docs/reference/json-rpc-api>
+/// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
+pub trait EthApi<TxReq: RpcObject, T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -213,7 +214,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     #[method(name = "simulateV1")]
     async fn simulate_v1(
         &self,
-        opts: SimulatePayload,
+        opts: SimulatePayload<TxReq>,
         block_number: Option<BlockId>,
     ) -> RpcResult<Vec<SimulatedBlock<B>>>;
 
@@ -221,7 +222,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     #[method(name = "call")]
     async fn call(
         &self,
-        request: TransactionRequest,
+        request: TxReq,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
@@ -232,7 +233,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     #[method(name = "callMany")]
     async fn call_many(
         &self,
-        bundles: Vec<Bundle>,
+        bundles: Vec<Bundle<TxReq>>,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<Vec<EthCallResponse>>>;
@@ -254,7 +255,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     #[method(name = "createAccessList")]
     async fn create_access_list(
         &self,
-        request: TransactionRequest,
+        request: TxReq,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<AccessListResult>;
@@ -264,7 +265,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     #[method(name = "estimateGas")]
     async fn estimate_gas(
         &self,
-        request: TransactionRequest,
+        request: TxReq,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<U256>;
@@ -332,11 +333,17 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     /// Sends transaction; will block waiting for signer to return the
     /// transaction hash.
     #[method(name = "sendTransaction")]
-    async fn send_transaction(&self, request: TransactionRequest) -> RpcResult<B256>;
+    async fn send_transaction(&self, request: TxReq) -> RpcResult<B256>;
 
     /// Sends signed transaction, returning its hash.
     #[method(name = "sendRawTransaction")]
     async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<B256>;
+
+    /// Sends a signed transaction and awaits the transaction receipt.
+    ///
+    /// This will return a timeout error if the transaction isn't included within some time period.
+    #[method(name = "sendRawTransactionSync")]
+    async fn send_raw_transaction_sync(&self, bytes: Bytes) -> RpcResult<R>;
 
     /// Returns an Ethereum specific signature with: sign(keccak256("\x19Ethereum Signed Message:\n"
     /// + len(message) + message))).
@@ -346,7 +353,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     /// Signs a transaction that can be submitted to the network at a later time using with
     /// `sendRawTransaction.`
     #[method(name = "signTransaction")]
-    async fn sign_transaction(&self, transaction: TransactionRequest) -> RpcResult<Bytes>;
+    async fn sign_transaction(&self, transaction: TxReq) -> RpcResult<Bytes>;
 
     /// Signs data via [EIP-712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md).
     #[method(name = "signTypedData")]
@@ -376,6 +383,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
 #[async_trait::async_trait]
 impl<T>
     EthApiServer<
+        RpcTxReq<T::NetworkTypes>,
         RpcTransaction<T::NetworkTypes>,
         RpcBlock<T::NetworkTypes>,
         RpcReceipt<T::NetworkTypes>,
@@ -405,7 +413,7 @@ where
     /// Handler for: `eth_accounts`
     fn accounts(&self) -> RpcResult<Vec<Address>> {
         trace!(target: "rpc::eth", "Serving eth_accounts");
-        Ok(EthApiSpec::accounts(self))
+        Ok(EthTransactions::accounts(self))
     }
 
     /// Handler for: `eth_blockNumber`
@@ -648,7 +656,7 @@ where
     /// Handler for: `eth_simulateV1`
     async fn simulate_v1(
         &self,
-        payload: SimulatePayload,
+        payload: SimulatePayload<RpcTxReq<T::NetworkTypes>>,
         block_number: Option<BlockId>,
     ) -> RpcResult<Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
@@ -659,7 +667,7 @@ where
     /// Handler for: `eth_call`
     async fn call(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<T::NetworkTypes>,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
@@ -677,7 +685,7 @@ where
     /// Handler for: `eth_callMany`
     async fn call_many(
         &self,
-        bundles: Vec<Bundle>,
+        bundles: Vec<Bundle<RpcTxReq<T::NetworkTypes>>>,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<Vec<EthCallResponse>>> {
@@ -688,7 +696,7 @@ where
     /// Handler for: `eth_createAccessList`
     async fn create_access_list(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<T::NetworkTypes>,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<AccessListResult> {
@@ -699,7 +707,7 @@ where
     /// Handler for: `eth_estimateGas`
     async fn estimate_gas(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<T::NetworkTypes>,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<U256> {
@@ -791,7 +799,7 @@ where
     }
 
     /// Handler for: `eth_sendTransaction`
-    async fn send_transaction(&self, request: TransactionRequest) -> RpcResult<B256> {
+    async fn send_transaction(&self, request: RpcTxReq<T::NetworkTypes>) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?request, "Serving eth_sendTransaction");
         Ok(EthTransactions::send_transaction(self, request).await?)
     }
@@ -802,6 +810,12 @@ where
         Ok(EthTransactions::send_raw_transaction(self, tx).await?)
     }
 
+    /// Handler for: `eth_sendRawTransactionSync`
+    async fn send_raw_transaction_sync(&self, tx: Bytes) -> RpcResult<RpcReceipt<T::NetworkTypes>> {
+        trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransactionSync");
+        Ok(EthTransactions::send_raw_transaction_sync(self, tx).await?)
+    }
+
     /// Handler for: `eth_sign`
     async fn sign(&self, address: Address, message: Bytes) -> RpcResult<Bytes> {
         trace!(target: "rpc::eth", ?address, ?message, "Serving eth_sign");
@@ -809,7 +823,7 @@ where
     }
 
     /// Handler for: `eth_signTransaction`
-    async fn sign_transaction(&self, request: TransactionRequest) -> RpcResult<Bytes> {
+    async fn sign_transaction(&self, request: RpcTxReq<T::NetworkTypes>) -> RpcResult<Bytes> {
         trace!(target: "rpc::eth", ?request, "Serving eth_signTransaction");
         Ok(EthTransactions::sign_transaction(self, request).await?)
     }

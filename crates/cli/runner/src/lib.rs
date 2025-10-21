@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Entrypoint for running commands.
 
@@ -36,11 +36,15 @@ impl CliRunner {
     pub const fn from_runtime(tokio_runtime: tokio::runtime::Runtime) -> Self {
         Self { tokio_runtime }
     }
-}
 
-// === impl CliRunner ===
+    /// Executes an async block on the runtime and blocks until completion.
+    pub fn block_on<F, T>(&self, fut: F) -> T
+    where
+        F: Future<Output = T>,
+    {
+        self.tokio_runtime.block_on(fut)
+    }
 
-impl CliRunner {
     /// Executes the given _async_ command on the tokio runtime until the command future resolves or
     /// until the process receives a `SIGINT` or `SIGTERM` signal.
     ///
@@ -99,8 +103,7 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        let tokio_runtime = tokio_runtime()?;
-        tokio_runtime.block_on(run_until_ctrl_c(fut))?;
+        self.tokio_runtime.block_on(run_until_ctrl_c(fut))?;
         Ok(())
     }
 
@@ -113,7 +116,7 @@ impl CliRunner {
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        let tokio_runtime = tokio_runtime()?;
+        let tokio_runtime = self.tokio_runtime;
         let handle = tokio_runtime.handle().clone();
         let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(fut));
         tokio_runtime

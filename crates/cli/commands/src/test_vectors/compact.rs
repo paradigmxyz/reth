@@ -94,7 +94,6 @@ compact_types!(
         Log,
         // BranchNodeCompact, // todo requires arbitrary
         TrieMask,
-        // TxDeposit, TODO(joshie): optimism
         // reth_prune_types
         PruneCheckpoint,
         PruneMode,
@@ -222,23 +221,6 @@ where
         };
         let res = obj.to_compact(&mut compact_buffer);
 
-        // `Compact` for `StoredNibbles` and `StoredNibblesSubKey` is implemented as converting to
-        // an array of nybbles, with each byte representing one nibble. This also matches the
-        // internal representation of `nybbles::Nibbles`: each nibble is stored in a separate byte,
-        // with high nibble set to zero.
-        //
-        // Unfortunately, the `Arbitrary` implementation for `nybbles::Nibbles` doesn't generate
-        // valid nibbles, as it sets the high nibble to a non-zero value.
-        //
-        // This hack sets the high nibble to zero.
-        //
-        // TODO: remove this, see https://github.com/paradigmxyz/reth/pull/17006
-        if type_name == "StoredNibbles" || type_name == "StoredNibblesSubKey" {
-            for byte in &mut compact_buffer {
-                *byte &= 0x0F;
-            }
-        }
-
         if IDENTIFIER_TYPE.contains(&type_name) {
             compact_buffer.push(res as u8);
         }
@@ -301,7 +283,7 @@ pub fn type_name<T>() -> String {
     // With alloy type transition <https://github.com/paradigmxyz/reth/pull/15768> the types are renamed, we map them here to the original name so that test vector files remain consistent
     let name = std::any::type_name::<T>();
     match name {
-        "alloy_consensus::transaction::typed::EthereumTypedTransaction<alloy_consensus::transaction::eip4844::TxEip4844>" => "Transaction".to_string(),
+        "alloy_consensus::transaction::envelope::EthereumTypedTransaction<alloy_consensus::transaction::eip4844::TxEip4844>" => "Transaction".to_string(),
         "alloy_consensus::transaction::envelope::EthereumTxEnvelope<alloy_consensus::transaction::eip4844::TxEip4844>" => "TransactionSigned".to_string(),
         name => {
             name.split("::").last().unwrap_or(std::any::type_name::<T>()).to_string()

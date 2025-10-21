@@ -1,15 +1,17 @@
-use alloy_consensus::Header;
 use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
-use reth_db::static_file::{
-    ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+use reth_db::{
+    static_file::{
+        ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+    },
+    RawDupSort,
 };
 use reth_db_api::{
     table::{Decompress, DupSort, Table},
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
 use reth_db_common::DbTool;
-use reth_node_api::{ReceiptTy, TxTy};
+use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
@@ -63,16 +65,16 @@ impl Command {
             }
             Subcommand::StaticFile { segment, key, raw } => {
                 let (key, mask): (u64, _) = match segment {
-                    StaticFileSegment::Headers => {
-                        (table_key::<tables::Headers>(&key)?, <HeaderWithHashMask<Header>>::MASK)
-                    }
+                    StaticFileSegment::Headers => (
+                        table_key::<tables::Headers>(&key)?,
+                        <HeaderWithHashMask<HeaderTy<N>>>::MASK,
+                    ),
                     StaticFileSegment::Transactions => {
                         (table_key::<tables::Transactions>(&key)?, <TransactionMask<TxTy<N>>>::MASK)
                     }
                     StaticFileSegment::Receipts => {
                         (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
                     }
-                    StaticFileSegment::BlockMeta => todo!(),
                 };
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(
@@ -94,7 +96,7 @@ impl Command {
                         } else {
                             match segment {
                                 StaticFileSegment::Headers => {
-                                    let header = Header::decompress(content[0].as_slice())?;
+                                    let header = HeaderTy::<N>::decompress(content[0].as_slice())?;
                                     let block_hash = BlockHash::decompress(content[1].as_slice())?;
                                     println!(
                                         "Header\n{}\n\nBlockHash\n{}",
@@ -113,9 +115,6 @@ impl Command {
                                         content[0].as_slice(),
                                     )?;
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
-                                }
-                                StaticFileSegment::BlockMeta => {
-                                    todo!()
                                 }
                             }
                         }
@@ -181,9 +180,21 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
         // process dupsort table
         let subkey = table_subkey::<T>(self.subkey.as_deref())?;
 
-        match self.tool.get_dup::<T>(key, subkey)? {
+        let content = if self.raw {
+            self.tool
+                .get_dup::<RawDupSort<T>>(RawKey::from(key), RawKey::from(subkey))?
+                .map(|content| hex::encode_prefixed(content.raw_value()))
+        } else {
+            self.tool
+                .get_dup::<T>(key, subkey)?
+                .as_ref()
+                .map(serde_json::to_string_pretty)
+                .transpose()?
+        };
+
+        match content {
             Some(content) => {
-                println!("{}", serde_json::to_string_pretty(&content)?);
+                println!("{content}");
             }
             None => {
                 error!(target: "reth::cli", "No content for the given table subkey.");

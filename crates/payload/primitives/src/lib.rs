@@ -8,7 +8,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -26,7 +26,8 @@ pub use error::{
 
 mod traits;
 pub use traits::{
-    BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilderAttributes,
+    BuildNextEnv, BuiltPayload, PayloadAttributes, PayloadAttributesBuilder,
+    PayloadBuilderAttributes,
 };
 
 mod payload;
@@ -70,6 +71,7 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
 /// * If V2, this ensures that the payload timestamp is pre-Cancun.
 /// * If V3, this ensures that the payload timestamp is within the Cancun timestamp.
 /// * If V4, this ensures that the payload timestamp is within the Prague timestamp.
+/// * If V5, this ensures that the payload timestamp is within the Osaka timestamp.
 ///
 /// Otherwise, this will return [`EngineObjectValidationError::UnsupportedFork`].
 pub fn validate_payload_timestamp(
@@ -413,6 +415,17 @@ impl EngineApiMessageVersion {
     pub const fn is_v5(&self) -> bool {
         matches!(self, Self::V5)
     }
+
+    /// Returns the method name for the given version.
+    pub const fn method_name(&self) -> &'static str {
+        match self {
+            Self::V1 => "engine_newPayloadV1",
+            Self::V2 => "engine_newPayloadV2",
+            Self::V3 => "engine_newPayloadV3",
+            Self::V4 => "engine_newPayloadV4",
+            Self::V5 => "engine_newPayloadV5",
+        }
+    }
 }
 
 /// Determines how we should choose the payload to return.
@@ -509,7 +522,7 @@ mod tests {
         let mut requests_valid_reversed = valid_requests;
         requests_valid_reversed.reverse();
         assert_matches!(
-            validate_execution_requests(&requests_with_empty),
+            validate_execution_requests(&requests_valid_reversed),
             Err(EngineObjectValidationError::InvalidParams(_))
         );
 

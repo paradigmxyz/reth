@@ -2,7 +2,10 @@
 
 use crate::Case;
 use reth_db::DatabaseError;
+use reth_ethereum_primitives::Block;
+use reth_primitives_traits::RecoveredBlock;
 use reth_provider::ProviderError;
+use reth_stateless::ExecutionWitness;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -17,9 +20,6 @@ pub enum Error {
     /// The test was skipped
     #[error("test was skipped")]
     Skipped,
-    /// No post state found in test
-    #[error("no post state found for validation")]
-    MissingPostState,
     /// Block processing failed
     /// Note: This includes but is not limited to execution.
     /// For example, the header number could be incorrect.
@@ -27,6 +27,9 @@ pub enum Error {
     BlockProcessingFailed {
         /// The block number for the block that failed
         block_number: u64,
+        /// Contains the inputs necessary for the block stateless validation guest program used in
+        /// zkVMs to prove the block is invalid.
+        partial_program_inputs: Vec<(RecoveredBlock<Block>, ExecutionWitness)>,
         /// The specific error
         #[source]
         err: Box<dyn std::error::Error + Send + Sync>,
@@ -70,9 +73,10 @@ impl Error {
     /// Create a new [`Error::BlockProcessingFailed`] error.
     pub fn block_failed(
         block_number: u64,
+        partial_program_inputs: Vec<(RecoveredBlock<Block>, ExecutionWitness)>,
         err: impl std::error::Error + Send + Sync + 'static,
     ) -> Self {
-        Self::BlockProcessingFailed { block_number, err: Box::new(err) }
+        Self::BlockProcessingFailed { block_number, partial_program_inputs, err: Box::new(err) }
     }
 }
 

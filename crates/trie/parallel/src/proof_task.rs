@@ -1,191 +1,631 @@
-//! A Task that manages sending proof requests to a number of tasks that have longer-running
-//! database transactions.
+//! Parallel proof computation using worker pools with dedicated database transactions.
 //!
-//! The [`ProofTaskManager`] ensures that there are a max number of currently executing proof tasks,
-//! and is responsible for managing the fixed number of database transactions created at the start
-//! of the task.
+//!
+//! # Architecture
+//!
+//! - **Worker Pools**: Pre-spawned workers with dedicated database transactions
+//!   - Storage pool: Handles storage proofs and blinded storage node requests
+//!   - Account pool: Handles account multiproofs and blinded account node requests
+//! - **Direct Channel Access**: [`ProofWorkerHandle`] provides type-safe queue methods with direct
+//!   access to worker channels, eliminating routing overhead
+//! - **Automatic Shutdown**: Workers terminate gracefully when all handles are dropped
 //!
 //! Individual [`ProofTaskTx`] instances manage a dedicated [`InMemoryTrieCursorFactory`] and
 //! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
 
-use crate::root::ParallelStateRootError;
-use alloy_primitives::{map::B256Set, B256};
+use crate::{
+    root::ParallelStateRootError,
+    stats::{ParallelTrieStats, ParallelTrieTracker},
+    StorageRootTargets,
+};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    B256,
+};
+use alloy_rlp::{BufMut, Encodable};
+use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use dashmap::DashMap;
 use reth_db_api::transaction::DbTx;
-use reth_execution_errors::SparseTrieError;
+use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderResult, StateCommitmentProvider,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
 };
+use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
-    prefix_set::TriePrefixSetsMut,
-    proof::{ProofBlindedProviderFactory, StorageProof},
-    trie_cursor::InMemoryTrieCursorFactory,
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    node_iter::{TrieElement, TrieNodeIter},
+    prefix_set::{TriePrefixSets, TriePrefixSetsMut},
+    proof::{ProofTrieNodeProviderFactory, StorageProof},
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
-    DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
+    walker::TrieWalker,
+    DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted,
+    MultiProofTargets, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::prefix_set::{PrefixSet, PrefixSetMut};
+use reth_trie_common::{
+    added_removed_keys::MultiAddedRemovedKeys,
+    prefix_set::{PrefixSet, PrefixSetMut},
+    proof::{DecodedProofNodes, ProofRetainer},
+};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use reth_trie_sparse::blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode};
+use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
-    collections::VecDeque,
     sync::{
-        atomic::{AtomicUsize, Ordering},
-        mpsc::{channel, Receiver, SendError, Sender},
+        mpsc::{channel, Receiver, Sender},
         Arc,
     },
     time::Instant,
 };
 use tokio::runtime::Handle;
-use tracing::debug;
+use tracing::trace;
+
+#[cfg(feature = "metrics")]
+use crate::proof_task_metrics::ProofTaskTrieMetrics;
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
-type BlindedNodeResult = Result<Option<RevealedNode>, SparseTrieError>;
+type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
+type AccountMultiproofResult =
+    Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError>;
 
-/// A task that manages sending multiproof requests to a number of tasks that have longer-running
-/// database transactions
+/// Internal message for storage workers.
 #[derive(Debug)]
-pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
-    /// Max number of database transactions to create
-    max_concurrency: usize,
-    /// Number of database transactions created
-    total_transactions: usize,
-    /// Consistent view provider used for creating transactions on-demand
+enum StorageWorkerJob {
+    /// Storage proof computation request
+    StorageProof {
+        /// Storage proof input parameters
+        input: StorageProofInput,
+        /// Channel to send result back to original caller
+        result_sender: Sender<StorageProofResult>,
+    },
+    /// Blinded storage node retrieval request
+    BlindedStorageNode {
+        /// Target account
+        account: B256,
+        /// Path to the storage node
+        path: Nibbles,
+        /// Channel to send result back to original caller
+        result_sender: Sender<TrieNodeProviderResult>,
+    },
+}
+
+/// Worker loop for storage trie operations.
+///
+/// # Lifecycle
+///
+/// Each worker:
+/// 1. Receives `StorageWorkerJob` from crossbeam unbounded channel
+/// 2. Computes result using its dedicated long-lived transaction
+/// 3. Sends result directly to original caller via `std::mpsc`
+/// 4. Repeats until channel closes (graceful shutdown)
+///
+/// # Transaction Reuse
+///
+/// Reuses the same transaction and cursor factories across multiple operations
+/// to avoid transaction creation and cursor factory setup overhead.
+///
+/// # Panic Safety
+///
+/// If this function panics, the worker thread terminates but other workers
+/// continue operating and the system degrades gracefully.
+///
+/// # Shutdown
+///
+/// Worker shuts down when the crossbeam channel closes (all senders dropped).
+fn storage_worker_loop<Factory>(
     view: ConsistentDbView<Factory>,
-    /// Proof task context shared across all proof tasks
     task_ctx: ProofTaskCtx,
-    /// Proof tasks pending execution
-    pending_tasks: VecDeque<ProofTaskKind>,
-    /// The underlying handle from which to spawn proof tasks
-    executor: Handle,
-    /// The proof task transactions, containing owned cursor factories that are reused for proof
-    /// calculation.
-    proof_task_txs: Vec<ProofTaskTx<FactoryTx<Factory>>>,
-    /// A receiver for new proof tasks.
-    proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
-    /// A sender for sending back transactions.
-    tx_sender: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
-    /// The number of active handles.
-    ///
-    /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
-    /// [`ProofTaskManagerHandle::drop`].
-    active_handles: Arc<AtomicUsize>,
-}
-
-impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
-    /// Creates a new [`ProofTaskManager`] with the given max concurrency, creating that number of
-    /// cursor factories.
-    ///
-    /// Returns an error if the consistent view provider fails to create a read-only transaction.
-    pub fn new(
-        executor: Handle,
-        view: ConsistentDbView<Factory>,
-        task_ctx: ProofTaskCtx,
-        max_concurrency: usize,
-    ) -> Self {
-        let (tx_sender, proof_task_rx) = channel();
-        Self {
-            max_concurrency,
-            total_transactions: 0,
-            view,
-            task_ctx,
-            pending_tasks: VecDeque::new(),
-            executor,
-            proof_task_txs: Vec::new(),
-            proof_task_rx,
-            tx_sender,
-            active_handles: Arc::new(AtomicUsize::new(0)),
-        }
-    }
-
-    /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
-    pub fn handle(&self) -> ProofTaskManagerHandle<FactoryTx<Factory>> {
-        ProofTaskManagerHandle::new(self.tx_sender.clone(), self.active_handles.clone())
-    }
-}
-
-impl<Factory> ProofTaskManager<Factory>
-where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + 'static,
+    work_rx: CrossbeamReceiver<StorageWorkerJob>,
+    worker_id: usize,
+    #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
+) where
+    Factory: DatabaseProviderFactory<Provider: BlockReader>,
 {
-    /// Inserts the task into the pending tasks queue.
-    pub fn queue_proof_task(&mut self, task: ProofTaskKind) {
-        self.pending_tasks.push_back(task);
-    }
+    // Create db transaction before entering work loop
+    let provider =
+        view.provider_ro().expect("Storage worker failed to initialize: database unavailable");
+    let proof_tx = ProofTaskTx::new(provider.into_tx(), task_ctx, worker_id);
 
-    /// Gets either the next available transaction, or creates a new one if all are in use and the
-    /// total number of transactions created is less than the max concurrency.
-    pub fn get_or_create_tx(&mut self) -> ProviderResult<Option<ProofTaskTx<FactoryTx<Factory>>>> {
-        if let Some(proof_task_tx) = self.proof_task_txs.pop() {
-            return Ok(Some(proof_task_tx));
-        }
+    tracing::debug!(
+        target: "trie::proof_task",
+        worker_id,
+        "Storage worker started"
+    );
 
-        // if we can create a new tx within our concurrency limits, create one on-demand
-        if self.total_transactions < self.max_concurrency {
-            let provider_ro = self.view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            self.total_transactions += 1;
-            return Ok(Some(ProofTaskTx::new(tx, self.task_ctx.clone())));
-        }
+    // Create factories once at worker startup to avoid recreation overhead.
+    let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
 
-        Ok(None)
-    }
+    // Create blinded provider factory once for all blinded node requests
+    let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
+        trie_cursor_factory.clone(),
+        hashed_cursor_factory.clone(),
+        proof_tx.task_ctx.prefix_sets.clone(),
+    );
 
-    /// Spawns the next queued proof task on the executor with the given input, if there are any
-    /// transactions available.
-    ///
-    /// This will return an error if a transaction must be created on-demand and the consistent view
-    /// provider fails.
-    pub fn try_spawn_next(&mut self) -> ProviderResult<()> {
-        let Some(task) = self.pending_tasks.pop_front() else { return Ok(()) };
+    let mut storage_proofs_processed = 0u64;
+    let mut storage_nodes_processed = 0u64;
 
-        let Some(proof_task_tx) = self.get_or_create_tx()? else {
-            // if there are no txs available, requeue the proof task
-            self.pending_tasks.push_front(task);
-            return Ok(())
-        };
+    while let Ok(job) = work_rx.recv() {
+        match job {
+            StorageWorkerJob::StorageProof { input, result_sender } => {
+                let hashed_address = input.hashed_address;
 
-        let tx_sender = self.tx_sender.clone();
-        self.executor.spawn_blocking(move || match task {
-            ProofTaskKind::StorageProof(input, sender) => {
-                proof_task_tx.storage_proof(input, sender, tx_sender);
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    hashed_address = ?hashed_address,
+                    prefix_set_len = input.prefix_set.len(),
+                    target_slots = input.target_slots.len(),
+                    "Processing storage proof"
+                );
+
+                let proof_start = Instant::now();
+                let result = proof_tx.compute_storage_proof(
+                    input,
+                    trie_cursor_factory.clone(),
+                    hashed_cursor_factory.clone(),
+                );
+
+                let proof_elapsed = proof_start.elapsed();
+                storage_proofs_processed += 1;
+
+                if result_sender.send(result).is_err() {
+                    tracing::debug!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        hashed_address = ?hashed_address,
+                        storage_proofs_processed,
+                        "Storage proof receiver dropped, discarding result"
+                    );
+                }
+
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    hashed_address = ?hashed_address,
+                    proof_time_us = proof_elapsed.as_micros(),
+                    total_processed = storage_proofs_processed,
+                    "Storage proof completed"
+                );
             }
-            ProofTaskKind::BlindedAccountNode(path, sender) => {
-                proof_task_tx.blinded_account_node(path, sender, tx_sender);
+
+            StorageWorkerJob::BlindedStorageNode { account, path, result_sender } => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    ?account,
+                    ?path,
+                    "Processing blinded storage node"
+                );
+
+                let start = Instant::now();
+                let result =
+                    blinded_provider_factory.storage_node_provider(account).trie_node(&path);
+                let elapsed = start.elapsed();
+
+                storage_nodes_processed += 1;
+
+                if result_sender.send(result).is_err() {
+                    tracing::debug!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        ?account,
+                        ?path,
+                        storage_nodes_processed,
+                        "Blinded storage node receiver dropped, discarding result"
+                    );
+                }
+
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    ?account,
+                    ?path,
+                    elapsed_us = elapsed.as_micros(),
+                    total_processed = storage_nodes_processed,
+                    "Blinded storage node completed"
+                );
             }
-            ProofTaskKind::BlindedStorageNode(account, path, sender) => {
-                proof_task_tx.blinded_storage_node(account, path, sender, tx_sender);
-            }
-        });
-
-        Ok(())
-    }
-
-    /// Loops, managing the proof tasks, and sending new tasks to the executor.
-    pub fn run(mut self) -> ProviderResult<()> {
-        loop {
-            match self.proof_task_rx.recv() {
-                Ok(message) => match message {
-                    ProofTaskMessage::QueueTask(task) => {
-                        // queue the task
-                        self.queue_proof_task(task)
-                    }
-                    ProofTaskMessage::Transaction(tx) => {
-                        // return the transaction to the pool
-                        self.proof_task_txs.push(tx);
-                    }
-                    ProofTaskMessage::Terminate => return Ok(()),
-                },
-                // All senders are disconnected, so we can terminate
-                // However this should never happen, as this struct stores a sender
-                Err(_) => return Ok(()),
-            };
-
-            // try spawning the next task
-            self.try_spawn_next()?;
         }
     }
+
+    tracing::debug!(
+        target: "trie::proof_task",
+        worker_id,
+        storage_proofs_processed,
+        storage_nodes_processed,
+        "Storage worker shutting down"
+    );
+
+    #[cfg(feature = "metrics")]
+    metrics.record_storage_nodes(storage_nodes_processed as usize);
 }
+
+/// Worker loop for account trie operations.
+///
+/// # Lifecycle
+///
+/// Each worker:
+/// 1. Receives `AccountWorkerJob` from crossbeam unbounded channel
+/// 2. Computes result using its dedicated long-lived transaction
+/// 3. Sends result directly to original caller via `std::mpsc`
+/// 4. Repeats until channel closes (graceful shutdown)
+///
+/// # Transaction Reuse
+///
+/// Reuses the same transaction and cursor factories across multiple operations
+/// to avoid transaction creation and cursor factory setup overhead.
+///
+/// # Panic Safety
+///
+/// If this function panics, the worker thread terminates but other workers
+/// continue operating and the system degrades gracefully.
+///
+/// # Shutdown
+///
+/// Worker shuts down when the crossbeam channel closes (all senders dropped).
+fn account_worker_loop<Factory>(
+    view: ConsistentDbView<Factory>,
+    task_ctx: ProofTaskCtx,
+    work_rx: CrossbeamReceiver<AccountWorkerJob>,
+    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    worker_id: usize,
+    #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
+) where
+    Factory: DatabaseProviderFactory<Provider: BlockReader>,
+{
+    // Create db transaction before entering work loop
+    let provider =
+        view.provider_ro().expect("Account worker failed to initialize: database unavailable");
+    let proof_tx = ProofTaskTx::new(provider.into_tx(), task_ctx, worker_id);
+
+    tracing::debug!(
+        target: "trie::proof_task",
+        worker_id,
+        "Account worker started"
+    );
+
+    // Create factories once at worker startup to avoid recreation overhead.
+    let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
+
+    // Create blinded provider factory once for all blinded node requests
+    let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
+        trie_cursor_factory.clone(),
+        hashed_cursor_factory.clone(),
+        proof_tx.task_ctx.prefix_sets.clone(),
+    );
+
+    let mut account_proofs_processed = 0u64;
+    let mut account_nodes_processed = 0u64;
+
+    while let Ok(job) = work_rx.recv() {
+        match job {
+            AccountWorkerJob::AccountMultiproof { mut input, result_sender } => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    targets = input.targets.len(),
+                    "Processing account multiproof"
+                );
+
+                let proof_start = Instant::now();
+                let mut tracker = ParallelTrieTracker::default();
+
+                let mut storage_prefix_sets =
+                    std::mem::take(&mut input.prefix_sets.storage_prefix_sets);
+
+                let storage_root_targets_len = StorageRootTargets::count(
+                    &input.prefix_sets.account_prefix_set,
+                    &storage_prefix_sets,
+                );
+                tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
+
+                let storage_proof_receivers = match dispatch_storage_proofs(
+                    &storage_work_tx,
+                    &input.targets,
+                    &mut storage_prefix_sets,
+                    input.collect_branch_node_masks,
+                    input.multi_added_removed_keys.as_ref(),
+                ) {
+                    Ok(receivers) => receivers,
+                    Err(error) => {
+                        let _ = result_sender.send(Err(error));
+                        continue;
+                    }
+                };
+
+                // Use the missed leaves cache passed from the multiproof manager
+                let missed_leaves_storage_roots = &input.missed_leaves_storage_roots;
+
+                let account_prefix_set = std::mem::take(&mut input.prefix_sets.account_prefix_set);
+
+                let ctx = AccountMultiproofParams {
+                    targets: &input.targets,
+                    prefix_set: account_prefix_set,
+                    collect_branch_node_masks: input.collect_branch_node_masks,
+                    multi_added_removed_keys: input.multi_added_removed_keys.as_ref(),
+                    storage_proof_receivers,
+                    missed_leaves_storage_roots,
+                };
+
+                let result = build_account_multiproof_with_storage_roots(
+                    trie_cursor_factory.clone(),
+                    hashed_cursor_factory.clone(),
+                    ctx,
+                    &mut tracker,
+                );
+
+                let proof_elapsed = proof_start.elapsed();
+                let stats = tracker.finish();
+                let result = result.map(|proof| (proof, stats));
+                account_proofs_processed += 1;
+
+                if result_sender.send(result).is_err() {
+                    tracing::debug!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        account_proofs_processed,
+                        "Account multiproof receiver dropped, discarding result"
+                    );
+                }
+
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    proof_time_us = proof_elapsed.as_micros(),
+                    total_processed = account_proofs_processed,
+                    "Account multiproof completed"
+                );
+            }
+
+            AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    ?path,
+                    "Processing blinded account node"
+                );
+
+                let start = Instant::now();
+                let result = blinded_provider_factory.account_node_provider().trie_node(&path);
+                let elapsed = start.elapsed();
+
+                account_nodes_processed += 1;
+
+                if result_sender.send(result).is_err() {
+                    tracing::debug!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        ?path,
+                        account_nodes_processed,
+                        "Blinded account node receiver dropped, discarding result"
+                    );
+                }
+
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    ?path,
+                    node_time_us = elapsed.as_micros(),
+                    total_processed = account_nodes_processed,
+                    "Blinded account node completed"
+                );
+            }
+        }
+    }
+
+    tracing::debug!(
+        target: "trie::proof_task",
+        worker_id,
+        account_proofs_processed,
+        account_nodes_processed,
+        "Account worker shutting down"
+    );
+
+    #[cfg(feature = "metrics")]
+    metrics.record_account_nodes(account_nodes_processed as usize);
+}
+
+/// Builds an account multiproof by consuming storage proof receivers lazily during trie walk.
+///
+/// This is a helper function used by account workers to build the account subtree proof
+/// while storage proofs are still being computed. Receivers are consumed only when needed,
+/// enabling interleaved parallelism between account trie traversal and storage proof computation.
+///
+/// Returns a `DecodedMultiProof` containing the account subtree and storage proofs.
+fn build_account_multiproof_with_storage_roots<C, H>(
+    trie_cursor_factory: C,
+    hashed_cursor_factory: H,
+    ctx: AccountMultiproofParams<'_>,
+    tracker: &mut ParallelTrieTracker,
+) -> Result<DecodedMultiProof, ParallelStateRootError>
+where
+    C: TrieCursorFactory + Clone,
+    H: HashedCursorFactory + Clone,
+{
+    let accounts_added_removed_keys =
+        ctx.multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
+
+    // Create the walker.
+    let walker = TrieWalker::<_>::state_trie(
+        trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
+        ctx.prefix_set,
+    )
+    .with_added_removed_keys(accounts_added_removed_keys)
+    .with_deletions_retained(true);
+
+    // Create a hash builder to rebuild the root node since it is not available in the database.
+    let retainer = ctx
+        .targets
+        .keys()
+        .map(Nibbles::unpack)
+        .collect::<ProofRetainer>()
+        .with_added_removed_keys(accounts_added_removed_keys);
+    let mut hash_builder = HashBuilder::default()
+        .with_proof_retainer(retainer)
+        .with_updates(ctx.collect_branch_node_masks);
+
+    // Initialize storage multiproofs map with pre-allocated capacity.
+    // Proofs will be inserted as they're consumed from receivers during trie walk.
+    let mut collected_decoded_storages: B256Map<DecodedStorageMultiProof> =
+        B256Map::with_capacity_and_hasher(ctx.targets.len(), Default::default());
+    let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+    let mut account_node_iter = TrieNodeIter::state_trie(
+        walker,
+        hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+    );
+
+    let mut storage_proof_receivers = ctx.storage_proof_receivers;
+
+    while let Some(account_node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
+        match account_node {
+            TrieElement::Branch(node) => {
+                hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+            }
+            TrieElement::Leaf(hashed_address, account) => {
+                let root = match storage_proof_receivers.remove(&hashed_address) {
+                    Some(receiver) => {
+                        // Block on this specific storage proof receiver - enables interleaved
+                        // parallelism
+                        let proof = receiver.recv().map_err(|_| {
+                            ParallelStateRootError::StorageRoot(
+                                reth_execution_errors::StorageRootError::Database(
+                                    DatabaseError::Other(format!(
+                                        "Storage proof channel closed for {hashed_address}"
+                                    )),
+                                ),
+                            )
+                        })??;
+                        let root = proof.root;
+                        collected_decoded_storages.insert(hashed_address, proof);
+                        root
+                    }
+                    // Since we do not store all intermediate nodes in the database, there might
+                    // be a possibility of re-adding a non-modified leaf to the hash builder.
+                    None => {
+                        tracker.inc_missed_leaves();
+
+                        match ctx.missed_leaves_storage_roots.entry(hashed_address) {
+                            dashmap::Entry::Occupied(occ) => *occ.get(),
+                            dashmap::Entry::Vacant(vac) => {
+                                let root = StorageProof::new_hashed(
+                                    trie_cursor_factory.clone(),
+                                    hashed_cursor_factory.clone(),
+                                    hashed_address,
+                                )
+                                .with_prefix_set_mut(Default::default())
+                                .storage_multiproof(
+                                    ctx.targets.get(&hashed_address).cloned().unwrap_or_default(),
+                                )
+                                .map_err(|e| {
+                                    ParallelStateRootError::StorageRoot(
+                                        reth_execution_errors::StorageRootError::Database(
+                                            DatabaseError::Other(e.to_string()),
+                                        ),
+                                    )
+                                })?
+                                .root;
+
+                                vac.insert(root);
+                                root
+                            }
+                        }
+                    }
+                };
+
+                // Encode account
+                account_rlp.clear();
+                let account = account.into_trie_account(root);
+                account.encode(&mut account_rlp as &mut dyn BufMut);
+
+                hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+            }
+        }
+    }
+
+    // Consume remaining storage proof receivers for accounts not encountered during trie walk.
+    for (hashed_address, receiver) in storage_proof_receivers {
+        if let Ok(Ok(proof)) = receiver.recv() {
+            collected_decoded_storages.insert(hashed_address, proof);
+        }
+    }
+
+    let _ = hash_builder.root();
+
+    let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
+    let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)?;
+
+    let (branch_node_hash_masks, branch_node_tree_masks) = if ctx.collect_branch_node_masks {
+        let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
+        (
+            updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
+            updated_branch_nodes.into_iter().map(|(path, node)| (path, node.tree_mask)).collect(),
+        )
+    } else {
+        (Default::default(), Default::default())
+    };
+
+    Ok(DecodedMultiProof {
+        account_subtree: decoded_account_subtree,
+        branch_node_hash_masks,
+        branch_node_tree_masks,
+        storages: collected_decoded_storages,
+    })
+}
+
+/// Queues storage proofs for all accounts in the targets and returns receivers.
+///
+/// This function queues all storage proof tasks to the worker pool but returns immediately
+/// with receivers, allowing the account trie walk to proceed in parallel with storage proof
+/// computation. This enables interleaved parallelism for better performance.
+///
+/// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
+fn dispatch_storage_proofs(
+    storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
+    targets: &MultiProofTargets,
+    storage_prefix_sets: &mut B256Map<PrefixSet>,
+    with_branch_node_masks: bool,
+    multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
+) -> Result<B256Map<Receiver<StorageProofResult>>, ParallelStateRootError> {
+    let mut storage_proof_receivers =
+        B256Map::with_capacity_and_hasher(targets.len(), Default::default());
+
+    // Queue all storage proofs to worker pool
+    for (hashed_address, target_slots) in targets.iter() {
+        let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
+
+        // Always queue a storage proof so we obtain the storage root even when no slots are
+        // requested.
+        let input = StorageProofInput::new(
+            *hashed_address,
+            prefix_set,
+            target_slots.clone(),
+            with_branch_node_masks,
+            multi_added_removed_keys.cloned(),
+        );
+
+        let (sender, receiver) = channel();
+
+        // If queuing fails, propagate error up (no fallback)
+        storage_work_tx
+            .send(StorageWorkerJob::StorageProof { input, result_sender: sender })
+            .map_err(|_| {
+                ParallelStateRootError::Other(format!(
+                    "Failed to queue storage proof for {}: storage worker pool unavailable",
+                    hashed_address
+                ))
+            })?;
+
+        storage_proof_receivers.insert(*hashed_address, receiver);
+    }
+
+    Ok(storage_proof_receivers)
+}
+
+/// Type alias for the factory tuple returned by `create_factories`
+type ProofFactories<'a, Tx> = (
+    InMemoryTrieCursorFactory<DatabaseTrieCursorFactory<&'a Tx>, &'a TrieUpdatesSorted>,
+    HashedPostStateCursorFactory<DatabaseHashedCursorFactory<&'a Tx>, &'a HashedPostStateSorted>,
+);
 
 /// This contains all information shared between all storage proof instances.
 #[derive(Debug)]
@@ -195,12 +635,16 @@ pub struct ProofTaskTx<Tx> {
 
     /// Trie updates, prefix sets, and state updates
     task_ctx: ProofTaskCtx,
+
+    /// Identifier for the worker within the worker pool, used only for tracing.
+    id: usize,
 }
 
 impl<Tx> ProofTaskTx<Tx> {
-    /// Initializes a [`ProofTaskTx`] using the given transaction anda[`ProofTaskCtx`].
-    const fn new(tx: Tx, task_ctx: ProofTaskCtx) -> Self {
-        Self { tx, task_ctx }
+    /// Initializes a [`ProofTaskTx`] using the given transaction and a [`ProofTaskCtx`]. The id is
+    /// used only for tracing.
+    const fn new(tx: Tx, task_ctx: ProofTaskCtx, id: usize) -> Self {
+        Self { tx, task_ctx, id }
     }
 }
 
@@ -208,173 +652,85 @@ impl<Tx> ProofTaskTx<Tx>
 where
     Tx: DbTx,
 {
-    fn create_factories(
-        &self,
-    ) -> (
-        InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>,
-        HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, Tx>>,
-    ) {
+    #[inline]
+    fn create_factories(&self) -> ProofFactories<'_, Tx> {
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(&self.tx),
-            &self.task_ctx.nodes_sorted,
+            self.task_ctx.nodes_sorted.as_ref(),
         );
 
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(&self.tx),
-            &self.task_ctx.state_sorted,
+            self.task_ctx.state_sorted.as_ref(),
         );
 
         (trie_cursor_factory, hashed_cursor_factory)
     }
 
-    /// Calculates a storage proof for the given hashed address, and desired prefix set.
-    fn storage_proof(
-        self,
+    /// Compute storage proof with pre-created factories.
+    ///
+    /// Accepts cursor factories as parameters to allow reuse across multiple proofs.
+    /// Used by storage workers in the worker pool to avoid factory recreation
+    /// overhead on each proof computation.
+    #[inline]
+    fn compute_storage_proof(
+        &self,
         input: StorageProofInput,
-        result_sender: Sender<StorageProofResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
-    ) {
-        debug!(
+        trie_cursor_factory: impl TrieCursorFactory,
+        hashed_cursor_factory: impl HashedCursorFactory,
+    ) -> StorageProofResult {
+        // Consume the input so we can move large collections (e.g. target slots) without cloning.
+        let StorageProofInput {
+            hashed_address,
+            prefix_set,
+            target_slots,
+            with_branch_node_masks,
+            multi_added_removed_keys,
+        } = input;
+
+        // Get or create added/removed keys context
+        let multi_added_removed_keys =
+            multi_added_removed_keys.unwrap_or_else(|| Arc::new(MultiAddedRemovedKeys::new()));
+        let added_removed_keys = multi_added_removed_keys.get_storage(&hashed_address);
+
+        let span = tracing::trace_span!(
             target: "trie::proof_task",
-            hashed_address=?input.hashed_address,
-            "Starting storage proof task calculation"
+            "Storage proof calculation",
+            hashed_address = ?hashed_address,
+            worker_id = self.id,
         );
+        let _span_guard = span.enter();
 
-        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
-
-        let target_slots_len = input.target_slots.len();
         let proof_start = Instant::now();
-        let raw_proof_result = StorageProof::new_hashed(
-            trie_cursor_factory,
-            hashed_cursor_factory,
-            input.hashed_address,
-        )
-        .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().cloned()))
-        .with_branch_node_masks(input.with_branch_node_masks)
-        .storage_multiproof(input.target_slots)
-        .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
+        // Compute raw storage multiproof
+        let raw_proof_result =
+            StorageProof::new_hashed(trie_cursor_factory, hashed_cursor_factory, hashed_address)
+                .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().copied()))
+                .with_branch_node_masks(with_branch_node_masks)
+                .with_added_removed_keys(added_removed_keys)
+                .storage_multiproof(target_slots)
+                .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+
+        // Decode proof into DecodedStorageMultiProof
         let decoded_result = raw_proof_result.and_then(|raw_proof| {
             raw_proof.try_into().map_err(|e: alloy_rlp::Error| {
                 ParallelStateRootError::Other(format!(
                     "Failed to decode storage proof for {}: {}",
-                    input.hashed_address, e
+                    hashed_address, e
                 ))
             })
         });
 
-        debug!(
+        trace!(
             target: "trie::proof_task",
-            hashed_address=?input.hashed_address,
-            prefix_set = ?input.prefix_set.len(),
-            target_slots = ?target_slots_len,
-            proof_time = ?proof_start.elapsed(),
-            "Completed storage proof task calculation"
+            hashed_address = ?hashed_address,
+            proof_time_us = proof_start.elapsed().as_micros(),
+            worker_id = self.id,
+            "Completed storage proof calculation"
         );
 
-        // send the result back
-        if let Err(error) = result_sender.send(decoded_result) {
-            debug!(
-                target: "trie::proof_task",
-                hashed_address = ?input.hashed_address,
-                ?error,
-                task_time = ?proof_start.elapsed(),
-                "Failed to send proof result"
-            );
-        }
-
-        // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
-    }
-
-    /// Retrieves blinded account node by path.
-    fn blinded_account_node(
-        self,
-        path: Nibbles,
-        result_sender: Sender<BlindedNodeResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
-    ) {
-        debug!(
-            target: "trie::proof_task",
-            ?path,
-            "Starting blinded account node retrieval"
-        );
-
-        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
-
-        let blinded_provider_factory = ProofBlindedProviderFactory::new(
-            trie_cursor_factory,
-            hashed_cursor_factory,
-            self.task_ctx.prefix_sets.clone(),
-        );
-
-        let start = Instant::now();
-        let result = blinded_provider_factory.account_node_provider().blinded_node(&path);
-        debug!(
-            target: "trie::proof_task",
-            ?path,
-            elapsed = ?start.elapsed(),
-            "Completed blinded account node retrieval"
-        );
-
-        if let Err(error) = result_sender.send(result) {
-            tracing::error!(
-                target: "trie::proof_task",
-                ?path,
-                ?error,
-                "Failed to send blinded account node result"
-            );
-        }
-
-        // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
-    }
-
-    /// Retrieves blinded storage node of the given account by path.
-    fn blinded_storage_node(
-        self,
-        account: B256,
-        path: Nibbles,
-        result_sender: Sender<BlindedNodeResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
-    ) {
-        debug!(
-            target: "trie::proof_task",
-            ?account,
-            ?path,
-            "Starting blinded storage node retrieval"
-        );
-
-        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
-
-        let blinded_provider_factory = ProofBlindedProviderFactory::new(
-            trie_cursor_factory,
-            hashed_cursor_factory,
-            self.task_ctx.prefix_sets.clone(),
-        );
-
-        let start = Instant::now();
-        let result = blinded_provider_factory.storage_node_provider(account).blinded_node(&path);
-        debug!(
-            target: "trie::proof_task",
-            ?account,
-            ?path,
-            elapsed = ?start.elapsed(),
-            "Completed blinded storage node retrieval"
-        );
-
-        if let Err(error) = result_sender.send(result) {
-            tracing::error!(
-                target: "trie::proof_task",
-                ?account,
-                ?path,
-                ?error,
-                "Failed to send blinded storage node result"
-            );
-        }
-
-        // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
+        decoded_result
     }
 }
 
@@ -389,6 +745,8 @@ pub struct StorageProofInput {
     target_slots: B256Set,
     /// Whether or not to collect branch node masks
     with_branch_node_masks: bool,
+    /// Provided by the user to give the necessary context to retain extra proofs.
+    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
 }
 
 impl StorageProofInput {
@@ -399,9 +757,66 @@ impl StorageProofInput {
         prefix_set: PrefixSet,
         target_slots: B256Set,
         with_branch_node_masks: bool,
+        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     ) -> Self {
-        Self { hashed_address, prefix_set, target_slots, with_branch_node_masks }
+        Self {
+            hashed_address,
+            prefix_set,
+            target_slots,
+            with_branch_node_masks,
+            multi_added_removed_keys,
+        }
     }
+}
+
+/// Input parameters for account multiproof computation.
+#[derive(Debug, Clone)]
+pub struct AccountMultiproofInput {
+    /// The targets for which to compute the multiproof.
+    pub targets: MultiProofTargets,
+    /// The prefix sets for the proof calculation.
+    pub prefix_sets: TriePrefixSets,
+    /// Whether or not to collect branch node masks.
+    pub collect_branch_node_masks: bool,
+    /// Provided by the user to give the necessary context to retain extra proofs.
+    pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    /// Cached storage proof roots for missed leaves encountered during account trie walk.
+    pub missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
+}
+
+/// Parameters for building an account multiproof with pre-computed storage roots.
+struct AccountMultiproofParams<'a> {
+    /// The targets for which to compute the multiproof.
+    targets: &'a MultiProofTargets,
+    /// The prefix set for the account trie walk.
+    prefix_set: PrefixSet,
+    /// Whether or not to collect branch node masks.
+    collect_branch_node_masks: bool,
+    /// Provided by the user to give the necessary context to retain extra proofs.
+    multi_added_removed_keys: Option<&'a Arc<MultiAddedRemovedKeys>>,
+    /// Receivers for storage proofs being computed in parallel.
+    storage_proof_receivers: B256Map<Receiver<StorageProofResult>>,
+    /// Cached storage proof roots for missed leaves encountered during account trie walk.
+    missed_leaves_storage_roots: &'a DashMap<B256, B256>,
+}
+
+/// Internal message for account workers.
+#[derive(Debug)]
+enum AccountWorkerJob {
+    /// Account multiproof computation request
+    AccountMultiproof {
+        /// Account multiproof input parameters
+        input: AccountMultiproofInput,
+        /// Channel to send result back to original caller
+        result_sender: Sender<AccountMultiproofResult>,
+    },
+    /// Blinded account node retrieval request
+    BlindedAccountNode {
+        /// Path to the account node
+        path: Nibbles,
+        /// Channel to send result back to original caller
+        result_sender: Sender<TrieNodeProviderResult>,
+    },
 }
 
 /// Data used for initializing cursor factories that is shared across all storage proof instances.
@@ -429,121 +844,272 @@ impl ProofTaskCtx {
     }
 }
 
-/// Message used to communicate with [`ProofTaskManager`].
-#[derive(Debug)]
-pub enum ProofTaskMessage<Tx> {
-    /// A request to queue a proof task.
-    QueueTask(ProofTaskKind),
-    /// A returned database transaction.
-    Transaction(ProofTaskTx<Tx>),
-    /// A request to terminate the proof task manager.
-    Terminate,
-}
-
-/// Proof task kind.
+/// A handle that provides type-safe access to proof worker pools.
 ///
-/// When queueing a task using [`ProofTaskMessage::QueueTask`], this enum
-/// specifies the type of proof task to be executed.
-#[derive(Debug)]
-pub enum ProofTaskKind {
-    /// A storage proof request.
-    StorageProof(StorageProofInput, Sender<StorageProofResult>),
-    /// A blinded account node request.
-    BlindedAccountNode(Nibbles, Sender<BlindedNodeResult>),
-    /// A blinded storage node request.
-    BlindedStorageNode(B256, Nibbles, Sender<BlindedNodeResult>),
+/// The handle stores direct senders to both storage and account worker pools,
+/// eliminating the need for a routing thread. All handles share reference-counted
+/// channels, and workers shut down gracefully when all handles are dropped.
+#[derive(Debug, Clone)]
+pub struct ProofWorkerHandle {
+    /// Direct sender to storage worker pool
+    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    /// Direct sender to account worker pool
+    account_work_tx: CrossbeamSender<AccountWorkerJob>,
 }
 
-/// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
-/// number of active handles went to zero.
-#[derive(Debug)]
-pub struct ProofTaskManagerHandle<Tx> {
-    /// The sender for the proof task manager.
-    sender: Sender<ProofTaskMessage<Tx>>,
-    /// The number of active handles.
-    active_handles: Arc<AtomicUsize>,
-}
+impl ProofWorkerHandle {
+    /// Spawns storage and account worker pools with dedicated database transactions.
+    ///
+    /// Returns a handle for submitting proof tasks to the worker pools.
+    /// Workers run until the last handle is dropped.
+    ///
+    /// # Parameters
+    /// - `executor`: Tokio runtime handle for spawning blocking tasks
+    /// - `view`: Consistent database view for creating transactions
+    /// - `task_ctx`: Shared context with trie updates and prefix sets
+    /// - `storage_worker_count`: Number of storage workers to spawn
+    /// - `account_worker_count`: Number of account workers to spawn
+    pub fn new<Factory>(
+        executor: Handle,
+        view: ConsistentDbView<Factory>,
+        task_ctx: ProofTaskCtx,
+        storage_worker_count: usize,
+        account_worker_count: usize,
+    ) -> Self
+    where
+        Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
+    {
+        let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
+        let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
-impl<Tx> ProofTaskManagerHandle<Tx> {
-    /// Creates a new [`ProofTaskManagerHandle`] with the given sender.
-    pub fn new(sender: Sender<ProofTaskMessage<Tx>>, active_handles: Arc<AtomicUsize>) -> Self {
-        active_handles.fetch_add(1, Ordering::SeqCst);
-        Self { sender, active_handles }
-    }
+        tracing::debug!(
+            target: "trie::proof_task",
+            storage_worker_count,
+            account_worker_count,
+            "Spawning proof worker pools"
+        );
 
-    /// Queues a task to the proof task manager.
-    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskMessage<Tx>>> {
-        self.sender.send(ProofTaskMessage::QueueTask(task))
-    }
+        // Spawn storage workers
+        for worker_id in 0..storage_worker_count {
+            let view_clone = view.clone();
+            let task_ctx_clone = task_ctx.clone();
+            let work_rx_clone = storage_work_rx.clone();
 
-    /// Terminates the proof task manager.
-    pub fn terminate(&self) {
-        let _ = self.sender.send(ProofTaskMessage::Terminate);
-    }
-}
+            executor.spawn_blocking(move || {
+                #[cfg(feature = "metrics")]
+                let metrics = ProofTaskTrieMetrics::default();
 
-impl<Tx> Clone for ProofTaskManagerHandle<Tx> {
-    fn clone(&self) -> Self {
-        Self::new(self.sender.clone(), self.active_handles.clone())
-    }
-}
+                storage_worker_loop(
+                    view_clone,
+                    task_ctx_clone,
+                    work_rx_clone,
+                    worker_id,
+                    #[cfg(feature = "metrics")]
+                    metrics,
+                )
+            });
 
-impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
-    fn drop(&mut self) {
-        // Decrement the number of active handles and terminate the manager if it was the last
-        // handle.
-        if self.active_handles.fetch_sub(1, Ordering::SeqCst) == 1 {
-            self.terminate();
+            tracing::debug!(
+                target: "trie::proof_task",
+                worker_id,
+                "Storage worker spawned successfully"
+            );
         }
+
+        // Spawn account workers
+        for worker_id in 0..account_worker_count {
+            let view_clone = view.clone();
+            let task_ctx_clone = task_ctx.clone();
+            let work_rx_clone = account_work_rx.clone();
+            let storage_work_tx_clone = storage_work_tx.clone();
+
+            executor.spawn_blocking(move || {
+                #[cfg(feature = "metrics")]
+                let metrics = ProofTaskTrieMetrics::default();
+
+                account_worker_loop(
+                    view_clone,
+                    task_ctx_clone,
+                    work_rx_clone,
+                    storage_work_tx_clone,
+                    worker_id,
+                    #[cfg(feature = "metrics")]
+                    metrics,
+                )
+            });
+
+            tracing::debug!(
+                target: "trie::proof_task",
+                worker_id,
+                "Account worker spawned successfully"
+            );
+        }
+
+        Self::new_handle(storage_work_tx, account_work_tx)
+    }
+
+    /// Creates a new [`ProofWorkerHandle`] with direct access to worker pools.
+    ///
+    /// This is an internal constructor used for creating handles.
+    const fn new_handle(
+        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+        account_work_tx: CrossbeamSender<AccountWorkerJob>,
+    ) -> Self {
+        Self { storage_work_tx, account_work_tx }
+    }
+
+    /// Dispatch a storage proof computation to storage worker pool
+    pub fn dispatch_storage_proof(
+        &self,
+        input: StorageProofInput,
+    ) -> Result<Receiver<StorageProofResult>, ProviderError> {
+        let (tx, rx) = channel();
+        self.storage_work_tx
+            .send(StorageWorkerJob::StorageProof { input, result_sender: tx })
+            .map_err(|_| {
+                ProviderError::other(std::io::Error::other("storage workers unavailable"))
+            })?;
+
+        Ok(rx)
+    }
+
+    /// Queue an account multiproof computation
+    pub fn dispatch_account_multiproof(
+        &self,
+        input: AccountMultiproofInput,
+    ) -> Result<Receiver<AccountMultiproofResult>, ProviderError> {
+        let (tx, rx) = channel();
+        self.account_work_tx
+            .send(AccountWorkerJob::AccountMultiproof { input, result_sender: tx })
+            .map_err(|_| {
+                ProviderError::other(std::io::Error::other("account workers unavailable"))
+            })?;
+
+        Ok(rx)
+    }
+
+    /// Dispatch blinded storage node request to storage worker pool
+    pub(crate) fn dispatch_blinded_storage_node(
+        &self,
+        account: B256,
+        path: Nibbles,
+    ) -> Result<Receiver<TrieNodeProviderResult>, ProviderError> {
+        let (tx, rx) = channel();
+        self.storage_work_tx
+            .send(StorageWorkerJob::BlindedStorageNode { account, path, result_sender: tx })
+            .map_err(|_| {
+                ProviderError::other(std::io::Error::other("storage workers unavailable"))
+            })?;
+
+        Ok(rx)
+    }
+
+    /// Dispatch blinded account node request to account worker pool
+    pub(crate) fn dispatch_blinded_account_node(
+        &self,
+        path: Nibbles,
+    ) -> Result<Receiver<TrieNodeProviderResult>, ProviderError> {
+        let (tx, rx) = channel();
+        self.account_work_tx
+            .send(AccountWorkerJob::BlindedAccountNode { path, result_sender: tx })
+            .map_err(|_| {
+                ProviderError::other(std::io::Error::other("account workers unavailable"))
+            })?;
+
+        Ok(rx)
     }
 }
 
-impl<Tx: DbTx> BlindedProviderFactory for ProofTaskManagerHandle<Tx> {
-    type AccountNodeProvider = ProofTaskBlindedNodeProvider<Tx>;
-    type StorageNodeProvider = ProofTaskBlindedNodeProvider<Tx>;
+impl TrieNodeProviderFactory for ProofWorkerHandle {
+    type AccountNodeProvider = ProofTaskTrieNodeProvider;
+    type StorageNodeProvider = ProofTaskTrieNodeProvider;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
-        ProofTaskBlindedNodeProvider::AccountNode { sender: self.sender.clone() }
+        ProofTaskTrieNodeProvider::AccountNode { handle: self.clone() }
     }
 
     fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
-        ProofTaskBlindedNodeProvider::StorageNode { account, sender: self.sender.clone() }
+        ProofTaskTrieNodeProvider::StorageNode { account, handle: self.clone() }
     }
 }
 
-/// Blinded node provider for retrieving trie nodes by path.
+/// Trie node provider for retrieving trie nodes by path.
 #[derive(Debug)]
-pub enum ProofTaskBlindedNodeProvider<Tx> {
+pub enum ProofTaskTrieNodeProvider {
     /// Blinded account trie node provider.
     AccountNode {
-        /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        /// Handle to the proof worker pools.
+        handle: ProofWorkerHandle,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
-        /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        /// Handle to the proof worker pools.
+        handle: ProofWorkerHandle,
     },
 }
 
-impl<Tx: DbTx> BlindedProvider for ProofTaskBlindedNodeProvider<Tx> {
-    fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
-        let (tx, rx) = channel();
+impl TrieNodeProvider for ProofTaskTrieNodeProvider {
+    fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         match self {
-            Self::AccountNode { sender } => {
-                let _ = sender.send(ProofTaskMessage::QueueTask(
-                    ProofTaskKind::BlindedAccountNode(path.clone(), tx),
-                ));
+            Self::AccountNode { handle } => {
+                let rx = handle
+                    .dispatch_blinded_account_node(*path)
+                    .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
+                rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
-            Self::StorageNode { sender, account } => {
-                let _ = sender.send(ProofTaskMessage::QueueTask(
-                    ProofTaskKind::BlindedStorageNode(*account, path.clone(), tx),
-                ));
+            Self::StorageNode { handle, account } => {
+                let rx = handle
+                    .dispatch_blinded_storage_node(*account, *path)
+                    .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
+                rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
         }
+    }
+}
 
-        rx.recv().unwrap()
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::map::B256Map;
+    use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
+    use reth_trie_common::{
+        prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedAccountsSorted,
+        HashedPostStateSorted,
+    };
+    use std::sync::Arc;
+    use tokio::{runtime::Builder, task};
+
+    fn test_ctx() -> ProofTaskCtx {
+        ProofTaskCtx::new(
+            Arc::new(TrieUpdatesSorted::default()),
+            Arc::new(HashedPostStateSorted::new(
+                HashedAccountsSorted::default(),
+                B256Map::default(),
+            )),
+            Arc::new(TriePrefixSetsMut::default()),
+        )
+    }
+
+    /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
+    #[test]
+    fn spawn_proof_workers_creates_handle() {
+        let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        runtime.block_on(async {
+            let handle = tokio::runtime::Handle::current();
+            let factory = create_test_provider_factory();
+            let view = ConsistentDbView::new(factory, None);
+            let ctx = test_ctx();
+
+            let proof_handle = ProofWorkerHandle::new(handle.clone(), view, ctx, 5, 3);
+
+            // Verify handle can be cloned
+            let _cloned_handle = proof_handle.clone();
+
+            // Workers shut down automatically when handle is dropped
+            drop(proof_handle);
+            task::yield_now().await;
+        });
     }
 }

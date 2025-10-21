@@ -10,7 +10,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
@@ -240,6 +240,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
             [self.data_path().into(), self.index_path(), self.offsets_path(), self.config_path()]
         {
             if path.exists() {
+                debug!(target: "nippy-jar", ?path, "Removing file.");
                 reth_fs_util::remove_file(path)?;
             }
         }
@@ -308,10 +309,10 @@ impl<H: NippyJarHeader> NippyJar<H> {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
         }
 
-        if let Some(compression) = &self.compressor {
-            if !compression.is_ready() {
-                return Err(NippyJarError::CompressorNotReady)
-            }
+        if let Some(compression) = &self.compressor &&
+            !compression.is_ready()
+        {
+            return Err(NippyJarError::CompressorNotReady)
         }
 
         Ok(())

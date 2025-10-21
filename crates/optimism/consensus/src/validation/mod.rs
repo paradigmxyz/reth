@@ -3,13 +3,15 @@
 pub mod canyon;
 pub mod isthmus;
 
+// Re-export the decode_holocene_base_fee function for compatibility
+pub use reth_optimism_chainspec::decode_holocene_base_fee;
+
 use crate::proof::calculate_receipt_root_optimism;
 use alloc::vec::Vec;
 use alloy_consensus::{BlockHeader, TxReceipt, EMPTY_OMMER_ROOT_HASH};
-use alloy_primitives::{Bloom, B256};
+use alloy_eips::Encodable2718;
+use alloy_primitives::{Bloom, Bytes, B256};
 use alloy_trie::EMPTY_ROOT_HASH;
-use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
-use reth_chainspec::{BaseFeeParams, EthChainSpec};
 use reth_consensus::ConsensusError;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
@@ -91,17 +93,21 @@ pub fn validate_block_post_execution<R: DepositReceipt>(
     // operation as hashing that is required for state root got calculated in every
     // transaction This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-    if chain_spec.is_byzantium_active_at_block(header.number()) {
-        if let Err(error) = verify_receipts_optimism(
+    if chain_spec.is_byzantium_active_at_block(header.number()) &&
+        let Err(error) = verify_receipts_optimism(
             header.receipts_root(),
             header.logs_bloom(),
             receipts,
             chain_spec,
             header.timestamp(),
-        ) {
-            tracing::debug!(%error, ?receipts, "receipts verification failed");
-            return Err(error)
-        }
+        )
+    {
+        let receipts = receipts
+            .iter()
+            .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
+            .collect::<Vec<_>>();
+        tracing::debug!(%error, ?receipts, "receipts verification failed");
+        return Err(error)
     }
 
     // Check if gas used matches the value set in header.
@@ -166,56 +172,19 @@ fn compare_receipts_root_and_logs_bloom(
     Ok(())
 }
 
-/// Extracts the Holocene 1599 parameters from the encoded extra data from the parent header.
-///
-/// Caution: Caller must ensure that holocene is active in the parent header.
-///
-/// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
-pub fn decode_holocene_base_fee(
-    chain_spec: impl EthChainSpec + OpHardforks,
-    parent: impl BlockHeader,
-    timestamp: u64,
-) -> Result<u64, EIP1559ParamError> {
-    let (elasticity, denominator) = decode_holocene_extra_data(parent.extra_data())?;
-    let base_fee_params = if elasticity == 0 && denominator == 0 {
-        chain_spec.base_fee_params_at_timestamp(timestamp)
-    } else {
-        BaseFeeParams::new(denominator as u128, elasticity as u128)
-    };
-
-    Ok(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
-}
-
-/// Read from parent to determine the base fee for the next block
-///
-/// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
-pub fn next_block_base_fee(
-    chain_spec: impl EthChainSpec + OpHardforks,
-    parent: impl BlockHeader,
-    timestamp: u64,
-) -> Result<u64, EIP1559ParamError> {
-    // If we are in the Holocene, we need to use the base fee params
-    // from the parent block's extra data.
-    // Else, use the base fee params (default values) from chainspec
-    if chain_spec.is_holocene_active_at_timestamp(parent.timestamp()) {
-        Ok(decode_holocene_base_fee(chain_spec, parent, timestamp)?)
-    } else {
-        Ok(parent
-            .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
-            .unwrap_or_default())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::{b256, hex, Bytes, U256};
     use op_alloy_consensus::OpTxEnvelope;
-    use reth_chainspec::{ChainSpec, ForkCondition, Hardfork};
+    use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec, ForkCondition, Hardfork};
     use reth_optimism_chainspec::{OpChainSpec, BASE_SEPOLIA};
     use reth_optimism_forks::{OpHardfork, BASE_SEPOLIA_HARDFORKS};
     use std::sync::Arc;
+
+    const JOVIAN_TIMESTAMP: u64 = 1900000000;
+    const BLOCK_TIME_SECONDS: u64 = 2;
 
     fn holocene_chainspec() -> Arc<OpChainSpec> {
         let mut hardforks = BASE_SEPOLIA_HARDFORKS.clone();
@@ -243,6 +212,15 @@ mod tests {
         chainspec
     }
 
+    fn jovian_chainspec() -> OpChainSpec {
+        let mut chainspec = BASE_SEPOLIA.as_ref().clone();
+        chainspec
+            .inner
+            .hardforks
+            .insert(OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(1900000000));
+        chainspec
+    }
+
     #[test]
     fn test_get_base_fee_pre_holocene() {
         let op_chain_spec = BASE_SEPOLIA.clone();
@@ -252,12 +230,11 @@ mod tests {
             gas_limit: 144000000,
             ..Default::default()
         };
-        let base_fee = next_block_base_fee(&op_chain_spec, &parent, 0);
+        let base_fee =
+            reth_optimism_chainspec::OpChainSpec::next_block_base_fee(&op_chain_spec, &parent, 0);
         assert_eq!(
             base_fee.unwrap(),
-            parent
-                .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
-                .unwrap_or_default()
+            op_chain_spec.next_block_base_fee(&parent, 0).unwrap_or_default()
         );
     }
 
@@ -272,12 +249,14 @@ mod tests {
             extra_data: Bytes::from_static(&[0, 0, 0, 0, 0, 0, 0, 0, 0]),
             ..Default::default()
         };
-        let base_fee = next_block_base_fee(&op_chain_spec, &parent, 1800000005);
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &op_chain_spec,
+            &parent,
+            1800000005,
+        );
         assert_eq!(
             base_fee.unwrap(),
-            parent
-                .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
-                .unwrap_or_default()
+            op_chain_spec.next_block_base_fee(&parent, 0).unwrap_or_default()
         );
     }
 
@@ -292,7 +271,11 @@ mod tests {
             ..Default::default()
         };
 
-        let base_fee = next_block_base_fee(holocene_chainspec(), &parent, 1800000005);
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &holocene_chainspec(),
+            &parent,
+            1800000005,
+        );
         assert_eq!(
             base_fee.unwrap(),
             parent
@@ -313,8 +296,186 @@ mod tests {
             ..Default::default()
         };
 
-        let base_fee = next_block_base_fee(&*BASE_SEPOLIA, &parent, 1735315546).unwrap();
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &*BASE_SEPOLIA,
+            &parent,
+            1735315546,
+        )
+        .unwrap();
         assert_eq!(base_fee, 507);
+    }
+
+    #[test]
+    fn test_get_base_fee_holocene_extra_data_set_and_min_base_fee_set() {
+        const MIN_BASE_FEE: u64 = 10;
+
+        let mut extra_data = Vec::new();
+        // eip1559 params
+        extra_data.append(&mut hex!("00000000fa0000000a").to_vec());
+        // min base fee
+        extra_data.append(&mut MIN_BASE_FEE.to_be_bytes().to_vec());
+        let extra_data = Bytes::from(extra_data);
+
+        let parent = Header {
+            base_fee_per_gas: Some(507),
+            gas_used: 4847634,
+            gas_limit: 60000000,
+            extra_data,
+            timestamp: 1735315544,
+            ..Default::default()
+        };
+
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &*BASE_SEPOLIA,
+            &parent,
+            1735315546,
+        );
+        assert_eq!(base_fee, None);
+    }
+
+    /// The version byte for Jovian is 1.
+    const JOVIAN_EXTRA_DATA_VERSION_BYTE: u8 = 1;
+
+    #[test]
+    fn test_get_base_fee_jovian_extra_data_and_min_base_fee_not_set() {
+        let op_chain_spec = jovian_chainspec();
+
+        let mut extra_data = Vec::new();
+        extra_data.push(JOVIAN_EXTRA_DATA_VERSION_BYTE);
+        // eip1559 params
+        extra_data.append(&mut [0_u8; 8].to_vec());
+        let extra_data = Bytes::from(extra_data);
+
+        let parent = Header {
+            base_fee_per_gas: Some(1),
+            gas_used: 15763614,
+            gas_limit: 144000000,
+            timestamp: JOVIAN_TIMESTAMP,
+            extra_data,
+            ..Default::default()
+        };
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &op_chain_spec,
+            &parent,
+            JOVIAN_TIMESTAMP + BLOCK_TIME_SECONDS,
+        );
+        assert_eq!(base_fee, None);
+    }
+
+    /// After Jovian, the next block base fee cannot be less than the minimum base fee.
+    #[test]
+    fn test_get_base_fee_jovian_default_extra_data_and_min_base_fee() {
+        const CURR_BASE_FEE: u64 = 1;
+        const MIN_BASE_FEE: u64 = 10;
+
+        let mut extra_data = Vec::new();
+        extra_data.push(JOVIAN_EXTRA_DATA_VERSION_BYTE);
+        // eip1559 params
+        extra_data.append(&mut [0_u8; 8].to_vec());
+        // min base fee
+        extra_data.append(&mut MIN_BASE_FEE.to_be_bytes().to_vec());
+        let extra_data = Bytes::from(extra_data);
+
+        let op_chain_spec = jovian_chainspec();
+        let parent = Header {
+            base_fee_per_gas: Some(CURR_BASE_FEE),
+            gas_used: 15763614,
+            gas_limit: 144000000,
+            timestamp: JOVIAN_TIMESTAMP,
+            extra_data,
+            ..Default::default()
+        };
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &op_chain_spec,
+            &parent,
+            JOVIAN_TIMESTAMP + BLOCK_TIME_SECONDS,
+        );
+        assert_eq!(base_fee, Some(MIN_BASE_FEE));
+    }
+
+    /// After Jovian, the next block base fee cannot be less than the minimum base fee.
+    #[test]
+    fn test_jovian_min_base_fee_cannot_decrease() {
+        const MIN_BASE_FEE: u64 = 10;
+
+        let mut extra_data = Vec::new();
+        extra_data.push(JOVIAN_EXTRA_DATA_VERSION_BYTE);
+        // eip1559 params
+        extra_data.append(&mut [0_u8; 8].to_vec());
+        // min base fee
+        extra_data.append(&mut MIN_BASE_FEE.to_be_bytes().to_vec());
+        let extra_data = Bytes::from(extra_data);
+
+        let op_chain_spec = jovian_chainspec();
+
+        // If we're currently at the minimum base fee, the next block base fee cannot decrease.
+        let parent = Header {
+            base_fee_per_gas: Some(MIN_BASE_FEE),
+            gas_used: 10,
+            gas_limit: 144000000,
+            timestamp: JOVIAN_TIMESTAMP,
+            extra_data: extra_data.clone(),
+            ..Default::default()
+        };
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &op_chain_spec,
+            &parent,
+            JOVIAN_TIMESTAMP + BLOCK_TIME_SECONDS,
+        );
+        assert_eq!(base_fee, Some(MIN_BASE_FEE));
+
+        // The next block can increase the base fee
+        let parent = Header {
+            base_fee_per_gas: Some(MIN_BASE_FEE),
+            gas_used: 144000000,
+            gas_limit: 144000000,
+            timestamp: JOVIAN_TIMESTAMP,
+            extra_data,
+            ..Default::default()
+        };
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &op_chain_spec,
+            &parent,
+            JOVIAN_TIMESTAMP + 2 * BLOCK_TIME_SECONDS,
+        );
+        assert_eq!(base_fee, Some(MIN_BASE_FEE + 1));
+    }
+
+    #[test]
+    fn test_jovian_base_fee_can_decrease_if_above_min_base_fee() {
+        const MIN_BASE_FEE: u64 = 10;
+
+        let mut extra_data = Vec::new();
+        extra_data.push(JOVIAN_EXTRA_DATA_VERSION_BYTE);
+        // eip1559 params
+        extra_data.append(&mut [0_u8; 8].to_vec());
+        // min base fee
+        extra_data.append(&mut MIN_BASE_FEE.to_be_bytes().to_vec());
+        let extra_data = Bytes::from(extra_data);
+
+        let op_chain_spec = jovian_chainspec();
+
+        let parent = Header {
+            base_fee_per_gas: Some(100 * MIN_BASE_FEE),
+            gas_used: 10,
+            gas_limit: 144000000,
+            timestamp: JOVIAN_TIMESTAMP,
+            extra_data,
+            ..Default::default()
+        };
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &op_chain_spec,
+            &parent,
+            JOVIAN_TIMESTAMP + BLOCK_TIME_SECONDS,
+        )
+        .unwrap();
+        assert_eq!(
+            base_fee,
+            op_chain_spec
+                .inner
+                .next_block_base_fee(&parent, JOVIAN_TIMESTAMP + BLOCK_TIME_SECONDS)
+                .unwrap()
+        );
     }
 
     #[test]

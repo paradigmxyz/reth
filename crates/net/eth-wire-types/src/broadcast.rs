@@ -228,7 +228,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns true if the message is empty
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         match self {
             Self::Eth66(msg) => msg.0.is_empty(),
             Self::Eth68(msg) => msg.hashes.is_empty(),
@@ -236,7 +236,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns the number of hashes in the message
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         match self {
             Self::Eth66(msg) => msg.0.len(),
             Self::Eth68(msg) => msg.hashes.len(),
@@ -801,7 +801,7 @@ pub struct BlockRangeUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Typed2718;
+    use alloy_consensus::{transaction::TxHashRef, Typed2718};
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{b256, hex, Signature, U256};
     use reth_ethereum_primitives::{Transaction, TransactionSigned};

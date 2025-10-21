@@ -48,7 +48,7 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
 impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
     ///
-    /// If will  **always** attempt to heal any inconsistent state when called.
+    /// If will **always** attempt to heal any inconsistent state when called.
     pub fn new(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
@@ -404,10 +404,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         // Appends new offsets to disk
         for offset in self.offsets.drain(..) {
-            if let Some(last_offset_ondisk) = last_offset_ondisk.take() {
-                if last_offset_ondisk == offset {
-                    continue
-                }
+            if let Some(last_offset_ondisk) = last_offset_ondisk.take() &&
+                last_offset_ondisk == offset
+            {
+                continue
             }
             self.offsets_file.write_all(&offset.to_le_bytes())?;
         }

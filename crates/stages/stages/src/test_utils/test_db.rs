@@ -1,5 +1,5 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256, U256};
-use reth_chainspec::{EthereumHardforks, MAINNET};
+use reth_chainspec::MAINNET;
 use reth_db::{
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
     DatabaseEnv,
@@ -19,7 +19,7 @@ use reth_primitives_traits::{Account, SealedBlock, SealedHeader, StorageEntry};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     test_utils::MockNodeTypesWithDB,
-    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
+    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory, StatsReader,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
@@ -103,6 +103,11 @@ impl TestStageDB {
         })
     }
 
+    /// Return the number of entries in the table or static file segment
+    pub fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
+        self.factory.provider()?.count_entries::<T>()
+    }
+
     /// Check that there is no table entry above a given
     /// number by [`Table::Key`]
     pub fn ensure_no_entry_above<T, F>(&self, num: u64, mut selector: F) -> ProviderResult<()>
@@ -145,7 +150,7 @@ impl TestStageDB {
         writer: Option<&mut StaticFileProviderRWRefMut<'_, EthPrimitives>>,
         tx: &TX,
         header: &SealedHeader,
-        td: U256,
+        _td: U256,
     ) -> ProviderResult<()> {
         if let Some(writer) = writer {
             // Backfill: some tests start at a forward block number, but static files require no
@@ -155,11 +160,11 @@ impl TestStageDB {
                 for block_number in 0..header.number {
                     let mut prev = header.clone_header();
                     prev.number = block_number;
-                    writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
+                    writer.append_header(&prev, &B256::ZERO)?;
                 }
             }
 
-            writer.append_header(header.header(), td, &header.hash())?;
+            writer.append_header(header.header(), &header.hash())?;
         } else {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
             tx.put::<tables::Headers>(header.number, header.header().clone())?;

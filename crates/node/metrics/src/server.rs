@@ -84,43 +84,46 @@ impl MetricServer {
             .await
             .wrap_err("Could not bind to address")?;
 
-        task_executor.spawn_with_graceful_shutdown_signal(|mut signal| async move {
-            loop {
-                let io = tokio::select! {
-                    _ = &mut signal => break,
-                    io = listener.accept() => {
-                        match io {
-                            Ok((stream, _remote_addr)) => stream,
-                            Err(err) => {
-                                tracing::error!(%err, "failed to accept connection");
-                                continue;
+        task_executor.spawn_with_graceful_shutdown_signal(|mut signal| {
+            Box::pin(async move {
+                loop {
+                    let io = tokio::select! {
+                        _ = &mut signal => break,
+                        io = listener.accept() => {
+                            match io {
+                                Ok((stream, _remote_addr)) => stream,
+                                Err(err) => {
+                                    tracing::error!(%err, "failed to accept connection");
+                                    continue;
+                                }
                             }
                         }
-                    }
-                };
+                    };
 
-                let handle = install_prometheus_recorder();
-                let hook = hook.clone();
-                let service = tower::service_fn(move |_| {
-                    (hook)();
-                    let metrics = handle.handle().render();
-                    let mut response = Response::new(metrics);
-                    response
-                        .headers_mut()
-                        .insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
-                    async move { Ok::<_, Infallible>(response) }
-                });
+                    let handle = install_prometheus_recorder();
+                    let hook = hook.clone();
+                    let service = tower::service_fn(move |_| {
+                        (hook)();
+                        let metrics = handle.handle().render();
+                        let mut response = Response::new(metrics);
+                        response
+                            .headers_mut()
+                            .insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+                        async move { Ok::<_, Infallible>(response) }
+                    });
 
-                let mut shutdown = signal.clone().ignore_guard();
-                tokio::task::spawn(async move {
-                    let _ =
-                        jsonrpsee_server::serve_with_graceful_shutdown(io, service, &mut shutdown)
-                            .await
-                            .inspect_err(
-                                |error| tracing::debug!(%error, "failed to serve request"),
-                            );
-                });
-            }
+                    let mut shutdown = signal.clone().ignore_guard();
+                    tokio::task::spawn(async move {
+                        let _ = jsonrpsee_server::serve_with_graceful_shutdown(
+                            io,
+                            service,
+                            &mut shutdown,
+                        )
+                        .await
+                        .inspect_err(|error| tracing::debug!(%error, "failed to serve request"));
+                    });
+                }
+            })
         });
 
         Ok(())

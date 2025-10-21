@@ -13,6 +13,7 @@ use alloy_rpc_types_trace::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
+use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
@@ -67,6 +68,7 @@ impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>, RpcHeader<Eth::Netw
     for OtterscanApi<Eth>
 where
     Eth: EthApiServer<
+            RpcTxReq<Eth::NetworkTypes>,
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
@@ -338,9 +340,9 @@ where
                 num.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
-                |tx_info, ctx| {
+                |tx_info, mut ctx| {
                     Ok(ctx
-                        .inspector
+                        .take_inspector()
                         .into_parity_builder()
                         .into_localized_transaction_traces(tx_info))
                 },

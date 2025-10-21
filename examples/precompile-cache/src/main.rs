@@ -5,6 +5,7 @@
 use alloy_evm::{
     eth::EthEvmContext,
     precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
+    revm::{handler::EthPrecompiles, precompile::PrecompileId},
     Evm, EvmFactory,
 };
 use alloy_genesis::Genesis;
@@ -15,9 +16,8 @@ use reth_ethereum::{
     evm::{
         primitives::{Database, EvmEnv},
         revm::{
-            context::{Context, TxEnv},
+            context::{BlockEnv, Context, TxEnv},
             context_interface::result::{EVMError, HaltReason},
-            handler::EthPrecompiles,
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
             precompile::PrecompileResult,
@@ -45,11 +45,9 @@ type PrecompileLRUCache = LruMap<(Bytes, u64), PrecompileResult>;
 
 /// A cache for precompile inputs / outputs.
 ///
-/// This assumes that the precompile is a standard precompile, as in `StandardPrecompileFn`, meaning
-/// its inputs are only `(Bytes, u64)`.
-///
-/// NOTE: This does not work with "context stateful precompiles", ie `ContextStatefulPrecompile` or
-/// `ContextStatefulPrecompileMut`. They are explicitly banned.
+/// This cache works with standard precompiles that take input data and gas limit as parameters.
+/// The cache key is composed of the input bytes and gas limit, and the cached value is the
+/// precompile execution result.
 #[derive(Debug)]
 pub struct PrecompileCache {
     /// Caches for each precompile input / output.
@@ -71,6 +69,7 @@ impl EvmFactory for MyEvmFactory {
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
     type Spec = SpecId;
+    type BlockEnv = BlockEnv;
     type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
@@ -119,12 +118,20 @@ impl WrappedPrecompile {
     /// Given a [`DynPrecompile`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
     fn wrap(precompile: DynPrecompile, cache: Arc<RwLock<PrecompileCache>>) -> DynPrecompile {
+        let precompile_id = precompile.precompile_id().clone();
         let wrapped = Self::new(precompile, cache);
-        move |input: PrecompileInput<'_>| -> PrecompileResult { wrapped.call(input) }.into()
+        (precompile_id, move |input: PrecompileInput<'_>| -> PrecompileResult {
+            wrapped.call(input)
+        })
+            .into()
     }
 }
 
 impl Precompile for WrappedPrecompile {
+    fn precompile_id(&self) -> &PrecompileId {
+        self.precompile.precompile_id()
+    }
+
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
         let mut cache = self.cache.write();
         let key = (Bytes::copy_from_slice(input.data), input.gas);
@@ -170,7 +177,7 @@ where
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = EthEvmConfig::new_with_evm_factory(
             ctx.chain_spec(),
-            MyEvmFactory { precompile_cache: self.precompile_cache.clone() },
+            MyEvmFactory { precompile_cache: self.precompile_cache },
         );
         Ok(evm_config)
     }

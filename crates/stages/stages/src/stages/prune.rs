@@ -1,7 +1,7 @@
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
+    BlockReader, ChainStateBlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory,
 };
 use reth_prune::{
@@ -42,7 +42,10 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
-        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
+        + ChainStateBlockReader
+        + StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        >,
 {
     fn id(&self) -> StageId {
         StageId::Prune
@@ -119,7 +122,7 @@ impl PruneSenderRecoveryStage {
     /// Create new prune sender recovery stage with the given prune mode and commit threshold.
     pub fn new(prune_mode: PruneMode, commit_threshold: usize) -> Self {
         Self(PruneStage::new(
-            PruneModes { sender_recovery: Some(prune_mode), ..PruneModes::none() },
+            PruneModes { sender_recovery: Some(prune_mode), ..PruneModes::default() },
             commit_threshold,
         ))
     }
@@ -131,7 +134,10 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
-        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
+        + ChainStateBlockReader
+        + StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        >,
 {
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery

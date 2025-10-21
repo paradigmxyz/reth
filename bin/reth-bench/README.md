@@ -49,7 +49,7 @@ reth stage unwind to-block 21000000
 
 The following `reth-bench` command would then start the benchmark at block 21,000,000:
 ```bash
-reth-bench new-payload-fcu --rpc-url <rpc-url> --from 21000000 --to <end_block> --jwtsecret <jwt_file_path>
+reth-bench new-payload-fcu --rpc-url <rpc-url> --from 21000000 --to <end_block> --jwt-secret <jwt_file_path>
 ```
 
 Finally, make sure that reth is built using a build profile suitable for what you are trying to measure.
@@ -80,17 +80,29 @@ RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --no-default-fe
 ### Run the Benchmark:
 First, start the reth node. Here is an example that runs `reth` compiled with the `profiling` profile, runs `samply`, and configures `reth` to run with metrics enabled:
 ```bash
-samply record -p 3001 target/profiling/reth node --metrics localhost:9001 --authrpc.jwtsecret <jwt_file_path>
+samply record -p 3001 target/profiling/reth node --metrics localhost:9001 --authrpc.jwt-secret <jwt_file_path>
 ```
 
 ```bash
-reth-bench new-payload-fcu --rpc-url <rpc-url> --from <start_block> --to <end_block> --jwtsecret <jwt_file_path>
+reth-bench new-payload-fcu --rpc-url <rpc-url> --from <start_block> --to <end_block> --jwt-secret <jwt_file_path>
 ```
 
 Replace `<start_block>`, `<end_block>`, and `<jwt_file_path>` with the appropriate values for your testing environment. `<rpc-url>` should be the URL of an RPC endpoint that can provide the blocks that will be used during the execution.
 This should NOT be the node that is being used for the benchmark. The node behind `--rpc-url` will be used as a data source for fetching real blocks, so they can be replayed in
 the benchmark. The node being benchmarked will not have these blocks.
 Note that this assumes that the benchmark node's engine API is running on `http://127.0.0.1:8551`, which is set as a default value in `reth-bench`. To configure this value, use the `--engine-rpc-url` flag.
+
+#### Using the `--advance` argument
+
+The `--advance` argument allows you to benchmark a relative number of blocks from the current head, without manually specifying `--from` and `--to`.
+
+```bash
+# Benchmark the next 10 blocks from the current head
+reth-bench new-payload-fcu --advance 10 --jwt-secret <jwt_file_path> --rpc-url <rpc-url>
+
+# Benchmark the next 50 blocks with a different subcommand
+reth-bench new-payload-only --advance 50 --jwt-secret <jwt_file_path> --rpc-url <rpc-url>
+```
 
 ### Observe Outputs
 

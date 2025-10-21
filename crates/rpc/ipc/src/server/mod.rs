@@ -139,7 +139,20 @@ where
             .to_fs_name::<GenericFilePath>()
             .and_then(|name| ListenerOptions::new().name(name).create_tokio())
         {
-            Ok(listener) => listener,
+            Ok(listener) => {
+                #[cfg(unix)]
+                {
+                    // set permissions only on unix
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Some(perms_str) = &self.cfg.ipc_socket_permissions &&
+                        let Ok(mode) = u32::from_str_radix(&perms_str.replace("0o", ""), 8)
+                    {
+                        let perms = std::fs::Permissions::from_mode(mode);
+                        let _ = std::fs::set_permissions(&self.endpoint, perms);
+                    }
+                }
+                listener
+            }
             Err(err) => {
                 on_ready
                     .send(Err(IpcServerStartError { endpoint: self.endpoint.clone(), source: err }))
@@ -550,6 +563,8 @@ pub struct Settings {
     message_buffer_capacity: u32,
     /// Custom tokio runtime to run the server on.
     tokio_runtime: Option<tokio::runtime::Handle>,
+    /// The permissions to create the IPC socket with.
+    ipc_socket_permissions: Option<String>,
 }
 
 impl Default for Settings {
@@ -562,6 +577,7 @@ impl Default for Settings {
             max_subscriptions_per_connection: 1024,
             message_buffer_capacity: 1024,
             tokio_runtime: None,
+            ipc_socket_permissions: None,
         }
     }
 }
@@ -645,6 +661,12 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     /// Default: [`tokio::spawn`]
     pub fn custom_tokio_runtime(mut self, rt: tokio::runtime::Handle) -> Self {
         self.settings.tokio_runtime = Some(rt);
+        self
+    }
+
+    /// Sets the permissions for the IPC socket file.
+    pub fn set_ipc_socket_permissions(mut self, permissions: Option<String>) -> Self {
+        self.settings.ipc_socket_permissions = permissions;
         self
     }
 
@@ -767,6 +789,24 @@ mod tests {
     use std::pin::pin;
     use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_ipc_socket_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let endpoint = &dummy_name();
+        let perms = "0777";
+        let server = Builder::default()
+            .set_ipc_socket_permissions(Some(perms.to_string()))
+            .build(endpoint.clone());
+        let module = RpcModule::new(());
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let meta = std::fs::metadata(endpoint).unwrap();
+        let perms = meta.permissions();
+        assert_eq!(perms.mode() & 0o777, 0o777);
+    }
 
     async fn pipe_from_stream_with_bounded_buffer(
         pending: PendingSubscriptionSink,

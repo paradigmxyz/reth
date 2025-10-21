@@ -14,6 +14,9 @@ pub trait RessProtocolProvider: Send + Sync {
 
     /// Return block headers.
     fn headers(&self, request: GetHeaders) -> ProviderResult<Vec<Header>> {
+        if request.limit == 0 {
+            return Ok(Vec::new());
+        }
         let mut total_bytes = 0;
         let mut block_hash = request.start_hash;
         let mut headers = Vec::new();

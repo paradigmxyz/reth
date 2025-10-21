@@ -1,5 +1,5 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
@@ -8,12 +8,12 @@ use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
+use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateCommitmentProvider,
-    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
+    StaticFileProviderFactory, StatsReader, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -71,7 +71,6 @@ where
     evm_config: E,
     /// The consensus instance for validating blocks.
     consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
-    /// The consensu
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -257,11 +256,11 @@ where
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,
             Header = <E::Primitives as NodePrimitives>::BlockHeader,
-        > + StaticFileProviderFactory
-        + StatsReader
+        > + StaticFileProviderFactory<
+            Primitives: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
+        > + StatsReader
         + BlockHashReader
-        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
-        + StateCommitmentProvider,
+        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -453,7 +452,7 @@ where
         }
 
         // write output
-        provider.write_state(&state, OriginalValuesKnown::Yes, StorageLocation::StaticFiles)?;
+        provider.write_state(&state, OriginalValuesKnown::Yes)?;
 
         let db_write_duration = time.elapsed();
         debug!(
@@ -505,8 +504,7 @@ where
         // Unwind account and storage changesets, as well as receipts.
         //
         // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts =
-            provider.take_state_above(unwind_to, StorageLocation::Both)?;
+        let bundle_state_with_receipts = provider.take_state_above(unwind_to)?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
@@ -532,9 +530,8 @@ where
         if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
             for block_number in range {
                 stage_checkpoint.progress.processed -= provider
-                    .block_by_number(block_number)?
+                    .header_by_number(block_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
-                    .header()
                     .gas_used();
             }
         }
@@ -561,12 +558,15 @@ where
     }
 }
 
-fn execution_checkpoint<N: NodePrimitives>(
+fn execution_checkpoint<N>(
     provider: &StaticFileProvider<N>,
     start_block: BlockNumber,
     max_block: BlockNumber,
     checkpoint: StageCheckpoint,
-) -> Result<ExecutionCheckpoint, ProviderError> {
+) -> Result<ExecutionCheckpoint, ProviderError>
+where
+    N: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
+{
     Ok(match checkpoint.execution_stage_checkpoint() {
         // If checkpoint block range fully matches our range,
         // we take the previously used stage checkpoint as-is.
@@ -628,10 +628,14 @@ fn execution_checkpoint<N: NodePrimitives>(
     })
 }
 
-fn calculate_gas_used_from_headers<N: NodePrimitives>(
+/// Calculates the total amount of gas used from the headers in the given range.
+pub fn calculate_gas_used_from_headers<N>(
     provider: &StaticFileProvider<N>,
     range: RangeInclusive<BlockNumber>,
-) -> Result<u64, ProviderError> {
+) -> Result<u64, ProviderError>
+where
+    N: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
+{
     debug!(target: "sync::stages::execution", ?range, "Calculating gas used from headers");
 
     let mut gas_total = 0;
@@ -641,10 +645,10 @@ fn calculate_gas_used_from_headers<N: NodePrimitives>(
     for entry in provider.fetch_range_iter(
         StaticFileSegment::Headers,
         *range.start()..*range.end() + 1,
-        |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
+        |cursor, number| cursor.get_one::<HeaderMask<N::BlockHeader>>(number.into()),
     )? {
-        let Header { gas_used, .. } = entry?;
-        gas_total += gas_used;
+        let entry = entry?;
+        gas_total += entry.gas_used();
     }
 
     let duration = start.elapsed();
@@ -670,8 +674,8 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
-        test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,
-        ReceiptProvider, StaticFileProviderFactory,
+        test_utils::create_test_provider_factory, AccountReader, BlockWriter,
+        DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory,
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
@@ -732,8 +736,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -773,8 +777,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -814,8 +818,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -847,8 +851,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -892,7 +896,7 @@ mod tests {
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
-        let modes = [None, Some(PruneModes::none())];
+        let modes = [None, Some(PruneModes::default())];
         let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
             Address::random(),
             PruneMode::Distance(100000),
@@ -989,8 +993,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -1029,7 +1033,7 @@ mod tests {
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
-        let modes = [None, Some(PruneModes::none())];
+        let modes = [None, Some(PruneModes::default())];
         let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
             Address::random(),
             PruneMode::Before(100000),
@@ -1060,6 +1064,8 @@ mod tests {
                     UnwindInput { checkpoint: result.checkpoint, unwind_to: 0, bad_block: None },
                 )
                 .unwrap();
+
+            provider.static_file_provider().commit().unwrap();
 
             assert_matches!(result, UnwindOutput {
                 checkpoint: StageCheckpoint {
@@ -1097,8 +1103,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)

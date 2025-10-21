@@ -174,6 +174,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         }
     }
 
+    /// Returns the currently tracked [`ForkId`].
+    pub(crate) const fn fork_id(&self) -> ForkId {
+        self.fork_filter.current()
+    }
+
     /// Check whether the provided [`ForkId`] is compatible based on the validation rules in
     /// `EIP-2124`.
     pub fn is_valid_fork_id(&self, fork_id: ForkId) -> bool {
@@ -566,6 +571,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     range_info: None,
                     local_range_info: self.local_range_info.clone(),
                     range_update_interval,
+                    last_sent_latest_block: None,
                 };
 
                 self.spawn(session);
@@ -1145,18 +1151,20 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 .ok();
         }
 
-        let (multiplex_stream, their_status) =
-            match multiplex_stream.into_eth_satellite_stream(status, fork_filter).await {
-                Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
-                Err(err) => {
-                    return PendingSessionEvent::Disconnected {
-                        remote_addr,
-                        session_id,
-                        direction,
-                        error: Some(PendingSessionHandshakeError::Eth(err)),
-                    }
+        let (multiplex_stream, their_status) = match multiplex_stream
+            .into_eth_satellite_stream(status, fork_filter, handshake)
+            .await
+        {
+            Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
+            Err(err) => {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::Eth(err)),
                 }
-            };
+            }
+        };
 
         (multiplex_stream.into(), their_status)
     };
