@@ -169,7 +169,7 @@ impl LaunchContext {
         Ok(toml_config)
     }
 
-    /// Save prune config to the toml file if node is a full node.
+    /// Save prune config to the toml file if node is a full node or has prune arguments specified.
     fn save_pruning_config_if_full_node<ChainSpec>(
         reth_config: &mut reth_config::Config,
         config: &NodeConfig<ChainSpec>,
@@ -405,13 +405,14 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     where
         ChainSpec: reth_chainspec::EthereumHardforks,
     {
+        let toml_config = self.toml_config().prune.clone();
         let Some(mut node_prune_config) = self.node_config().prune_config() else {
             // No CLI config is set, use the toml config.
-            return self.toml_config().prune.clone();
+            return toml_config;
         };
 
         // Otherwise, use the CLI configuration and merge with toml config.
-        node_prune_config.merge(self.toml_config().prune.clone());
+        node_prune_config.merge(toml_config);
         Some(node_prune_config)
     }
 

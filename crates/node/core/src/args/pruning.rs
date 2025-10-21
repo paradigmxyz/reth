@@ -124,6 +124,8 @@ impl PruningArgs {
                     // TODO: set default to pre-merge block if available
                     bodies_history: None,
                     merkle_changesets: PruneMode::Distance(MINIMUM_PRUNING_DISTANCE),
+                    #[expect(deprecated)]
+                    receipts_log_filter: (),
                 },
             }
         }
@@ -156,8 +158,7 @@ impl PruningArgs {
         if self.receipts_log_filter.is_some() {
             tracing::warn!(
                 target: "reth::cli",
-                "The --prune.receiptslogfilter flag is deprecated and has no effect. \
-                Receipts log filter pruning has been removed."
+                "The --prune.receiptslogfilter flag is deprecated and has no effect. It will be removed in a future release."
             );
         }
 

@@ -99,6 +99,10 @@ pub struct PruneModes {
         )
     )]
     pub merkle_changesets: PruneMode,
+    /// Receipts log filtering has been deprecated and will be removed in a future release.
+    #[deprecated]
+    #[serde(skip)]
+    pub receipts_log_filter: (),
 }
 
 impl Default for PruneModes {
@@ -111,6 +115,8 @@ impl Default for PruneModes {
             storage_history: None,
             bodies_history: None,
             merkle_changesets: default_merkle_changesets_mode(),
+            #[expect(deprecated)]
+            receipts_log_filter: (),
         }
     }
 }
@@ -126,6 +132,8 @@ impl PruneModes {
             storage_history: Some(PruneMode::Full),
             bodies_history: Some(PruneMode::Full),
             merkle_changesets: PruneMode::Full,
+            #[expect(deprecated)]
+            receipts_log_filter: (),
         }
     }
 

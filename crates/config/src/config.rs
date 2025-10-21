@@ -454,6 +454,7 @@ impl PruneConfig {
     /// if the corresponding value in this config is not set.
     pub fn merge(&mut self, other: Option<Self>) {
         let Some(other) = other else { return };
+        #[expect(deprecated)]
         let Self {
             block_interval,
             segments:
@@ -465,6 +466,7 @@ impl PruneConfig {
                     storage_history,
                     bodies_history,
                     merkle_changesets,
+                    receipts_log_filter: (),
                 },
         } = other;
 
@@ -999,6 +1001,8 @@ receipts = 'full'
                 storage_history: Some(PruneMode::Before(5000)),
                 bodies_history: None,
                 merkle_changesets: PruneMode::Before(0),
+                #[expect(deprecated)]
+                receipts_log_filter: (),
             },
         };
 
@@ -1012,6 +1016,8 @@ receipts = 'full'
                 storage_history: Some(PruneMode::Distance(3000)),
                 bodies_history: None,
                 merkle_changesets: PruneMode::Distance(10000),
+                #[expect(deprecated)]
+                receipts_log_filter: (),
             },
         };
 
