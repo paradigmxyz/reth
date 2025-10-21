@@ -24,7 +24,7 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     ops::DerefMut,
     sync::{
         mpsc::{channel, Receiver, Sender},
@@ -33,6 +33,10 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{debug, error, instrument, trace};
+
+/// Default upper bound for inflight multiproof calculations. These would be sitting in the queue
+/// waiting to be processed.
+const DEFAULT_MULTIPROOF_INFLIGHT_LIMIT: usize = 256;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
@@ -333,11 +337,17 @@ impl MultiproofInput {
 }
 
 /// Manages concurrent multiproof calculations.
-/// Takes care of spawning multiproof calculations and tracking in-flight work.
+/// Takes care of not having more calculations in flight than a given maximum
+/// concurrency, further calculation requests are queued and spawn later, after
+/// availability has been signaled.
 #[derive(Debug)]
 pub struct MultiproofManager {
+    /// Maximum number of proof calculations allowed to be inflight at once.
+    inflight_limit: usize,
     /// Currently running calculations.
     inflight: usize,
+    /// Queued calculations.
+    pending: VecDeque<PendingMultiproofTask>,
     /// Executor for tasks
     executor: WorkloadExecutor,
     /// Handle to the proof worker pools (storage and account).
@@ -366,6 +376,8 @@ impl MultiproofManager {
         proof_worker_handle: ProofWorkerHandle,
     ) -> Self {
         Self {
+            pending: VecDeque::with_capacity(DEFAULT_MULTIPROOF_INFLIGHT_LIMIT),
+            inflight_limit: DEFAULT_MULTIPROOF_INFLIGHT_LIMIT,
             executor,
             inflight: 0,
             metrics,
@@ -374,7 +386,11 @@ impl MultiproofManager {
         }
     }
 
-    /// Spawns a new multiproof calculation for the provided input.
+    const fn is_full(&self) -> bool {
+        self.inflight >= self.inflight_limit
+    }
+
+    /// Spawns a new multiproof calculation or enqueues it if the inflight limit is reached.
     fn spawn_or_queue(&mut self, input: PendingMultiproofTask) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets_is_empty() {
@@ -386,6 +402,12 @@ impl MultiproofManager {
             return
         }
 
+        if self.is_full() {
+            self.pending.push_back(input);
+            self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
+            return;
+        }
+
         self.spawn_multiproof_task(input);
     }
 
@@ -394,6 +416,11 @@ impl MultiproofManager {
     fn on_calculation_complete(&mut self) {
         self.inflight = self.inflight.saturating_sub(1);
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+
+        if let Some(input) = self.pending.pop_front() {
+            self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
+            self.spawn_multiproof_task(input);
+        }
     }
 
     /// Spawns a multiproof task, dispatching to `spawn_storage_proof` if the input is a storage
@@ -579,6 +606,8 @@ impl MultiproofManager {
 pub(crate) struct MultiProofTaskMetrics {
     /// Histogram of inflight multiproofs.
     pub inflight_multiproofs_histogram: Histogram,
+    /// Histogram of pending multiproofs.
+    pub pending_multiproofs_histogram: Histogram,
 
     /// Histogram of the number of prefetch proof target accounts.
     pub prefetch_proof_targets_accounts_histogram: Histogram,
