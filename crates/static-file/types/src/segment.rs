@@ -10,7 +10,7 @@ use core::{
     str::FromStr,
 };
 use derive_more::Display;
-use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de::Visitor, Deserialize, Deserializer, Serialize};
 use strum::{AsRefStr, EnumString};
 
 #[derive(
