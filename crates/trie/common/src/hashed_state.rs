@@ -324,17 +324,8 @@ impl HashedPostState {
 
     /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
-        let mut updated_accounts = Vec::new();
-        let mut destroyed_accounts = HashSet::default();
-        for (hashed_address, info) in self.accounts {
-            if let Some(info) = info {
-                updated_accounts.push((hashed_address, info));
-            } else {
-                destroyed_accounts.insert(hashed_address);
-            }
-        }
-        updated_accounts.sort_unstable_by_key(|(address, _)| *address);
-        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
+        let mut accounts: Vec<_> = self.accounts.into_iter().collect();
+        accounts.sort_unstable_by_key(|(address, _)| *address);
 
         let storages = self
             .storages
@@ -353,17 +344,8 @@ impl HashedPostState {
     /// This allows us to reuse the allocated space. This allocates new space for the sorted hashed
     /// post state, like `into_sorted`.
     pub fn drain_into_sorted(&mut self) -> HashedPostStateSorted {
-        let mut updated_accounts = Vec::new();
-        let mut destroyed_accounts = HashSet::default();
-        for (hashed_address, info) in self.accounts.drain() {
-            if let Some(info) = info {
-                updated_accounts.push((hashed_address, info));
-            } else {
-                destroyed_accounts.insert(hashed_address);
-            }
-        }
-        updated_accounts.sort_unstable_by_key(|(address, _)| *address);
-        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
+        let mut accounts: Vec<_> = self.accounts.drain().collect();
+        accounts.sort_unstable_by_key(|(address, _)| *address);
 
         let storages = self
             .storages
@@ -462,7 +444,7 @@ impl HashedStorage {
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostStateSorted {
     /// Updated state of accounts.
-    pub accounts: HashedAccountsSorted,
+    pub accounts: Vec<(B256, Option<Account>)>,
     /// Map of hashed addresses to hashed storage.
     pub storages: B256Map<HashedStorageSorted>,
 }
@@ -470,14 +452,14 @@ pub struct HashedPostStateSorted {
 impl HashedPostStateSorted {
     /// Create new instance of [`HashedPostStateSorted`]
     pub const fn new(
-        accounts: HashedAccountsSorted,
+        accounts: Vec<(B256, Option<Account>)>,
         storages: B256Map<HashedStorageSorted>,
     ) -> Self {
         Self { accounts, storages }
     }
 
     /// Returns reference to hashed accounts.
-    pub const fn accounts(&self) -> &HashedAccountsSorted {
+    pub const fn accounts(&self) -> &Vec<(B256, Option<Account>)> {
         &self.accounts
     }
 
@@ -497,7 +479,7 @@ impl HashedPostStateSorted {
     /// Entries in `other` take precedence for duplicate keys.
     pub fn extend_ref(&mut self, other: &Self) {
         // Extend accounts
-        self.accounts.extend_ref(&other.accounts);
+        extend_sorted_vec(&mut self.accounts, &other.accounts);
 
         // Extend storages
         for (hashed_address, other_storage) in &other.storages {
@@ -515,39 +497,39 @@ impl AsRef<Self> for HashedPostStateSorted {
     }
 }
 
-/// Sorted account state optimized for iterating during state trie calculation.
-#[derive(Clone, Eq, PartialEq, Default, Debug)]
-pub struct HashedAccountsSorted {
-    /// Sorted collection of hashed addresses and their account info.
-    pub accounts: Vec<(B256, Account)>,
-    /// Set of destroyed account keys.
-    pub destroyed_accounts: B256Set,
-}
+// /// Sorted account state optimized for iterating during state trie calculation.
+// #[derive(Clone, Eq, PartialEq, Default, Debug)]
+// pub struct HashedAccountsSorted {
+//     /// Sorted collection of hashed addresses and their account info.
+//     pub accounts: Vec<(B256, Account)>,
+//     /// Set of destroyed account keys.
+//     pub destroyed_accounts: B256Set,
+// }
 
-impl HashedAccountsSorted {
-    /// Returns a sorted iterator over updated accounts.
-    pub fn accounts_sorted(&self) -> impl Iterator<Item = (B256, Option<Account>)> {
-        self.accounts
-            .iter()
-            .map(|(address, account)| (*address, Some(*account)))
-            .chain(self.destroyed_accounts.iter().map(|address| (*address, None)))
-            .sorted_by_key(|entry| *entry.0)
-    }
-
-    /// Extends this collection with contents of another sorted collection.
-    /// Entries in `other` take precedence for duplicate keys.
-    pub fn extend_ref(&mut self, other: &Self) {
-        // Updates take precedence over removals, so we want removals from `other` to only apply to
-        // the previous accounts.
-        self.accounts.retain(|(addr, _)| !other.destroyed_accounts.contains(addr));
-
-        // Extend the sorted accounts vector
-        extend_sorted_vec(&mut self.accounts, &other.accounts);
-
-        // Merge destroyed accounts sets
-        self.destroyed_accounts.extend(&other.destroyed_accounts);
-    }
-}
+// impl HashedAccountsSorted {
+//     /// Returns a sorted iterator over updated accounts.
+//     pub fn accounts_sorted(&self) -> impl Iterator<Item = (B256, Option<Account>)> {
+//         self.accounts
+//             .iter()
+//             .map(|(address, account)| (*address, Some(*account)))
+//             .chain(self.destroyed_accounts.iter().map(|address| (*address, None)))
+//             .sorted_by_key(|entry| *entry.0)
+//     }
+//
+//     /// Extends this collection with contents of another sorted collection.
+//     /// Entries in `other` take precedence for duplicate keys.
+//     pub fn extend_ref(&mut self, other: &Self) {
+//         // Updates take precedence over removals, so we want removals from `other` to only apply to
+//         // the previous accounts.
+//         self.accounts.retain(|(addr, _)| !other.destroyed_accounts.contains(addr));
+//
+//         // Extend the sorted accounts vector
+//         extend_sorted_vec(&mut self.accounts, &other.accounts);
+//
+//         // Merge destroyed accounts sets
+//         self.destroyed_accounts.extend(&other.destroyed_accounts);
+//     }
+// }
 
 /// Sorted hashed storage optimized for iterating during state trie calculation.
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -1146,41 +1128,37 @@ mod tests {
     fn test_hashed_post_state_sorted_extend_ref() {
         // Test extending accounts
         let mut state1 = HashedPostStateSorted {
-            accounts: HashedAccountsSorted {
-                accounts: vec![
-                    (B256::from([1; 32]), Account::default()),
-                    (B256::from([3; 32]), Account::default()),
-                ],
-                destroyed_accounts: B256Set::from_iter([B256::from([5; 32])]),
-            },
+            accounts: vec![
+                (B256::from([1; 32]), Some(Account::default())),
+                (B256::from([3; 32]), Some(Account::default())),
+                (B256::from([5; 32]), None)
+            ],
             storages: B256Map::default(),
         };
 
         let state2 = HashedPostStateSorted {
-            accounts: HashedAccountsSorted {
-                accounts: vec![
-                    (B256::from([2; 32]), Account::default()),
-                    (B256::from([3; 32]), Account { nonce: 1, ..Default::default() }), // Override
-                    (B256::from([4; 32]), Account::default()),
-                ],
-                destroyed_accounts: B256Set::from_iter([B256::from([6; 32])]),
-            },
+            accounts: vec![
+                (B256::from([2; 32]), Some(Account::default())),
+                (B256::from([3; 32]), Some(Account { nonce: 1, ..Default::default() })), // Override
+                (B256::from([4; 32]), Some(Account::default())),
+                (B256::from([6; 32]), None),
+            ],
             storages: B256Map::default(),
         };
 
         state1.extend_ref(&state2);
 
         // Check accounts are merged and sorted
-        assert_eq!(state1.accounts.accounts.len(), 4);
-        assert_eq!(state1.accounts.accounts[0].0, B256::from([1; 32]));
-        assert_eq!(state1.accounts.accounts[1].0, B256::from([2; 32]));
-        assert_eq!(state1.accounts.accounts[2].0, B256::from([3; 32]));
-        assert_eq!(state1.accounts.accounts[2].1.nonce, 1); // Should have state2's value
-        assert_eq!(state1.accounts.accounts[3].0, B256::from([4; 32]));
+        assert_eq!(state1.accounts.len(), 4);
+        assert_eq!(state1.accounts[0].0, B256::from([1; 32]));
+        assert_eq!(state1.accounts[1].0, B256::from([2; 32]));
+        assert_eq!(state1.accounts[2].0, B256::from([3; 32]));
+        assert_eq!(state1.accounts[2].1.unwrap().nonce, 1); // Should have state2's value
+        assert_eq!(state1.accounts[3].0, B256::from([4; 32]));
 
         // Check destroyed accounts are merged
-        assert!(state1.accounts.destroyed_accounts.contains(&B256::from([5; 32])));
-        assert!(state1.accounts.destroyed_accounts.contains(&B256::from([6; 32])));
+        assert!(state1.accounts.contains(&(B256::from([5; 32]), None)));
+        assert!(state1.accounts.contains(&(B256::from([6; 32]), None)));
     }
 
     #[test]

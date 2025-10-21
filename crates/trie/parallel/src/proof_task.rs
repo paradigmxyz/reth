@@ -1102,7 +1102,7 @@ mod tests {
     use alloy_primitives::map::B256Map;
     use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
     use reth_trie_common::{
-        prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedAccountsSorted,
+        prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted,
         HashedPostStateSorted,
     };
     use std::sync::Arc;
@@ -1112,7 +1112,7 @@ mod tests {
         ProofTaskCtx::new(
             Arc::new(TrieUpdatesSorted::default()),
             Arc::new(HashedPostStateSorted::new(
-                HashedAccountsSorted::default(),
+                Vec::new(),
                 B256Map::default(),
             )),
             Arc::new(TriePrefixSetsMut::default()),
