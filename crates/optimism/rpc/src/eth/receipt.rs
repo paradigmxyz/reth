@@ -131,10 +131,12 @@ pub struct OpReceiptFieldsBuilder {
     pub l1_blob_base_fee: Option<u128>,
     /// The current L1 blob base fee scalar.
     pub l1_blob_base_fee_scalar: Option<u128>,
+    /* ---------------------------------------- Isthmus ---------------------------------------- */
     /// The current operator fee scalar.
     pub operator_fee_scalar: Option<u128>,
     /// The current L1 blob base fee scalar.
     pub operator_fee_constant: Option<u128>,
+    /* ---------------------------------------- Jovian ----------------------------------------- */
     /// The current DA footprint gas scalar.
     pub da_footprint_gas_scalar: Option<u16>,
 }
@@ -207,6 +209,8 @@ impl OpReceiptFieldsBuilder {
             self.operator_fee_constant =
                 l1_block_info.operator_fee_constant.map(|constant| constant.saturating_to());
         }
+
+        self.da_footprint_gas_scalar = l1_block_info.da_footprint_gas_scalar;
 
         Ok(self)
     }

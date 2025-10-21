@@ -92,7 +92,8 @@ fn build_components<Node>(
 where
     Node: FullNodeTypes<Types: OpNodeTypes>,
 {
-    let RollupArgs { disable_txpool_gossip, compute_pending_block, .. } = RollupArgs::default();
+    let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } =
+        RollupArgs::default();
     ComponentsBuilder::default()
         .node_types::<Node>()
         .pool(OpPoolBuilder::default())
@@ -101,7 +102,7 @@ where
             OpPayloadBuilder::new(compute_pending_block)
                 .with_transactions(CustomTxPriority { chain_id }),
         ))
-        .network(OpNetworkBuilder::new(disable_txpool_gossip, true))
+        .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
         .consensus(OpConsensusBuilder::default())
 }
 

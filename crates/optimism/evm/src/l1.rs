@@ -354,6 +354,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{Block, BlockBody};
     use alloy_eips::eip2718::Decodable2718;
+    use alloy_primitives::keccak256;
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_forks::OpHardforks;
     use reth_optimism_primitives::OpTransactionSigned;
@@ -378,6 +379,12 @@ mod tests {
         assert_eq!(l1_info.l1_base_fee_scalar, U256::from(1_000_000));
         assert_eq!(l1_info.l1_blob_base_fee, None);
         assert_eq!(l1_info.l1_blob_base_fee_scalar, None);
+    }
+
+    #[test]
+    fn test_verify_set_jovian() {
+        let hash = &keccak256("setL1BlockValuesJovian()")[..4];
+        assert_eq!(hash, L1_BLOCK_JOVIAN_SELECTOR)
     }
 
     #[test]
