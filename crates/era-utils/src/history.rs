@@ -1,4 +1,3 @@
-use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, U256};
 use futures_util::{Stream, StreamExt};
 use reth_db_api::{
@@ -20,15 +19,15 @@ use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    providers::StaticFileProviderRWRefMut, BlockReader, BlockWriter, StaticFileProviderFactory,
+    providers::StaticFileProviderRWRefMut, BlockWriter, ProviderError, StaticFileProviderFactory,
     StaticFileSegment, StaticFileWriter,
 };
 use reth_stages_types::{
     CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
 };
 use reth_storage_api::{
-    errors::ProviderResult, DBProvider, DatabaseProviderFactory, NodePrimitivesProvider,
-    StageCheckpointWriter,
+    errors::ProviderResult, DBProvider, DatabaseProviderFactory, HeaderProvider,
+    NodePrimitivesProvider, StageCheckpointWriter,
 };
 use std::{
     collections::Bound,
@@ -39,7 +38,7 @@ use std::{
     ops::RangeBounds,
     sync::mpsc,
 };
-use tracing::info;
+use tracing::{error, info};
 
 /// Imports blocks from `downloader` using `provider`.
 ///
@@ -83,21 +82,47 @@ where
         .get_highest_static_file_block(StaticFileSegment::Headers)
         .unwrap_or_default();
 
+    // Find the latest total difficulty
+    let mut td = static_file_provider
+        .header_td_by_number(height)?
+        .ok_or(ProviderError::TotalDifficultyNotFound(height))?;
+
     while let Some(meta) = rx.recv()? {
         let from = height;
         let provider = provider_factory.database_provider_rw()?;
 
-        height = process(
-            &meta?,
+        let meta = match meta {
+            Ok(meta) => meta,
+            Err(e) => {
+                error!(target: "era::history::import", %e, "Failed to process era metadata");
+                return Err(e);
+            }
+        };
+
+        height = match process(
+            &meta,
             &mut static_file_provider.latest_writer(StaticFileSegment::Headers)?,
             &provider,
             hash_collector,
+            &mut td,
             height..,
-        )?;
+        ) {
+            Ok(height) => height,
+            Err(e) => {
+                error!(target: "era::history::import", %e, from = from, "Failed to process era file");
+                return Err(e);
+            }
+        };
 
-        save_stage_checkpoints(&provider, from, height, height, height)?;
+        if let Err(e) = save_stage_checkpoints(&provider, from, height, height, height) {
+            error!(target: "era::history::import", %e, from = from, to = height, "Failed to save stage checkpoints");
+            return Err(e.into());
+        }
 
-        provider.commit()?;
+        if let Err(e) = provider.commit() {
+            error!(target: "era::history::import", %e, to = height, "Failed to commit transaction");
+            return Err(e.into());
+        }
     }
 
     let provider = provider_factory.database_provider_rw()?;
@@ -141,7 +166,7 @@ where
 
 /// Extracts block headers and bodies from `meta` and appends them using `writer` and `provider`.
 ///
-/// Collects hash to height using `hash_collector`.
+/// Adds on to `total_difficulty` and collects hash to height using `hash_collector`.
 ///
 /// Skips all blocks below the [`start_bound`] of `block_numbers` and stops when reaching past the
 /// [`end_bound`] or the end of the file.
@@ -155,6 +180,7 @@ pub fn process<Era, P, B, BB, BH>(
     writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
+    total_difficulty: &mut U256,
     block_numbers: impl RangeBounds<BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
@@ -176,7 +202,7 @@ where
                 as Box<dyn Fn(Result<BlockTuple, E2sError>) -> eyre::Result<(BH, BB)>>);
     let iter = ProcessIter { iter, era: meta };
 
-    process_iter(iter, writer, provider, hash_collector, block_numbers)
+    process_iter(iter, writer, provider, hash_collector, total_difficulty, block_numbers)
 }
 
 type ProcessInnerIter<R, BH, BB> =
@@ -265,6 +291,7 @@ pub fn process_iter<P, B, BB, BH>(
     writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
+    total_difficulty: &mut U256,
     block_numbers: impl RangeBounds<BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
@@ -289,7 +316,14 @@ where
     };
 
     for block in &mut iter {
-        let (header, body) = block?;
+        let (header, body) = match block {
+            Ok((header, body)) => (header, body),
+            Err(e) => {
+                error!(target: "era::history::import", %e, "Failed to decode block");
+                return Err(e);
+            }
+        };
+
         let number = header.number();
 
         if number <= last_header_number {
@@ -304,13 +338,25 @@ where
         let hash = header.hash_slow();
         last_header_number = number;
 
+        // Increase total difficulty
+        *total_difficulty += header.difficulty();
+
         // Append to Headers segment
-        writer.append_header(&header, &hash)?;
+        if let Err(e) = writer.append_header(&header, *total_difficulty, &hash) {
+            error!(target: "era::history::import", %e, block_number = number, "Failed to append header");
+            return Err(e.into());
+        }
 
         // Write bodies to database.
-        provider.append_block_bodies(vec![(header.number(), Some(body))])?;
+        if let Err(e) = provider.append_block_bodies(vec![(header.number(), Some(body))]) {
+            error!(target: "era::history::import", %e, block_number = number, "Failed to append block body");
+            return Err(e.into());
+        }
 
-        hash_collector.insert(hash, number)?;
+        if let Err(e) = hash_collector.insert(hash, number) {
+            error!(target: "era::history::import", %e, block_number = number, "Failed to insert hash into collector");
+            return Err(e.into());
+        }
     }
 
     Ok(last_header_number)
@@ -335,26 +381,64 @@ where
     info!(target: "era::history::import", total = total_headers, "Writing headers hash index");
 
     // Database cursor for hash to number index
-    let mut cursor_header_numbers =
-        provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
+    let mut cursor_header_numbers = match provider
+        .tx_ref()
+        .cursor_write::<RawTable<tables::HeaderNumbers>>()
+    {
+        Ok(cursor) => cursor,
+        Err(e) => {
+            error!(target: "era::history::import", %e, "Failed to create cursor for HeaderNumbers table");
+            return Err(e.into());
+        }
+    };
+
     // If we only have the genesis block hash, then we are at first sync, and we can remove it,
     // add it to the collector and use tx.append on all hashes.
-    let first_sync = if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 &&
-        let Some((hash, block_number)) = cursor_header_numbers.last()? &&
-        block_number.value()? == 0
+    let first_sync = if let Ok(entries) =
+        provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()
     {
-        hash_collector.insert(hash.key()?, 0)?;
-        cursor_header_numbers.delete_current()?;
-        true
+        if entries == 1 {
+            if let Some((hash, block_number)) = cursor_header_numbers.last()? {
+                if let Ok(block_num) = block_number.value() {
+                    if block_num == 0 {
+                        if let Err(e) = hash_collector.insert(hash.key()?, 0) {
+                            error!(target: "era::history::import", %e, "Failed to insert genesis hash into collector");
+                            return Err(e.into());
+                        }
+                        if let Err(e) = cursor_header_numbers.delete_current() {
+                            error!(target: "era::history::import", %e, "Failed to delete genesis block from cursor");
+                            return Err(e.into());
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    error!(target: "era::history::import", "Failed to decode block number value");
+                    return Err(eyre::eyre!("Failed to decode block number value"));
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     } else {
-        false
+        error!(target: "era::history::import", "Failed to get entries count for HeaderNumbers table");
+        return Err(eyre::eyre!("Failed to get entries count for HeaderNumbers table"));
     };
 
     let interval = (total_headers / 10).max(8192);
 
     // Build block hash to block number index
     for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
-        let (hash, number) = hash_to_number?;
+        let (hash, number) = match hash_to_number {
+            Ok((hash, number)) => (hash, number),
+            Err(e) => {
+                error!(target: "era::history::import", %e, index = index, "Failed to get hash-to-number mapping from collector");
+                return Err(e.into());
+            }
+        };
 
         if index != 0 && index.is_multiple_of(interval) {
             info!(target: "era::history::import", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
@@ -364,36 +448,15 @@ where
         let number = RawValue::<BlockNumber>::from_vec(number);
 
         if first_sync {
-            cursor_header_numbers.append(hash, &number)?;
-        } else {
-            cursor_header_numbers.upsert(hash, &number)?;
+            if let Err(e) = cursor_header_numbers.append(hash, &number) {
+                error!(target: "era::history::import", %e, index = index, "Failed to append hash to number mapping");
+                return Err(e.into());
+            }
+        } else if let Err(e) = cursor_header_numbers.upsert(hash, &number) {
+            error!(target: "era::history::import", %e, index = index, "Failed to upsert hash to number mapping");
+            return Err(e.into());
         }
     }
 
     Ok(())
-}
-
-/// Calculates the total difficulty for a given block number by summing the difficulty
-/// of all blocks from genesis to the given block.
-///
-/// Very expensive - iterates through all blocks in batches of 1000.
-///
-/// Returns an error if any block is missing.
-pub fn calculate_td_by_number<P>(provider: &P, num: BlockNumber) -> eyre::Result<U256>
-where
-    P: BlockReader,
-{
-    let mut total_difficulty = U256::ZERO;
-    let mut start = 0;
-
-    while start <= num {
-        let end = (start + 1000 - 1).min(num);
-
-        total_difficulty +=
-            provider.headers_range(start..=end)?.iter().map(|h| h.difficulty()).sum::<U256>();
-
-        start = end + 1;
-    }
-
-    Ok(total_difficulty)
 }
