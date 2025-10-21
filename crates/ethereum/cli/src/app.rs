@@ -98,7 +98,7 @@ where
                 self.cli.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
 
-        self.init_tracing(Some(&runner))?;
+        self.init_tracing(&runner)?;
 
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
@@ -110,7 +110,7 @@ where
     ///
     /// If file logging is enabled, this function stores guard to the struct.
     /// For gRPC OTLP, it requires tokio runtime context.
-    pub fn init_tracing(&mut self, runner: Option<&CliRunner>) -> Result<()> {
+    pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
         if self.guard.is_none() {
             let mut layers = self.layers.take().unwrap_or_default();
 
@@ -136,7 +136,7 @@ where
         &self,
         layers: &mut Layers,
         endpoint: &Url,
-        runner: Option<&CliRunner>,
+        runner: &CliRunner,
     ) -> Result<()> {
         let endpoint = endpoint.clone();
         let protocol = self.cli.traces.protocol;
@@ -144,8 +144,6 @@ where
 
         match protocol {
             OtlpProtocol::Grpc => {
-                let runner =
-                    runner.ok_or_else(|| eyre!("Runner required for gRPC OTLP initialization"))?;
                 runner.block_on(async {
                     layers.with_span_layer("reth".to_string(), endpoint, filter_level, protocol)
                 })?;
