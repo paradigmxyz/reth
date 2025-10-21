@@ -12,7 +12,9 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
-use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{
+    b256, keccak256, map::HashSet, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
+};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
@@ -260,6 +262,10 @@ pub struct StaticFileProviderInner<N> {
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Access rights of the provider.
     access: StaticFileAccess,
+    /// Whether or not to write to specific segments.
+    ///
+    /// Writers will not be returned for these segments.
+    read_only_segments: HashSet<StaticFileSegment>,
     /// Number of blocks per file.
     blocks_per_file: u64,
     /// Write lock for when access is [`StaticFileAccess::RW`].
@@ -287,6 +293,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             path: path.as_ref().to_path_buf(),
             metrics: None,
             access,
+            read_only_segments: HashSet::from_iter([StaticFileSegment::AccountChangeSets]),
             blocks_per_file: DEFAULT_BLOCKS_PER_STATIC_FILE,
             _lock_file,
             _pd: Default::default(),
@@ -1431,7 +1438,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         block: BlockNumber,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
-        if self.access.is_read_only() {
+        if self.access.is_read_only() || self.read_only_segments.contains(&segment) {
             return Err(ProviderError::ReadOnlyStaticFileAccess)
         }
 
