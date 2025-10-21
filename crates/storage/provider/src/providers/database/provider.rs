@@ -1,7 +1,6 @@
 use crate::{
     changesets_utils::{
         storage_trie_wiped_changeset_iter, StorageRevertsIter, StorageTrieCurrentValuesIter,
-        WipedStorageIter,
     },
     providers::{
         database::{chain::ChainStorage, metrics},
@@ -1733,18 +1732,34 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 // storage state has to be taken from the database and written to storage history.
                 // See [StorageWipe::Primary] for more details.
                 //
-                // Note: This code performs an intermediate Vec allocation to collect storage slot changes before sorting.
-                let wiped_storage_iter: Option<WipedStorageIter<'_, _>> = if wiped {
+                // Note: This code performs an intermediate Vec allocation to collect storage slot
+                // changes before sorting.
+                let wiped_storage_iter: Box<dyn Iterator<Item = (B256, U256)>> = if wiped {
                     tracing::trace!(?address, "Wiping storage");
-                    Some(WipedStorageIter::new(&mut storages_cursor, address)?)
+
+                    // collect the first entry and chain with duplicates
+                    let first_entry = storages_cursor
+                        .seek_exact(address)?
+                        .map(|(_, entry)| (entry.key, entry.value));
+
+                    match first_entry {
+                        Some(first) => {
+                            // Create an iterator that includes the first entry and all duplicates
+                            Box::new(std::iter::once(first).chain(std::iter::from_fn(|| {
+                                match storages_cursor.next_dup_val() {
+                                    Ok(Some(entry)) => Some((entry.key, entry.value)),
+                                    Ok(None) | Err(_) => None,
+                                }
+                            })))
+                        }
+                        None => Box::new(std::iter::empty()),
+                    }
                 } else {
-                    None
+                    Box::new(std::iter::empty())
                 };
 
                 tracing::trace!(?address, ?storage, "Writing storage reverts");
-                for (key, value) in
-                    StorageRevertsIter::new(storage, wiped_storage_iter.into_iter().flatten())
-                {
+                for (key, value) in StorageRevertsIter::new(storage, wiped_storage_iter) {
                     storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
                 }
             }
