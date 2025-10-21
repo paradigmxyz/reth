@@ -535,6 +535,24 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     where
         N::BlockHeader: Compact,
     {
+        self.append_header_with_td(header, U256::ZERO, hash)
+    }
+
+    /// Appends header to static file with a specified total difficulty.
+    ///
+    /// It **CALLS** `increment_block()` since the number of headers is equal to the number of
+    /// blocks.
+    ///
+    /// Returns the current [`BlockNumber`] as seen in the static file.
+    pub fn append_header_with_td(
+        &mut self,
+        header: &N::BlockHeader,
+        total_difficulty: U256,
+        hash: &BlockHash,
+    ) -> ProviderResult<()>
+    where
+        N::BlockHeader: Compact,
+    {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
@@ -543,7 +561,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.increment_block(header.number())?;
 
         self.append_column(header)?;
-        self.append_column(CompactU256::from(U256::ZERO))?; // deprecated total difficulty
+        self.append_column(CompactU256::from(total_difficulty))?;
         self.append_column(hash)?;
 
         if let Some(metrics) = &self.metrics {
