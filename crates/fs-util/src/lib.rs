@@ -38,15 +38,6 @@ pub enum FsPathError {
         path: PathBuf,
     },
 
-    /// Error variant for failed read link operation with additional path context.
-    #[error("failed to read from {path:?}: {source}")]
-    ReadLink {
-        /// The source `io::Error`.
-        source: io::Error,
-        /// The path related to the operation.
-        path: PathBuf,
-    },
-
     /// Error variant for failed file creation operation with additional path context.
     #[error("failed to create file {path:?}: {source}")]
     CreateFile {
@@ -157,11 +148,6 @@ impl FsPathError {
     /// Returns the complementary error variant for [`std::fs::read`].
     pub fn read(source: io::Error, path: impl Into<PathBuf>) -> Self {
         Self::Read { source, path: path.into() }
-    }
-
-    /// Returns the complementary error variant for [`std::fs::read_link`].
-    pub fn read_link(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::ReadLink { source, path: path.into() }
     }
 
     /// Returns the complementary error variant for [`std::fs::File::create`].
