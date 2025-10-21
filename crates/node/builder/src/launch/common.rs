@@ -180,7 +180,7 @@ impl LaunchContext {
     {
         if reth_config.prune.is_none() {
             if let Some(prune_config) = config.prune_config() {
-                reth_config.update_prune_config(prune_config);
+                reth_config.set_prune_config(prune_config);
                 info!(target: "reth::cli", "Saving prune config to toml file");
                 reth_config.save(config_path.as_ref())?;
             }
@@ -1206,6 +1206,7 @@ mod tests {
                     storage_history_before: None,
                     bodies_pre_merge: false,
                     bodies_distance: None,
+                    #[expect(deprecated)]
                     receipts_log_filter: None,
                     bodies_before: None,
                 },

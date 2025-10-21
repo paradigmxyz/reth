@@ -2,7 +2,7 @@ use alloy_primitives::BlockNumber;
 use derive_more::Display;
 use thiserror::Error;
 
-use crate::{PruneCheckpoint, PruneMode, PruneSegment, ReceiptsLogPruneConfig};
+use crate::{PruneCheckpoint, PruneMode, PruneSegment};
 
 /// Minimum distance from the tip necessary for the node to work correctly:
 /// 1. Minimum 2 epochs (32 blocks per epoch) required to handle any reorg according to the
@@ -99,12 +99,6 @@ pub struct PruneModes {
         )
     )]
     pub merkle_changesets: PruneMode,
-    /// Receipts pruning configuration by retaining only those receipts that contain logs emitted
-    /// by the specified addresses, discarding others. This setting is overridden by `receipts`.
-    ///
-    /// The [`BlockNumber`](`crate::BlockNumber`) represents the starting block from which point
-    /// onwards the receipts are preserved.
-    pub receipts_log_filter: ReceiptsLogPruneConfig,
 }
 
 impl Default for PruneModes {
@@ -117,14 +111,13 @@ impl Default for PruneModes {
             storage_history: None,
             bodies_history: None,
             merkle_changesets: default_merkle_changesets_mode(),
-            receipts_log_filter: ReceiptsLogPruneConfig::default(),
         }
     }
 }
 
 impl PruneModes {
     /// Sets pruning to all targets.
-    pub fn all() -> Self {
+    pub const fn all() -> Self {
         Self {
             sender_recovery: Some(PruneMode::Full),
             transaction_lookup: Some(PruneMode::Full),
@@ -133,13 +126,12 @@ impl PruneModes {
             storage_history: Some(PruneMode::Full),
             bodies_history: Some(PruneMode::Full),
             merkle_changesets: PruneMode::Full,
-            receipts_log_filter: Default::default(),
         }
     }
 
     /// Returns whether there is any kind of receipt pruning configuration.
-    pub fn has_receipts_pruning(&self) -> bool {
-        self.receipts.is_some() || !self.receipts_log_filter.is_empty()
+    pub const fn has_receipts_pruning(&self) -> bool {
+        self.receipts.is_some()
     }
 
     /// Returns an error if we can't unwind to the targeted block because the target block is

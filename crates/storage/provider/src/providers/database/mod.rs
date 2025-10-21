@@ -96,7 +96,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Sets the pruning configuration for an existing [`ProviderFactory`].
-    pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
+    pub const fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
         self.prune_modes = prune_modes;
         self
     }
