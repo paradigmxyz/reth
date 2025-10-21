@@ -1,4 +1,5 @@
 use crate::{providers::NodeTypesForProvider, DatabaseProvider};
+use reth_db::{tables, TableSet};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_node_types::NodePrimitives;
 
@@ -18,6 +19,11 @@ pub trait ChainStorage<N: NodePrimitives>: Send + Sync {
     where
         TX: DbTxMut + DbTx + 'static,
         Types: NodeTypesForProvider<Primitives = N>;
+
+    /// Optionally specifies extra database tables required for node operation.
+    fn extra_tables() -> Option<impl TableSet> {
+        None::<tables::Tables>
+    }
 }
 
 impl<N, T, H> ChainStorage<N> for EthStorage

@@ -504,6 +504,15 @@ impl DatabaseEnv {
         Ok(())
     }
 
+    /// Same as [`DatabaseEnv::create_tables_for`] but takes [`TableSet`] as an argument helping
+    /// with type inference.
+    pub fn create_tables_for_set<TS: TableSet>(
+        self: &mut Arc<Self>,
+        _set: TS,
+    ) -> Result<(), DatabaseError> {
+        self.create_tables_for::<TS>()
+    }
+
     /// Creates the tables and returns the identifiers of the tables.
     fn _create_tables<TS: TableSet>(
         &self,

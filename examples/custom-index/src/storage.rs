@@ -11,10 +11,11 @@ use reth_ethereum::{
             cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
             table::{Compress, Decompress},
             tables,
-            transaction::DbTxMut,
-            DatabaseError,
+            transaction::{DbTx, DbTxMut},
+            DatabaseError, TableSet,
         },
-        ChainSpecProvider, ExecutionOutcome, ProviderError, ProviderResult,
+        providers::{ChainStorage, NodeTypesForProvider},
+        ChainSpecProvider, DatabaseProvider, ExecutionOutcome, ProviderError, ProviderResult,
     },
     storage::{
         BlockBodyIndicesProvider, ChainStorageReader, ChainStorageWriter, DBProvider, EthStorage,
@@ -175,5 +176,31 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl ChainStorage<EthPrimitives> for CustomStorage {
+    fn reader<TX, Types>(
+        &self,
+    ) -> impl ChainStorageReader<DatabaseProvider<TX, Types>, EthPrimitives>
+    where
+        TX: DbTx + 'static,
+        Types: NodeTypesForProvider<Primitives = EthPrimitives>,
+    {
+        self
+    }
+
+    fn writer<TX, Types>(
+        &self,
+    ) -> impl ChainStorageWriter<DatabaseProvider<TX, Types>, EthPrimitives>
+    where
+        TX: DbTxMut + DbTx + 'static,
+        Types: NodeTypesForProvider<Primitives = EthPrimitives>,
+    {
+        self
+    }
+
+    fn extra_tables() -> Option<impl TableSet> {
+        Some(Tables::SenderTransactions)
     }
 }
