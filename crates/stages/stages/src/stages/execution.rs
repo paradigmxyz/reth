@@ -39,7 +39,6 @@ use super::missing_static_data_error;
 /// Input tables:
 /// - [`tables::CanonicalHeaders`] get next block to execute.
 /// - [`tables::Headers`] get for revm environment variables.
-/// - [`tables::HeaderTerminalDifficulties`]
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///

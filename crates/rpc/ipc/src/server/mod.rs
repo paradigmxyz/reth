@@ -391,7 +391,7 @@ where
     fn call(&mut self, request: String) -> Self::Future {
         trace!("{:?}", request);
 
-        let cfg = RpcServiceCfg::CallsAndSubscriptions {
+        let cfg = RpcServiceCfg {
             bounded_subscriptions: BoundedSubscriptions::new(
                 self.inner.server_cfg.max_subscriptions_per_connection,
             ),
@@ -443,7 +443,7 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
 }
 
 /// Spawns the IPC connection onto a new task
-#[instrument(name = "connection", skip_all, fields(conn_id = %params.conn_id), level = "INFO")]
+#[instrument(name = "connection", skip_all, fields(conn_id = %params.conn_id))]
 fn process_connection<RpcMiddleware, HttpMiddleware>(
     params: ProcessConnection<'_, HttpMiddleware, RpcMiddleware>,
 ) where
