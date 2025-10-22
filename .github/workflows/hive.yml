@@ -32,7 +32,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v5
         with:
-          repository: raxhvl/hive
+          repository: Rimeeeeee/hive
           ref: feat/asmterdam-bal
           path: hivetests
 
@@ -208,7 +208,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v5
         with:
-          repository: raxhvl/hive
+          repository: Rimeeeeee/hive
           ref: feat/asmterdam-bal
           path: hivetests
 
