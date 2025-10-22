@@ -7,10 +7,10 @@ use alloy_primitives::{
     map::{B256Set, HashSet},
     B256,
 };
+use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::Histogram;
-use reth_errors::ProviderError;
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -20,17 +20,14 @@ use reth_trie::{
 };
 use reth_trie_parallel::{
     proof::ParallelProof,
-    proof_task::{AccountMultiproofInput, ProofWorkerHandle},
-    root::ParallelStateRootError,
+    proof_task::{AccountMultiproofInput, ProofResultMessage, ProofWorkerHandle},
+    stats::ParallelTrieTracker,
 };
 use std::{
     collections::BTreeMap,
     ops::DerefMut,
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        Arc,
-    },
-    time::{Duration, Instant},
+    sync::Arc,
+    time::Instant,
 };
 use tracing::{debug, error, instrument, trace};
 
@@ -109,10 +106,6 @@ pub(super) enum MultiProofMessage {
         /// The state update that was used to calculate the proof
         state: HashedPostState,
     },
-    /// Proof calculation completed for a specific state update
-    ProofCalculated(Box<ProofCalculated>),
-    /// Error during proof calculation
-    ProofCalculationError(ProviderError),
     /// Signals state update stream end.
     ///
     /// This is triggered by block execution, indicating that no additional state updates are
