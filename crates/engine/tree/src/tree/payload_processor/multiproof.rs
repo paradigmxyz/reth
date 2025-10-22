@@ -21,6 +21,7 @@ use reth_trie::{
 use reth_trie_parallel::{
     proof::ParallelProof,
     proof_task::{AccountMultiproofInput, ProofResultMessage, ProofWorkerHandle},
+    root::ParallelStateRootError,
     stats::ParallelTrieTracker,
 };
 use std::{
