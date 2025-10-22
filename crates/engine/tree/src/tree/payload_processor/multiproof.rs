@@ -1210,9 +1210,9 @@ mod tests {
         let consistent_view = ConsistentDbView::new(factory, None);
         let proof_handle =
             ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1);
-        let channel = std::sync::mpsc::channel();
+        let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
 
-        MultiProofTask::new(config, executor, proof_handle, channel.0, Some(1))
+        MultiProofTask::new(config, executor, proof_handle, to_sparse_trie, Some(1))
     }
 
     #[test]
