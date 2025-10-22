@@ -39,8 +39,8 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
-    DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted,
-    MultiProofTargets, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostState,
+    HashedPostStateSorted, MultiProofTargets, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
@@ -55,10 +55,10 @@ use std::{
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::runtime::Handle;
-use tracing::{debug_span, trace};
+use tracing::{error, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskTrieMetrics;
