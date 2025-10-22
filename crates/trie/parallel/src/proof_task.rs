@@ -103,22 +103,6 @@ enum StorageWorkerJob {
     },
 }
 
-/// Message containing a completed proof result with metadata for direct delivery to
-/// `MultiProofTask`.
-///
-/// This type enables workers to send proof results directly to the `MultiProofTask` event loop.
-#[derive(Debug)]
-pub struct ProofResultMessage {
-    /// Sequence number for ordering proofs
-    pub sequence_number: u64,
-    /// The proof calculation result
-    pub result: AccountMultiproofResult,
-    /// Time taken for the entire proof calculation (from dispatch to completion)
-    pub elapsed: Duration,
-    /// Original state update that triggered this proof
-    pub state: HashedPostState,
-}
-
 /// Worker loop for storage trie operations.
 ///
 /// # Lifecycle
@@ -877,7 +861,6 @@ pub struct AccountMultiproofInput {
     /// Cached storage proof roots for missed leaves encountered during account trie walk.
     pub missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     /// Sender for proof results.
-    ///
     /// The worker sends the computed proof result via this channel.
     pub proof_result_sender: ProofResultContext,
 }
