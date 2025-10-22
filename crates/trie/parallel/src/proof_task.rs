@@ -453,7 +453,7 @@ fn account_worker_loop<Factory>(
 
                 trace!(
                     target: "trie::proof_task",
-                    proof_time_us = proof_start.elapsed().as_micros(),
+                    proof_time_us = proof_elapsed.as_micros(),
                     total_processed = account_proofs_processed,
                     "Account multiproof completed"
                 );
