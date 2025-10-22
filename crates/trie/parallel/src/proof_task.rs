@@ -52,7 +52,7 @@ use std::{
     time::Instant,
 };
 use tokio::runtime::Handle;
-use tracing::{debug_span, trace};
+use tracing::trace;
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskTrieMetrics;
@@ -121,7 +121,7 @@ fn storage_worker_loop<Factory>(
         .expect("Storage worker failed to initialize: unable to create provider");
     let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
 
-    tracing::debug!(
+    tracing::trace!(
         target: "trie::proof_task",
         worker_id,
         "Storage worker started"
@@ -216,7 +216,7 @@ fn storage_worker_loop<Factory>(
         }
     }
 
-    tracing::debug!(
+    tracing::trace!(
         target: "trie::proof_task",
         worker_id,
         storage_proofs_processed,
@@ -267,7 +267,7 @@ fn account_worker_loop<Factory>(
         .expect("Account worker failed to initialize: unable to create provider");
     let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
 
-    tracing::debug!(
+    tracing::trace!(
         target: "trie::proof_task",
         worker_id,
         "Account worker started"
@@ -408,7 +408,7 @@ fn account_worker_loop<Factory>(
         }
     }
 
-    tracing::debug!(
+    tracing::trace!(
         target: "trie::proof_task",
         worker_id,
         account_proofs_processed,
@@ -847,10 +847,6 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
-        let storage_worker_parent =
-            debug_span!(target: "trie::proof_task", "Storage worker tasks", ?storage_worker_count);
-        let _guard = storage_worker_parent.enter();
-
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
             let task_ctx_clone = task_ctx.clone();
@@ -868,19 +864,7 @@ impl ProofWorkerHandle {
                     metrics,
                 )
             });
-
-            tracing::debug!(
-                target: "trie::proof_task",
-                worker_id,
-                "Storage worker spawned successfully"
-            );
         }
-
-        drop(_guard);
-
-        let account_worker_parent =
-            debug_span!(target: "trie::proof_task", "Account worker tasks", ?account_worker_count);
-        let _guard = account_worker_parent.enter();
 
         // Spawn account workers
         for worker_id in 0..account_worker_count {
@@ -901,15 +885,7 @@ impl ProofWorkerHandle {
                     metrics,
                 )
             });
-
-            tracing::debug!(
-                target: "trie::proof_task",
-                worker_id,
-                "Account worker spawned successfully"
-            );
         }
-
-        drop(_guard);
 
         Self::new_handle(storage_work_tx, account_work_tx)
     }

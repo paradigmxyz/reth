@@ -408,8 +408,7 @@ where
         let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
 
         // Plan the strategy used for state root computation.
-        let state_root_plan = self.plan_state_root_computation(&input, &ctx);
-        let persisting_kind = state_root_plan.persisting_kind;
+        let state_root_plan = self.plan_state_root_computation();
         let strategy = state_root_plan.strategy;
 
         debug!(
@@ -426,7 +425,6 @@ where
             env.clone(),
             txs,
             provider_builder,
-            persisting_kind,
             parent_hash,
             ctx.state(),
             strategy,
@@ -496,7 +494,6 @@ where
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
                 match self.compute_state_root_parallel(
-                    persisting_kind,
                     block.parent_hash(),
                     &hashed_state,
                     ctx.state(),
@@ -531,7 +528,7 @@ where
             if self.config.state_root_fallback() {
                 debug!(target: "engine::tree::payload_validator", "Using state root fallback for testing");
             } else {
-                warn!(target: "engine::tree::payload_validator", ?persisting_kind, "Failed to compute state root in parallel");
+                warn!(target: "engine::tree::payload_validator", "Failed to compute state root in parallel");
                 self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
             }
 
@@ -679,7 +676,6 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn compute_state_root_parallel(
         &self,
-        persisting_kind: PersistingKind,
         parent_hash: B256,
         hashed_state: &HashedPostState,
         state: &EngineApiTreeState<N>,
@@ -687,7 +683,7 @@ where
         let provider = self.provider.database_provider_ro()?;
 
         let (mut input, block_number) =
-            self.compute_trie_input(persisting_kind, provider, parent_hash, state, None)?;
+            self.compute_trie_input(provider, parent_hash, state, None)?;
 
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
@@ -790,7 +786,6 @@ where
         env: ExecutionEnv<Evm>,
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
-        persisting_kind: PersistingKind,
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
         strategy: StateRootStrategy,
@@ -812,7 +807,6 @@ where
                 // Compute trie input
                 let trie_input_start = Instant::now();
                 let (trie_input, block_number) = self.compute_trie_input(
-                    persisting_kind,
                     self.provider.database_provider_ro()?,
                     parent_hash,
                     state,
@@ -924,48 +918,24 @@ where
         Ok(None)
     }
 
-    /// Determines the state root computation strategy based on persistence state and configuration.
+    /// Determines the state root computation strategy based on configuration.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    fn plan_state_root_computation<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
-        &self,
-        input: &BlockOrPayload<T>,
-        ctx: &TreeCtx<'_, N>,
-    ) -> StateRootPlan {
-        // We only run the parallel state root if we are not currently persisting any blocks or
-        // persisting blocks that are all ancestors of the one we are executing.
-        //
-        // If we're committing ancestor blocks, then: any trie updates being committed are a subset
-        // of the in-memory trie updates collected before fetching reverts. So any diff in
-        // reverts (pre vs post commit) is already covered by the in-memory trie updates we
-        // collect in `compute_state_root_parallel`.
-        //
-        // See https://github.com/paradigmxyz/reth/issues/12688 for more details
-        let persisting_kind = ctx.persisting_kind_for(input.block_with_parent());
-        let can_run_parallel =
-            persisting_kind.can_run_parallel_state_root() && !self.config.state_root_fallback();
-
-        // Decide on the strategy.
-        // Use state root task only if:
-        // 1. No persistence is in progress
-        // 2. Config allows it
-        let strategy = if can_run_parallel {
-            if self.config.use_state_root_task() {
-                StateRootStrategy::StateRootTask
-            } else {
-                StateRootStrategy::Parallel
-            }
-        } else {
+    fn plan_state_root_computation(&self) -> StateRootPlan {
+        let strategy = if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
+        } else if self.config.use_state_root_task() {
+            StateRootStrategy::StateRootTask
+        } else {
+            StateRootStrategy::Parallel
         };
 
         debug!(
             target: "engine::tree::payload_validator",
-            block=?input.num_hash(),
             ?strategy,
             "Planned state root computation strategy"
         );
 
-        StateRootPlan { strategy, persisting_kind }
+        StateRootPlan { strategy }
     }
 
     /// Called when an invalid block is encountered during validation.
@@ -1004,11 +974,10 @@ where
         level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
-        fields(persisting_kind, parent_hash)
+        fields(parent_hash)
     )]
     fn compute_trie_input<TP: DBProvider + BlockNumReader + TrieReader>(
         &self,
-        persisting_kind: PersistingKind,
         provider: TP,
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
@@ -1017,46 +986,12 @@ where
         // get allocated trie input or use a default trie input
         let mut input = allocated_trie_input.unwrap_or_default();
 
-        let best_block_number = provider.best_block_number()?;
-
-        let (mut historical, mut blocks) = state
+        let (historical, blocks) = state
             .tree_state
             .blocks_by_hash(parent_hash)
             .map_or_else(|| (parent_hash.into(), vec![]), |(hash, blocks)| (hash.into(), blocks));
 
-        // If the current block is a descendant of the currently persisting blocks, then we need to
-        // filter in-memory blocks, so that none of them are already persisted in the database.
-        let _enter =
-            debug_span!(target: "engine::tree::payload_validator", "filter in-memory blocks", len = blocks.len())
-                .entered();
-        if persisting_kind.is_descendant() {
-            // Iterate over the blocks from oldest to newest.
-            while let Some(block) = blocks.last() {
-                let recovered_block = block.recovered_block();
-                if recovered_block.number() <= best_block_number {
-                    // Remove those blocks that lower than or equal to the highest database
-                    // block.
-                    blocks.pop();
-                } else {
-                    // If the block is higher than the best block number, stop filtering, as it's
-                    // the first block that's not in the database.
-                    break
-                }
-            }
-
-            historical = if let Some(block) = blocks.last() {
-                // If there are any in-memory blocks left after filtering, set the anchor to the
-                // parent of the oldest block.
-                (block.recovered_block().number() - 1).into()
-            } else {
-                // Otherwise, set the anchor to the original provided parent hash.
-                parent_hash.into()
-            };
-        }
-        drop(_enter);
-
-        let blocks_empty = blocks.is_empty();
-        if blocks_empty {
+        if blocks.is_empty() {
             debug!(target: "engine::tree::payload_validator", "Parent found on disk");
         } else {
             debug!(target: "engine::tree::payload_validator", %historical, blocks = blocks.len(), "Parent found in memory");
@@ -1094,8 +1029,6 @@ enum StateRootStrategy {
 struct StateRootPlan {
     /// Strategy that should be attempted for computing the state root.
     strategy: StateRootStrategy,
-    /// The persisting kind for this block.
-    persisting_kind: PersistingKind,
 }
 
 /// Type that validates the payloads processed by the engine.
