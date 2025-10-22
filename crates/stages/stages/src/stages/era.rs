@@ -384,7 +384,7 @@ mod tests {
                         ..Default::default()
                     },
                 );
-                self.db.insert_headers_with_td(blocks.iter().map(|block| block.sealed_header()))?;
+                self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data
                     {
@@ -499,10 +499,6 @@ mod tests {
                     .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
                 self.db.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
                 self.db.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
-                self.db.ensure_no_entry_above::<tables::HeaderTerminalDifficulties, _>(
-                    block,
-                    |num| num,
-                )?;
                 Ok(())
             }
 

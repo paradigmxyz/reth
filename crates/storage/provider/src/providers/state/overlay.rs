@@ -1,10 +1,11 @@
 use alloy_primitives::{BlockNumber, B256};
 use reth_db_api::DatabaseError;
 use reth_errors::ProviderError;
+use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    DBProvider, DatabaseProviderFactory, DatabaseProviderROFactory, StageCheckpointReader,
-    TrieReader,
+    DBProvider, DatabaseProviderFactory, DatabaseProviderROFactory, PruneCheckpointReader,
+    StageCheckpointReader, TrieReader,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -64,29 +65,51 @@ impl<F> OverlayStateProviderFactory<F> {
 impl<F> OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: TrieReader + StageCheckpointReader,
+    F::Provider: TrieReader + StageCheckpointReader + PruneCheckpointReader,
 {
     /// Validates that there are sufficient changesets to revert to the requested block number.
     ///
     /// Returns an error if the `MerkleChangeSets` checkpoint doesn't cover the requested block.
+    /// Takes into account both the stage checkpoint and the prune checkpoint to determine the
+    /// available data range.
     fn validate_changesets_availability(
         &self,
         provider: &F::Provider,
         requested_block: BlockNumber,
     ) -> Result<(), ProviderError> {
-        // Get the MerkleChangeSets stage checkpoint - let errors propagate as-is
-        let checkpoint = provider.get_stage_checkpoint(StageId::MerkleChangeSets)?;
+        // Get the MerkleChangeSets stage and prune checkpoints.
+        let stage_checkpoint = provider.get_stage_checkpoint(StageId::MerkleChangeSets)?;
+        let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::MerkleChangeSets)?;
 
-        // If there's no checkpoint at all or block range details are missing, we can't revert
-        let available_range = checkpoint
-            .and_then(|chk| {
-                chk.merkle_changesets_stage_checkpoint()
-                    .map(|stage_chk| stage_chk.block_range.from..=chk.block_number)
-            })
-            .ok_or_else(|| ProviderError::InsufficientChangesets {
-                requested: requested_block,
-                available: 0..=0,
+        // Get the upper bound from stage checkpoint
+        let upper_bound =
+            stage_checkpoint.as_ref().map(|chk| chk.block_number).ok_or_else(|| {
+                ProviderError::InsufficientChangesets {
+                    requested: requested_block,
+                    available: 0..=0,
+                }
             })?;
+
+        // Extract a possible lower bound from stage checkpoint if available
+        let stage_lower_bound = stage_checkpoint.as_ref().and_then(|chk| {
+            chk.merkle_changesets_stage_checkpoint().map(|stage_chk| stage_chk.block_range.from)
+        });
+
+        // Extract a possible lower bound from prune checkpoint if available
+        // The prune checkpoint's block_number is the highest pruned block, so data is available
+        // starting from the next block
+        let prune_lower_bound =
+            prune_checkpoint.and_then(|chk| chk.block_number.map(|block| block + 1));
+
+        // Use the higher of the two lower bounds (or error if neither is available)
+        let Some(lower_bound) = stage_lower_bound.max(prune_lower_bound) else {
+            return Err(ProviderError::InsufficientChangesets {
+                requested: requested_block,
+                available: 0..=upper_bound,
+            })
+        };
+
+        let available_range = lower_bound..=upper_bound;
 
         // Check if the requested block is within the available range
         if !available_range.contains(&requested_block) {
@@ -103,7 +126,7 @@ where
 impl<F> DatabaseProviderROFactory for OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: TrieReader + StageCheckpointReader,
+    F::Provider: TrieReader + StageCheckpointReader + PruneCheckpointReader,
 {
     type Provider = OverlayStateProvider<F::Provider>;
 

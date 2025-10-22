@@ -58,12 +58,10 @@ mod tests {
         test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
-    use alloy_primitives::{BlockHash, Signature, TxNumber, B256, U256};
+    use alloy_primitives::{BlockHash, Signature, TxNumber, B256};
     use rand::seq::SliceRandom;
     use reth_db::test_utils::create_test_static_files_dir;
-    use reth_db_api::{
-        transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers,
-    };
+    use reth_db_api::{transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};
     use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
     use reth_static_file_types::{
         find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE,
@@ -102,14 +100,11 @@ mod tests {
 
         let mut provider_rw = factory.provider_rw().unwrap();
         let tx = provider_rw.tx_mut();
-        let mut td = U256::ZERO;
         for header in headers.clone() {
-            td += header.header().difficulty;
             let hash = header.hash();
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();
             tx.put::<Headers>(header.number, header.clone_header()).unwrap();
-            tx.put::<HeaderTerminalDifficulties>(header.number, td.into()).unwrap();
             tx.put::<HeaderNumbers>(hash, header.number).unwrap();
         }
         provider_rw.commit().unwrap();

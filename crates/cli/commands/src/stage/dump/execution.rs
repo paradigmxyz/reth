@@ -70,13 +70,6 @@ fn import_tables_with_range<N: NodeTypesWithDB>(
         )
     })??;
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::HeaderTerminalDifficulties, _>(
-            &db_tool.provider_factory.db_ref().tx()?,
-            Some(from),
-            to,
-        )
-    })??;
-    output_db.update(|tx| {
         tx.import_table_with_range::<tables::Headers, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from),

@@ -52,7 +52,7 @@ use std::{
     time::Instant,
 };
 use tokio::runtime::Handle;
-use tracing::trace;
+use tracing::{debug_span, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskTrieMetrics;
@@ -279,10 +279,16 @@ fn account_worker_loop<Factory>(
     while let Ok(job) = work_rx.recv() {
         match job {
             AccountWorkerJob::AccountMultiproof { mut input, result_sender } => {
+                let span = tracing::debug_span!(
+                    target: "trie::proof_task",
+                    "Account multiproof calculation",
+                    targets = input.targets.len(),
+                    worker_id,
+                );
+                let _span_guard = span.enter();
+
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
-                    targets = input.targets.len(),
                     "Processing account multiproof"
                 );
 
@@ -348,18 +354,24 @@ fn account_worker_loop<Factory>(
 
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
                     proof_time_us = proof_elapsed.as_micros(),
                     total_processed = account_proofs_processed,
                     "Account multiproof completed"
                 );
+                drop(_span_guard);
             }
 
             AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
+                let span = tracing::debug_span!(
+                    target: "trie::proof_task",
+                    "Blinded account node calculation",
+                    ?path,
+                    worker_id,
+                );
+                let _span_guard = span.enter();
+
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
-                    ?path,
                     "Processing blinded account node"
                 );
 
@@ -387,12 +399,11 @@ fn account_worker_loop<Factory>(
 
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
-                    ?path,
                     node_time_us = elapsed.as_micros(),
                     total_processed = account_nodes_processed,
                     "Blinded account node completed"
                 );
+                drop(_span_guard);
             }
         }
     }
@@ -646,7 +657,7 @@ where
             multi_added_removed_keys.unwrap_or_else(|| Arc::new(MultiAddedRemovedKeys::new()));
         let added_removed_keys = multi_added_removed_keys.get_storage(&hashed_address);
 
-        let span = tracing::trace_span!(
+        let span = tracing::debug_span!(
             target: "trie::proof_task",
             "Storage proof calculation",
             hashed_address = ?hashed_address,
@@ -836,6 +847,10 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
+        let storage_worker_parent =
+            debug_span!(target: "trie::proof_task", "Storage worker tasks", ?storage_worker_count);
+        let _guard = storage_worker_parent.enter();
+
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
             let task_ctx_clone = task_ctx.clone();
@@ -860,6 +875,12 @@ impl ProofWorkerHandle {
                 "Storage worker spawned successfully"
             );
         }
+
+        drop(_guard);
+
+        let account_worker_parent =
+            debug_span!(target: "trie::proof_task", "Account worker tasks", ?account_worker_count);
+        let _guard = account_worker_parent.enter();
 
         // Spawn account workers
         for worker_id in 0..account_worker_count {
@@ -887,6 +908,8 @@ impl ProofWorkerHandle {
                 "Account worker spawned successfully"
             );
         }
+
+        drop(_guard);
 
         Self::new_handle(storage_work_tx, account_work_tx)
     }

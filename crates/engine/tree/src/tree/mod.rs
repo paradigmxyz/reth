@@ -495,7 +495,12 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
-    #[instrument(level = "trace", skip_all, fields(block_hash = %payload.block_hash(), block_num = %payload.block_number(),), target = "engine::tree")]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree",
+        skip_all,
+        fields(block_hash = %payload.block_hash(), block_num = %payload.block_number()),
+    )]
     fn on_new_payload(
         &mut self,
         payload: T::ExecutionData,
@@ -576,6 +581,7 @@ where
     /// - `Valid`: Payload successfully validated and inserted
     /// - `Syncing`: Parent missing, payload buffered for later
     /// - Error status: Payload is invalid
+    #[instrument(level = "debug", target = "engine::tree", skip_all)]
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
@@ -969,7 +975,7 @@ where
     /// `engine_forkchoiceUpdated`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1).
     ///
     /// Returns an error if an internal error occurred like a database error.
-    #[instrument(level = "trace", skip_all, fields(head = % state.head_block_hash, safe = % state.safe_block_hash,finalized = % state.finalized_block_hash), target = "engine::tree")]
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(head = % state.head_block_hash, safe = % state.safe_block_hash,finalized = % state.finalized_block_hash))]
     fn on_forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
@@ -1971,7 +1977,7 @@ where
     }
 
     /// Attempts to connect any buffered blocks that are connected to the given parent hash.
-    #[instrument(level = "trace", skip(self), target = "engine::tree")]
+    #[instrument(level = "debug", target = "engine::tree", skip(self))]
     fn try_connect_buffered_blocks(
         &mut self,
         parent: BlockNumHash,
@@ -2280,7 +2286,7 @@ where
     /// Returns an event with the appropriate action to take, such as:
     ///  - download more missing blocks
     ///  - try to canonicalize the target if the `block` is the tracked target (head) block.
-    #[instrument(level = "trace", skip_all, fields(block_hash = %block.hash(), block_num = %block.number(),), target = "engine::tree")]
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
     fn on_downloaded_block(
         &mut self,
         block: RecoveredBlock<N::Block>,
@@ -2386,6 +2392,7 @@ where
     /// Returns `InsertPayloadOk::Inserted(BlockStatus::Valid)` on successful execution,
     /// `InsertPayloadOk::AlreadySeen` if the block already exists, or
     /// `InsertPayloadOk::Inserted(BlockStatus::Disconnected)` if parent state is missing.
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_id))]
     fn insert_block_or_payload<Input, Err>(
         &mut self,
         block_id: BlockWithParent,
