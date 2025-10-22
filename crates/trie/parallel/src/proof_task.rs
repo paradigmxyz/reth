@@ -68,25 +68,19 @@ type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 type AccountMultiproofResult =
     Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError>;
 
-/// Message containing a completed proof result with metadata for direct delivery to `MultiProofTask`.
-///
-/// This type enables workers to send proof results directly to the `MultiProofTask` event loop.
-#[derive(Debug)]
-pub struct ProofResultMessage {
-    /// Sequence number for ordering proofs
-    pub sequence_number: u64,
-    /// The proof calculation result
-    pub result: AccountMultiproofResult,
-    /// Time taken for the entire proof calculation (from dispatch to completion)
-    pub elapsed: Duration,
-    /// Original state update that triggered this proof
-    pub state: HashedPostState,
-}
-
 /// Type alias for the proof result sender channel.
 ///
 /// Workers use this sender to deliver proof results directly to `MultiProofTask`.
 pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
+
+/// Type alias for proof result context containing sender, sequence number, state, and timing.
+///
+/// This tuple contains all context needed to send and track proof calculation results:
+/// - `ProofResultSender`: Channel sender for result delivery
+/// - `u64`: Sequence number for proof ordering
+/// - `HashedPostState`: Original state update that triggered this proof
+/// - `Instant`: Calculation start time for measuring elapsed duration
+pub type ProofResultContext = (ProofResultSender, u64, HashedPostState, Instant);
 
 /// Internal message for storage workers.
 #[derive(Debug)]
@@ -107,6 +101,21 @@ enum StorageWorkerJob {
         /// Channel to send result back to original caller
         result_sender: Sender<TrieNodeProviderResult>,
     },
+}
+
+/// Message containing a completed proof result with metadata for direct delivery to `MultiProofTask`.
+///
+/// This type enables workers to send proof results directly to the `MultiProofTask` event loop.
+#[derive(Debug)]
+pub struct ProofResultMessage {
+    /// Sequence number for ordering proofs
+    pub sequence_number: u64,
+    /// The proof calculation result
+    pub result: AccountMultiproofResult,
+    /// Time taken for the entire proof calculation (from dispatch to completion)
+    pub elapsed: Duration,
+    /// Original state update that triggered this proof
+    pub state: HashedPostState,
 }
 
 /// Worker loop for storage trie operations.
@@ -390,17 +399,17 @@ fn account_worker_loop<Factory>(
                 };
 
                 // Use the missed leaves cache passed from the multiproof manager
-                let missed_leaves_storage_roots = &input.missed_leaves_storage_roots;
+                let missed_leaves_storage_roots_ref = missed_leaves_storage_roots.as_ref();
 
-                let account_prefix_set = std::mem::take(&mut input.prefix_sets.account_prefix_set);
+                let account_prefix_set = std::mem::take(&mut prefix_sets.account_prefix_set);
 
                 let ctx = AccountMultiproofParams {
-                    targets: &input.targets,
+                    targets: &targets,
                     prefix_set: account_prefix_set,
-                    collect_branch_node_masks: input.collect_branch_node_masks,
-                    multi_added_removed_keys: input.multi_added_removed_keys.as_ref(),
+                    collect_branch_node_masks,
+                    multi_added_removed_keys: multi_added_removed_keys_ref,
                     storage_proof_receivers,
-                    missed_leaves_storage_roots,
+                    missed_leaves_storage_roots: missed_leaves_storage_roots_ref,
                 };
 
                 let result = build_account_multiproof_with_storage_roots(
@@ -410,17 +419,21 @@ fn account_worker_loop<Factory>(
                     &mut tracker,
                 );
 
-                let proof_elapsed = proof_start.elapsed();
+                let proof_elapsed = start.elapsed();
                 let stats = tracker.finish();
                 let result = result.map(|proof| (proof, stats));
                 account_proofs_processed += 1;
 
-                if result_sender.send(result).is_err() {
+                // Send result to MultiProofTask
+                if result_tx
+                    .send(ProofResultMessage { sequence_number: seq, result, elapsed: proof_elapsed, state })
+                    .is_err()
+                {
                     tracing::debug!(
                         target: "trie::proof_task",
                         worker_id,
                         account_proofs_processed,
-                        "Account multiproof receiver dropped, discarding result"
+                        "Proof result receiver dropped, discarding result"
                     );
                 }
 
@@ -849,6 +862,10 @@ pub struct AccountMultiproofInput {
     pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Cached storage proof roots for missed leaves encountered during account trie walk.
     pub missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
+    /// Sender for proof results.
+    ///
+    /// The worker sends the computed proof result via this channel.
+    pub proof_result_sender: ProofResultContext,
 }
 
 /// Parameters for building an account multiproof with pre-computed storage roots.
@@ -874,8 +891,6 @@ enum AccountWorkerJob {
     AccountMultiproof {
         /// Account multiproof input parameters
         input: Box<AccountMultiproofInput>,
-        /// Channel to send result back to original caller
-        result_sender: Sender<AccountMultiproofResult>,
     },
     /// Blinded account node retrieval request
     BlindedAccountNode {
