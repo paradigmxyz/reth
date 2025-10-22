@@ -44,8 +44,8 @@ impl MetricServerConfig {
         }
     }
 
-    /// Set the push gateway URL for pushing metrics
-    pub fn with_pushgateway(mut self, url: Option<String>, interval: Duration) -> Self {
+    /// Set the gateway URL and interval for pushing metrics
+    pub fn with_push_gateway(mut self, url: Option<String>, interval: Duration) -> Self {
         self.push_gateway_url = url;
         self.push_gateway_interval = interval;
         self
@@ -163,7 +163,7 @@ impl MetricServer {
         Ok(())
     }
 
-    /// Starts a background task to push metrics to a push gateway
+    /// Starts a background task to push metrics to a metrics gateway
     fn start_push_gateway_task(
         &self,
         url: String,
@@ -179,17 +179,17 @@ impl MetricServer {
                 let client = match client {
                     Ok(c) => c,
                     Err(err) => {
-                        tracing::error!(%err, "Failed to create HTTP client for PushGateway");
+                        tracing::error!(%err, "Failed to create HTTP client to push metrics to gateway");
                         return;
                     }
                 };
 
-                tracing::info!(url = %url, interval = ?interval, "Starting PushGateway metrics push task");
+                tracing::info!(url = %url, interval = ?interval, "Starting task to push metrics to gateway");
 
                 loop {
                     tokio::select! {
                         _ = &mut signal => {
-                            tracing::info!("Shutting down PushGateway push task");
+                            tracing::info!("Shutting down task to push metrics to gateway");
                             break;
                         }
                         _ = tokio::time::sleep(interval) => {
@@ -201,12 +201,12 @@ impl MetricServer {
                                     if !response.status().is_success() {
                                         tracing::warn!(
                                             status = %response.status(),
-                                            "Failed to push metrics to PushGateway"
+                                            "Failed to push metrics to gateway"
                                         );
                                     }
                                 }
                                 Err(err) => {
-                                    tracing::warn!(%err, "Failed to push metrics to PushGateway");
+                                    tracing::warn!(%err, "Failed to push metrics to gateway");
                                 }
                             }
                         }
