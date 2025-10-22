@@ -44,9 +44,10 @@ where
         >>()?;
 
         // Compute transactions range once
-        let mut transactions_walker =
-            transactions_cursor.walk_range(first_tx..=last_tx)?.peekable();
+        let mut transactions_walker = transactions_cursor.walk_range(first_tx..=last_tx)?;
 
+        // Concern: on 32-bit system usize::MAX is smaller than u64::MAX, which can be a potential
+        // overflow if range is big
         for (current_block_index, block) in block_range.enumerate() {
             static_file_writer.increment_block(block)?;
 
@@ -54,20 +55,16 @@ where
                 .get(current_block_index)
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
-            // Use peek to check the next transaction without consuming it if it's out of the
-            // current block's range
-            while let Some(entry_ref) = transactions_walker.peek() {
-                let (tx_number, _transaction) =
-                    entry_ref.as_ref().map_err(|e| ProviderError::Database(e.clone()))?;
-
-                if *tx_number > block_body_indices.last_tx_num() {
-                    break;
-                }
-
-                // Consume transaction
-                let (tx_number, transaction) = transactions_walker.next().unwrap()?;
+            // Consume transaction
+            #[allow(clippy::while_let_on_iterator)]
+            while let Some(entry) = transactions_walker.next() {
+                let (tx_number, transaction) = entry?;
 
                 static_file_writer.append_transaction(tx_number, &transaction)?;
+
+                if tx_number == block_body_indices.last_tx_num() {
+                    break;
+                }
             }
         }
 
