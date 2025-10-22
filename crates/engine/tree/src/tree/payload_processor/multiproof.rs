@@ -218,7 +218,7 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
     for (address, account) in update {
         if account.is_touched() {
             let hashed_address = keccak256(address);
-            trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
+            trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
             let info = if destroyed { None } else { Some(account.info.into()) };
@@ -456,7 +456,7 @@ impl MultiproofManager {
             let storage_targets = proof_targets.len();
 
             trace!(
-                target: "engine::root",
+                target: "engine::tree::payload_processor::multiproof",
                 proof_sequence_number,
                 ?proof_targets,
                 storage_targets,
@@ -475,7 +475,7 @@ impl MultiproofManager {
             .storage_proof(hashed_address, proof_targets);
             let elapsed = start.elapsed();
             trace!(
-                target: "engine::root",
+                target: "engine::tree::payload_processor::multiproof",
                 proof_sequence_number,
                 ?elapsed,
                 ?source,
@@ -529,7 +529,7 @@ impl MultiproofManager {
             let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
 
             trace!(
-                target: "engine::root",
+                target: "engine::tree::payload_processor::multiproof",
                 proof_sequence_number,
                 ?proof_targets,
                 account_targets,
@@ -567,7 +567,7 @@ impl MultiproofManager {
             })();
             let elapsed = start.elapsed();
             trace!(
-                target: "engine::root",
+                target: "engine::tree::payload_processor::multiproof",
                 proof_sequence_number,
                 ?elapsed,
                 ?source,
@@ -781,7 +781,7 @@ impl MultiProofTask {
             proofs_processed >= state_update_proofs_requested + prefetch_proofs_requested;
         let no_pending = !self.proof_sequencer.has_pending();
         trace!(
-            target: "engine::root",
+            target: "engine::tree::payload_processor::multiproof",
             proofs_processed,
             state_update_proofs_requested,
             prefetch_proofs_requested,
@@ -836,7 +836,7 @@ impl MultiProofTask {
         }
 
         if duplicates > 0 {
-            trace!(target: "engine::root", duplicates, "Removed duplicate prefetch proof targets");
+            trace!(target: "engine::tree::payload_processor::multiproof", duplicates, "Removed duplicate prefetch proof targets");
         }
 
         targets
@@ -998,18 +998,18 @@ impl MultiProofTask {
         let mut updates_finished_time = None;
 
         loop {
-            trace!(target: "engine::root", "entering main channel receiving loop");
+            trace!(target: "engine::tree::payload_processor::multiproof", "entering main channel receiving loop");
             match self.rx.recv() {
                 Ok(message) => match message {
                     MultiProofMessage::PrefetchProofs(targets) => {
-                        trace!(target: "engine::root", "processing MultiProofMessage::PrefetchProofs");
+                        trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::PrefetchProofs");
                         if first_update_time.is_none() {
                             // record the wait time
                             self.metrics
                                 .first_update_wait_time_histogram
                                 .record(start.elapsed().as_secs_f64());
                             first_update_time = Some(Instant::now());
-                            debug!(target: "engine::root", "Started state root calculation");
+                            debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                         }
 
                         let account_targets = targets.len();
@@ -1017,7 +1017,7 @@ impl MultiProofTask {
                             targets.values().map(|slots| slots.len()).sum::<usize>();
                         prefetch_proofs_requested += self.on_prefetch_proof(targets);
                         trace!(
-                            target: "engine::root",
+                            target: "engine::tree::payload_processor::multiproof",
                             account_targets,
                             storage_targets,
                             prefetch_proofs_requested,
@@ -1025,20 +1025,20 @@ impl MultiProofTask {
                         );
                     }
                     MultiProofMessage::StateUpdate(source, update) => {
-                        trace!(target: "engine::root", "processing MultiProofMessage::StateUpdate");
+                        trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
                         if first_update_time.is_none() {
                             // record the wait time
                             self.metrics
                                 .first_update_wait_time_histogram
                                 .record(start.elapsed().as_secs_f64());
                             first_update_time = Some(Instant::now());
-                            debug!(target: "engine::root", "Started state root calculation");
+                            debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                         }
 
                         let len = update.len();
                         state_update_proofs_requested += self.on_state_update(source, update);
                         trace!(
-                            target: "engine::root",
+                            target: "engine::tree::payload_processor::multiproof",
                             ?source,
                             len,
                             ?state_update_proofs_requested,
@@ -1046,7 +1046,7 @@ impl MultiProofTask {
                         );
                     }
                     MultiProofMessage::FinishedStateUpdates => {
-                        trace!(target: "engine::root", "processing MultiProofMessage::FinishedStateUpdates");
+                        trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
                         updates_finished = true;
                         updates_finished_time = Some(Instant::now());
                         if self.is_done(
@@ -1056,14 +1056,14 @@ impl MultiProofTask {
                             updates_finished,
                         ) {
                             debug!(
-                                target: "engine::root",
+                                target: "engine::tree::payload_processor::multiproof",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
                             break
                         }
                     }
                     MultiProofMessage::EmptyProof { sequence_number, state } => {
-                        trace!(target: "engine::root", "processing MultiProofMessage::EmptyProof");
+                        trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::EmptyProof");
 
                         proofs_processed += 1;
 
@@ -1081,14 +1081,14 @@ impl MultiProofTask {
                             updates_finished,
                         ) {
                             debug!(
-                                target: "engine::root",
+                                target: "engine::tree::payload_processor::multiproof",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
                             break
                         }
                     }
                     MultiProofMessage::ProofCalculated(proof_calculated) => {
-                        trace!(target: "engine::root", "processing
+                        trace!(target: "engine::tree::payload_processor::multiproof", "processing
         MultiProofMessage::ProofCalculated");
 
                         // we increment proofs_processed for both state updates and prefetches,
@@ -1100,7 +1100,7 @@ impl MultiProofTask {
                             .record(proof_calculated.elapsed);
 
                         trace!(
-                            target: "engine::root",
+                            target: "engine::tree::payload_processor::multiproof",
                             sequence = proof_calculated.sequence_number,
                             total_proofs = proofs_processed,
                             "Processing calculated proof"
@@ -1121,14 +1121,14 @@ impl MultiProofTask {
                             updates_finished,
                         ) {
                             debug!(
-                                target: "engine::root",
+                                target: "engine::tree::payload_processor::multiproof",
                                 "State updates finished and all proofs processed, ending calculation");
                             break
                         }
                     }
                     MultiProofMessage::ProofCalculationError(err) => {
                         error!(
-                            target: "engine::root",
+                            target: "engine::tree::payload_processor::multiproof",
                             ?err,
                             "proof calculation error"
                         );
@@ -1138,14 +1138,14 @@ impl MultiProofTask {
                 Err(_) => {
                     // this means our internal message channel is closed, which shouldn't happen
                     // in normal operation since we hold both ends
-                    error!(target: "engine::root", "Internal message channel closed unexpectedly");
+                    error!(target: "engine::tree::payload_processor::multiproof", "Internal message channel closed unexpectedly");
                     return
                 }
             }
         }
 
         debug!(
-            target: "engine::root",
+            target: "engine::tree::payload_processor::multiproof",
             total_updates = state_update_proofs_requested,
             total_proofs = proofs_processed,
             total_time = ?first_update_time.map(|t|t.elapsed()),
