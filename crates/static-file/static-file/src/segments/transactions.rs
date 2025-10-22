@@ -35,21 +35,37 @@ where
         let mut static_file_writer = static_file_provider
             .get_writer(*block_range.start(), StaticFileSegment::Transactions)?;
 
-        for block in block_range {
+        let indices = provider.block_body_indices_range(block_range.clone())?;
+        let first_tx = indices.iter().map(|i| i.first_tx_num).min().unwrap();
+        let last_tx = indices.iter().map(|i| i.last_tx_num()).max().unwrap();
+
+        let mut transactions_cursor = provider.tx_ref().cursor_read::<tables::Transactions<
+            <Provider::Primitives as NodePrimitives>::SignedTx,
+        >>()?;
+
+        // Compute transactions range once
+        let mut transactions_walker =
+            transactions_cursor.walk_range(first_tx..=last_tx)?.peekable();
+
+        for (current_block_index, block) in block_range.enumerate() {
             static_file_writer.increment_block(block)?;
 
-            let block_body_indices = provider
-                .block_body_indices(block)?
+            let block_body_indices = indices
+                .get(current_block_index)
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
-            let mut transactions_cursor = provider.tx_ref().cursor_read::<tables::Transactions<
-                <Provider::Primitives as NodePrimitives>::SignedTx,
-            >>()?;
-            let transactions_walker =
-                transactions_cursor.walk_range(block_body_indices.tx_num_range())?;
+            // Use peek to check the next transaction without consuming it if it's out of the
+            // current block's range
+            while let Some(entry_ref) = transactions_walker.peek() {
+                let (tx_number, _transaction) =
+                    entry_ref.as_ref().map_err(|e| ProviderError::Database(e.clone()))?;
 
-            for entry in transactions_walker {
-                let (tx_number, transaction) = entry?;
+                if *tx_number > block_body_indices.last_tx_num() {
+                    break;
+                }
+
+                // Consume transaction
+                let (tx_number, transaction) = transactions_walker.next().unwrap()?;
 
                 static_file_writer.append_transaction(tx_number, &transaction)?;
             }
