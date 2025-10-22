@@ -466,6 +466,7 @@ where
         let root_time = Instant::now();
 
         let mut maybe_state_root = None;
+        let mut task_trie_updates_for_comparison: Option<TrieUpdates> = None;
 
         match strategy {
             StateRootStrategy::StateRootTask => {
@@ -476,7 +477,14 @@ where
                         info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
-                            maybe_state_root = Some((state_root, trie_updates, elapsed))
+                            // If comparison flag is set, store task updates and force synchronous
+                            // fallback
+                            if self.config.always_compare_trie_updates() {
+                                debug!(target: "engine::tree::payload_validator", "Storing task trie updates for comparison");
+                                task_trie_updates_for_comparison = Some(trie_updates);
+                            } else {
+                                maybe_state_root = Some((state_root, trie_updates, elapsed))
+                            }
                         } else {
                             warn!(
                                 target: "engine::tree::payload_validator",
@@ -527,6 +535,8 @@ where
             // fallback is to compute the state root regularly in sync
             if self.config.state_root_fallback() {
                 debug!(target: "engine::tree::payload_validator", "Using state root fallback for testing");
+            } else if task_trie_updates_for_comparison.is_some() {
+                debug!(target: "engine::tree::payload_validator", "Computing synchronous state root for comparison");
             } else {
                 warn!(target: "engine::tree::payload_validator", "Failed to compute state root in parallel");
                 self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
@@ -536,6 +546,13 @@ where
                 state_provider.state_root_with_updates(hashed_state.clone()),
                 block
             );
+
+            // If we have task trie updates stored for comparison, compare them now
+            if let Some(task_updates) = task_trie_updates_for_comparison {
+                debug!(target: "engine::tree::payload_validator", "Comparing task and synchronous trie updates");
+                super::trie_updates::compare_trie_updates_simple(task_updates, updates.clone());
+            }
+
             (root, updates, root_time.elapsed())
         };
 
