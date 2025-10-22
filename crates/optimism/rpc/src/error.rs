@@ -94,11 +94,6 @@ impl TryFrom<OpTransactionError> for OpInvalidTransactionError {
             }
             OpTransactionError::HaltedDepositPostRegolith => Ok(Self::HaltedDepositPostRegolith),
             OpTransactionError::Base(err) => Err(err),
-            OpTransactionError::MissingEnvelopedTx => Err(InvalidTransaction::Str(
-                "missing enveloped transaction bytes for non-deposit transaction"
-                    .to_string()
-                    .into(),
-            )),
         }
     }
 }

@@ -18,7 +18,7 @@ use reth_evm::{
     execute::{
         BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockExecutor, BlockValidationError,
     },
-    op_revm::L1BlockInfo,
+    op_revm::{constants::L1_BLOCK_CONTRACT, L1BlockInfo},
     ConfigureEvm, Database,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -341,6 +341,11 @@ impl<Txs> OpBuilder<'_, Txs> {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number(), "building new payload");
 
         let mut db = State::builder().with_database(db).with_bundle_update().build();
+
+        // Load the L1 block contract into the database cache. If the L1 block contract is not
+        // pre-loaded the database will panic when trying to fetch the DA footprint gas
+        // scalar.
+        db.load_cache_account(L1_BLOCK_CONTRACT).map_err(BlockExecutionError::other)?;
 
         let mut builder = ctx.block_builder(&mut db)?;
 
@@ -688,6 +693,7 @@ where
             let interop = tx.interop_deadline();
             let tx_da_size = tx.estimated_da_size();
             let tx = tx.into_consensus();
+
             let da_footprint_gas_scalar = self
                 .chain_spec
                 .is_jovian_active_at_timestamp(self.attributes().timestamp())

@@ -1,5 +1,7 @@
 //! Base fee related utilities for Optimism chains.
 
+use core::cmp::max;
+
 use alloy_consensus::BlockHeader;
 use alloy_eips::calc_next_block_base_fee;
 use op_alloy_consensus::{decode_holocene_extra_data, decode_jovian_extra_data, EIP1559ParamError};
@@ -56,11 +58,7 @@ where
 
     // Starting from Jovian, we use the maximum of the gas used and the blob gas used to calculate
     // the next base fee.
-    let gas_used = if parent.blob_gas_used().unwrap_or_default() > parent.gas_used() {
-        parent.blob_gas_used().unwrap_or_default()
-    } else {
-        parent.gas_used()
-    };
+    let gas_used = max(parent.gas_used(), parent.blob_gas_used().unwrap_or_default());
 
     let next_base_fee = calc_next_block_base_fee(
         gas_used,
