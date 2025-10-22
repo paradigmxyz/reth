@@ -84,6 +84,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
     pub fn new(
         eth_api: EthApiNodeBackend<N, Rpc>,
         sequencer_client: Option<SequencerClient>,
+        enable_txpool_admission: bool,
         min_suggested_priority_fee: U256,
         pending_block_rx: Option<PendingBlockRx<N::Primitives>>,
         flashblock_rx: Option<FlashBlockCompleteSequenceRx>,
@@ -92,6 +93,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         let inner = Arc::new(OpEthApiInner {
             eth_api,
             sequencer_client,
+            enable_txpool_admission,
             min_suggested_priority_fee,
             pending_block_rx,
             flashblock_rx,
@@ -348,6 +350,8 @@ pub struct OpEthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
+    /// Whether to enable submission of transactions to the transaction pool.
+    enable_txpool_admission: bool,
     /// Minimum priority fee enforced by OP-specific logic.
     ///
     /// See also <https://github.com/ethereum-optimism/op-geth/blob/d4e0fe9bb0c2075a9bff269fb975464dd8498f75/eth/gasprice/optimism-gasprice.go#L38-L38>
@@ -380,6 +384,11 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApiInner<N, Rpc> {
     const fn sequencer_client(&self) -> Option<&SequencerClient> {
         self.sequencer_client.as_ref()
     }
+
+    /// Returns `true` transaction pool admission is enabled.
+    const fn is_txpool_admission_enabled(&self) -> bool {
+        self.enable_txpool_admission
+    }
 }
 
 /// Converter for OP RPC types.
@@ -397,6 +406,8 @@ pub struct OpEthApiBuilder<NetworkT = Optimism> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_url: Option<String>,
+    /// Enable txpool admission flag
+    enable_txpool_admission: bool,
     /// Headers to use for the sequencer client requests.
     sequencer_headers: Vec<String>,
     /// Minimum suggested priority fee (tip)
@@ -416,6 +427,7 @@ impl<NetworkT> Default for OpEthApiBuilder<NetworkT> {
             sequencer_headers: Vec::new(),
             min_suggested_priority_fee: 1_000_000,
             flashblocks_url: None,
+            enable_txpool_admission: true,
             _nt: PhantomData,
         }
     }
@@ -429,6 +441,7 @@ impl<NetworkT> OpEthApiBuilder<NetworkT> {
             sequencer_headers: Vec::new(),
             min_suggested_priority_fee: 1_000_000,
             flashblocks_url: None,
+            enable_txpool_admission: true,
             _nt: PhantomData,
         }
     }
@@ -436,6 +449,12 @@ impl<NetworkT> OpEthApiBuilder<NetworkT> {
     /// With a [`SequencerClient`].
     pub fn with_sequencer(mut self, sequencer_url: Option<String>) -> Self {
         self.sequencer_url = sequencer_url;
+        self
+    }
+
+    /// With a flag to enable txpool admission
+    pub const fn with_enable_txpool_admission(mut self, enable_txpool_admission: bool) -> Self {
+        self.enable_txpool_admission = enable_txpool_admission;
         self
     }
 
@@ -479,6 +498,7 @@ where
         let Self {
             sequencer_url,
             sequencer_headers,
+            enable_txpool_admission,
             min_suggested_priority_fee,
             flashblocks_url,
             ..
@@ -487,9 +507,9 @@ where
             RpcConverter::new(OpReceiptConverter::new(ctx.components.provider().clone()))
                 .with_mapper(OpTxInfoMapper::new(ctx.components.provider().clone()));
 
-        let sequencer_client = if let Some(url) = sequencer_url {
+        let sequencer_client = if let Some(url) = &sequencer_url {
             Some(
-                SequencerClient::new_with_headers(&url, sequencer_headers)
+                SequencerClient::new_with_headers(url, sequencer_headers)
                     .await
                     .wrap_err_with(|| format!("Failed to init sequencer client with: {url}"))?,
             )
@@ -525,6 +545,7 @@ where
         Ok(OpEthApi::new(
             eth_api,
             sequencer_client,
+            enable_txpool_admission,
             U256::from(min_suggested_priority_fee),
             pending_block_rx,
             flashblock_rx,
