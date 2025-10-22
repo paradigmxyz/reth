@@ -259,9 +259,9 @@ where
             self;
         let hash = env.hash;
 
+        debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
         // Perform all cache operations atomically under the lock
         execution_cache.update_with_guard(|cached| {
-
             // consumes the `SavedCache` held by the prewarming task, which releases its usage guard
             let (caches, cache_metrics) = saved_cache.split();
             let new_cache = SavedCache::new(hash, caches, cache_metrics);
@@ -275,13 +275,15 @@ where
             }
 
             new_cache.update_metrics();
-            debug!(target: "engine::caching", parent_hash=?new_cache.executed_block_hash(), "Updated execution cache");
 
             // Replace the shared cache with the new one; the previous cache (if any) is dropped.
             *cached = Some(new_cache);
         });
 
-        metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
+        let elapsed = start.elapsed();
+        debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+
+        metrics.cache_saving_duration.set(elapsed.as_secs_f64());
     }
 
     /// Executes the task.
