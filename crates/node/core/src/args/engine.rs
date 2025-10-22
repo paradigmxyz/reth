@@ -24,11 +24,9 @@ pub struct EngineArgs {
     #[arg(long = "engine.legacy-state-root", default_value = "false")]
     pub legacy_state_root_task_enabled: bool,
 
-
     /// Disable parallel prewarming
     #[arg(long = "engine.disable-prewarming", alias = "engine.disable-caching-and-prewarming")]
     pub prewarming_disabled: bool,
-
 
     /// Disable the parallel sparse trie in the engine.
     #[arg(long = "engine.disable-parallel-sparse-trie", default_value = "false")]
@@ -64,7 +62,6 @@ pub struct EngineArgs {
     /// Configure the number of reserved CPU cores for non-reth processes
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DEFAULT_RESERVED_CPU_CORES)]
     pub reserved_cpu_cores: usize,
-
 
     /// Disable precompile cache
     #[arg(long = "engine.disable-precompile-cache", default_value = "false")]
