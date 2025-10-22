@@ -610,7 +610,7 @@ where
                         }
                     })
                     .build(),
-            );
+            ).with_pushgateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval.clone());
 
             MetricServer::new(config).serve().await?;
         }

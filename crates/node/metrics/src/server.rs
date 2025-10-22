@@ -10,7 +10,7 @@ use metrics::describe_gauge;
 use metrics_process::Collector;
 use reth_metrics::metrics::Unit;
 use reth_tasks::TaskExecutor;
-use std::{convert::Infallible, net::SocketAddr, sync::Arc};
+use std::{convert::Infallible, net::SocketAddr, sync::Arc, time::Duration};
 
 /// Configuration for the [`MetricServer`]
 #[derive(Debug)]
@@ -20,6 +20,8 @@ pub struct MetricServerConfig {
     chain_spec_info: ChainSpecInfo,
     task_executor: TaskExecutor,
     hooks: Hooks,
+    push_gateway_url: Option<String>,
+    push_gateway_interval: Duration,
 }
 
 impl MetricServerConfig {
@@ -31,7 +33,22 @@ impl MetricServerConfig {
         task_executor: TaskExecutor,
         hooks: Hooks,
     ) -> Self {
-        Self { listen_addr, hooks, task_executor, version_info, chain_spec_info }
+        Self {
+            listen_addr,
+            hooks,
+            task_executor,
+            version_info,
+            chain_spec_info,
+            push_gateway_url: None,
+            push_gateway_interval: Duration::from_secs(5),
+        }
+    }
+
+    /// Set the push gateway URL for pushing metrics
+    pub fn with_pushgateway(mut self, url: Option<String>, interval: Duration) -> Self {
+        self.push_gateway_url = url;
+        self.push_gateway_interval = interval;
+        self
     }
 }
 
@@ -49,17 +66,34 @@ impl MetricServer {
 
     /// Spawns the metrics server
     pub async fn serve(&self) -> eyre::Result<()> {
-        let MetricServerConfig { listen_addr, hooks, task_executor, version_info, chain_spec_info } =
-            &self.config;
+        let MetricServerConfig {
+            listen_addr,
+            hooks,
+            task_executor,
+            version_info,
+            chain_spec_info,
+            push_gateway_url,
+            push_gateway_interval,
+        } = &self.config;
 
-        let hooks = hooks.clone();
+        let hooks_for_endpoint = hooks.clone();
         self.start_endpoint(
             *listen_addr,
-            Arc::new(move || hooks.iter().for_each(|hook| hook())),
+            Arc::new(move || hooks_for_endpoint.iter().for_each(|hook| hook())),
             task_executor.clone(),
         )
         .await
         .wrap_err_with(|| format!("Could not start Prometheus endpoint at {listen_addr}"))?;
+
+        // Start push-gateway task if configured
+        if let Some(url) = push_gateway_url {
+            self.start_push_gateway_task(
+                url.clone(),
+                *push_gateway_interval,
+                hooks.clone(),
+                task_executor.clone(),
+            );
+        }
 
         // Describe metrics after recorder installation
         describe_db_metrics();
@@ -127,6 +161,59 @@ impl MetricServer {
         });
 
         Ok(())
+    }
+
+    /// Starts a background task to push metrics to a push gateway
+    fn start_push_gateway_task(
+        &self,
+        url: String,
+        interval: Duration,
+        hooks: Hooks,
+        task_executor: TaskExecutor,
+    ) {
+        task_executor.spawn_with_graceful_shutdown_signal(move |mut signal| {
+            Box::pin(async move {
+                let client = reqwest::Client::builder()
+                    .build();
+
+                let client = match client {
+                    Ok(c) => c,
+                    Err(err) => {
+                        tracing::error!(%err, "Failed to create HTTP client for PushGateway");
+                        return;
+                    }
+                };
+
+                tracing::info!(url = %url, interval = ?interval, "Starting PushGateway metrics push task");
+
+                loop {
+                    tokio::select! {
+                        _ = &mut signal => {
+                            tracing::info!("Shutting down PushGateway push task");
+                            break;
+                        }
+                        _ = tokio::time::sleep(interval) => {
+                            hooks.iter().for_each(|hook| hook());
+                            let handle = install_prometheus_recorder();
+                            let metrics = handle.handle().render();
+                            match client.put(&url).header("Content-Type", "text/plain").body(metrics).send().await {
+                                Ok(response) => {
+                                    if !response.status().is_success() {
+                                        tracing::warn!(
+                                            status = %response.status(),
+                                            "Failed to push metrics to PushGateway"
+                                        );
+                                    }
+                                }
+                                Err(err) => {
+                                    tracing::warn!(%err, "Failed to push metrics to PushGateway");
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        });
     }
 }
 
