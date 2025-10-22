@@ -72,9 +72,9 @@ pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
 /// Node maps have a key of `Nibbles` and value of `SparseNode`.
 /// The `size_of::<Nibbles>` is 40, and `size_of::<SparseNode>` is 80.
 ///
-/// If we have 4 million entries of 120 bytes each, this conservative estimate comes out at around
-/// 480MB.
-pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 4_000_000;
+/// If we have 2 million entries of 120 bytes each, this conservative estimate comes out at around
+/// 240MB.
+pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 2_000_000;
 
 /// Default value capacity for shrinking the sparse trie. This is used to limit the number of values
 /// in allocated sparse tries.
@@ -85,9 +85,9 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 4_000_000;
 /// Account value maps have a key of `Nibbles` and value of `TrieAccount`.
 /// The `size_of::<Nibbles>` is 40, and `size_of::<TrieAccount>` is 104.
 ///
-/// If we have 1 million entries of 144 bytes each, this conservative estimate comes out at around
-/// 144MB.
-pub const SPARSE_TRIE_MAX_VALUE_SHRINK_CAPACITY: usize = 1_000_000;
+/// If we have 100k entries of 144 bytes each, this conservative estimate comes out at around
+/// 14.4MB.
+pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 100_000;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -471,7 +471,7 @@ where
             // Shrink the sparse trie so that we don't have ever increasing memory.
             cleared_trie.shrink_to(
                 SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
             );
 
             cleared_sparse_trie.lock().replace(cleared_trie);
