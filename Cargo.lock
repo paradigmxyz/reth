@@ -262,7 +262,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.22.3"
-source = "git+https://github.com/Rimeeeeee/evm?branch=new-approach#4dcf57705cc7b3249dadabf7e7b3c1ce4c41b68a"
+source = "git+https://github.com/Rimeeeeee/evm?branch=new-approach#ae6e67a8ce5066880173358ca8f6a68909d8827b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -375,7 +375,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.22.3"
-source = "git+https://github.com/Rimeeeeee/evm?branch=new-approach#4dcf57705cc7b3249dadabf7e7b3c1ce4c41b68a"
+source = "git+https://github.com/Rimeeeeee/evm?branch=new-approach#ae6e67a8ce5066880173358ca8f6a68909d8827b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2263,7 +2263,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4495,7 +4495,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -12817,7 +12817,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "319c70195101a93f56db4c74733e272d720768e13471f400c78406a326b172b0"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -13364,7 +13364,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
