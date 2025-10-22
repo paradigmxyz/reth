@@ -432,7 +432,9 @@ impl MultiproofManager {
         self.executor.spawn_blocking(move || {
             // Try to reserve a worker slot without letting the counter underflow.
             let decremented = available_workers
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_sub(1))
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    current.checked_sub(1)
+                })
                 .is_ok();
 
             let storage_targets = proof_targets.len();
@@ -521,7 +523,9 @@ impl MultiproofManager {
         self.executor.spawn_blocking(move || {
             // Try to reserve a worker slot without letting the counter underflow.
             let decremented = available_workers
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_sub(1))
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    current.checked_sub(1)
+                })
                 .is_ok();
 
             let account_targets = proof_targets.len();
