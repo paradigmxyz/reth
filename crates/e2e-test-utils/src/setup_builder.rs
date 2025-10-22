@@ -4,10 +4,12 @@
 //! configurations through closures that modify `NodeConfig` and `TreeConfig`.
 
 use crate::{node::NodeTestContext, wallet::Wallet, NodeBuilderHelper, NodeHelperType, TmpDB};
+use alloy_primitives::B256;
 use reth_chainspec::EthChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_node_api::PayloadBuilderAttributes;
 use reth_node_builder::{
-    EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle, NodeTypes, NodeTypesWithDBAdapter,
+    EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle, NodeTypesWithDBAdapter,
     PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
@@ -29,42 +31,30 @@ type NodeConfigModifier<C> = Box<dyn Fn(NodeConfig<C>) -> NodeConfig<C> + Send +
 /// This builder allows customizing test node configurations through closures that
 /// modify `NodeConfig` and `TreeConfig`. It avoids code duplication by centralizing
 /// the node creation logic.
-pub struct E2ETestSetupBuilder<N, F>
+pub struct E2ETestSetupBuilder<N>
 where
     N: NodeBuilderHelper,
-    F: Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes
-        + Send
-        + Sync
-        + Copy
-        + 'static,
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
-    attributes_generator: F,
     connect_nodes: bool,
     tree_config_modifier: Option<TreeConfigModifier>,
     node_config_modifier: Option<NodeConfigModifier<N::ChainSpec>>,
 }
 
-impl<N, F> E2ETestSetupBuilder<N, F>
+impl<N> E2ETestSetupBuilder<N>
 where
     N: NodeBuilderHelper,
-    F: Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes
-        + Send
-        + Sync
-        + Copy
-        + 'static,
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
     /// Creates a new builder with the required parameters.
-    pub fn new(num_nodes: usize, chain_spec: Arc<N::ChainSpec>, attributes_generator: F) -> Self {
+    pub fn new(num_nodes: usize, chain_spec: Arc<N::ChainSpec>) -> Self {
         Self {
             num_nodes,
             chain_spec,
-            attributes_generator,
             connect_nodes: true,
             tree_config_modifier: None,
             node_config_modifier: None,
@@ -161,7 +151,12 @@ where
                 })
                 .await?;
 
-            let mut node = NodeTestContext::new(node, self.attributes_generator).await?;
+            let local = LocalPayloadAttributesBuilder::new(self.chain_spec.clone());
+            let attributes_generator = move |timestamp: u64| {
+                let attributes = local.build(timestamp);
+                PayloadBuilderAttributes::try_new(B256::ZERO, attributes, 0).unwrap()
+            };
+            let mut node = NodeTestContext::new(node, attributes_generator).await?;
 
             let genesis = node.block_hash(0);
             node.update_forkchoice(genesis, genesis).await?;
@@ -188,14 +183,9 @@ where
     }
 }
 
-impl<N, F> std::fmt::Debug for E2ETestSetupBuilder<N, F>
+impl<N> std::fmt::Debug for E2ETestSetupBuilder<N>
 where
     N: NodeBuilderHelper,
-    F: Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes
-        + Send
-        + Sync
-        + Copy
-        + 'static,
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {

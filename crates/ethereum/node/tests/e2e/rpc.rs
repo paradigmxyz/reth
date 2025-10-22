@@ -1,4 +1,3 @@
-use crate::utils::eth_payload_attributes;
 use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig};
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
@@ -48,14 +47,8 @@ async fn test_fee_history() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, _tasks, wallet) =
+        setup_engine::<EthereumNode>(1, chain_spec.clone(), false, Default::default()).await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
@@ -133,14 +126,8 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, _tasks, wallet) =
+        setup_engine::<EthereumNode>(1, chain_spec.clone(), false, Default::default()).await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
@@ -215,14 +202,8 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, _tasks, wallet) =
+        setup_engine::<EthereumNode>(1, chain_spec.clone(), false, Default::default()).await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
@@ -305,14 +286,8 @@ async fn test_eth_config() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, _tasks, wallet) =
+        setup_engine::<EthereumNode>(1, chain_spec.clone(), false, Default::default()).await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))

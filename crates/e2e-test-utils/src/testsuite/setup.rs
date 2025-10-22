@@ -215,14 +215,11 @@ where
         let is_dev = self.is_dev;
         let node_count = self.network.node_count;
 
-        let attributes_generator = Self::create_static_attributes_generator::<N>();
-
         let result = setup_engine_with_connection::<N>(
             node_count,
             Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
             is_dev,
             self.tree_config.clone(),
-            attributes_generator,
             self.network.connect_nodes,
         )
         .await;
@@ -292,31 +289,6 @@ where
             attributes_generator,
         )
         .await
-    }
-
-    /// Create a static attributes generator that doesn't capture any instance data
-    fn create_static_attributes_generator<N>(
-    ) -> impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes
-           + Copy
-           + use<N, I>
-    where
-        N: NodeBuilderHelper<Payload = I>,
-        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-        >,
-    {
-        move |timestamp| {
-            let attributes = PayloadAttributes {
-                timestamp,
-                prev_randao: B256::ZERO,
-                suggested_fee_recipient: alloy_primitives::Address::ZERO,
-                withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
-            };
-            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes::from(
-                EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
-            )
-        }
     }
 
     /// Common finalization logic for both apply methods

@@ -24,7 +24,6 @@ async fn can_run_eth_node() -> eyre::Result<()> {
                 .build(),
         ),
         false,
-        eth_payload_attributes,
     )
     .await?;
 

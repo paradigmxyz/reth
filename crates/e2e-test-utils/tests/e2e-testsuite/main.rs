@@ -19,7 +19,6 @@ use reth_e2e_test_utils::{
 };
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
-use reth_payload_builder::EthPayloadBuilderAttributes;
 use std::sync::Arc;
 use tempfile::TempDir;
 use tracing::debug;
@@ -369,10 +368,7 @@ async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
             .build(),
     );
 
-    let (nodes, _tasks, _wallet) =
-        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, |_| {
-            EthPayloadBuilderAttributes::default()
-        })
+    let (nodes, _tasks, _wallet) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(5)
         })

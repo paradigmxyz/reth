@@ -50,14 +50,13 @@ pub async fn setup<N>(
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
     N: NodeBuilderHelper,
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes>,
 {
-    E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
+    E2ETestSetupBuilder::new(num_nodes, chain_spec)
         .with_node_config_modifier(move |config| config.set_dev(is_dev))
         .build()
         .await
@@ -69,7 +68,6 @@ pub async fn setup_engine<N>(
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
     tree_config: reth_node_api::TreeConfig,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
     TaskManager,
@@ -80,15 +78,7 @@ where
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
-    setup_engine_with_connection::<N>(
-        num_nodes,
-        chain_spec,
-        is_dev,
-        tree_config,
-        attributes_generator,
-        true,
-    )
-    .await
+    setup_engine_with_connection::<N>(num_nodes, chain_spec, is_dev, tree_config, true).await
 }
 
 /// Creates the initial setup with `num_nodes` started and optionally interconnected.
@@ -97,7 +87,6 @@ pub async fn setup_engine_with_connection<N>(
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
     tree_config: reth_node_api::TreeConfig,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
     connect_nodes: bool,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
@@ -109,7 +98,7 @@ where
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
-    E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
+    E2ETestSetupBuilder::new(num_nodes, chain_spec)
         .with_tree_config_modifier(move |_| tree_config.clone())
         .with_node_config_modifier(move |config| config.set_dev(is_dev))
         .with_connect_nodes(connect_nodes)
@@ -140,14 +129,10 @@ pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<
 pub trait NodeBuilderHelper
 where
     Self: Default
-        + NodeTypesForProvider<
-            Payload: PayloadTypes<
-                PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
-            >,
-        > + Node<
+        + NodeTypesForProvider
+        + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             Primitives: NodePrimitives<
-                BlockHeader = alloy_consensus::Header,
                 BlockBody = alloy_consensus::BlockBody<
                     <Self::Primitives as NodePrimitives>::SignedTx,
                 >,
