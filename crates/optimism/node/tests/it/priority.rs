@@ -14,7 +14,7 @@ use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
     EngineNodeLauncher, Node, NodeBuilder, NodeConfig,
 };
-use reth_node_core::args::{DatadirArgs, DiscoveryArgs, NetworkArgs};
+use reth_node_core::args::DatadirArgs;
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_optimism_node::{
     args::RollupArgs,
