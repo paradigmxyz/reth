@@ -9,7 +9,7 @@ go build .
 
 ./hive -client reth # first builds and caches the client
 
-# Run each hive command in the background for each simulator and wait(using fork  tar) 
+# Run each hive command in the background for each simulator and wait
 echo "Building images"
 ./hive -client reth --sim "ethereum/eest" \
   --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal@v1.3.0/fixtures_bal.tar.gz \
