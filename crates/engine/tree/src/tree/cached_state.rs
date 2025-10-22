@@ -354,7 +354,7 @@ impl ExecutionCache {
     }
 
     /// Invalidates the storage for all addresses in the set
-    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(accounts = addresses.len()))]
+    #[instrument(level = "debug", target = "engine::caching", skip_all, fields(accounts = addresses.len()))]
     pub(crate) fn invalidate_storages(&self, addresses: HashSet<&Address>) {
         // NOTE: this must collect because the invalidate function should not be called while we
         // hold an iter for it
@@ -386,7 +386,7 @@ impl ExecutionCache {
     /// ## Error Handling
     ///
     /// Returns an error if the state updates are inconsistent and should be discarded.
-    #[instrument(level = "debug", target = "engine::tree", skip_all)]
+    #[instrument(level = "debug", target = "engine::caching", skip_all)]
     pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
         let _enter =
             debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())

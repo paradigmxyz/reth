@@ -462,7 +462,6 @@ impl From<reth_errors::ProviderError> for EthApiError {
             }
             ProviderError::BestBlockNotFound => Self::HeaderNotFound(BlockId::latest()),
             ProviderError::BlockNumberForTransactionIndexNotFound => Self::UnknownBlockOrTxIndex,
-            ProviderError::TotalDifficultyNotFound(num) => Self::HeaderNotFound(num.into()),
             ProviderError::FinalizedBlockNotFound => Self::HeaderNotFound(BlockId::finalized()),
             ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
             err => Self::Internal(err.into()),
@@ -931,8 +930,13 @@ pub enum RpcPoolError {
     #[error("negative value")]
     NegativeValue,
     /// When oversized data is encountered
-    #[error("oversized data")]
-    OversizedData,
+    #[error("oversized data: transaction size {size}, limit {limit}")]
+    OversizedData {
+        /// Size of the transaction/input data that exceeded the limit.
+        size: usize,
+        /// Configured limit that was exceeded.
+        limit: usize,
+    },
     /// When the max initcode size is exceeded
     #[error("max initcode size exceeded")]
     ExceedsMaxInitCodeSize,
@@ -974,7 +978,7 @@ impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
             RpcPoolError::MaxTxGasLimitExceeded |
             RpcPoolError::ExceedsFeeCap { .. } |
             RpcPoolError::NegativeValue |
-            RpcPoolError::OversizedData |
+            RpcPoolError::OversizedData { .. } |
             RpcPoolError::ExceedsMaxInitCodeSize |
             RpcPoolError::PoolTransactionError(_) |
             RpcPoolError::Eip4844(_) |
@@ -1018,7 +1022,9 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::IntrinsicGasTooLow => {
                 Self::Invalid(RpcInvalidTransactionError::GasTooLow)
             }
-            InvalidPoolTransactionError::OversizedData(_, _) => Self::OversizedData,
+            InvalidPoolTransactionError::OversizedData { size, limit } => {
+                Self::OversizedData { size, limit }
+            }
             InvalidPoolTransactionError::Underpriced => Self::Underpriced,
             InvalidPoolTransactionError::Eip2681 => {
                 Self::Invalid(RpcInvalidTransactionError::NonceMaxValue)

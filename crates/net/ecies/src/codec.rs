@@ -58,7 +58,7 @@ impl Decoder for ECIESCodec {
     type Item = IngressECIESValue;
     type Error = ECIESError;
 
-    #[instrument(skip_all, fields(peer=?self.ecies.remote_id, state=?self.state))]
+    #[instrument(level = "trace", skip_all, fields(peer=?self.ecies.remote_id, state=?self.state))]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         loop {
             match self.state {
@@ -110,7 +110,7 @@ impl Decoder for ECIESCodec {
                         self.ecies.read_header(&mut buf.split_to(ECIES::header_len()))?;
 
                     if body_size > MAX_INITIAL_HANDSHAKE_SIZE {
-                        trace!(?body_size, max=?MAX_INITIAL_HANDSHAKE_SIZE, "Header exceeds max initial handshake size");
+                        trace!(?body_size, max=?MAX_INITIAL_HANDSHAKE_SIZE, "Body exceeds max initial handshake size");
                         return Err(ECIESErrorImpl::InitialHeaderBodyTooLarge {
                             body_size,
                             max_body_size: MAX_INITIAL_HANDSHAKE_SIZE,
@@ -150,7 +150,7 @@ impl Decoder for ECIESCodec {
 impl Encoder<EgressECIESValue> for ECIESCodec {
     type Error = io::Error;
 
-    #[instrument(skip(self, buf), fields(peer=?self.ecies.remote_id, state=?self.state))]
+    #[instrument(level = "trace", skip(self, buf), fields(peer=?self.ecies.remote_id, state=?self.state))]
     fn encode(&mut self, item: EgressECIESValue, buf: &mut BytesMut) -> Result<(), Self::Error> {
         match item {
             EgressECIESValue::Auth => {

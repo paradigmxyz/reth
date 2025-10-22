@@ -309,7 +309,8 @@ tables! {
         type Value = HeaderHash;
     }
 
-    /// Stores the total difficulty from a block header.
+    /// Stores the total difficulty from block headers.
+    /// Note: Deprecated.
     table HeaderTerminalDifficulties {
         type Key = BlockNumber;
         type Value = CompactU256;

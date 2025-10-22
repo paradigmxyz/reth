@@ -329,7 +329,7 @@ where
         skip_all,
         fields(
             parent = ?input.parent_hash(),
-            block_num_hash = ?input.num_hash()
+            type_name = ?input.type_name(),
         )
     )]
     pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
@@ -1257,6 +1257,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.block_with_parent(),
             Self::Block(block) => block.block_with_parent(),
+        }
+    }
+
+    /// Returns a string showing whether or not this is a block or payload.
+    pub const fn type_name(&self) -> &'static str {
+        match self {
+            Self::Payload(_) => "payload",
+            Self::Block(_) => "block",
         }
     }
 }

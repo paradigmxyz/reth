@@ -534,6 +534,7 @@ op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc
 either = { version = "1.15.0", default-features = false }
+arrayvec = { version = "0.7.6", default-features = false }
 aquamarine = "0.6"
 auto_impl = "1"
 backon = { version = "1.2", default-features = false, features = ["std-blocking-sleep", "tokio-sleep"] }

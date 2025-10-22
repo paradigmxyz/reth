@@ -236,10 +236,10 @@ where
         if is_osaka && estimated_block_size_with_tx > MAX_RLP_BLOCK_SIZE {
             best_txs.mark_invalid(
                 &pool_tx,
-                InvalidPoolTransactionError::OversizedData(
-                    estimated_block_size_with_tx,
-                    MAX_RLP_BLOCK_SIZE,
-                ),
+                InvalidPoolTransactionError::OversizedData {
+                    size: estimated_block_size_with_tx,
+                    limit: MAX_RLP_BLOCK_SIZE,
+                },
             );
             continue;
         }

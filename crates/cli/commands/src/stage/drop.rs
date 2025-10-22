@@ -70,7 +70,6 @@ impl<C: ChainSpecParser> Command<C> {
             StageEnum::Headers => {
                 tx.clear::<tables::CanonicalHeaders>()?;
                 tx.clear::<tables::Headers<HeaderTy<N>>>()?;
-                tx.clear::<tables::HeaderTerminalDifficulties>()?;
                 tx.clear::<tables::HeaderNumbers>()?;
                 reset_stage_checkpoint(tx, StageId::Headers)?;
 

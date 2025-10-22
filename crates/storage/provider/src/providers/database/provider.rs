@@ -22,18 +22,18 @@ use crate::{
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
-    BlockHeader, TxReceipt,
+    BlockHeader,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
@@ -214,7 +214,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
     #[cfg(feature = "test-utils")]
     /// Sets the prune modes for provider.
-    pub fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+    pub const fn set_prune_modes(&mut self, prune_modes: PruneModes) {
         self.prune_modes = prune_modes;
     }
 }
@@ -971,26 +971,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
         self.static_file_provider.header_by_number(num)
     }
 
-    fn header_td(&self, block_hash: BlockHash) -> ProviderResult<Option<U256>> {
-        if let Some(num) = self.block_number(block_hash)? {
-            self.header_td_by_number(num)
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        if self.chain_spec.is_paris_active_at_block(number) &&
-            let Some(td) = self.chain_spec.final_paris_total_difficulty()
-        {
-            // if this block is higher than the final paris(merge) block, return the final paris
-            // difficulty
-            return Ok(Some(td))
-        }
-
-        self.static_file_provider.header_td_by_number(number)
-    }
-
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -1641,19 +1621,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             .then(|| self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts))
             .transpose()?;
 
-        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
-        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
-
         // All receipts from the last 128 blocks are required for blockchain tree, even with
         // [`PruneSegment::ContractLogs`].
         let prunable_receipts =
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
-
-        // Prepare set of addresses which logs should not be pruned.
-        let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
-        for (_, addresses) in contract_log_pruner.range(..first_block) {
-            allowed_addresses.extend(addresses.iter().copied());
-        }
 
         for (idx, (receipts, first_tx_index)) in
             execution_outcome.receipts.iter().zip(block_indices).enumerate()
@@ -1674,21 +1645,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 continue
             }
 
-            // If there are new addresses to retain after this block number, track them
-            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
-                allowed_addresses.extend(new_addresses.iter().copied());
-            }
-
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
-                // Skip writing receipt if log filter is active and it does not have any logs to
-                // retain
-                if prunable_receipts &&
-                    has_contract_log_filter &&
-                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
-                {
-                    continue
-                }
 
                 if let Some(writer) = &mut receipts_static_writer {
                     writer.append_receipt(receipt_idx, receipt)?;
@@ -2808,7 +2766,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// tables:
     /// * [`StaticFileSegment::Headers`]
     /// * [`tables::HeaderNumbers`]
-    /// * [`tables::HeaderTerminalDifficulties`]
     /// * [`tables::BlockBodyIndices`]
     ///
     /// If there are transactions in the block, the following static file segments and tables will
@@ -2833,19 +2790,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
-        // total difficulty
-        let ttd = if block_number == 0 {
-            block.header().difficulty()
-        } else {
-            let parent_block_number = block_number - 1;
-            let parent_ttd = self.header_td_by_number(parent_block_number)?.unwrap_or_default();
-            durations_recorder.record_relative(metrics::Action::GetParentTD);
-            parent_ttd + block.header().difficulty()
-        };
-
         self.static_file_provider
             .get_writer(block_number, StaticFileSegment::Headers)?
-            .append_header(block.header(), ttd, &block.hash())?;
+            .append_header(block.header(), &block.hash())?;
 
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);
