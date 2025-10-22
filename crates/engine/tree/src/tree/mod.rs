@@ -29,9 +29,8 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, HashedPostStateProvider,
-    ProviderError, StateProviderBox, StateProviderFactory, StateReader, TransactionVariant,
-    TrieReader,
+    BlockReader, DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StateProviderBox,
+    StateProviderFactory, StateReader, TransactionVariant, TrieReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
