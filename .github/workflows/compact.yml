@@ -9,7 +9,7 @@ on:
   pull_request:
   merge_group:
   push:
-    branches: [main]
+    branches: ["**"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,8 +17,7 @@ env:
 name: compact-codec
 jobs:
   compact-codec:
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         bin:
