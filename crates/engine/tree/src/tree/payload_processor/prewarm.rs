@@ -350,7 +350,7 @@ where
             }
         }
 
-        trace!(target: "engine::tree::prewarm", "Completed prewarm execution");
+        debug!(target: "engine::tree::prewarm", "Completed prewarm execution");
 
         // save caches and finish
         if let Some(Some(state)) = final_block_output {
