@@ -109,7 +109,7 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
     Ok(())
 }
 
-/// The `BlockReader` allows querying the headers-related tables.
+/// The `BlockReader` allows querying the blocks-related tables.
 fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
     provider: T,
     number: u64,
