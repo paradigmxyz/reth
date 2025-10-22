@@ -35,8 +35,8 @@ use reth_primitives_traits::{
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
-    StageCheckpointReader, StateProvider, StateProviderFactory, StateReader, StateRootProvider,
-    TrieReader,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
+    StateRootProvider, TrieReader,
 };
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
@@ -166,8 +166,9 @@ where
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory<Provider: BlockReader + TrieReader + StageCheckpointReader>
-        + BlockReader<Header = N::BlockHeader>
+    P: DatabaseProviderFactory<
+            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+        > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
@@ -1150,8 +1151,9 @@ pub trait EngineValidator<
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
-    P: DatabaseProviderFactory<Provider: BlockReader + TrieReader + StageCheckpointReader>
-        + BlockReader<Header = N::BlockHeader>
+    P: DatabaseProviderFactory<
+            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+        > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
