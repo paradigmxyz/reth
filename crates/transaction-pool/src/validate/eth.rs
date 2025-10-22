@@ -203,6 +203,11 @@ where
     /// which can improve performance when validating many transactions.
     ///
     /// If `state` is `None`, a new state provider will be created.
+    ///
+    /// Convenience method for applying both checks that don't require chain state and that do
+    /// require chain state on given transaction,
+    /// [`apply_checks_no_state`](Self::apply_checks_no_state) and
+    /// [`apply_checks_against_state`](Self::apply_checks_against_state).
     pub fn validate_one_with_state(
         &self,
         origin: TransactionOrigin,
@@ -211,7 +216,13 @@ where
     ) -> TransactionValidationOutcome<Tx> {
         self.validate_one_with_provider(origin, transaction, state)
     }
+}
 
+impl<Client, Tx> EthTransactionValidator<Client, Tx>
+where
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
+    Tx: EthPoolTransaction,
+{
     /// Validates a single transaction using an optional cached state provider.
     /// If no provider is passed, a new one will be created. This allows reusing
     /// the same provider across multiple txs.
@@ -221,7 +232,7 @@ where
         transaction: Tx,
         maybe_state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
-        match self.validate_one_no_state(origin, transaction) {
+        match self.apply_checks_no_state(origin, transaction) {
             Ok(transaction) => {
                 // stateless checks passed, pass transaction down stateful validation pipeline
                 // If we don't have a state provider yet, fetch the latest state
@@ -241,7 +252,7 @@ where
 
                 let state = maybe_state.as_deref().expect("provider is set");
 
-                self.validate_one_against_state(origin, transaction, state)
+                self.apply_checks_against_state(origin, transaction, state)
             }
             Err(invalid_outcome) => invalid_outcome,
         }
@@ -249,8 +260,8 @@ where
 
     /// Performs stateless validation on single transaction. Returns unaltered input transaction
     /// if all checks pass, so transaction can continue through to stateful validation as argument
-    /// to [`validate_one_against_state`](Self::validate_one_against_state).
-    fn validate_one_no_state(
+    /// to [`apply_checks_against_state`](Self::apply_checks_against_state).
+    pub fn apply_checks_no_state(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -509,7 +520,7 @@ where
     }
 
     /// Validates a single transaction using given state provider.
-    fn validate_one_against_state<P>(
+    pub fn apply_checks_against_state<P>(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
