@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 /// Response type for `eth_fillTransaction` RPC method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FillTransactionRes<T> {
+pub struct FillTransactionResult<T> {
     /// RLP-encoded transaction bytes
     pub raw: Bytes,
     /// Filled transaction object
