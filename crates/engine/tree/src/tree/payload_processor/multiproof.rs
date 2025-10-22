@@ -113,17 +113,6 @@ pub(super) enum MultiProofMessage {
     FinishedStateUpdates,
 }
 
-/// Message about completion of proof calculation for a specific state update
-#[derive(Debug)]
-pub(super) struct ProofCalculated {
-    /// The index of this proof in the sequence of state updates
-    sequence_number: u64,
-    /// Sparse trie update
-    update: SparseTrieUpdate,
-    /// The time taken to calculate the proof.
-    elapsed: Duration,
-}
-
 /// Handle to track proof calculation ordering.
 #[derive(Debug, Default)]
 struct ProofSequencer {
