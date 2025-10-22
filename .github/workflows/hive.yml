@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: raxhvl/hive
-          ref: feat/amsterdam-bal
+          ref: feat/asmterdam-bal
           path: hivetests
 
       - name: Get hive commit hash
