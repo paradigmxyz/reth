@@ -234,13 +234,13 @@ where
     }
 
     /// Returns true if prewarming was terminated and no more transactions should be prewarmed.
-    fn is_execucation_terminated(&self) -> bool {
+    fn is_execution_terminated(&self) -> bool {
         self.ctx.terminate_execution.load(Ordering::Relaxed)
     }
 
     /// If configured and the tx returned proof targets, emit the targets the transaction produced
     fn send_multi_proof_targets(&self, targets: Option<MultiProofTargets>) {
-        if self.is_execucation_terminated() {
+        if self.is_execution_terminated() {
             // if execution is already terminated then we dont need to send more proof fetch
             // messages
             return
