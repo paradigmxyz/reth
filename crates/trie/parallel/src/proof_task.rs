@@ -338,42 +338,53 @@ fn account_worker_loop<Factory>(
         available_workers.fetch_sub(1, Ordering::Relaxed);
 
         match job {
-            AccountWorkerJob::AccountMultiproof { mut input, result_sender } => {
-                let span = tracing::debug_span!(
-                    target: "trie::proof_task",
-                    "Account multiproof calculation",
-                    targets = input.targets.len(),
-                    worker_id,
-                );
-                let _span_guard = span.enter();
+            AccountWorkerJob::AccountMultiproof { input } => {
+                let AccountMultiproofInput {
+                    targets,
+                    mut prefix_sets,
+                    collect_branch_node_masks,
+                    multi_added_removed_keys,
+                    missed_leaves_storage_roots,
+                    proof_result_sender: (result_tx, seq, state, start),
+                } = *input;
 
                 trace!(
                     target: "trie::proof_task",
+                    worker_id,
+                    targets = targets.len(),
                     "Processing account multiproof"
                 );
 
-                let proof_start = Instant::now();
                 let mut tracker = ParallelTrieTracker::default();
 
-                let mut storage_prefix_sets =
-                    std::mem::take(&mut input.prefix_sets.storage_prefix_sets);
+                let mut storage_prefix_sets = std::mem::take(&mut prefix_sets.storage_prefix_sets);
 
                 let storage_root_targets_len = StorageRootTargets::count(
-                    &input.prefix_sets.account_prefix_set,
+                    &prefix_sets.account_prefix_set,
                     &storage_prefix_sets,
                 );
+
                 tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
+
+                let multi_added_removed_keys_ref = multi_added_removed_keys.as_ref();
 
                 let storage_proof_receivers = match dispatch_storage_proofs(
                     &storage_work_tx,
-                    &input.targets,
+                    &targets,
                     &mut storage_prefix_sets,
-                    input.collect_branch_node_masks,
-                    input.multi_added_removed_keys.as_ref(),
+                    collect_branch_node_masks,
+                    multi_added_removed_keys_ref,
                 ) {
                     Ok(receivers) => receivers,
                     Err(error) => {
-                        let _ = result_sender.send(Err(error));
+                        // Send error through result channel
+                        error!(target: "trie::proof_task", "Failed to dispatch storage proofs: {error}");
+                        let _ = result_tx.send(ProofResultMessage {
+                            sequence_number: seq,
+                            result: Err(error),
+                            elapsed: start.elapsed(),
+                            state,
+                        });
                         continue;
                     }
                 };
