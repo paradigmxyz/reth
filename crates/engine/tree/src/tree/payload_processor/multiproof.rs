@@ -335,7 +335,7 @@ pub struct MultiproofManager {
     /// a big account change into different chunks, which may repeatedly
     /// revisit missed leaves.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-    /// Sender for proof results (passed directly to workers)
+    /// Channel sender for receiving computed multiproof results from worker pools.
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
