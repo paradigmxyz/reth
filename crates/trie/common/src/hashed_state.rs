@@ -486,6 +486,13 @@ impl HashedPostStateSorted {
         &self.storages
     }
 
+    /// Returns the total number of updates including all accounts and storage updates.
+    pub fn total_len(&self) -> usize {
+        self.accounts.accounts.len() +
+            self.accounts.destroyed_accounts.len() +
+            self.storages.values().map(|storage| storage.len()).sum::<usize>()
+    }
+
     /// Extends this state with contents of another sorted state.
     /// Entries in `other` take precedence for duplicate keys.
     pub fn extend_ref(&mut self, other: &Self) {
@@ -566,6 +573,16 @@ impl HashedStorageSorted {
             .map(|(hashed_slot, value)| (*hashed_slot, *value))
             .chain(self.zero_valued_slots.iter().map(|hashed_slot| (*hashed_slot, U256::ZERO)))
             .sorted_by_key(|entry| *entry.0)
+    }
+
+    /// Returns the total number of storage slot updates.
+    pub fn len(&self) -> usize {
+        self.non_zero_valued_slots.len() + self.zero_valued_slots.len()
+    }
+
+    /// Returns `true` if there are no storage slot updates.
+    pub fn is_empty(&self) -> bool {
+        self.non_zero_valued_slots.is_empty() && self.zero_valued_slots.is_empty()
     }
 
     /// Extends this storage with contents of another sorted storage.
