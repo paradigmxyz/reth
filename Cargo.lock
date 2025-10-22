@@ -262,7 +262,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.22.3"
-source = "git+https://github.com/Rimeeeeee/evm?branch=temp-fix#ae6e67a8ce5066880173358ca8f6a68909d8827b"
+source = "git+https://github.com/Rimeeeeee/evm?branch=temp-fix#ce1015415dfa155a76504664a8d8022df6ba579e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -375,7 +375,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.22.3"
-source = "git+https://github.com/Rimeeeeee/evm?branch=temp-fix#ae6e67a8ce5066880173358ca8f6a68909d8827b"
+source = "git+https://github.com/Rimeeeeee/evm?branch=temp-fix#ce1015415dfa155a76504664a8d8022df6ba579e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
