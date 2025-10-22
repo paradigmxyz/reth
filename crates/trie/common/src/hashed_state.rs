@@ -425,11 +425,10 @@ impl HashedStorage {
 
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
-        let mut storage_slots: Vec<_> = self.storage
+        let mut storage_slots: Vec<_> = self
+            .storage
             .into_iter()
-            .map(|(hashed_slot, value)| {
-                (hashed_slot, (!value.is_zero()).then_some(value))
-            })
+            .map(|(hashed_slot, value)| (hashed_slot, (!value.is_zero()).then_some(value)))
             .collect();
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
 
@@ -514,8 +513,8 @@ impl AsRef<Self> for HashedPostStateSorted {
 //     /// Extends this collection with contents of another sorted collection.
 //     /// Entries in `other` take precedence for duplicate keys.
 //     pub fn extend_ref(&mut self, other: &Self) {
-//         // Updates take precedence over removals, so we want removals from `other` to only apply to
-//         // the previous accounts.
+//         // Updates take precedence over removals, so we want removals from `other` to only apply
+// to         // the previous accounts.
 //         self.accounts.retain(|(addr, _)| !other.destroyed_accounts.contains(addr));
 //
 //         // Extend the sorted accounts vector
@@ -547,12 +546,12 @@ impl HashedStorageSorted {
     }
 
     /// Returns the total number of storage slot updates.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.storage_slots.len()
     }
 
     /// Returns `true` if there are no storage slot updates.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.storage_slots.is_empty()
     }
 
@@ -565,7 +564,7 @@ impl HashedStorageSorted {
             // If other is wiped, clear everything and copy from other
             self.wiped = true;
             self.storage_slots.clear();
-            self.storage_slots.extend(other.storage_slots.iter().cloned());
+            self.storage_slots.extend(other.storage_slots.iter().copied());
             return;
         }
 
@@ -1115,7 +1114,7 @@ mod tests {
             accounts: vec![
                 (B256::from([1; 32]), Some(Account::default())),
                 (B256::from([3; 32]), Some(Account::default())),
-                (B256::from([5; 32]), None)
+                (B256::from([5; 32]), None),
             ],
             storages: B256Map::default(),
         };
@@ -1123,7 +1122,7 @@ mod tests {
         let state2 = HashedPostStateSorted {
             accounts: vec![
                 (B256::from([2; 32]), Some(Account::default())),
-                (B256::from([3; 32]), Some(Account { nonce: 1, ..Default::default() })), // Override
+                (B256::from([3; 32]), Some(Account { nonce: 1, ..Default::default() })), /* Override */
                 (B256::from([4; 32]), Some(Account::default())),
                 (B256::from([6; 32]), None),
             ],

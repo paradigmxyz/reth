@@ -3,7 +3,7 @@ use crate::forward_cursor::ForwardInMemoryCursor;
 use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_common::{HashedPostStateSorted};
+use reth_trie_common::HashedPostStateSorted;
 
 /// The hashed cursor factory for the post state.
 #[derive(Clone, Debug)]
@@ -48,7 +48,7 @@ where
         let (storage_slots, wiped) = post_state_storage
             .map(|u| (u.storage_slots_ref(), u.is_wiped()))
             .unwrap_or((&EMPTY_POST_STATES, false));
-        
+
         let cursor = if wiped {
             None
         } else {
@@ -72,33 +72,29 @@ pub struct HashedPostStateCursor<'a, C, V> {
     last_key: Option<B256>,
 }
 
-impl <'a, C, V> HashedPostStateCursor<'a, C, V>
+impl<'a, C, V> HashedPostStateCursor<'a, C, V>
 where
     C: HashedCursor<Value = V>,
     V: Copy + Clone + std::fmt::Debug,
 {
     /// todo!()
-    pub fn new(cursor: Option<C>, updates: Option<&'a[(B256, Option<V>)]>) -> Self {
-        let post_state_cursor = updates.map(|updates| ForwardInMemoryCursor::new(updates));
+    pub fn new(cursor: Option<C>, updates: Option<&'a [(B256, Option<V>)]>) -> Self {
+        let post_state_cursor = updates.map(ForwardInMemoryCursor::new);
         Self { cursor, post_state_cursor, last_key: None }
     }
 
     fn seek_inner(&mut self, key: B256) -> Result<Option<(B256, V)>, DatabaseError> {
         // Seek in post state first
-        let post_state_entry = self.post_state_cursor
-            .as_mut()
-            .and_then(|c| c.seek(&key));
+        let post_state_entry = self.post_state_cursor.as_mut().and_then(|c| c.seek(&key));
 
         // Fast path: exact match in post state with non-empty values
-        if let Some((k, Some(value))) = post_state_entry && k == key {
+        if let Some((k, Some(value))) = post_state_entry &&
+            k == key
+        {
             return Ok(Some((k, value)))
         }
 
-        let db_entry = self.cursor
-            .as_mut()
-            .map(|c| c.seek(key))
-            .transpose()?
-            .flatten();
+        let db_entry = self.cursor.as_mut().map(|c| c.seek(key)).transpose()?.flatten();
         self.resolve_next_entry(post_state_entry, db_entry)
     }
 
@@ -125,23 +121,25 @@ where
             match (post_state_entry, &db_entry) {
                 // Post state has zero-valued slot before DB position
                 (Some((post_key, None)), _)
-                if db_entry.as_ref().is_none_or(|(db_key, _)| post_key < *db_key) =>
-                    {
-                        post_state_entry = self.post_state_cursor.as_mut().and_then(|c| c.first_after(&post_key));
-                    }
+                    if db_entry.as_ref().is_none_or(|(db_key, _)| post_key < *db_key) =>
+                {
+                    post_state_entry =
+                        self.post_state_cursor.as_mut().and_then(|c| c.first_after(&post_key));
+                }
 
                 // Post state zeroed out exact DB entry
                 (Some((post_key, None)), Some((db_key, _))) if post_key == *db_key => {
-                    post_state_entry = self.post_state_cursor.as_mut().and_then(|c| c.first_after(&post_key));
+                    post_state_entry =
+                        self.post_state_cursor.as_mut().and_then(|c| c.first_after(&post_key));
                     db_entry = self.cursor.as_mut().map(|c| c.next()).transpose()?.flatten();
                 }
 
                 // Post state has non-zero value before or at DB position
                 (Some((post_key, Some(value))), _)
-                if db_entry.as_ref().is_none_or(|(db_key, _)| post_key <= *db_key) =>
-                    {
-                        return Ok(Some((post_key, value)))
-                    }
+                    if db_entry.as_ref().is_none_or(|(db_key, _)| post_key <= *db_key) =>
+                {
+                    return Ok(Some((post_key, value)))
+                }
 
                 // All other cases:
                 // - post state_key > db_key

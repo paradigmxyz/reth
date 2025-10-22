@@ -1,5 +1,6 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{B256, U256};
+use core::marker::PhantomData;
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 
@@ -10,33 +11,43 @@ pub struct NoopHashedCursorFactory;
 
 impl HashedCursorFactory for NoopHashedCursorFactory {
     type AccountCursor<'a>
-        = NoopHashedAccountCursor
+        = NoopHashedCursor<Account>
     where
         Self: 'a;
     type StorageCursor<'a>
-        = NoopHashedStorageCursor
+        = NoopHashedCursor<U256>
     where
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        Ok(NoopHashedAccountCursor::default())
+        Ok(NoopHashedCursor::default())
     }
 
     fn hashed_storage_cursor(
         &self,
         _hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        Ok(NoopHashedStorageCursor::default())
+        Ok(NoopHashedCursor::default())
     }
 }
 
-/// Noop account hashed cursor.
-#[derive(Default, Debug)]
-#[non_exhaustive]
-pub struct NoopHashedAccountCursor;
+/// Generic noop hashed cursor.
+#[derive(Debug)]
+pub struct NoopHashedCursor<V> {
+    _marker: PhantomData<V>,
+}
 
-impl HashedCursor for NoopHashedAccountCursor {
-    type Value = Account;
+impl<V> Default for NoopHashedCursor<V> {
+    fn default() -> Self {
+        Self { _marker: PhantomData }
+    }
+}
+
+impl<V> HashedCursor for NoopHashedCursor<V>
+where
+    V: std::fmt::Debug,
+{
+    type Value = V;
 
     fn seek(&mut self, _key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         Ok(None)
@@ -47,24 +58,7 @@ impl HashedCursor for NoopHashedAccountCursor {
     }
 }
 
-/// Noop account hashed cursor.
-#[derive(Default, Debug)]
-#[non_exhaustive]
-pub struct NoopHashedStorageCursor;
-
-impl HashedCursor for NoopHashedStorageCursor {
-    type Value = U256;
-
-    fn seek(&mut self, _key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        Ok(None)
-    }
-
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        Ok(None)
-    }
-}
-
-impl HashedStorageCursor for NoopHashedStorageCursor {
+impl HashedStorageCursor for NoopHashedCursor<U256> {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         Ok(true)
     }

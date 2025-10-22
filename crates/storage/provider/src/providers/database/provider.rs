@@ -25,7 +25,11 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{keccak256, map::{hash_map, B256Map, HashMap, HashSet}, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{
+    keccak256,
+    map::{hash_map, B256Map, HashMap, HashSet},
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+};
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
@@ -1793,7 +1797,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
         for (hashed_address, account) in hashed_state.accounts() {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, &account)?;
+                hashed_accounts_cursor.upsert(*hashed_address, account)?;
             } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
