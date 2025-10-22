@@ -50,7 +50,7 @@ impl Bodies {
     {
         let deleted_headers = provider
             .static_file_provider()
-            .delete_segment_below_block(StaticFileSegment::Transactions, target_block)?;
+            .delete_segment_below_block(StaticFileSegment::Transactions, target_block + 1)?;
 
         if deleted_headers.is_empty() {
             return Ok(SegmentOutput::done())
@@ -67,7 +67,7 @@ impl Bodies {
             progress: PruneProgress::Finished,
             pruned,
             checkpoint: Some(SegmentOutputCheckpoint {
-                block_number: Some(target_block.saturating_sub(1)),
+                block_number: Some(target_block),
                 tx_number: tx_ranges.map(|range| range.end()).max(),
             }),
         })
