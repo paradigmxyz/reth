@@ -596,7 +596,7 @@ impl MultiproofManager {
                 }
             }
 
-            // Increment at the end - worker is now available again
+            // Increment available workers after no more calculations are expected. 
             if decremented {
                 available_workers.fetch_add(1, Ordering::Relaxed);
             }
