@@ -910,10 +910,6 @@ impl<S: SparseTrieInterface> StorageTries<S> {
             trie.shrink_nodes_to(node_size_per_trie);
             trie.shrink_values_to(value_size_per_trie);
         }
-
-        // Shrink the default trie
-        self.default_trie.shrink_nodes_to(node_size_per_trie);
-        self.default_trie.shrink_values_to(value_size_per_trie);
     }
 }
 
