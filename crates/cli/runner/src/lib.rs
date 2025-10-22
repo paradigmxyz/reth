@@ -76,6 +76,15 @@ impl CliRunner {
         self.executor.handle()
     }
 
+    /// Executes an async block on the runtime and blocks until completion.
+    pub fn block_on<F, T>(&self, fut: F) -> Result<T, std::io::Error>
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.executor.block_on(fut)
+    }
+
     /// Executes a regular future until completion or until external signal received
     pub fn run_until_ctrl_c_with_handle<F, E>(self, fut: F) -> Result<(), E>
     where
@@ -84,14 +93,6 @@ impl CliRunner {
     {
         self.executor.block_on(run_until_ctrl_c(fut)).map_err(E::from)??;
         Ok(())
-    }
-
-    /// Executes an async block on the runtime and blocks until completion.
-    pub fn block_on<F, T>(&self, fut: F) -> T
-    where
-        F: Future<Output = T>,
-    {
-        self.tokio_runtime.block_on(fut)
     }
 
     /// Executes the given _async_ command on the tokio runtime until the command future resolves or
