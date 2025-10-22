@@ -628,7 +628,7 @@ where
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
-            .with_bal_builder()
+            .with_bal_builder()//TODO
             .without_state_clear()
             .build();
         db.bal_index = 0;

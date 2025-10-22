@@ -11,7 +11,6 @@ go build .
 
 # Run each hive command in the background for each simulator and wait(using fork  tar) 
 echo "Building images"
-# Changed this for eip 7928 
 ./hive -client reth --sim "ethereum/eest" \
   --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal@v1.3.0/fixtures_bal.tar.gz \
   --sim.buildarg branch=main \
