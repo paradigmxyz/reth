@@ -40,10 +40,13 @@ use reth_trie_sparse::{
     ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
-use std::sync::{
-    atomic::AtomicBool,
-    mpsc::{self, channel, Sender},
-    Arc,
+use std::{
+    sync::{
+        atomic::AtomicBool,
+        mpsc::{self, channel, Sender},
+        Arc,
+    },
+    time::Instant,
 };
 use tracing::{debug, debug_span, instrument, warn};
 
@@ -596,8 +599,16 @@ impl ExecutionCache {
     /// A cache is considered available when:
     /// - It exists and matches the requested parent hash
     /// - No other tasks are currently using it (checked via Arc reference count)
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
     pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
+        let start = Instant::now();
         let cache = self.inner.read();
+
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 5 {
+            warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
+        }
+
         cache
             .as_ref()
             .filter(|c| c.executed_block_hash() == parent_hash && c.is_available())
