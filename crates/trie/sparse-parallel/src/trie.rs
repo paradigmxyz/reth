@@ -2617,10 +2617,19 @@ impl SparseSubtrieBuffers {
     /// Clears all buffers.
     fn clear(&mut self) {
         self.path_stack.clear();
+        self.path_stack.shrink_to_fit();
+
         self.rlp_node_stack.clear();
+        self.rlp_node_stack.shrink_to_fit();
+
         self.branch_child_buf.clear();
+        self.branch_child_buf.shrink_to_fit();
+
         self.branch_value_stack_buf.clear();
+        self.branch_value_stack_buf.shrink_to_fit();
+
         self.rlp_buf.clear();
+        self.rlp_buf.shrink_to_fit();
     }
 }
 
