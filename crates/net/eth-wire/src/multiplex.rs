@@ -332,9 +332,9 @@ impl ProtocolProxy {
             return Ok(msg);
         }
 
-        let mut masked = Vec::from(msg);
+        let mut masked: BytesMut = msg.into();
         masked[0] = masked[0].checked_add(offset).ok_or(io::ErrorKind::InvalidInput)?;
-        Ok(masked.into())
+        Ok(masked.freeze())
     }
 
     /// Unmasks the message ID of a message received from the wire.
