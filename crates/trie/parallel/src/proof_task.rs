@@ -58,7 +58,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::runtime::Handle;
-use tracing::{error, trace};
+use tracing::{debug_span, error, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskTrieMetrics;
@@ -103,7 +103,8 @@ enum StorageWorkerJob {
     },
 }
 
-/// Message containing a completed proof result with metadata for direct delivery to `MultiProofTask`.
+/// Message containing a completed proof result with metadata for direct delivery to
+/// `MultiProofTask`.
 ///
 /// This type enables workers to send proof results directly to the `MultiProofTask` event loop.
 #[derive(Debug)]
@@ -357,10 +358,16 @@ fn account_worker_loop<Factory>(
                     proof_result_sender: (result_tx, seq, state, start),
                 } = *input;
 
+                let span = tracing::debug_span!(
+                    target: "trie::proof_task",
+                    "Account multiproof calculation",
+                    targets = targets.len(),
+                    worker_id,
+                );
+                let _span_guard = span.enter();
+
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
-                    targets = targets.len(),
                     "Processing account multiproof"
                 );
 
@@ -426,7 +433,12 @@ fn account_worker_loop<Factory>(
 
                 // Send result to MultiProofTask
                 if result_tx
-                    .send(ProofResultMessage { sequence_number: seq, result, elapsed: proof_elapsed, state })
+                    .send(ProofResultMessage {
+                        sequence_number: seq,
+                        result,
+                        elapsed: proof_elapsed,
+                        state,
+                    })
                     .is_err()
                 {
                     tracing::debug!(
