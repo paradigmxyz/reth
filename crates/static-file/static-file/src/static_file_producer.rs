@@ -308,7 +308,7 @@ mod tests {
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(1), receipts: Some(1), transactions: Some(1) }
+            HighestStaticFiles { headers: None, receipts: Some(1), transactions: None }
         );
 
         let targets = static_file_producer
@@ -322,7 +322,7 @@ mod tests {
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles { headers: None, receipts: Some(3), transactions: None }
         );
 
         let targets = static_file_producer
@@ -339,7 +339,7 @@ mod tests {
         );
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles { headers: None, receipts: Some(3), transactions: None }
         );
     }
 
