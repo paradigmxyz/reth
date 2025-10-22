@@ -24,6 +24,7 @@ use alloy_consensus::transaction::TxHashRef;
 use alloy_eips::Typed2718;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
+use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
@@ -39,7 +40,6 @@ use std::{
     },
     time::Instant,
 };
-use crossbeam_channel::Sender as CrossbeamSender;
 use tracing::{debug, trace, warn};
 
 /// A wrapper for transactions that includes their index in the block.

@@ -15,6 +15,7 @@ use crate::tree::{
 };
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
+use crossbeam_channel::Sender as CrossbeamSender;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
@@ -45,7 +46,6 @@ use std::sync::{
     mpsc::{self, channel},
     Arc,
 };
-use crossbeam_channel::Sender as CrossbeamSender;
 use tracing::{debug, instrument, warn};
 
 mod configured_sparse_trie;
