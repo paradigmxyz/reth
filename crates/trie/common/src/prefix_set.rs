@@ -205,9 +205,10 @@ impl PrefixSet {
             return true
         }
 
-        // Ensure index is within bounds to eliminate bound checks in the while loop
-        if self.index >= self.keys.len() && !self.keys.is_empty() {
-            self.index = self.keys.len() - 1;
+        // Early bounds check to help compiler eliminate redundant checks in the while loop
+        // If index is out of bounds, reset to 0 to avoid unnecessary backward scanning
+        if self.index >= self.keys.len() {
+            self.index = 0;
         }
 
         while self.index > 0 && &self.keys[self.index] > prefix {
