@@ -1,0 +1,25 @@
+[package]
+name = "reth-prune-static-files"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-prune-types.workspace = true
+reth-provider.workspace = true
+reth-static-file-types.workspace = true
+reth-storage-errors.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+
+[dev-dependencies]
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-prune-types = { workspace = true, features = ["test-utils"] }

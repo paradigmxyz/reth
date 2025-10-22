@@ -9799,6 +9799,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune-static-files",
  "reth-prune-types",
  "reth-stages",
  "reth-static-file-types",
@@ -9809,6 +9810,17 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-prune-static-files"
+version = "1.8.2"
+dependencies = [
+ "alloy-primitives",
+ "reth-provider",
+ "reth-prune-types",
+ "reth-static-file-types",
+ "reth-storage-errors",
 ]
 
 [[package]]
