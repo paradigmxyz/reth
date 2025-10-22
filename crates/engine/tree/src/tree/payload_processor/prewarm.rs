@@ -233,8 +233,19 @@ where
         });
     }
 
+    /// Returns true if prewarming was terminated and no more transactions should be prewarmed.
+    fn is_execution_terminated(&self) -> bool {
+        self.ctx.terminate_execution.load(Ordering::Relaxed)
+    }
+
     /// If configured and the tx returned proof targets, emit the targets the transaction produced
     fn send_multi_proof_targets(&self, targets: Option<MultiProofTargets>) {
+        if self.is_execution_terminated() {
+            // if execution is already terminated then we dont need to send more proof fetch
+            // messages
+            return
+        }
+
         if let Some((proof_targets, to_multi_proof)) = targets.zip(self.to_multi_proof.as_ref()) {
             let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(proof_targets));
         }
@@ -308,6 +319,7 @@ where
             match event {
                 PrewarmTaskEvent::TerminateTransactionExecution => {
                     // stop tx processing
+                    debug!(target: "engine::tree::prewarm", "Terminating prewarm execution");
                     self.ctx.terminate_execution.store(true, Ordering::Relaxed);
                 }
                 PrewarmTaskEvent::Outcome { proof_targets } => {
@@ -338,7 +350,7 @@ where
             }
         }
 
-        trace!(target: "engine::tree::prewarm", "Completed prewarm execution");
+        debug!(target: "engine::tree::prewarm", "Completed prewarm execution");
 
         // save caches and finish
         if let Some(Some(state)) = final_block_output {
@@ -460,6 +472,9 @@ where
                 debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
                     .entered();
 
+            // create the tx env
+            let start = Instant::now();
+
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
             if terminate_execution.load(Ordering::Relaxed) {
@@ -467,8 +482,6 @@ where
                 break
             }
 
-            // create the tx env
-            let start = Instant::now();
             let res = match evm.transact(&tx) {
                 Ok(res) => res,
                 Err(err) => {
@@ -488,6 +501,13 @@ where
             metrics.execution_duration.record(start.elapsed());
 
             drop(_enter);
+
+            // If the task was cancelled, stop execution, send an empty result to notify the task,
+            // and exit.
+            if terminate_execution.load(Ordering::Relaxed) {
+                let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: None });
+                break
+            }
 
             // Only send outcome for transactions after the first txn
             // as the main execution will be just as fast
