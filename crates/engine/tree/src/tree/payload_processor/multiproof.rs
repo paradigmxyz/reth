@@ -27,6 +27,7 @@ use std::{
     collections::BTreeMap,
     ops::DerefMut,
     sync::{
+        atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
@@ -353,6 +354,9 @@ pub struct MultiproofManager {
     /// a big account change into different chunks, which may repeatedly
     /// revisit missed leaves.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
+    /// Counter tracking available workers. Workers decrement when starting work,
+    /// increment when finishing. Used to determine whether to chunk multiproofs.
+    available_workers: Arc<AtomicUsize>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
 }
@@ -363,6 +367,7 @@ impl MultiproofManager {
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
         proof_worker_handle: ProofWorkerHandle,
+        worker_count: usize,
     ) -> Self {
         Self {
             inflight: 0,
@@ -370,7 +375,13 @@ impl MultiproofManager {
             metrics,
             proof_worker_handle,
             missed_leaves_storage_roots: Default::default(),
+            available_workers: Arc::new(AtomicUsize::new(worker_count)),
         }
+    }
+
+    /// Returns true if there are available workers to process tasks.
+    fn has_available_workers(&self) -> bool {
+        self.available_workers.load(Ordering::Relaxed) > 0
     }
 
     /// Spawns a new multiproof calculation.
@@ -416,8 +427,14 @@ impl MultiproofManager {
 
         let storage_proof_worker_handle = self.proof_worker_handle.clone();
         let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
+        let available_workers = self.available_workers.clone();
 
         self.executor.spawn_blocking(move || {
+            // Try to reserve a worker slot without letting the counter underflow.
+            let decremented = available_workers
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_sub(1))
+                .is_ok();
+
             let storage_targets = proof_targets.len();
 
             trace!(
@@ -469,6 +486,11 @@ impl MultiproofManager {
                         .send(MultiProofMessage::ProofCalculationError(error.into()));
                 }
             }
+
+            // Increment at the end - worker is now available again
+            if decremented {
+                available_workers.fetch_add(1, Ordering::Relaxed);
+            }
         });
 
         self.inflight += 1;
@@ -494,8 +516,14 @@ impl MultiproofManager {
         } = multiproof_input;
         let account_proof_worker_handle = self.proof_worker_handle.clone();
         let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
+        let available_workers = self.available_workers.clone();
 
         self.executor.spawn_blocking(move || {
+            // Try to reserve a worker slot without letting the counter underflow.
+            let decremented = available_workers
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_sub(1))
+                .is_ok();
+
             let account_targets = proof_targets.len();
             let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
 
@@ -564,6 +592,11 @@ impl MultiproofManager {
                     let _ = state_root_message_sender
                         .send(MultiProofMessage::ProofCalculationError(error.into()));
                 }
+            }
+
+            // Increment at the end - worker is now available again
+            if decremented {
+                available_workers.fetch_add(1, Ordering::Relaxed);
             }
         });
 
@@ -654,6 +687,7 @@ impl MultiProofTask {
         config: MultiProofConfig,
         executor: WorkloadExecutor,
         proof_worker_handle: ProofWorkerHandle,
+        worker_count: usize,
         to_sparse_trie: Sender<SparseTrieUpdate>,
         chunk_size: Option<usize>,
     ) -> Self {
@@ -673,6 +707,7 @@ impl MultiProofTask {
                 executor,
                 metrics.clone(),
                 proof_worker_handle,
+                worker_count,
             ),
             metrics,
         }
@@ -707,6 +742,9 @@ impl MultiProofTask {
         // Process proof targets in chunks.
         let mut chunks = 0;
 
+        // Only chunk if workers are available to take advantage of parallelism.
+        let should_chunk = self.multiproof_manager.has_available_workers();
+
         let mut spawn = |proof_targets| {
             self.multiproof_manager.spawn(
                 MultiproofInput {
@@ -723,7 +761,7 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if let Some(chunk_size) = self.chunk_size {
+        if should_chunk && let Some(chunk_size) = self.chunk_size {
             for proof_targets_chunk in proof_targets.chunks(chunk_size) {
                 spawn(proof_targets_chunk);
             }
@@ -843,6 +881,9 @@ impl MultiProofTask {
 
         let mut spawned_proof_targets = MultiProofTargets::default();
 
+        // Only chunk if workers are available to take advantage of parallelism.
+        let should_chunk = self.multiproof_manager.has_available_workers();
+
         let mut spawn = |hashed_state_update| {
             let proof_targets = get_proof_targets(
                 &hashed_state_update,
@@ -867,7 +908,7 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if let Some(chunk_size) = self.chunk_size {
+        if should_chunk && let Some(chunk_size) = self.chunk_size {
             for chunk in not_fetched_state_update.chunks(chunk_size) {
                 spawn(chunk);
             }
@@ -1205,7 +1246,7 @@ mod tests {
             ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1);
         let channel = channel();
 
-        MultiProofTask::new(config, executor, proof_handle, channel.0, Some(1))
+        MultiProofTask::new(config, executor, proof_handle, 1, channel.0, Some(1))
     }
 
     #[test]
