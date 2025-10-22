@@ -39,7 +39,8 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, trace, warn};
+use crossbeam_channel::Sender as CrossbeamSender;
+use tracing::{debug, trace, warn};
 
 /// A wrapper for transactions that includes their index in the block.
 #[derive(Clone)]
@@ -83,7 +84,7 @@ where
     /// The number of transactions to be processed
     transaction_count_hint: usize,
     /// Sender to emit evm state outcome messages, if any.
-    to_multi_proof: Option<Sender<MultiProofMessage>>,
+    to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
 }
@@ -99,7 +100,7 @@ where
         executor: WorkloadExecutor,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        to_multi_proof: Option<Sender<MultiProofMessage>>,
+        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         transaction_count_hint: usize,
         max_concurrency: usize,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
