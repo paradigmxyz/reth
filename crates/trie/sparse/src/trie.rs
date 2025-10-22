@@ -1113,6 +1113,8 @@ impl SparseTrieInterface for SerialSparseTrie {
 
     fn shrink_nodes_to(&mut self, size: usize) {
         self.nodes.shrink_to(size);
+        self.branch_node_tree_masks.shrink_to(size);
+        self.branch_node_hash_masks.shrink_to(size);
     }
 
     fn shrink_values_to(&mut self, size: usize) {

@@ -901,6 +901,10 @@ impl SparseTrieInterface for ParallelSparseTrie {
         for subtrie in &mut self.lower_subtries {
             subtrie.shrink_nodes_to(size_per_subtrie);
         }
+
+        // shrink masks maps
+        self.branch_node_hash_masks.shrink_to(size);
+        self.branch_node_tree_masks.shrink_to(size);
     }
 
     fn shrink_values_to(&mut self, size: usize) {
