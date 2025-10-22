@@ -1,7 +1,7 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use super::{EthApiSpec, EthSigner, LoadBlock, LoadReceipt, LoadState, SpawnBlocking};
+use super::{EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadReceipt, LoadState, SpawnBlocking};
 use crate::{
     helpers::{estimate::EstimateCall, spec::SignersForRpc},
     FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
@@ -14,7 +14,7 @@ use alloy_consensus::{
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::TransactionBuilder;
-use alloy_primitives::{Address, Bytes, TxHash, B256};
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInfo};
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
@@ -439,18 +439,66 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Fills the defaults on a given unsigned transaction.
     fn fill_transaction(
         &self,
-        request: RpcTxReq<Self::NetworkTypes>,
+        mut request: RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<FillTransactionResult<RpcTxReq<Self::NetworkTypes>>, Self::Error>>
            + Send
     where
-        Self: EthApiSpec,
+        Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
     {
         async move {
-            // TODO: implement transaction filling logic
-            let _ = request;
-            Err(Self::Error::from_eth_err(EthApiError::Unsupported(
-                "eth_fillTransaction not yet implemented",
-            )))
+            let from = match request.as_ref().from() {
+                Some(from) => from,
+                None => return Err(SignError::NoAccount.into_eth_err()),
+            };
+
+            if request.as_ref().value().is_none() {
+                request.as_mut().set_value(U256::ZERO);
+            }
+
+            if request.as_ref().nonce().is_none() {
+                let nonce = self.next_available_nonce(from).await?;
+                request.as_mut().set_nonce(nonce);
+            }
+
+            let chain_id = self.chain_id();
+            request.as_mut().set_chain_id(chain_id.to());
+
+            if request.as_ref().gas_limit().is_none() {
+                let estimated_gas =
+                    self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
+                request.as_mut().set_gas_limit(estimated_gas.to());
+            }
+            
+            // get suggested gas prices
+            let suggested_gas_price = LoadFee::gas_price(self).await?;
+            
+            let tx_type = request.as_ref().output_tx_type();
+
+            if tx_type.is_legacy() || tx_type.is_eip2930() {
+                if request.as_ref().gas_price().is_none() {
+                    request.as_mut().set_gas_price(suggested_gas_price.to());
+                }
+            } else {
+                if request.as_ref().max_fee_per_gas().is_none() {
+                    let mut max_fee_per_gas = suggested_gas_price.to();
+                    if let Some(prio_fee) = request.as_ref().max_priority_fee_per_gas() {
+                        max_fee_per_gas = prio_fee.max(max_fee_per_gas);
+                    }
+                    request.as_mut().set_max_fee_per_gas(max_fee_per_gas);
+                }
+                if request.as_ref().max_priority_fee_per_gas().is_none() {
+                    let suggested_tip = self.suggested_priority_fee().await?;
+                    request.as_mut().set_max_priority_fee_per_gas(suggested_tip.to());
+                }
+            }
+
+            let _unsigned_tx = request.as_ref().clone().build_typed_tx()
+                .map_err(|_| EthApiError::TransactionConversionError)?;
+            
+            // todo: encode the tx
+            let raw = Bytes::new(); // placeholder
+
+            Ok(FillTransactionResult { raw, tx: request })
         }
     }
 
