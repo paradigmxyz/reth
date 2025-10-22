@@ -857,30 +857,6 @@ where
     pub fn value_capacity(&self) -> usize {
         self.state.value_capacity() + self.storage.total_value_capacity()
     }
-
-    /// Shrink the sparse trie's capacity to the given size.
-    /// This helps reduce memory usage when the trie has excess capacity.
-    /// The capacity is distributed equally across the account trie and all storage tries.
-    pub fn shrink_to(&mut self, size: usize) {
-        // Count total number of storage tries (active + cleared + default)
-        let storage_tries_count = self.storage.tries.len() + self.storage.cleared_tries.len();
-
-        // Total tries = 1 account trie + all storage tries
-        let total_tries = 1 + storage_tries_count;
-
-        // Distribute capacity equally among all tries
-        let size_per_trie = size / total_tries;
-
-        // Shrink the account trie
-        self.state.shrink_nodes_to(size_per_trie);
-        self.state.shrink_values_to(size_per_trie);
-
-        // Calculate total capacity for storage tries
-        let storage_size = size_per_trie * storage_tries_count;
-
-        // Shrink all storage tries (they will redistribute internally)
-        self.storage.shrink_to(storage_size, storage_size);
-    }
 }
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest

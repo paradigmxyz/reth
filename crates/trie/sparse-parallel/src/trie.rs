@@ -905,12 +905,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
     fn shrink_values_to(&mut self, size: usize) {
         // Distribute the capacity across upper and lower subtries
-        // Count how many subtries have capacity (revealed or blind with allocation)
-        let lower_with_capacity =
-            self.lower_subtries.iter().filter(|s| s.value_capacity() > 0).count();
-
-        // Always include upper subtrie, plus any lower subtries with capacity
-        let total_subtries = 1 + lower_with_capacity;
+        //
+        // Always include upper subtrie, plus any lower subtries
+        let total_subtries = 1 + NUM_LOWER_SUBTRIES;
         let size_per_subtrie = size / total_subtries;
 
         // Shrink the upper subtrie
