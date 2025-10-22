@@ -269,20 +269,17 @@ pub struct IpcServerStartError {
 
 /// Data required by the server to handle requests received via an IPC connection
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct ServiceData {
     /// Registered server methods.
     pub(crate) methods: Methods,
     /// Subscription ID provider.
     pub(crate) id_provider: Arc<dyn IdProvider>,
-    /// Stop handle.
-    pub(crate) stop_handle: StopHandle,
+    /// Limits the number of subscriptions for this connection
+    pub(crate) bounded_subscriptions: BoundedSubscriptions,
     /// Connection ID
     pub(crate) conn_id: u32,
     /// Connection Permit.
     pub(crate) conn_permit: Arc<ConnectionPermit>,
-    /// Limits the number of subscriptions for this connection
-    pub(crate) bounded_subscriptions: BoundedSubscriptions,
     /// Sink that is used to send back responses to the connection.
     ///
     /// This is used for subscriptions.
@@ -392,9 +389,7 @@ where
         trace!("{:?}", request);
 
         let cfg = RpcServiceCfg {
-            bounded_subscriptions: BoundedSubscriptions::new(
-                self.inner.server_cfg.max_subscriptions_per_connection,
-            ),
+            bounded_subscriptions: self.inner.bounded_subscriptions.clone(),
             id_provider: self.inner.id_provider.clone(),
             sink: self.inner.method_sink.clone(),
         };
@@ -483,7 +478,6 @@ fn process_connection<RpcMiddleware, HttpMiddleware>(
         inner: ServiceData {
             methods,
             id_provider,
-            stop_handle: stop_handle.clone(),
             server_cfg: server_cfg.clone(),
             conn_id,
             conn_permit,
