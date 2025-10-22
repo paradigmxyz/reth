@@ -82,6 +82,22 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 /// - `Instant`: Calculation start time for measuring elapsed duration
 pub type ProofResultContext = (ProofResultSender, u64, HashedPostState, Instant);
 
+/// Message containing a completed proof result with metadata for direct delivery to
+/// `MultiProofTask`.
+///
+/// This type enables workers to send proof results directly to the `MultiProofTask` event loop.
+#[derive(Debug)]
+pub struct ProofResultMessage {
+    /// Sequence number for ordering proofs
+    pub sequence_number: u64,
+    /// The proof calculation result
+    pub result: AccountMultiproofResult,
+    /// Time taken for the entire proof calculation (from dispatch to completion)
+    pub elapsed: Duration,
+    /// Original state update that triggered this proof
+    pub state: HashedPostState,
+}
+
 /// Internal message for storage workers.
 #[derive(Debug)]
 enum StorageWorkerJob {
