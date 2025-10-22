@@ -9006,7 +9006,6 @@ dependencies = [
  "serde",
  "shellexpand",
  "strum 0.27.2",
- "thiserror 2.0.17",
  "tokio",
  "toml",
  "tracing",
@@ -9786,7 +9785,6 @@ dependencies = [
 name = "reth-prune"
 version = "1.8.2"
 dependencies = [
- "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "assert_matches",
