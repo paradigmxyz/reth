@@ -207,19 +207,17 @@ where
             headers: finalized_block_numbers.headers.and_then(|finalized_block_number| {
                 self.get_static_file_target(highest_static_files.headers, finalized_block_number)
             }),
-            // StaticFile receipts only if they're not pruned according to the user configuration
-            receipts: if self.prune_modes.receipts.is_none() &&
-                self.prune_modes.receipts_log_filter.is_empty()
-            {
-                finalized_block_numbers.receipts.and_then(|finalized_block_number| {
+            receipts: finalized_block_numbers
+                .receipts
+                // StaticFile receipts only if they're not pruned according to the user
+                // configuration
+                .filter(|_| !self.prune_modes.has_receipts_pruning())
+                .and_then(|finalized_block_number| {
                     self.get_static_file_target(
                         highest_static_files.receipts,
                         finalized_block_number,
                     )
-                })
-            } else {
-                None
-            },
+                }),
             transactions: finalized_block_numbers.transactions.and_then(|finalized_block_number| {
                 self.get_static_file_target(
                     highest_static_files.transactions,

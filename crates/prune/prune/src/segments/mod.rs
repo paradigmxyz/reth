@@ -15,8 +15,8 @@ pub use static_file::{
 use std::{fmt::Debug, ops::RangeInclusive};
 use tracing::error;
 pub use user::{
-    AccountHistory, MerkleChangeSets, Receipts as UserReceipts, ReceiptsByLogs, SenderRecovery,
-    StorageHistory, TransactionLookup,
+    AccountHistory, MerkleChangeSets, Receipts as UserReceipts, SenderRecovery, StorageHistory,
+    TransactionLookup,
 };
 
 /// A segment represents a pruning of some portion of the data.
