@@ -542,8 +542,13 @@ impl StorageTrieUpdatesSorted {
     }
 
     /// Returns the total number of storage node updates.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.storage_nodes.len()
+    }
+
+    /// Returns `true` if there are no storage node updates.
+    pub const fn is_empty(&self) -> bool {
+        self.storage_nodes.is_empty()
     }
 
     /// Extends the storage trie updates with another set of sorted updates.

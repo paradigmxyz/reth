@@ -580,6 +580,11 @@ impl HashedStorageSorted {
         self.non_zero_valued_slots.len() + self.zero_valued_slots.len()
     }
 
+    /// Returns `true` if there are no storage slot updates.
+    pub fn is_empty(&self) -> bool {
+        self.non_zero_valued_slots.is_empty() && self.zero_valued_slots.is_empty()
+    }
+
     /// Extends this storage with contents of another sorted storage.
     /// Entries in `other` take precedence for duplicate keys.
     pub fn extend_ref(&mut self, other: &Self) {
