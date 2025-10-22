@@ -17,6 +17,7 @@ use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
 use std::sync::Arc;
+use tracing::debug;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
@@ -40,19 +41,24 @@ impl<F> OverlayStateProviderFactory<F> {
         Self { factory, block_number: None, trie_overlay: None, hashed_state_overlay: None }
     }
 
-    /// Set the block number for collecting reverts
+    /// Set the block number for collecting reverts. All state will be reverted to the point
+    /// _after_ this block has been processed.
     pub const fn with_block_number(mut self, block_number: Option<BlockNumber>) -> Self {
         self.block_number = block_number;
         self
     }
 
-    /// Set the trie overlay
+    /// Set the trie overlay.
+    ///
+    /// This overlay will be applied on top of any reverts applied via `with_block_number`.
     pub fn with_trie_overlay(mut self, trie_overlay: Option<Arc<TrieUpdatesSorted>>) -> Self {
         self.trie_overlay = trie_overlay;
         self
     }
 
     /// Set the hashed state overlay
+    ///
+    /// This overlay will be applied on top of any reverts applied via `with_block_number`.
     pub fn with_hashed_state_overlay(
         mut self,
         hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
@@ -141,11 +147,13 @@ where
             self.validate_changesets_availability(&provider, from_block)?;
 
             // Collect trie reverts
-            let mut trie_updates_mut = provider.trie_reverts(from_block)?;
+            let mut trie_updates_mut = provider.trie_reverts(from_block + 1)?;
 
             // Collect state reverts using HashedPostState::from_reverts
-            let reverted_state =
-                HashedPostState::from_reverts::<KeccakKeyHasher>(provider.tx_ref(), from_block..)?;
+            let reverted_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
+                provider.tx_ref(),
+                from_block + 1..,
+            )?;
             let mut hashed_state_mut = reverted_state.into_sorted();
 
             // Extend with overlays if provided
@@ -156,6 +164,14 @@ where
             if let Some(hashed_state_overlay) = &self.hashed_state_overlay {
                 hashed_state_mut.extend_ref(hashed_state_overlay);
             }
+
+            debug!(
+                target: "providers::state::overlay",
+                ?from_block,
+                num_trie_updates = ?trie_updates_mut.total_len(),
+                num_state_updates = ?hashed_state_mut.total_len(),
+                "Reverted to target block",
+            );
 
             (Arc::new(trie_updates_mut), Arc::new(hashed_state_mut))
         } else {
