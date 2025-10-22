@@ -210,7 +210,6 @@ where
         );
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let worker_count = storage_worker_count + account_worker_count;
         let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
             consistent_view,
@@ -223,7 +222,6 @@ where
             state_root_config,
             self.executor.clone(),
             proof_handle.clone(),
-            worker_count,
             to_sparse_trie,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );

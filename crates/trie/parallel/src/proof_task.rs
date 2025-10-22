@@ -51,6 +51,7 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
     sync::{
+        atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
@@ -116,6 +117,7 @@ fn storage_worker_loop<Factory>(
     task_ctx: ProofTaskCtx,
     work_rx: CrossbeamReceiver<StorageWorkerJob>,
     worker_id: usize,
+    available_workers: Arc<AtomicUsize>,
     #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
 ) where
     Factory: DatabaseProviderFactory<Provider: BlockReader>,
@@ -145,6 +147,12 @@ fn storage_worker_loop<Factory>(
     let mut storage_nodes_processed = 0u64;
 
     while let Ok(job) = work_rx.recv() {
+        // Reserve a worker slot with saturating decrement to prevent underflow.
+        // Only decrement if counter is above zero.
+        let decremented = available_workers
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_sub(1))
+            .is_ok();
+
         match job {
             StorageWorkerJob::StorageProof { input, result_sender } => {
                 let hashed_address = input.hashed_address;
@@ -186,6 +194,12 @@ fn storage_worker_loop<Factory>(
                     total_processed = storage_proofs_processed,
                     "Storage proof completed"
                 );
+
+                // Release worker slot only if we successfully reserved it.
+                // Prevents counter from wrapping to usize::MAX on underflow.
+                if decremented {
+                    available_workers.fetch_add(1, Ordering::Relaxed);
+                }
             }
 
             StorageWorkerJob::BlindedStorageNode { account, path, result_sender } => {
@@ -224,6 +238,12 @@ fn storage_worker_loop<Factory>(
                     total_processed = storage_nodes_processed,
                     "Blinded storage node completed"
                 );
+
+                // Release worker slot only if we successfully reserved it.
+                // Prevents counter from wrapping to usize::MAX on underflow.
+                if decremented {
+                    available_workers.fetch_add(1, Ordering::Relaxed);
+                }
             }
         }
     }
@@ -246,9 +266,11 @@ fn storage_worker_loop<Factory>(
 ///
 /// Each worker:
 /// 1. Receives `AccountWorkerJob` from crossbeam unbounded channel
-/// 2. Computes result using its dedicated long-lived transaction
-/// 3. Sends result directly to original caller via `std::mpsc`
-/// 4. Repeats until channel closes (graceful shutdown)
+/// 2. Decrements availability counter to mark itself as busy
+/// 3. Computes result using its dedicated long-lived transaction
+/// 4. Sends result directly to original caller via `std::mpsc`
+/// 5. Increments availability counter to mark itself as available
+/// 6. Repeats until channel closes (graceful shutdown)
 ///
 /// # Transaction Reuse
 ///
@@ -269,6 +291,7 @@ fn account_worker_loop<Factory>(
     work_rx: CrossbeamReceiver<AccountWorkerJob>,
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     worker_id: usize,
+    available_workers: Arc<AtomicUsize>,
     #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
 ) where
     Factory: DatabaseProviderFactory<Provider: BlockReader>,
@@ -298,6 +321,12 @@ fn account_worker_loop<Factory>(
     let mut account_nodes_processed = 0u64;
 
     while let Ok(job) = work_rx.recv() {
+        // Reserve a worker slot with saturating decrement to prevent underflow.
+        // Only decrement if counter is above zero.
+        let decremented = available_workers
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_sub(1))
+            .is_ok();
+
         match job {
             AccountWorkerJob::AccountMultiproof { mut input, result_sender } => {
                 let span = tracing::debug_span!(
@@ -381,6 +410,12 @@ fn account_worker_loop<Factory>(
                     "Account multiproof completed"
                 );
                 drop(_span_guard);
+
+                // Release worker slot only if we successfully reserved it.
+                // Prevents counter from wrapping to usize::MAX on underflow.
+                if decremented {
+                    available_workers.fetch_add(1, Ordering::Relaxed);
+                }
             }
 
             AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
@@ -420,6 +455,12 @@ fn account_worker_loop<Factory>(
                     "Blinded account node completed"
                 );
                 drop(_span_guard);
+
+                // Release worker slot only if we successfully reserved it.
+                // Prevents counter from wrapping to usize::MAX on underflow.
+                if decremented {
+                    available_workers.fetch_add(1, Ordering::Relaxed);
+                }
             }
         }
     }
@@ -866,6 +907,12 @@ pub struct ProofWorkerHandle {
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Direct sender to account worker pool
     account_work_tx: CrossbeamSender<AccountWorkerJob>,
+    /// Counter tracking available storage workers. Workers decrement when starting work,
+    /// increment when finishing. Used to determine whether to chunk multiproofs.
+    storage_available_workers: Arc<AtomicUsize>,
+    /// Counter tracking available account workers. Workers decrement when starting work,
+    /// increment when finishing. Used to determine whether to chunk multiproofs.
+    account_available_workers: Arc<AtomicUsize>,
 }
 
 impl ProofWorkerHandle {
@@ -893,6 +940,10 @@ impl ProofWorkerHandle {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
+        // Initialize availability counters
+        let storage_available_workers = Arc::new(AtomicUsize::new(storage_worker_count));
+        let account_available_workers = Arc::new(AtomicUsize::new(account_worker_count));
+
         tracing::debug!(
             target: "trie::proof_task",
             storage_worker_count,
@@ -910,6 +961,7 @@ impl ProofWorkerHandle {
             let view_clone = view.clone();
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = storage_work_rx.clone();
+            let storage_available_workers_clone = storage_available_workers.clone();
 
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
@@ -921,6 +973,7 @@ impl ProofWorkerHandle {
                     task_ctx_clone,
                     work_rx_clone,
                     worker_id,
+                    storage_available_workers_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
                 )
@@ -946,6 +999,7 @@ impl ProofWorkerHandle {
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = account_work_rx.clone();
             let storage_work_tx_clone = storage_work_tx.clone();
+            let account_available_workers_clone = account_available_workers.clone();
 
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
@@ -958,6 +1012,7 @@ impl ProofWorkerHandle {
                     work_rx_clone,
                     storage_work_tx_clone,
                     worker_id,
+                    account_available_workers_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
                 )
@@ -972,7 +1027,12 @@ impl ProofWorkerHandle {
 
         drop(_guard);
 
-        Self::new_handle(storage_work_tx, account_work_tx)
+        Self::new_handle(
+            storage_work_tx,
+            account_work_tx,
+            storage_available_workers,
+            account_available_workers,
+        )
     }
 
     /// Creates a new [`ProofWorkerHandle`] with direct access to worker pools.
@@ -981,8 +1041,25 @@ impl ProofWorkerHandle {
     const fn new_handle(
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         account_work_tx: CrossbeamSender<AccountWorkerJob>,
+        storage_available_workers: Arc<AtomicUsize>,
+        account_available_workers: Arc<AtomicUsize>,
     ) -> Self {
-        Self { storage_work_tx, account_work_tx }
+        Self {
+            storage_work_tx,
+            account_work_tx,
+            storage_available_workers,
+            account_available_workers,
+        }
+    }
+
+    /// Returns true if there are available storage workers to process tasks.
+    pub fn has_available_storage_workers(&self) -> bool {
+        self.storage_available_workers.load(Ordering::Relaxed) > 0
+    }
+
+    /// Returns true if there are available account workers to process tasks.
+    pub fn has_available_account_workers(&self) -> bool {
+        self.account_available_workers.load(Ordering::Relaxed) > 0
     }
 
     /// Dispatch a storage proof computation to storage worker pool
