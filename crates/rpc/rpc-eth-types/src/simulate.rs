@@ -24,6 +24,7 @@ use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::noop::NoopProvider;
 use revm::{
+    context::Block,
     context_interface::result::ExecutionResult,
     primitives::{Address, Bytes, TxKind},
     Database,
@@ -88,7 +89,7 @@ where
         let tx = resolve_transaction(
             call,
             default_gas_limit,
-            builder.evm().block().basefee,
+            builder.evm().block().basefee(),
             chain_id,
             builder.evm_mut().db_mut(),
             tx_resp_builder,

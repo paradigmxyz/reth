@@ -11,7 +11,7 @@ use alloy_primitives::{B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{
     execute::{
@@ -379,13 +379,11 @@ impl<Txs> OpBuilder<'_, Txs> {
         );
 
         // create the executed block data
-        let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(block),
-                execution_output: Arc::new(execution_outcome),
-                hashed_state: Arc::new(hashed_state),
-            },
-            trie: ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
+        let executed: ExecutedBlock<N> = ExecutedBlock {
+            recovered_block: Arc::new(block),
+            execution_output: Arc::new(execution_outcome),
+            hashed_state: Arc::new(hashed_state),
+            trie_updates: Arc::new(trie_updates),
         };
 
         let no_tx_pool = ctx.attributes().no_tx_pool();
@@ -567,9 +565,9 @@ where
     }
 
     /// Returns the current fee settings for transactions from the mempool
-    pub fn best_transaction_attributes(&self, block_env: &BlockEnv) -> BestTransactionsAttributes {
+    pub fn best_transaction_attributes(&self, block_env: impl Block) -> BestTransactionsAttributes {
         BestTransactionsAttributes::new(
-            block_env.basefee,
+            block_env.basefee(),
             block_env.blob_gasprice().map(|p| p as u64),
         )
     }
@@ -659,10 +657,10 @@ where
             Transaction: PoolTransaction<Consensus = TxTy<Evm::Primitives>> + OpPooledTx,
         >,
     ) -> Result<Option<()>, PayloadBuilderError> {
-        let block_gas_limit = builder.evm_mut().block().gas_limit;
+        let block_gas_limit = builder.evm_mut().block().gas_limit();
         let block_da_limit = self.da_config.max_da_block_size();
         let tx_da_limit = self.da_config.max_da_tx_size();
-        let base_fee = builder.evm_mut().block().basefee;
+        let base_fee = builder.evm_mut().block().basefee();
 
         while let Some(tx) = best_txs.next(()) {
             let interop = tx.interop_deadline();

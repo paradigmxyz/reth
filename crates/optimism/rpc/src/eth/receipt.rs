@@ -249,6 +249,7 @@ impl OpReceiptFieldsBuilder {
                 l1_blob_base_fee_scalar,
                 operator_fee_scalar,
                 operator_fee_constant,
+                da_footprint_gas_scalar: None,
             },
             deposit_nonce,
             deposit_receipt_version,
@@ -364,6 +365,7 @@ mod test {
                 l1_blob_base_fee_scalar: Some(1014213),
                 operator_fee_scalar: None,
                 operator_fee_constant: None,
+                da_footprint_gas_scalar: None,
             },
             deposit_nonce: None,
             deposit_receipt_version: None,
@@ -407,6 +409,7 @@ mod test {
             l1_blob_base_fee_scalar,
             operator_fee_scalar,
             operator_fee_constant,
+            ..
         } = receipt_meta.l1_block_info;
 
         assert_eq!(
@@ -458,10 +461,11 @@ mod test {
             OpTransactionSigned::decode_2718(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
                 .unwrap();
 
-        let mut l1_block_info = op_revm::L1BlockInfo::default();
-
-        l1_block_info.operator_fee_scalar = Some(U256::ZERO);
-        l1_block_info.operator_fee_constant = Some(U256::from(2));
+        let mut l1_block_info = op_revm::L1BlockInfo {
+            operator_fee_scalar: Some(U256::ZERO),
+            operator_fee_constant: Some(U256::from(2)),
+            ..Default::default()
+        };
 
         let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
             .l1_block_info(&*OP_MAINNET, &tx_1, &mut l1_block_info)
@@ -481,10 +485,11 @@ mod test {
             OpTransactionSigned::decode_2718(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
                 .unwrap();
 
-        let mut l1_block_info = op_revm::L1BlockInfo::default();
-
-        l1_block_info.operator_fee_scalar = Some(U256::ZERO);
-        l1_block_info.operator_fee_constant = Some(U256::ZERO);
+        let mut l1_block_info = op_revm::L1BlockInfo {
+            operator_fee_scalar: Some(U256::ZERO),
+            operator_fee_constant: Some(U256::ZERO),
+            ..Default::default()
+        };
 
         let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
             .l1_block_info(&*OP_MAINNET, &tx_1, &mut l1_block_info)
@@ -535,6 +540,7 @@ mod test {
             l1_blob_base_fee_scalar,
             operator_fee_scalar,
             operator_fee_constant,
+            ..
         } = receipt_meta.l1_block_info;
 
         assert_eq!(l1_gas_price, Some(14121491676), "incorrect l1 base fee (former gas price)");

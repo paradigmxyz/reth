@@ -3,6 +3,7 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
+use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
@@ -40,7 +41,7 @@ use reth_storage_api::{
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{context_interface::Transaction, state::EvmState, DatabaseCommit};
+use revm::{context::Block, context_interface::Transaction, state::EvmState, DatabaseCommit};
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
@@ -168,8 +169,6 @@ where
                     .iter()
                     .map(|tx| tx.recover_signer().map_err(Eth::Error::from_eth_err))
                     .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .collect()
             } else {
                 block
                     .body()
@@ -177,8 +176,6 @@ where
                     .iter()
                     .map(|tx| tx.recover_signer_unchecked().map_err(Eth::Error::from_eth_err))
                     .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .collect()
             };
 
         self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
@@ -372,8 +369,8 @@ where
                                 let db = db.0;
 
                                 let tx_info = TransactionInfo {
-                                    block_number: Some(evm_env.block_env.number.saturating_to()),
-                                    base_fee: Some(evm_env.block_env.basefee),
+                                    block_number: Some(evm_env.block_env.number().saturating_to()),
+                                    base_fee: Some(evm_env.block_env.basefee()),
                                     hash: None,
                                     block_hash: None,
                                     index: None,
@@ -418,6 +415,11 @@ where
                             .await?;
 
                         Ok(frame.into())
+                    }
+                    _ => {
+                        // Note: this match is non-exhaustive in case we need to add support for
+                        // additional tracers
+                        Err(EthApiError::Unsupported("unsupported tracer").into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -589,8 +591,8 @@ where
                         results.push(trace);
                     }
                     // Increment block_env number and timestamp for the next bundle
-                    evm_env.block_env.number += uint!(1_U256);
-                    evm_env.block_env.timestamp += uint!(12_U256);
+                    evm_env.block_env.inner_mut().number += uint!(1_U256);
+                    evm_env.block_env.inner_mut().timestamp += uint!(12_U256);
 
                     all_bundles.push(results);
                 }
@@ -741,8 +743,8 @@ where
                 .map(|c| c.tx_index.map(|i| i as u64))
                 .unwrap_or_default(),
             block_hash: transaction_context.as_ref().map(|c| c.block_hash).unwrap_or_default(),
-            block_number: Some(evm_env.block_env.number.saturating_to()),
-            base_fee: Some(evm_env.block_env.basefee),
+            block_number: Some(evm_env.block_env.number().saturating_to()),
+            base_fee: Some(evm_env.block_env.basefee()),
         };
 
         if let Some(tracer) = tracer {
@@ -837,6 +839,11 @@ where
                             .into_localized_transaction_traces(tx_info);
 
                         return Ok((frame.into(), res.state));
+                    }
+                    _ => {
+                        // Note: this match is non-exhaustive in case we need to add support for
+                        // additional tracers
+                        Err(EthApiError::Unsupported("unsupported tracer").into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]

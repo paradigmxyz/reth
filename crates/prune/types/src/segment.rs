@@ -3,6 +3,9 @@ use derive_more::Display;
 use thiserror::Error;
 
 /// Segment of the data that can be pruned.
+///
+/// NOTE new variants must be added to the end of this enum. The variant index is encoded directly
+/// when writing to the `PruneCheckpoint` table, so changing the order here will corrupt the table.
 #[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
@@ -21,11 +24,13 @@ pub enum PruneSegment {
     AccountHistory,
     /// Prune segment responsible for the `StorageChangeSets` and `StoragesHistory` tables.
     StorageHistory,
-    /// Prune segment responsible for the `CanonicalHeaders`, `Headers` and
-    /// `HeaderTerminalDifficulties` tables.
+    /// Prune segment responsible for the `CanonicalHeaders`, `Headers` tables.
     Headers,
     /// Prune segment responsible for the `Transactions` table.
     Transactions,
+    /// Prune segment responsible for all rows in `AccountsTrieChangeSets` and
+    /// `StoragesTrieChangeSets` table.
+    MerkleChangeSets,
 }
 
 #[cfg(test)]
@@ -44,9 +49,10 @@ impl PruneSegment {
                 0
             }
             Self::Receipts if purpose.is_static_file() => 0,
-            Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
-                MINIMUM_PRUNING_DISTANCE
-            }
+            Self::ContractLogs |
+            Self::AccountHistory |
+            Self::StorageHistory |
+            Self::MerkleChangeSets |
             Self::Receipts => MINIMUM_PRUNING_DISTANCE,
         }
     }

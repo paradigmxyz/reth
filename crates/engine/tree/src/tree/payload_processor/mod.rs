@@ -32,7 +32,7 @@ use reth_provider::{
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
 use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofTaskManager},
+    proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
@@ -45,7 +45,7 @@ use std::sync::{
     mpsc::{self, channel, Sender},
     Arc,
 };
-use tracing::{debug, instrument};
+use tracing::{debug, debug_span, instrument, warn};
 
 mod configured_sparse_trie;
 pub mod executor;
@@ -117,7 +117,7 @@ where
             execution_cache: Default::default(),
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
-            disable_transaction_prewarming: config.disable_caching_and_prewarming(),
+            disable_transaction_prewarming: config.disable_prewarming(),
             evm_config,
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
@@ -166,6 +166,13 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
+    #[allow(clippy::type_complexity)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor",
+        name = "payload processor",
+        skip_all
+    )]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -174,7 +181,10 @@ where
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+    ) -> Result<
+        PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
+        (ParallelStateRootError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
+    >
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -183,10 +193,10 @@ where
             + Clone
             + 'static,
     {
+        let span = tracing::Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task, save the trie input
-        let (trie_input, state_root_config) =
-            MultiProofConfig::new_from_input(consistent_view, trie_input);
+        let (trie_input, state_root_config) = MultiProofConfig::from_input(trie_input);
         self.trie_input = Some(trie_input);
 
         // Create and spawn the storage proof task
@@ -195,23 +205,21 @@ where
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
         );
-        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
-        let proof_task = ProofTaskManager::new(
+        let storage_worker_count = config.storage_worker_count();
+        let account_worker_count = config.account_worker_count();
+        let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
-            state_root_config.consistent_view.clone(),
+            consistent_view,
             task_ctx,
-            max_proof_task_concurrency,
+            storage_worker_count,
+            account_worker_count,
         );
 
-        // We set it to half of the proof task concurrency, because often for each multiproof we
-        // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
-        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
-            proof_task.handle(),
+            proof_handle.clone(),
             to_sparse_trie,
-            max_multi_proof_task_concurrency,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );
 
@@ -231,6 +239,7 @@ where
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
+            let _enter = span.entered();
             multi_proof_task.run();
         });
 
@@ -238,31 +247,20 @@ where
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        self.spawn_sparse_trie_task(sparse_trie_rx, proof_task.handle(), state_root_tx);
+        self.spawn_sparse_trie_task(sparse_trie_rx, proof_handle, state_root_tx);
 
-        // spawn the proof task
-        self.executor.spawn_blocking(move || {
-            if let Err(err) = proof_task.run() {
-                // At least log if there is an error at any point
-                tracing::error!(
-                    target: "engine::root",
-                    ?err,
-                    "Storage proof task returned an error"
-                );
-            }
-        });
-
-        PayloadHandle {
+        Ok(PayloadHandle {
             to_multi_proof,
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
-        }
+        })
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
     ///
     /// Returns a [`PayloadHandle`] to communicate with the task.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     pub(super) fn spawn_cache_exclusive<P, I: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
@@ -359,7 +357,9 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
+            let span = debug_span!(target: "engine::tree::payload_processor", "prewarm task");
             self.executor.spawn_blocking(move || {
+                let _enter = span.entered();
                 prewarm_task.run(transactions, to_prewarm_task);
             });
         }
@@ -376,7 +376,7 @@ where
     ///
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
-    #[instrument(target = "engine::caching", skip(self))]
+    #[instrument(level = "debug", target = "engine::caching", skip(self))]
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
         if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
             debug!("reusing execution cache");
@@ -389,10 +389,11 @@ where
     }
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task<BPF>(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
-        proof_task_handle: BPF,
+        proof_worker_handle: BPF,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
     ) where
         BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
@@ -422,18 +423,23 @@ where
         let task =
             SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
                 sparse_trie_rx,
-                proof_task_handle,
+                proof_worker_handle,
                 self.trie_metrics.clone(),
                 sparse_state_trie,
             );
 
+        let span = tracing::Span::current();
         self.executor.spawn_blocking(move || {
+            let _enter = span.entered();
+
             let (result, trie) = task.run();
             // Send state root computation result
             let _ = state_root_tx.send(result);
 
-            // Clear the SparseStateTrie and replace it back into the mutex _after_ sending results
-            // to the next step, so that time spent clearing doesn't block the step after this one.
+            // Clear the SparseStateTrie and replace it back into the mutex _after_ sending
+            // results to the next step, so that time spent clearing doesn't block the step after
+            // this one.
+            let _enter = debug_span!(target: "engine::tree::payload_processor", "clear").entered();
             cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
         });
     }
@@ -458,6 +464,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.state_root
             .take()
@@ -857,14 +864,20 @@ mod tests {
             PrecompileCacheMap::default(),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
-        let mut handle = payload_processor.spawn(
-            Default::default(),
-            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
-            StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-            ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-            TrieInput::from_state(hashed_state),
-            &TreeConfig::default(),
-        );
+        let mut handle =
+            payload_processor
+                .spawn(
+                    Default::default(),
+                    core::iter::empty::<
+                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+                    >(),
+                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                    ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+                    TrieInput::from_state(hashed_state),
+                    &TreeConfig::default(),
+                )
+                .map_err(|(err, ..)| err)
+                .expect("failed to spawn payload processor");
 
         let mut state_hook = handle.state_hook();
 
