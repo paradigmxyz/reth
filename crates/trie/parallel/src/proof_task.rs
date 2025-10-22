@@ -1103,19 +1103,35 @@ impl ProofWorkerHandle {
         Ok(rx)
     }
 
-    /// Queue an account multiproof computation
+    /// Dispatch an account multiproof computation
+    ///
+    /// The result will be sent via the `result_sender` channel included in the input.
     pub fn dispatch_account_multiproof(
         &self,
         input: AccountMultiproofInput,
-    ) -> Result<Receiver<AccountMultiproofResult>, ProviderError> {
-        let (tx, rx) = channel();
+    ) -> Result<(), ProviderError> {
         self.account_work_tx
-            .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input), result_sender: tx })
-            .map_err(|_| {
-                ProviderError::other(std::io::Error::other("account workers unavailable"))
-            })?;
+            .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input) })
+            .map_err(|err| {
+                let error =
+                    ProviderError::other(std::io::Error::other("account workers unavailable"));
 
-        Ok(rx)
+                if let AccountWorkerJob::AccountMultiproof { input } = err.0 {
+                    let AccountMultiproofInput {
+                        proof_result_sender: (result_tx, seq, state, start),
+                        ..
+                    } = *input;
+
+                    let _ = result_tx.send(ProofResultMessage {
+                        sequence_number: seq,
+                        result: Err(ParallelStateRootError::Provider(error.clone())),
+                        elapsed: start.elapsed(),
+                        state,
+                    });
+                }
+
+                error
+            })
     }
 
     /// Dispatch blinded storage node request to storage worker pool
