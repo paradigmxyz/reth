@@ -88,11 +88,11 @@ pub trait FillTransaction: Call + EstimateCall + EthFees + LoadPendingBlock + Lo
 
             let blob_fee_fut = async {
                 let tx_req = request.as_ref();
-                if tx_req.max_fee_per_blob_gas.is_none() {
-                    if tx_req.blob_versioned_hashes.is_some() || tx_req.sidecar.is_some() {
-                        let blob_fee = EthFees::blob_base_fee(self).await?;
-                        return Ok(Some(blob_fee));
-                    }
+                if tx_req.max_fee_per_blob_gas.is_none() &&
+                    (tx_req.blob_versioned_hashes.is_some() || tx_req.sidecar.is_some())
+                {
+                    let blob_fee = EthFees::blob_base_fee(self).await?;
+                    return Ok(Some(blob_fee));
                 }
                 Ok(None)
             };
