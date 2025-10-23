@@ -904,7 +904,7 @@ impl ProofWorkerHandle {
     ///
     /// Returns a handle for submitting proof tasks to the worker pools.
     /// Workers run until the last handle is dropped.
-    ///
+    /// 
     /// # Parameters
     /// - `executor`: Tokio runtime handle for spawning blocking tasks
     /// - `view`: Consistent database view for creating transactions
