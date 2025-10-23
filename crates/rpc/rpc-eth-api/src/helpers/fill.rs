@@ -142,8 +142,6 @@ pub trait FillTransaction: Call + EstimateCall + EthFees + LoadPendingBlock + Lo
                 }
             }
 
-            // TODO: Fill blob fee for EIP-4844 transactions
-
             let gas_limit = EstimateCall::estimate_gas_at(
                 self,
                 request.clone(),
