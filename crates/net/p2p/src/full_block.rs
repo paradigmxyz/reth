@@ -466,6 +466,7 @@ where
                 if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
                     debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
                     self.client.report_bad_message(peer);
+                    return;
                 }
 
                 // get the bodies request so it can be polled later
