@@ -1062,6 +1062,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             if segment.is_headers() {
                 // TODO(joshie): is_block_meta
                 writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
+            } else if segment.is_account_changesets() {
+                // For account changesets, prune to the target block
+                writer.prune_account_changesets(checkpoint_block_number)?;
             } else if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
                 // todo joshie: is querying block_body_indices a potential issue once bbi is moved
                 // to sf as well
