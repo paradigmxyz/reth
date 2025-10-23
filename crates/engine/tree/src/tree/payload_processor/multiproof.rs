@@ -35,6 +35,7 @@ use std::{
 };
 use tracing::{debug, error, instrument, trace};
 
+
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
