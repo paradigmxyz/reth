@@ -11,8 +11,6 @@ use reth_provider::{
 };
 use reth_prune_types::PruneModes;
 
-use super::StaticFileReceipts;
-
 /// Collection of [`Segment`]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
 pub struct SegmentSet<Provider> {
@@ -58,7 +56,7 @@ where
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].
     pub fn from_components(
-        static_file_provider: StaticFileProvider<Provider::Primitives>,
+        _static_file_provider: StaticFileProvider<Provider::Primitives>,
         prune_modes: PruneModes,
     ) -> Self {
         #[expect(deprecated)]
@@ -74,8 +72,6 @@ where
         } = prune_modes;
 
         Self::default()
-            // Static file receipts
-            .segment(StaticFileReceipts::new(static_file_provider))
             // Merkle changesets
             .segment(MerkleChangeSets::new(merkle_changesets))
             // Account history
