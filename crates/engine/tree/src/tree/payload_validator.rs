@@ -41,7 +41,7 @@ use reth_provider::{
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, fs, sync::Arc, time::Instant};
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
 /// Context providing access to tree state during validation.
@@ -505,6 +505,7 @@ where
                     block.parent_hash(),
                     &hashed_state,
                     ctx.state(),
+                    block.hash(),
                 ) {
                     Ok(result) => {
                         let elapsed = root_time.elapsed();
@@ -696,11 +697,12 @@ where
         parent_hash: B256,
         hashed_state: &HashedPostState,
         state: &EngineApiTreeState<N>,
+        block_hash: B256,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let provider = self.provider.database_provider_ro()?;
 
         let (mut input, block_number) =
-            self.compute_trie_input(provider, parent_hash, state, None)?;
+            self.compute_trie_input(provider, parent_hash, state, None, block_hash)?;
 
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
@@ -828,6 +830,7 @@ where
                     parent_hash,
                     state,
                     allocated_trie_input,
+                    env.hash,
                 )?;
 
                 self.metrics
@@ -999,6 +1002,7 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
         allocated_trie_input: Option<TrieInput>,
+        block_hash: B256,
     ) -> ProviderResult<(TrieInput, BlockNumber)> {
         // get allocated trie input or use a default trie input
         let mut input = allocated_trie_input.unwrap_or_default();
@@ -1018,6 +1022,40 @@ where
         let block_number = provider
             .convert_hash_or_number(historical)?
             .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
+
+        debug!(
+            target: "engine::tree::payload_validator",
+            historical_block_hash = ?historical,
+            historical_block_number = ?block_number,
+            blocks = ?blocks.iter().map(|block| block.recovered_block.num_hash()).collect::<Vec<_>>(),
+            "Computing trie input from in-memory blocks",
+        );
+
+        // Write trie updates for in-memory blocks to JSON file
+        if !blocks.is_empty() {
+            if let Err(err) = (|| -> Result<(), Box<dyn std::error::Error>> {
+                let trie_input_dir = std::env::current_dir()?.join("trie-input");
+                fs::create_dir_all(&trie_input_dir)?;
+                let file_path = trie_input_dir.join(format!("{}.json", block_hash));
+
+                let blocks_data: Vec<_> = blocks
+                    .iter()
+                    .map(|block| {
+                        let sorted_updates = block.trie_updates().clone().into_sorted();
+                        serde_json::json!({
+                            "block_hash": block.recovered_block.hash(),
+                            "block_number": block.recovered_block.number(),
+                            "trie_updates": sorted_updates,
+                        })
+                    })
+                    .collect();
+
+                fs::write(&file_path, serde_json::to_string_pretty(&blocks_data)?)?;
+                Ok(())
+            })() {
+                warn!(target: "engine::tree::payload_validator", %err, "Failed to write trie updates to file");
+            }
+        }
 
         // Extend with contents of parent in-memory blocks.
         input.extend_with_blocks(
