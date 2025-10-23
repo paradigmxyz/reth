@@ -469,7 +469,10 @@ where
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
-            StaticFileProvider::read_write(self.data_dir().static_files())?,
+            StaticFileProvider::read_write(
+                self.data_dir().static_files(),
+                self.node_config().db.enable_v2_static_files,
+            )?,
         )
         .with_prune_modes(self.prune_modes())
         .with_static_files_metrics();

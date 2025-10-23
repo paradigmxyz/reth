@@ -41,7 +41,7 @@ where
             ProviderFactory::<N>::new(
                 Arc::new(output_db),
                 db_tool.chain(),
-                StaticFileProvider::read_write(output_datadir.static_files())?,
+                StaticFileProvider::read_write(output_datadir.static_files(), false)?,
             ),
             to,
             from,
