@@ -172,16 +172,11 @@ where
     /// Returns highest block numbers for all static file segments.
     pub fn copy_to_static_files(&self) -> ProviderResult<HighestStaticFiles> {
         let provider = self.provider.database_provider_ro()?;
-        let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
-            .into_iter()
+        let stages_checkpoints = std::iter::once(StageId::Execution)
             .map(|stage| provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number)))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let highest_static_files = HighestStaticFiles {
-            headers: stages_checkpoints[0],
-            receipts: stages_checkpoints[1],
-            transactions: stages_checkpoints[2],
-        };
+        let highest_static_files = HighestStaticFiles { receipts: stages_checkpoints[0] };
         let targets = self.get_static_file_targets(highest_static_files)?;
         self.run(targets)?;
 
@@ -298,39 +293,27 @@ mod tests {
             StaticFileProducerInner::new(provider_factory.clone(), PruneModes::default());
 
         let targets = static_file_producer
-            .get_static_file_targets(HighestStaticFiles {
-                headers: None,
-                receipts: Some(1),
-                transactions: None,
-            })
+            .get_static_file_targets(HighestStaticFiles { receipts: Some(1) })
             .expect("get static file targets");
         assert_eq!(targets, StaticFileTargets { receipts: Some(0..=1) });
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: None, receipts: Some(1), transactions: None }
+            HighestStaticFiles { receipts: Some(1) }
         );
 
         let targets = static_file_producer
-            .get_static_file_targets(HighestStaticFiles {
-                headers: None,
-                receipts: Some(3),
-                transactions: None,
-            })
+            .get_static_file_targets(HighestStaticFiles { receipts: Some(3) })
             .expect("get static file targets");
         assert_eq!(targets, StaticFileTargets { receipts: Some(2..=3) });
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: None, receipts: Some(3), transactions: None }
+            HighestStaticFiles { receipts: Some(3) }
         );
 
         let targets = static_file_producer
-            .get_static_file_targets(HighestStaticFiles {
-                headers: None,
-                receipts: Some(4),
-                transactions: None,
-            })
+            .get_static_file_targets(HighestStaticFiles { receipts: Some(4) })
             .expect("get static file targets");
         assert_eq!(targets, StaticFileTargets { receipts: Some(4..=4) });
         assert_matches!(
@@ -339,7 +322,7 @@ mod tests {
         );
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: None, receipts: Some(3), transactions: None }
+            HighestStaticFiles { receipts: Some(3) }
         );
     }
 
@@ -363,11 +346,7 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(100));
                 }
                 let targets = locked_producer
-                    .get_static_file_targets(HighestStaticFiles {
-                        headers: None,
-                        receipts: Some(1),
-                        transactions: None,
-                    })
+                    .get_static_file_targets(HighestStaticFiles { receipts: Some(1) })
                     .expect("get static file targets");
                 assert_matches!(locked_producer.run(targets.clone()), Ok(_));
                 tx.send(targets).unwrap();

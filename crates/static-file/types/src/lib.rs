@@ -27,39 +27,15 @@ pub const DEFAULT_BLOCKS_PER_STATIC_FILE: u64 = 500_000;
 /// Highest static file block numbers, per data segment.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct HighestStaticFiles {
-    /// Highest static file block of headers, inclusive.
-    /// If [`None`], no static file is available.
-    pub headers: Option<BlockNumber>,
     /// Highest static file block of receipts, inclusive.
     /// If [`None`], no static file is available.
     pub receipts: Option<BlockNumber>,
-    /// Highest static file block of transactions, inclusive.
-    /// If [`None`], no static file is available.
-    pub transactions: Option<BlockNumber>,
 }
 
 impl HighestStaticFiles {
-    /// Returns the highest static file if it exists for a segment
-    pub const fn highest(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
-        match segment {
-            StaticFileSegment::Headers => self.headers,
-            StaticFileSegment::Transactions => self.transactions,
-            StaticFileSegment::Receipts => self.receipts,
-        }
-    }
-
-    /// Returns a mutable reference to a static file segment
-    pub const fn as_mut(&mut self, segment: StaticFileSegment) -> &mut Option<BlockNumber> {
-        match segment {
-            StaticFileSegment::Headers => &mut self.headers,
-            StaticFileSegment::Transactions => &mut self.transactions,
-            StaticFileSegment::Receipts => &mut self.receipts,
-        }
-    }
-
     /// Returns an iterator over all static file segments
     fn iter(&self) -> impl Iterator<Item = Option<BlockNumber>> {
-        [self.headers, self.transactions, self.receipts].into_iter()
+        [self.receipts].into_iter()
     }
 
     /// Returns the minimum block of all segments.
@@ -116,41 +92,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_highest_static_files_highest() {
-        let files =
-            HighestStaticFiles { headers: Some(100), receipts: Some(200), transactions: None };
-
-        // Test for headers segment
-        assert_eq!(files.highest(StaticFileSegment::Headers), Some(100));
-
-        // Test for receipts segment
-        assert_eq!(files.highest(StaticFileSegment::Receipts), Some(200));
-
-        // Test for transactions segment
-        assert_eq!(files.highest(StaticFileSegment::Transactions), None);
-    }
-
-    #[test]
-    fn test_highest_static_files_as_mut() {
-        let mut files = HighestStaticFiles::default();
-
-        // Modify headers value
-        *files.as_mut(StaticFileSegment::Headers) = Some(150);
-        assert_eq!(files.headers, Some(150));
-
-        // Modify receipts value
-        *files.as_mut(StaticFileSegment::Receipts) = Some(250);
-        assert_eq!(files.receipts, Some(250));
-
-        // Modify transactions value
-        *files.as_mut(StaticFileSegment::Transactions) = Some(350);
-        assert_eq!(files.transactions, Some(350));
-    }
-
-    #[test]
     fn test_highest_static_files_min() {
-        let files =
-            HighestStaticFiles { headers: Some(300), receipts: Some(100), transactions: None };
+        let files = HighestStaticFiles { receipts: Some(100) };
 
         // Minimum value among the available segments
         assert_eq!(files.min_block_num(), Some(100));
@@ -162,11 +105,10 @@ mod tests {
 
     #[test]
     fn test_highest_static_files_max() {
-        let files =
-            HighestStaticFiles { headers: Some(300), receipts: Some(100), transactions: Some(500) };
+        let files = HighestStaticFiles { receipts: Some(100) };
 
         // Maximum value among the available segments
-        assert_eq!(files.max_block_num(), Some(500));
+        assert_eq!(files.max_block_num(), Some(100));
 
         let empty_files = HighestStaticFiles::default();
         // No values, should return None
