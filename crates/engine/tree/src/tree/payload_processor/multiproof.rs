@@ -1,6 +1,5 @@
 //! Multiproof task related functionality.
 
-use crate::tree::payload_processor::executor::WorkloadExecutor;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
     keccak256,
@@ -271,7 +270,6 @@ impl From<MultiproofInput> for PendingMultiproofTask {
 /// Input parameters for spawning a dedicated storage multiproof calculation.
 #[derive(Debug)]
 struct StorageMultiproofInput {
-    config: MultiProofConfig,
     source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
     hashed_address: B256,
@@ -318,8 +316,8 @@ impl MultiproofInput {
 pub struct MultiproofManager {
     /// Currently running calculations.
     inflight: usize,
-    /// Executor for tasks
-    executor: WorkloadExecutor,
+    /// Queued calculations.
+    pending: VecDeque<PendingMultiproofTask>,
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,
     /// Cached storage proof roots for missed leaves; this maps
@@ -343,13 +341,14 @@ pub struct MultiproofManager {
 impl MultiproofManager {
     /// Creates a new [`MultiproofManager`].
     fn new(
-        executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
         proof_worker_handle: ProofWorkerHandle,
         max_concurrent: usize,
         proof_result_tx: CrossbeamSender<ProofResultMessage>,
     ) -> Self {
         Self {
+            pending: VecDeque::with_capacity(DEFAULT_MULTIPROOF_INFLIGHT_LIMIT),
+            inflight_limit: DEFAULT_MULTIPROOF_INFLIGHT_LIMIT,
             inflight: 0,
             executor,
             metrics,
@@ -395,14 +394,13 @@ impl MultiproofManager {
     /// Spawns a single storage proof calculation task.
     fn spawn_storage_proof(&mut self, storage_multiproof_input: StorageMultiproofInput) {
         let StorageMultiproofInput {
-            config: _,
             source,
             hashed_state_update,
             hashed_address,
             proof_targets,
             proof_sequence_number,
             multi_added_removed_keys,
-            ..
+            state_root_message_sender: _,
         } = storage_multiproof_input;
 
         let storage_targets = proof_targets.len();
@@ -614,7 +612,6 @@ impl MultiProofTask {
     /// Creates a new multi proof task with the unified message channel
     pub(super) fn new(
         config: MultiProofConfig,
-        executor: WorkloadExecutor,
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
         max_concurrency: usize,
@@ -635,7 +632,6 @@ impl MultiProofTask {
             multi_added_removed_keys: MultiAddedRemovedKeys::new(),
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(
-                executor,
                 metrics.clone(),
                 proof_worker_handle,
                 max_concurrency,
@@ -1196,7 +1192,7 @@ mod tests {
             ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
 
-        MultiProofTask::new(config, executor, proof_handle, to_sparse_trie, Some(1))
+        MultiProofTask::new(config, proof_handle, to_sparse_trie, Some(1))
     }
 
     #[test]

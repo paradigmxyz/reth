@@ -241,7 +241,6 @@ where
 
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
-            self.executor.clone(),
             proof_handle.clone(),
             to_sparse_trie,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
