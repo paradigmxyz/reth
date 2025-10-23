@@ -1965,7 +1965,7 @@ impl TransportRpcModules {
         self.add_or_replace_ipc(other)?;
         Ok(())
     }
-    /// Adds or replaces the given [`Methods`] in the transport modules where the specified 
+    /// Adds or replaces the given [`Methods`] in the transport modules where the specified
     /// [`RethRpcModule`] is configured.
     pub fn add_or_replace_if_module_configured(
         &mut self,
