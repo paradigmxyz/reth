@@ -127,8 +127,8 @@ impl FromStr for SyncMode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let val = s.trim().to_ascii_lowercase();
         match val.as_str() {
-            "durable" => Ok(SyncMode::Durable),
-            "safe-no-sync" | "safenosync" | "safe_no_sync" => Ok(SyncMode::SafeNoSync),
+            "durable" => Ok(Self::Durable),
+            "safe-no-sync" | "safenosync" | "safe_no_sync" => Ok(Self::SafeNoSync),
             _ => Err(format!(
                 "invalid value '{s}' for sync mode. valid values: durable, safe-no-sync"
             )),
