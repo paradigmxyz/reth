@@ -58,6 +58,9 @@ mod tests {
         SegmentHeader, SegmentRangeInclusive, StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
     };
 
+    /// Creates empty static file jars at 500k block intervals up to the tip block.
+    /// 
+    /// Each jar contains sequential transaction ranges for testing deletion logic.
     fn setup_static_file_jars<P: StaticFileProviderFactory>(provider: &P, tip_block: u64) {
         let num_jars = (tip_block + 1) / DEFAULT_BLOCKS_PER_STATIC_FILE;
         let txs_per_jar = 1000;
