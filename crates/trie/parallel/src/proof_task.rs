@@ -718,7 +718,7 @@ fn dispatch_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
 
-    // Queue all storage proofs to worker pool
+    // Dispatch all storage proofs to worker pool
     for (hashed_address, target_slots) in targets.iter() {
         let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
 
@@ -735,7 +735,7 @@ fn dispatch_storage_proofs(
             multi_added_removed_keys.cloned(),
         );
 
-        // Always queue a storage proof so we obtain the storage root even when no slots are
+        // Always dispatch a storage proof so we obtain the storage root even when no slots are
         // requested.
         storage_work_tx
             .send(StorageWorkerJob::StorageProof {

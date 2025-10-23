@@ -896,12 +896,11 @@ impl MultiProofTask {
     ///    [`MultiproofManager::spawn`].
     ///    * If the list of proof targets is empty, the [`MultiProofMessage::EmptyProof`] message is
     ///      sent back to this task along with the original state update.
-    ///    * Otherwise, the multiproof is calculated and the [`MultiProofMessage::ProofCalculated`]
-    ///      message is sent back to this task along with the resulting multiproof, proof targets
-    ///      and original state update.
-    /// 3. Either [`MultiProofMessage::EmptyProof`] or [`MultiProofMessage::ProofCalculated`] is
-    ///    received.
-    ///    * The multiproof is added to the (proof sequencer)[`ProofSequencer`].
+    ///    * Otherwise, the multiproof is dispatched to worker pools and results are sent directly
+    ///      to this task via the `proof_result_rx` channel as [`ProofResultMessage`].
+    /// 3. Either [`MultiProofMessage::EmptyProof`] (via control channel) or [`ProofResultMessage`]
+    ///    (via proof result channel) is received.
+    ///    * The multiproof is added to the [`ProofSequencer`].
     ///    * If the proof sequencer has a contiguous sequence of multiproofs in the same order as
     ///      state updates arrived (i.e. transaction order), such sequence is returned.
     /// 4. Once there's a sequence of contiguous multiproofs along with the proof targets and state
@@ -910,9 +909,8 @@ impl MultiProofTask {
     /// 5. Steps above are repeated until this task receives a
     ///    [`MultiProofMessage::FinishedStateUpdates`].
     ///    * Once this message is received, on every [`MultiProofMessage::EmptyProof`] and
-    ///      [`MultiProofMessage::ProofCalculated`] message, we check if there are any proofs are
-    ///      currently being calculated, or if there are any pending proofs in the proof sequencer
-    ///      left to be revealed by checking the pending tasks.
+    ///      [`ProofResultMessage`], we check if all proofs have been processed and if there are any
+    ///      pending proofs in the proof sequencer left to be revealed.
     /// 6. This task exits after all pending proofs are processed.
     #[instrument(
         level = "debug",
