@@ -16,6 +16,7 @@ use reth_trie::{updates::TrieUpdates, HashedStorage};
 use revm::state::AccountInfo;
 use revm_bytecode::Bytecode;
 use revm_database::{
+    bal::BalDatabase,
     states::{reverts::AccountInfoRevert, StorageSlot},
     AccountStatus, RevertToSlot,
 };
@@ -114,7 +115,7 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 
 /// Extracts execution data including codes, preimages, and hashed state from database
 fn collect_execution_data(
-    mut db: State<StateProviderDatabase<Box<dyn StateProvider>>>,
+    mut db: BalDatabase<State<StateProviderDatabase<Box<dyn StateProvider>>>>,
 ) -> eyre::Result<CollectionResult> {
     let bundle_state = db.take_bundle();
     let mut codes = BTreeMap::new();
@@ -128,7 +129,7 @@ fn collect_execution_data(
     });
 
     // Collect preimages
-    for (address, account) in db.cache.accounts {
+    for (address, account) in db.db.cache.accounts {
         let hashed_address = keccak256(address);
         hashed_state
             .accounts
@@ -448,12 +449,14 @@ mod tests {
                     nonce: account.nonce,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
+                    storage_id: None,
                 }),
                 original_info: (i == 0).then(|| AccountInfo {
                     balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
                     nonce: 0,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
+                    storage_id: None,
                 }),
                 storage,
                 status: AccountStatus::default(),
@@ -529,12 +532,14 @@ mod tests {
 
         // Create a State with StateProviderTest
         let state_provider = StateProviderTest::default();
-        let mut state = State::builder()
-            .with_database(StateProviderDatabase::new(
-                Box::new(state_provider) as Box<dyn StateProvider>
-            ))
-            .with_bundle_update()
-            .build();
+        let mut state = BalDatabase::new(
+            State::builder()
+                .with_database(StateProviderDatabase::new(
+                    Box::new(state_provider) as Box<dyn StateProvider>
+                ))
+                .with_bundle_update()
+                .build(),
+        );
 
         // Insert contracts from the fixture into the state cache
         for (code_hash, bytecode) in &bundle_state.contracts {

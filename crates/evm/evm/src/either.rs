@@ -66,7 +66,7 @@ where
         }
     }
 
-    fn into_state(self) -> revm::database::State<DB> {
+    fn into_state(self) -> revm::database::bal::BalDatabase<revm::database::State<DB>> {
         match self {
             Self::Left(a) => a.into_state(),
             Self::Right(b) => b.into_state(),

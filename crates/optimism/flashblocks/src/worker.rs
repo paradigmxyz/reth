@@ -11,7 +11,11 @@ use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered,
 };
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
+use reth_revm::{
+    cached::CachedReads,
+    database::StateProviderDatabase,
+    db::{bal::BalDatabase, State},
+};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
 use std::{
@@ -90,7 +94,9 @@ where
             .map(|(_, state)| state)
             .unwrap_or_default();
         let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
-        let mut state = State::builder().with_database(cached_db).with_bundle_update().build();
+        let mut state = BalDatabase::new(
+            State::builder().with_database(cached_db).with_bundle_update().build(),
+        );
 
         let mut builder = self
             .evm_config

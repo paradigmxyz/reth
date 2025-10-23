@@ -27,7 +27,7 @@ use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
 use reth_revm::{
     database::StateProviderDatabase,
-    db::{CacheDB, State},
+    db::{bal::BalDatabase, CacheDB, State},
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
@@ -98,12 +98,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let this = self.clone();
             self.spawn_with_state_at_block(block, move |state| {
                 //todo?
-                let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(state))
-                    .with_bal_builder()
-                    .build();
-                db.bal_index = 0;
-                db.bal_builder = Some(revm::state::bal::Bal::new());
+                let mut db = BalDatabase::new(
+                    State::builder().with_database(StateProviderDatabase::new(state)).build(),
+                );
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
                 for block in block_state_calls {
@@ -136,12 +133,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
                         apply_block_overrides(
                             block_overrides,
-                            &mut db,
+                            &mut db.db,
                             evm_env.block_env.inner_mut(),
                         );
                     }
                     if let Some(state_overrides) = state_overrides {
-                        apply_state_overrides(state_overrides, &mut db)
+                        apply_state_overrides(state_overrides, &mut db.db)
                             .map_err(Self::Error::from_eth_err)?;
                     }
 

@@ -72,6 +72,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                         nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
+                        storage_id: None,
                     },
                     storage: (0..rng.random_range(0..=params.storage_slots_per_account))
                         .map(|_| {

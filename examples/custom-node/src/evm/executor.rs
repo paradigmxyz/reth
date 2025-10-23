@@ -17,7 +17,10 @@ use alloy_evm::{
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
 use reth_ethereum::evm::primitives::InspectorFor;
 use reth_op::{chainspec::OpChainSpec, node::OpRethReceiptBuilder, OpReceipt};
-use revm::{context::result::ResultAndState, database::State};
+use revm::{
+    context::result::ResultAndState,
+    database::{bal::BalDatabase, State},
+};
 use std::sync::Arc;
 
 pub struct CustomBlockExecutor<Evm> {
@@ -27,7 +30,7 @@ pub struct CustomBlockExecutor<Evm> {
 impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<E>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = CustomTxEnv>,
+    E: Evm<DB = &'db mut BalDatabase<State<DB>>, Tx = CustomTxEnv>,
 {
     type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
@@ -91,12 +94,12 @@ impl BlockExecutorFactory for CustomEvmConfig {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: CustomEvm<&'a mut State<DB>, I, PrecompilesMap>,
+        evm: CustomEvm<&'a mut BalDatabase<State<DB>>, I, PrecompilesMap>,
         ctx: CustomBlockExecutionCtx,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
         DB: Database + 'a,
-        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+        I: InspectorFor<Self, &'a mut BalDatabase<State<DB>>> + 'a,
     {
         CustomBlockExecutor {
             inner: OpBlockExecutor::new(

@@ -39,7 +39,10 @@ use reth_revm::{
 };
 use reth_storage_api::{errors::ProviderError, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::context::{Block, BlockEnv};
+use revm::{
+    context::{Block, BlockEnv},
+    database::bal::BalDatabase,
+};
 use std::{marker::PhantomData, sync::Arc};
 use tracing::{debug, trace, warn};
 
@@ -338,7 +341,8 @@ impl<Txs> OpBuilder<'_, Txs> {
         let Self { best } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number(), "building new payload");
 
-        let mut db = State::builder().with_database(db).with_bundle_update().build();
+        let mut db =
+            BalDatabase::new(State::builder().with_database(db).with_bundle_update().build());
 
         let mut builder = ctx.block_builder(&mut db)?;
 
@@ -417,10 +421,12 @@ impl<Txs> OpBuilder<'_, Txs> {
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         Attrs: OpAttributes<Transaction = N::SignedTx>,
     {
-        let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(&state_provider))
-            .with_bundle_update()
-            .build();
+        let mut db = BalDatabase::new(
+            State::builder()
+                .with_database(StateProviderDatabase::new(&state_provider))
+                .with_bundle_update()
+                .build(),
+        );
         let mut builder = ctx.block_builder(&mut db)?;
 
         builder.apply_pre_execution_changes()?;
@@ -585,7 +591,7 @@ where
     /// Prepares a [`BlockBuilder`] for the next block.
     pub fn block_builder<'a, DB: Database>(
         &'a self,
-        db: &'a mut State<DB>,
+        db: &'a mut BalDatabase<State<DB>>,
     ) -> Result<impl BlockBuilder<Primitives = Evm::Primitives> + 'a, PayloadBuilderError> {
         self.evm_config
             .builder_for_next_block(

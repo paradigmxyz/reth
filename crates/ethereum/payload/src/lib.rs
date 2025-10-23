@@ -29,7 +29,10 @@ use reth_payload_builder::{BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttri
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::{bal::BalDatabase, State},
+};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
@@ -154,13 +157,10 @@ where
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
     let state = StateProviderDatabase::new(&state_provider);
-    let mut db = State::builder()
-        .with_database(cached_reads.as_db_mut(state))
-        .with_bundle_update()
-        .with_bal_builder()
-        .build();
-    db.bal_index = 0;
-    db.bal_builder = Some(revm::state::bal::Bal::new());
+    let mut db = BalDatabase::new(
+        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build(),
+    );
+
     let mut builder = evm_config
         .builder_for_next_block(
             &mut db,

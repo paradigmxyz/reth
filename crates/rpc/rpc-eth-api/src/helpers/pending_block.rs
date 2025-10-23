@@ -16,7 +16,10 @@ use reth_evm::{
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::{bal::BalDatabase, State},
+};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
     block::BlockAndReceipts, builder::config::PendingBlockKind, EthApiError, PendingBlock,
@@ -237,10 +240,7 @@ pub trait LoadPendingBlock:
             .map_err(Self::Error::from_eth_err)?;
         let state = StateProviderDatabase::new(&state_provider);
         let mut db =
-            State::builder().with_database(state).with_bundle_update().with_bal_builder().build();
-
-        db.bal_index = 0;
-        db.bal_builder = Some(revm::state::bal::Bal::new());
+            BalDatabase::new(State::builder().with_database(state).with_bundle_update().build());
 
         let mut builder = self
             .evm_config()

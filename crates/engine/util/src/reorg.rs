@@ -18,7 +18,10 @@ use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadType
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::{bal::BalDatabase, State},
+};
 use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
 use std::{
     collections::VecDeque,
@@ -280,14 +283,12 @@ where
 
     // Configure state
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
-    let mut state = State::builder()
-        .with_database_ref(StateProviderDatabase::new(&state_provider))
-        .with_bundle_update()
-        .with_bal_builder()
-        .build();
-
-    state.bal_index = 0;
-    state.bal_builder = Some(revm::state::bal::Bal::new());
+    let mut state = BalDatabase::new(
+        State::builder()
+            .with_database_ref(StateProviderDatabase::new(&state_provider))
+            .with_bundle_update()
+            .build(),
+    );
 
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
     let evm = evm_config.evm_for_block(&mut state, &reorg_target).map_err(RethError::other)?;
