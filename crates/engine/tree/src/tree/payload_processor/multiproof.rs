@@ -390,11 +390,10 @@ impl MultiproofManager {
         let storage_targets = proof_targets.len();
 
         trace!(
-            target: "engine::root",
+            target: "engine::tree::payload_processor::multiproof",
             proof_sequence_number,
             ?proof_targets,
             storage_targets,
-            ?source,
             "Dispatching storage proof to workers"
         );
 
@@ -415,12 +414,12 @@ impl MultiproofManager {
             Some(multi_added_removed_keys),
         );
 
-        // Dispatch to storage worker - NO spawn_blocking!
+        // Dispatch to storage worker
         if let Err(e) = self.proof_worker_handle.dispatch_storage_proof(
             input,
             (self.proof_result_tx.clone(), proof_sequence_number, hashed_state_update, start),
         ) {
-            error!(target: "engine::root", ?e, "Failed to dispatch storage proof");
+            error!(target: "engine::tree::payload_processor::multiproof", ?e, "Failed to dispatch storage proof");
             return;
         }
 
@@ -463,7 +462,7 @@ impl MultiproofManager {
         let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
 
         trace!(
-            target: "engine::root",
+            target: "engine::tree::payload_processor::multiproof",
             proof_sequence_number,
             ?proof_targets,
             account_targets,
@@ -939,7 +938,7 @@ impl MultiProofTask {
                                 targets.values().map(|slots| slots.len()).sum::<usize>();
                             prefetch_proofs_requested += self.on_prefetch_proof(targets);
                             debug!(
-                                target: "engine::root",
+                                target: "engine::tree::payload_processor::multiproof",
                                 account_targets,
                                 storage_targets,
                                 prefetch_proofs_requested,
@@ -960,7 +959,7 @@ impl MultiProofTask {
                             let len = update.len();
                             state_update_proofs_requested += self.on_state_update(source, update);
                             debug!(
-                                target: "engine::root",
+                                target: "engine::tree::payload_processor::multiproof",
                                 ?source,
                                 len,
                                 ?state_update_proofs_requested,
@@ -978,7 +977,7 @@ impl MultiProofTask {
                                 updates_finished,
                             ) {
                                 debug!(
-                                    target: "engine::root",
+                                    target: "engine::tree::payload_processor::multiproof",
                                     "State updates finished and all proofs processed, ending calculation"
                                 );
                                     break
@@ -1003,7 +1002,7 @@ impl MultiProofTask {
                                     updates_finished,
                                 ) {
                                     debug!(
-                                        target: "engine::root",
+                                        target: "engine::tree::payload_processor::multiproof",
                                         "State updates finished and all proofs processed, ending calculation"
                                     );
                                     break
@@ -1011,7 +1010,7 @@ impl MultiProofTask {
                             }
                         },
                         Err(_) => {
-                            error!(target: "engine::root", "State root related message channel closed unexpectedly");
+                            error!(target: "engine::tree::payload_processor::multiproof", "State root related message channel closed unexpectedly");
                             return
                         }
                     }
@@ -1032,7 +1031,7 @@ impl MultiProofTask {
                             match proof_result.result {
                                 Ok((multiproof, _stats)) => {
                                     debug!(
-                                        target: "engine::root",
+                                        target: "engine::tree::payload_processor::multiproof",
                                         sequence = proof_result.sequence_number,
                                         total_proofs = proofs_processed,
                                         "Processing calculated proof from worker"
@@ -1050,7 +1049,7 @@ impl MultiProofTask {
                                     }
                                 }
                                 Err(error) => {
-                                    error!(target: "engine::root", ?error, "proof calculation error from worker");
+                                    error!(target: "engine::tree::payload_processor::multiproof", ?error, "proof calculation error from worker");
                                     return
                                 }
                             }
@@ -1062,14 +1061,14 @@ impl MultiProofTask {
                                 updates_finished,
                             ) {
                                 debug!(
-                                    target: "engine::root",
+                                    target: "engine::tree::payload_processor::multiproof",
                                     "State updates finished and all proofs processed, ending calculation"
                                 );
                                 break
                             }
                         }
                         Err(_) => {
-                            error!(target: "engine::root", "Proof result channel closed unexpectedly");
+                            error!(target: "engine::tree::payload_processor::multiproof", "Proof result channel closed unexpectedly");
                             return
                         }
                     }
