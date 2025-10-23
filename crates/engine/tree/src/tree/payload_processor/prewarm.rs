@@ -40,7 +40,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, debug_span, instrument, trace, warn};
 
 /// A wrapper for transactions that includes their index in the block.
 #[derive(Clone)]

@@ -41,12 +41,15 @@ use reth_trie_sparse::{
     ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
-use std::sync::{
-    atomic::AtomicBool,
-    mpsc::{self, channel},
-    Arc,
+use std::{
+    sync::{
+        atomic::AtomicBool,
+        mpsc::{self, channel},
+        Arc,
+    },
+    time::Instant,
 };
-use tracing::{debug, instrument, warn};
+use tracing::{debug, debug_span, instrument, warn};
 
 mod configured_sparse_trie;
 pub mod executor;
