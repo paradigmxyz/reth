@@ -722,7 +722,7 @@ mod tests {
 
         // Setup: Create account changesets for multiple blocks
         {
-            let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir, false)
+            let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir, true)
                 .expect("Failed to create static file provider")
                 .with_custom_blocks_per_file(blocks_per_file);
 
@@ -802,7 +802,7 @@ mod tests {
         // Case 1: Truncate to block 20 (remove last 9 blocks)
         {
             let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
-            writer.prune_account_changesets(9).unwrap();
+            writer.prune_account_changesets(20).unwrap();
             writer.commit().unwrap();
 
             validate_truncation(&sf_rw, &static_dir, Some(20), initial_file_count)
@@ -812,7 +812,7 @@ mod tests {
         // Case 2: Truncate to block 9 (should remove 2 files)
         {
             let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
-            writer.prune_account_changesets(11).unwrap();
+            writer.prune_account_changesets(9).unwrap();
             writer.commit().unwrap();
 
             validate_truncation(&sf_rw, &static_dir, Some(9), files_per_range)
@@ -822,7 +822,7 @@ mod tests {
         // Case 3: Truncate all (should keep block 0)
         {
             let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
-            writer.prune_account_changesets(9).unwrap();
+            writer.prune_account_changesets(0).unwrap();
             writer.commit().unwrap();
 
             // AccountChangeSets behaves like tx-based segments and keeps at least block 0

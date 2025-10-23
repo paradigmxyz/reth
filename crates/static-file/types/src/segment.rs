@@ -404,7 +404,8 @@ impl SegmentHeader {
 
     /// Removes `num` elements from end of tx or block range.
     pub fn prune(&mut self, num: u64) {
-        if self.segment.is_block_based() {
+        // Changesets also contain a block range, but are not strictly block-based
+        if self.segment.is_block_based() || self.segment.is_account_changesets() {
             if let Some(range) = &mut self.block_range {
                 if num > range.end - range.start {
                     self.block_range = None;
