@@ -13,7 +13,7 @@ use reth_rpc_convert::transaction::ConvertReceiptInput;
 use reth_rpc_eth_api::{
     helpers::{
         receipt::calculate_gas_used_and_next_log_index, spec::SignersForRpc, EthTransactions,
-        LoadReceipt, LoadTransaction,
+        FillTransaction, LoadReceipt, LoadTransaction,
     },
     try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
     RpcReceipt, TxInfoMapper,
@@ -217,6 +217,14 @@ where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
+{
+}
+
+impl<N, Rpc> FillTransaction for OpEthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    OpEthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError, Evm = N::Evm>,
 {
 }
 

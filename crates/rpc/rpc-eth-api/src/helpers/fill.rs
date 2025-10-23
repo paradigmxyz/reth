@@ -31,10 +31,10 @@ pub trait FillTransaction: Call + EstimateCall + EthFees + LoadPendingBlock + Lo
         Self: SpawnBlocking,
     {
         async move {
-            let provider = RpcNodeCore::provider(self);
-            let chain_spec = provider.chain_spec();
-
             let header_fut = async {
+                let provider = RpcNodeCore::provider(self);
+                let chain_spec = provider.chain_spec();
+
                 let is_post_london = match block_id {
                     BlockId::Number(num) => self
                         .provider()
@@ -86,8 +86,21 @@ pub trait FillTransaction: Call + EstimateCall + EthFees + LoadPendingBlock + Lo
                 Ok(None)
             };
 
-            let (header, chain_id, nonce) =
-                futures::try_join!(header_fut, chain_id_fut, nonce_fut)?;
+            let blob_fee_fut = async {
+                let tx_req = request.as_ref();
+                if tx_req.max_fee_per_blob_gas.is_none() {
+                    if tx_req.blob_versioned_hashes.is_some() || tx_req.sidecar.is_some() {
+                        let blob_fee = EthFees::blob_base_fee(self).await?;
+                        return Ok(Some(blob_fee));
+                    }
+                }
+                Ok(None)
+            };
+
+            // TODO: fill versioned hashes & sidecars from blobs
+
+            let (header, chain_id, nonce, blob_fee) =
+                futures::try_join!(header_fut, chain_id_fut, nonce_fut, blob_fee_fut)?;
 
             if let Some(chain_id) = chain_id {
                 request.as_mut().set_chain_id(chain_id);
@@ -95,6 +108,10 @@ pub trait FillTransaction: Call + EstimateCall + EthFees + LoadPendingBlock + Lo
 
             if let Some(nonce) = nonce {
                 request.as_mut().set_nonce(nonce);
+            }
+
+            if let Some(blob_fee) = blob_fee {
+                request.as_mut().max_fee_per_blob_gas = Some(blob_fee.to());
             }
 
             let base_fee = header.and_then(|h| h.base_fee_per_gas());
