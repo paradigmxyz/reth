@@ -1,6 +1,7 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::B256;
+use alloy_rpc_types_engine::PayloadId;
 use core::mem;
 use eyre::{bail, OptionExt};
 use reth_primitives_traits::{Recovered, SignedTransaction};
@@ -85,8 +86,7 @@ where
         // only insert if we previously received the same block and payload, assume we received
         // index 0
         let same_block = self.block_number() == Some(flashblock.metadata.block_number);
-        let same_payload =
-            self.inner.values().next().map(|b| b.block().payload_id) == Some(flashblock.payload_id);
+        let same_payload = self.payload_id() == Some(flashblock.payload_id);
 
         if same_block && same_payload {
             trace!(number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len()  ,"Received followup flashblock");
@@ -143,6 +143,10 @@ where
     /// Returns the current/latest flashblock index in the sequence
     pub fn index(&self) -> Option<u64> {
         Some(self.inner.values().last()?.block().index)
+    }
+    /// Returns the payload id of the first tracked flashblock in the current sequence.
+    pub fn payload_id(&self) -> Option<PayloadId> {
+        Some(self.inner.values().next()?.block().payload_id)
     }
 }
 
