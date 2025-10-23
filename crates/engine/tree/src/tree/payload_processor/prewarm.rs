@@ -106,7 +106,7 @@ where
         let (actions_tx, actions_rx) = channel();
 
         trace!(
-            target: "engine::tree::prewarm",
+            target: "engine::tree::payload_processor::prewarm",
             max_concurrency,
             transaction_count_hint,
             "Initialized prewarm task"
@@ -185,7 +185,7 @@ where
                     for handle in &handles {
                         if let Err(err) = handle.send(indexed_tx.clone()) {
                             warn!(
-                                target: "engine::tree::prewarm",
+                                target: "engine::tree::payload_processor::prewarm",
                                 tx_hash = %first_tx_hash,
                                 error = %err,
                                 "Failed to send deposit transaction to worker"
@@ -196,7 +196,7 @@ where
                     // Not a deposit, send to first worker via round-robin
                     if let Err(err) = handles[0].send(indexed_tx) {
                         warn!(
-                            target: "engine::tree::prewarm",
+                            target: "engine::tree::payload_processor::prewarm",
                             task_idx = 0,
                             error = %err,
                             "Failed to send transaction to worker"
@@ -213,7 +213,7 @@ where
                 let task_idx = executing % workers_needed;
                 if let Err(err) = handles[task_idx].send(indexed_tx) {
                     warn!(
-                        target: "engine::tree::prewarm",
+                        target: "engine::tree::payload_processor::prewarm",
                         task_idx,
                         error = %err,
                         "Failed to send transaction to worker"
@@ -329,7 +329,7 @@ where
                     self.send_multi_proof_targets(proof_targets);
                 }
                 PrewarmTaskEvent::Terminate { block_output } => {
-                    trace!(target: "engine::tree::prewarm", "Received termination signal");
+                    trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
                     final_block_output = Some(block_output);
 
                     if finished_execution {
@@ -338,7 +338,7 @@ where
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
-                    trace!(target: "engine::tree::prewarm", "Finished prewarm execution signal");
+                    trace!(target: "engine::tree::payload_processor::prewarm", "Finished prewarm execution signal");
                     self.ctx.metrics.transactions.set(executed_transactions as f64);
                     self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);
 
@@ -352,7 +352,7 @@ where
             }
         }
 
-        debug!(target: "engine::tree::prewarm", "Completed prewarm execution");
+        debug!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
 
         // save caches and finish
         if let Some(Some(state)) = final_block_output {
@@ -488,7 +488,7 @@ where
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
-                        target: "engine::tree::prewarm",
+                        target: "engine::tree::payload_processor::prewarm",
                         %err,
                         tx_hash=%tx.tx().tx_hash(),
                         sender=%tx.signer(),
