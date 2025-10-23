@@ -18,8 +18,9 @@ pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
 ///  A boxed tracing [Layer].
 pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
-/// Default [directives](Directive) for [`EnvFilter`] which disables high-frequency debug logs from
-/// `hyper`, `hickory-resolver`, `jsonrpsee-server`, and `discv5`.
+/// Default [directives](Directive) for [`EnvFilter`] which disable high-frequency debug logs from
+/// dependencies such as `hyper`, `hickory-resolver`, `hickory_proto`, `discv5`, `jsonrpsee-server`,
+/// the `opentelemetry_*` crates, and `hyper_util::client::legacy::pool`.
 const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 9] = [
     "hyper::proto::h1=off",
     "hickory_resolver=off",
