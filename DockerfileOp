@@ -28,7 +28,7 @@ RUN cargo build --profile $BUILD_PROFILE --bin op-reth --manifest-path /app/crat
 RUN ls -la /app/target/$BUILD_PROFILE/op-reth
 RUN cp /app/target/$BUILD_PROFILE/op-reth /app/op-reth
 
-FROM ubuntu:22.04 AS runtime
+FROM ubuntu:24.04 AS runtime
 
 RUN apt-get update && \
     apt-get install -y ca-certificates libssl-dev pkg-config strace && \
