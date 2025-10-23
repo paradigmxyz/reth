@@ -311,9 +311,8 @@ impl MultiproofInput {
 /// 1. `MultiProofTask` asks the manager to spawn either storage or account proof work.
 /// 2. The manager builds the request, clones `proof_result_tx`, and hands everything to
 ///    [`ProofWorkerHandle`].
-/// 3. A worker finishes the proof and sends a
-///    [`ProofResultMessage`](reth_trie_parallel::proof_task::ProofResultMessage) through the
-///    channel included in the job.
+/// 3. A worker finishes the proof and sends a [`ProofResultMessage`] through the channel included
+///    in the job.
 /// 4. `MultiProofTask` consumes the message from the same channel and sequences it with
 ///    `ProofSequencer`.
 #[derive(Debug)]

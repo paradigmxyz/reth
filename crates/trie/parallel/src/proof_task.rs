@@ -124,9 +124,9 @@ pub struct ProofResultMessage {
 enum StorageWorkerJob {
     /// Storage proof computation request
     StorageProof {
-        /// Storage proof input parameters (what to compute)
+        /// Storage proof input parameters
         input: StorageProofInput,
-        /// Channel to send result back (where to send)
+        /// Context for sending the proof result.
         proof_result_sender: ProofResultContext,
     },
     /// Blinded storage node retrieval request
@@ -937,8 +937,7 @@ pub struct AccountMultiproofInput {
     pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Cached storage proof roots for missed leaves encountered during account trie walk.
     pub missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-    /// Sender for proof results.
-    /// The worker sends the computed proof result via this channel.
+    /// Context for sending the proof result.
     pub proof_result_sender: ProofResultContext,
 }
 
