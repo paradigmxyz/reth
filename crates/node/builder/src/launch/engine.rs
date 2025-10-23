@@ -117,9 +117,6 @@ impl EngineNodeLauncher {
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
-        // Try to expire pre-merge transaction history if configured
-        ctx.expire_pre_merge_transactions()?;
-
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
 

@@ -94,6 +94,7 @@ members = [
     "crates/primitives-traits/",
     "crates/primitives/",
     "crates/prune/prune",
+    "crates/prune/static-files",
     "crates/prune/types",
     "crates/ress/protocol",
     "crates/ress/provider",
@@ -429,6 +430,7 @@ reth-primitives = { path = "crates/primitives", default-features = false }
 reth-primitives-traits = { path = "crates/primitives-traits", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
+reth-prune-static-files = { path = "crates/prune/static-files" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
 reth-revm = { path = "crates/revm", default-features = false }
 reth-rpc = { path = "crates/rpc/rpc" }
