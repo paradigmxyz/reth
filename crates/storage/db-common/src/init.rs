@@ -153,14 +153,9 @@ where
     // compute state root to populate trie tables
     compute_state_root(&provider_rw, None)?;
 
-    // insert sync stage
+    // set stage checkpoint to genesis block number for all stages
+    let checkpoint = StageCheckpoint { block_number: genesis_block_number, ..Default::default() };
     for stage in StageId::ALL {
-        let checkpoint = if stage == StageId::Finish {
-            // Set Finish stage checkpoint to genesis block number
-            StageCheckpoint { block_number: genesis_block_number, ..Default::default() }
-        } else {
-            Default::default()
-        };
         provider_rw.save_stage_checkpoint(stage, checkpoint)?;
     }
 
