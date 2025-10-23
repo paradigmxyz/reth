@@ -468,10 +468,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
                 request.as_mut().set_gas_limit(estimated_gas.to());
             }
-            
+
             // get suggested gas prices
             let suggested_gas_price = LoadFee::gas_price(self).await?;
-            
+
             let tx_type = request.as_ref().output_tx_type();
 
             if tx_type.is_legacy() || tx_type.is_eip2930() {
@@ -492,9 +492,12 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 }
             }
 
-            let _unsigned_tx = request.as_ref().clone().build_typed_tx()
+            let _unsigned_tx = request
+                .as_ref()
+                .clone()
+                .build_typed_tx()
                 .map_err(|_| EthApiError::TransactionConversionError)?;
-            
+
             // todo: encode the tx
             let raw = Bytes::new(); // placeholder
 
