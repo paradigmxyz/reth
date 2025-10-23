@@ -1047,6 +1047,16 @@ impl ProofWorkerHandle {
         self.account_available_workers.load(Ordering::Relaxed) > 0
     }
 
+    /// Returns the number of pending storage tasks in the queue.
+    pub fn pending_storage_tasks(&self) -> usize {
+        self.storage_work_tx.len()
+    }
+
+    /// Returns the number of pending account tasks in the queue.
+    pub fn pending_account_tasks(&self) -> usize {
+        self.account_work_tx.len()
+    }
+
     /// Dispatch a storage proof computation to storage worker pool
     pub fn dispatch_storage_proof(
         &self,
