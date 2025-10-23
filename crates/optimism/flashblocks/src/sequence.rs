@@ -82,8 +82,13 @@ where
             return Ok(())
         }
 
-        // only insert if we previously received the same block, assume we received index 0
-        if self.block_number() == Some(flashblock.metadata.block_number) {
+        // only insert if we previously received the same block and payload, assume we received
+        // index 0
+        let same_block = self.block_number() == Some(flashblock.metadata.block_number);
+        let same_payload =
+            self.inner.values().next().map(|b| b.block().payload_id) == Some(flashblock.payload_id);
+
+        if same_block && same_payload {
             trace!(number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len()  ,"Received followup flashblock");
             self.inner.insert(flashblock.index, PreparedFlashBlock::new(flashblock)?);
         } else {
