@@ -485,6 +485,12 @@ impl MultiproofManager {
     fn on_calculation_complete(&mut self) {
         self.inflight = self.inflight.saturating_sub(1);
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        self.metrics
+            .pending_storage_tasks_histogram
+            .record(self.proof_worker_handle.pending_storage_tasks() as f64);
+        self.metrics
+            .pending_account_tasks_histogram
+            .record(self.proof_worker_handle.pending_account_tasks() as f64);
     }
 
     /// Spawns a single multiproof calculation task.
