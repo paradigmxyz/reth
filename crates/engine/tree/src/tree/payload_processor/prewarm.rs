@@ -147,9 +147,6 @@ where
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0usize;
 
-            // Initialize worker handles container
-            let mut handles = Vec::with_capacity(max_concurrency);
-
             // When transaction_count_hint is 0, it means the count is unknown. In this case, spawn
             // max workers to handle potentially many transactions in parallel rather
             // than bottlenecking on a single worker.
@@ -158,6 +155,9 @@ where
             } else {
                 transaction_count_hint.min(max_concurrency)
             };
+
+            // Initialize worker handles container
+            let mut handles = Vec::with_capacity(workers_needed);
 
             // Only spawn initial workers as needed
             for i in 0..workers_needed {
@@ -233,8 +233,19 @@ where
         });
     }
 
+    /// Returns true if prewarming was terminated and no more transactions should be prewarmed.
+    fn is_execution_terminated(&self) -> bool {
+        self.ctx.terminate_execution.load(Ordering::Relaxed)
+    }
+
     /// If configured and the tx returned proof targets, emit the targets the transaction produced
     fn send_multi_proof_targets(&self, targets: Option<MultiProofTargets>) {
+        if self.is_execution_terminated() {
+            // if execution is already terminated then we dont need to send more proof fetch
+            // messages
+            return
+        }
+
         if let Some((proof_targets, to_multi_proof)) = targets.zip(self.to_multi_proof.as_ref()) {
             let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(proof_targets));
         }
@@ -259,9 +270,9 @@ where
             self;
         let hash = env.hash;
 
+        debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
         // Perform all cache operations atomically under the lock
         execution_cache.update_with_guard(|cached| {
-
             // consumes the `SavedCache` held by the prewarming task, which releases its usage guard
             let (caches, cache_metrics) = saved_cache.split();
             let new_cache = SavedCache::new(hash, caches, cache_metrics);
@@ -275,13 +286,15 @@ where
             }
 
             new_cache.update_metrics();
-            debug!(target: "engine::caching", parent_hash=?new_cache.executed_block_hash(), "Updated execution cache");
 
             // Replace the shared cache with the new one; the previous cache (if any) is dropped.
             *cached = Some(new_cache);
         });
 
-        metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
+        let elapsed = start.elapsed();
+        debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+
+        metrics.cache_saving_duration.set(elapsed.as_secs_f64());
     }
 
     /// Executes the task.
@@ -308,6 +321,7 @@ where
             match event {
                 PrewarmTaskEvent::TerminateTransactionExecution => {
                     // stop tx processing
+                    debug!(target: "engine::tree::prewarm", "Terminating prewarm execution");
                     self.ctx.terminate_execution.store(true, Ordering::Relaxed);
                 }
                 PrewarmTaskEvent::Outcome { proof_targets } => {
@@ -338,7 +352,7 @@ where
             }
         }
 
-        trace!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
+        debug!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
 
         // save caches and finish
         if let Some(Some(state)) = final_block_output {
@@ -460,6 +474,9 @@ where
                 debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
                     .entered();
 
+            // create the tx env
+            let start = Instant::now();
+
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
             if terminate_execution.load(Ordering::Relaxed) {
@@ -467,8 +484,6 @@ where
                 break
             }
 
-            // create the tx env
-            let start = Instant::now();
             let res = match evm.transact(&tx) {
                 Ok(res) => res,
                 Err(err) => {
@@ -488,6 +503,13 @@ where
             metrics.execution_duration.record(start.elapsed());
 
             drop(_enter);
+
+            // If the task was cancelled, stop execution, send an empty result to notify the task,
+            // and exit.
+            if terminate_execution.load(Ordering::Relaxed) {
+                let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: None });
+                break
+            }
 
             // Only send outcome for transactions after the first txn
             // as the main execution will be just as fast

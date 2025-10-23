@@ -253,9 +253,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.22.3"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbb19405755c6f94c9bb856f2b1449767074b7e2002e1ab2be0a79b9b28db322"
+checksum = "83ce19ea6140497670b1b7e721f9a9ce88022fe475a5e4e6a68a403499cca209"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -370,9 +370,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-evm"
-version = "0.22.3"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f059cf29d7f15b3e6581ceb6eda06a16d8ed4b55adc02b0677add3fd381db6bb"
+checksum = "7d7aeaf6051f53880a65b547c43e3b05ee42f68236b1f43f013abfe4eadc47bb"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6127,9 +6127,9 @@ dependencies = [
 
 [[package]]
 name = "op-revm"
-version = "11.1.2"
+version = "11.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1d721c4c196273dd135ea5b823cd573ea8735cd3c5f2c19fcb91ee3af655351"
+checksum = "a33ab6a7bbcfffcbf784de78f14593b6389003f5c69653fcffcc163459a37d69"
 dependencies = [
  "auto_impl",
  "revm",
@@ -9435,6 +9435,7 @@ version = "1.8.2"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-debug",
