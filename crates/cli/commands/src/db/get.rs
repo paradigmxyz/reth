@@ -101,6 +101,7 @@ impl Command {
                         error!(target: "reth::cli", "Subkey is required for `db get` account changesets");
                         return Ok(())
                     };
+
                     let account = tool
                         .provider_factory
                         .static_file_provider()
@@ -114,9 +115,6 @@ impl Command {
 
                     return Ok(())
                 };
-
-                // TODO: if someone doesnt input a subkey then return early because it's basically
-                // required for account changesets
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(
                     segment,
@@ -158,7 +156,7 @@ impl Command {
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
                                 }
                                 StaticFileSegment::AccountChangeSets => {
-                                    todo!()
+                                    unreachable!("account changeset static files are special cased before this match")
                                 }
                             }
                         }
