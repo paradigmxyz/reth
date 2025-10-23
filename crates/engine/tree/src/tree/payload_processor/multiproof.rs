@@ -265,7 +265,6 @@ impl From<MultiproofInput> for PendingMultiproofTask {
 /// Input parameters for spawning a dedicated storage multiproof calculation.
 #[derive(Debug)]
 struct StorageMultiproofInput {
-    source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
     hashed_address: B256,
     proof_targets: B256Set,
@@ -378,7 +377,6 @@ impl MultiproofManager {
     /// Spawns a single storage proof calculation task.
     fn spawn_storage_proof(&mut self, storage_multiproof_input: StorageMultiproofInput) {
         let StorageMultiproofInput {
-            source,
             hashed_state_update,
             hashed_address,
             proof_targets,
