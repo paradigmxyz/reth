@@ -220,7 +220,7 @@ impl ParallelProof {
             .dispatch_account_multiproof(input)
             .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
-        // Wait for account multiproof result from worker via ProofResultMessage
+        // Wait for account multiproof result from worker
         let proof_result_msg = result_rx.recv().map_err(|_| {
             ParallelStateRootError::Other(
                 "Account multiproof channel dropped: worker died or pool shutdown".to_string(),
