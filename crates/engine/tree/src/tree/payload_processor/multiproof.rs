@@ -21,12 +21,7 @@ use reth_trie_parallel::{
     proof::ParallelProof,
     proof_task::{AccountMultiproofInput, ProofResultMessage, ProofWorkerHandle},
 };
-use std::{
-    collections::BTreeMap,
-    ops::DerefMut,
-    sync::Arc,
-    time::Instant,
-};
+use std::{collections::{BTreeMap, VecDeque}, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the

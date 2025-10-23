@@ -467,7 +467,7 @@ fn account_worker_loop<Factory>(
                         target: "trie::proof_task",
                         worker_id,
                         account_proofs_processed,
-                        "Proof result receiver dropped, discarding result"
+                        "Account multiproof receiver dropped, discarding result"
                     );
                 }
 
