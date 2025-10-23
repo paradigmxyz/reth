@@ -10,6 +10,26 @@
 //!   access to worker channels, eliminating routing overhead
 //! - **Automatic Shutdown**: Workers terminate gracefully when all handles are dropped
 //!
+//! # Message Flow
+//!
+//! 1. [`MultiProofTask`](reth_engine_tree::tree::payload_processor::multiproof::MultiProofTask)
+//!    prepares a storage or account job and hands it to [`ProofWorkerHandle`]. The job carries a
+//!    [`ProofResultContext`] so the worker knows how to send the result back.
+//! 2. A worker receives the job, runs the proof, and sends a [`ProofResultMessage`] through the
+//!    provided [`ProofResultSender`].
+//! 3. `MultiProofTask` receives the message, uses `sequence_number` to keep proofs in order, and
+//!    proceeds with its state-root logic.
+//!
+//! Each job gets its own direct channel so results go straight back to `MultiProofTask`. That keeps
+//! ordering decisions in one place and lets workers run independently.
+//!
+//! ```text
+//! MultiProofTask -> MultiproofManager -> ProofWorkerHandle -> Storage/Account Worker
+//!        ^                                          |
+//!        |                                          v
+//! ProofResultMessage <-------- ProofResultSender ---
+//! ```
+//!
 //! Individual [`ProofTaskTx`] instances manage a dedicated [`InMemoryTrieCursorFactory`] and
 //! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
 
@@ -68,7 +88,8 @@ type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 type AccountMultiproofResult =
     Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError>;
 
-/// Type alias for the proof result sender channel.
+/// Channel used by worker threads to deliver `ProofResultMessage` items back to
+/// `MultiProofTask`.
 ///
 /// Workers use this sender to deliver proof results directly to `MultiProofTask`.
 pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
@@ -313,7 +334,7 @@ fn storage_worker_loop<Factory>(
 /// # Lifecycle
 ///
 /// Each worker initializes its providers, advertises availability, then loops:
-/// receive an account job, mark busy, process the work, respond, and mark available again.
+/// take a job, mark busy, compute the proof, send the result, and mark available again.
 /// The loop ends gracefully once the channel closes.
 ///
 /// # Transaction Reuse

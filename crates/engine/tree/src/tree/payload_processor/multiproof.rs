@@ -305,7 +305,16 @@ impl MultiproofInput {
     }
 }
 
-/// Manages concurrent multiproof calculations.
+/// Coordinates multiproof dispatch between `MultiProofTask` and the parallel trie workers.
+///
+/// # Flow
+/// 1. `MultiProofTask` asks the manager to spawn either storage or account proof work.
+/// 2. The manager builds the request, clones `proof_result_tx`, and hands everything to
+///    [`ProofWorkerHandle`].
+/// 3. A worker finishes the proof and sends a [`ProofResultMessage`](reth_trie_parallel::proof_task::ProofResultMessage)
+///    through the channel included in the job.
+/// 4. `MultiProofTask` consumes the message from the same channel and sequences it with
+///    `ProofSequencer`.
 #[derive(Debug)]
 pub struct MultiproofManager {
     /// Currently running calculations.
@@ -324,7 +333,7 @@ pub struct MultiproofManager {
     /// a big account change into different chunks, which may repeatedly
     /// revisit missed leaves.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-    /// Channel sender for receiving computed multiproof results from worker pools.
+    /// Channel sender cloned into each dispatched job so workers can send back the `ProofResultMessage`.
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
