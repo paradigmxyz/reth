@@ -408,14 +408,12 @@ fn account_worker_loop<Factory>(
 
                 tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-                let multi_added_removed_keys_ref = multi_added_removed_keys.as_ref();
-
                 let storage_proof_receivers = match dispatch_storage_proofs(
                     &storage_work_tx,
                     &targets,
                     &mut storage_prefix_sets,
                     collect_branch_node_masks,
-                    multi_added_removed_keys_ref,
+                    multi_added_removed_keys.as_ref(),
                 ) {
                     Ok(receivers) => receivers,
                     Err(error) => {
@@ -432,17 +430,15 @@ fn account_worker_loop<Factory>(
                 };
 
                 // Use the missed leaves cache passed from the multiproof manager
-                let missed_leaves_storage_roots_ref = missed_leaves_storage_roots.as_ref();
-
                 let account_prefix_set = std::mem::take(&mut prefix_sets.account_prefix_set);
 
                 let ctx = AccountMultiproofParams {
                     targets: &targets,
                     prefix_set: account_prefix_set,
                     collect_branch_node_masks,
-                    multi_added_removed_keys: multi_added_removed_keys_ref,
+                    multi_added_removed_keys: multi_added_removed_keys.as_ref(),
                     storage_proof_receivers,
-                    missed_leaves_storage_roots: missed_leaves_storage_roots_ref,
+                    missed_leaves_storage_roots: missed_leaves_storage_roots.as_ref(),
                 };
 
                 let result = build_account_multiproof_with_storage_roots(
