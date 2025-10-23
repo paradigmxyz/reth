@@ -42,16 +42,12 @@ impl UpgradeStatus {
 
     /// Creates a new `UpgradeStatus` that allows peer transaction broadcasting.
     pub fn allow_broadcast() -> Self {
-        Self {
-            extension: UpgradeStatusExtension::allow_broadcast(),
-        }
+        Self { extension: UpgradeStatusExtension::allow_broadcast() }
     }
 
     /// Creates a new `UpgradeStatus` that disables peer transaction broadcasting.
     pub fn disable_broadcast() -> Self {
-        Self {
-            extension: UpgradeStatusExtension::disable_broadcast(),
-        }
+        Self { extension: UpgradeStatusExtension::disable_broadcast() }
     }
 
     /// Encode the upgrade status message into RLPx bytes.
