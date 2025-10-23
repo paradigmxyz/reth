@@ -2,7 +2,7 @@
 
 use super::{estimate::EstimateCall, Call, EthFees, LoadPendingBlock, LoadState, SpawnBlocking};
 use crate::{FromEthApiError, RpcNodeCore};
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, TxType};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, BlockId};
@@ -31,9 +31,20 @@ pub trait FillTransaction: Call + EstimateCall + EthFees + LoadPendingBlock + Lo
         Self: SpawnBlocking,
     {
         async move {
+            let tx_type = request.as_ref().transaction_type;
+            let supports_eip1559_fees = tx_type
+                .is_some_and(|tx_type| tx_type != TxType::Legacy && tx_type != TxType::Eip2930);
+
+            // Fetch header to determine base fee for EIP-1559 fees
             let header_fut = async {
                 let provider = RpcNodeCore::provider(self);
                 let chain_spec = provider.chain_spec();
+
+                // If the transaction type does not support EIP-1559 fees, no need
+                // to fetch the header
+                if !supports_eip1559_fees {
+                    return Ok(None);
+                }
 
                 let is_post_london = match block_id {
                     BlockId::Number(num) => self
@@ -45,11 +56,11 @@ pub trait FillTransaction: Call + EstimateCall + EthFees + LoadPendingBlock + Lo
                     _ => false, // Need to fetch header to determine
                 };
 
+                // If the block is not post-London, no need to fetch the header
                 if !is_post_london {
                     return Ok(None);
                 }
 
-                // Post-London: fetch header for base fee
                 let block_hash = provider
                     .block_hash_for_id(block_id)
                     .map_err(Self::Error::from_eth_err)?
@@ -89,13 +100,21 @@ pub trait FillTransaction: Call + EstimateCall + EthFees + LoadPendingBlock + Lo
 
             let blob_fee_fut = async {
                 let tx_req = request.as_ref();
-                if tx_req.max_fee_per_blob_gas.is_none() &&
-                    (tx_req.blob_versioned_hashes.is_some() || tx_req.sidecar.is_some())
-                {
-                    let blob_fee = EthFees::blob_base_fee(self).await?;
-                    return Ok(Some(blob_fee));
+
+                if tx_req.max_fee_per_blob_gas.is_some() {
+                    return Ok(None);
                 }
-                Ok(None)
+
+                if tx_type.is_some_and(|tx_type| tx_type != TxType::Eip4844) {
+                    return Ok(None);
+                }
+
+                if !tx_req.blob_versioned_hashes.is_some() && !tx_req.sidecar.is_some() {
+                    return Ok(None);
+                }
+
+                let blob_fee = EthFees::blob_base_fee(self).await?;
+                Ok(Some(blob_fee))
             };
 
             let (header, chain_id, nonce, blob_fee) =
@@ -114,7 +133,9 @@ pub trait FillTransaction: Call + EstimateCall + EthFees + LoadPendingBlock + Lo
             }
 
             let base_fee = header.and_then(|h| h.base_fee_per_gas());
-            if let Some(base_fee) = base_fee {
+            let use_eip1559_fees = supports_eip1559_fees && base_fee.is_some();
+
+            if use_eip1559_fees {
                 // Derive EIP-1559 fee fields
                 let suggested_priority_fee = EthFees::suggested_priority_fee(self).await?;
 
@@ -123,7 +144,8 @@ pub trait FillTransaction: Call + EstimateCall + EthFees + LoadPendingBlock + Lo
                 }
 
                 if request.as_ref().max_fee_per_gas().is_none() {
-                    let max_fee = suggested_priority_fee.saturating_add(U256::from(base_fee));
+                    let max_fee =
+                        suggested_priority_fee.saturating_add(U256::from(base_fee.unwrap()));
                     request.as_mut().set_max_fee_per_gas(max_fee.to());
                 }
             } else {
