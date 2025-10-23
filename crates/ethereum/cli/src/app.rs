@@ -131,6 +131,9 @@ where
     }
 
     /// Initialize OTLP tracing export based on protocol type.
+    ///
+    /// For gRPC, `block_on` is required because tonic's channel initialization needs
+    /// a tokio runtime context, even though `with_span_layer` itself is not async.
     #[cfg(feature = "otlp")]
     fn init_otlp_export(
         &self,
