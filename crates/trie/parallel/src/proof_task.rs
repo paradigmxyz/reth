@@ -103,10 +103,10 @@ pub struct ProofResultMessage {
 enum StorageWorkerJob {
     /// Storage proof computation request
     StorageProof {
-        /// Storage proof input parameters
+        /// Storage proof input parameters (what to compute)
         input: StorageProofInput,
-        /// Channel to send result back to original caller
-        result_sender: Sender<StorageProofResult>,
+        /// Channel to send result back (where to send)
+        proof_result_sender: ProofResultContext,
     },
     /// Blinded storage node retrieval request
     BlindedStorageNode {
@@ -184,19 +184,21 @@ fn storage_worker_loop<Factory>(
         available_workers.fetch_sub(1, Ordering::Relaxed);
 
         match job {
-            StorageWorkerJob::StorageProof { input, result_sender } => {
+            StorageWorkerJob::StorageProof { input, proof_result_sender } => {
                 let hashed_address = input.hashed_address;
+                let (sender, seq, state, start_time) = proof_result_sender;
 
                 trace!(
                     target: "trie::proof_task",
                     worker_id,
                     hashed_address = ?hashed_address,
                     prefix_set_len = input.prefix_set.len(),
-                    target_slots = input.target_slots.len(),
+                    target_slots_len = input.target_slots.len(),
                     "Processing storage proof"
                 );
 
                 let proof_start = Instant::now();
+
                 let result = proof_tx.compute_storage_proof(
                     input,
                     trie_cursor_factory.clone(),
@@ -206,13 +208,35 @@ fn storage_worker_loop<Factory>(
                 let proof_elapsed = proof_start.elapsed();
                 storage_proofs_processed += 1;
 
-                if result_sender.send(result).is_err() {
+                // Convert storage proof to account multiproof format
+                let result_msg = match result {
+                    Ok(storage_proof) => {
+                        let multiproof = reth_trie::DecodedMultiProof::from_storage_proof(
+                            hashed_address,
+                            storage_proof,
+                        );
+                        let stats = crate::stats::ParallelTrieTracker::default().finish();
+                        Ok((multiproof, stats))
+                    }
+                    Err(e) => Err(e),
+                };
+
+                // Send result directly to MultiProofTask
+                if sender
+                    .send(ProofResultMessage {
+                        sequence_number: seq,
+                        result: result_msg,
+                        elapsed: start_time.elapsed(),
+                        state,
+                    })
+                    .is_err()
+                {
                     tracing::debug!(
                         target: "trie::proof_task",
                         worker_id,
                         hashed_address = ?hashed_address,
                         storage_proofs_processed,
-                        "Storage proof receiver dropped, discarding result"
+                        "Proof result receiver dropped, discarding result"
                     );
                 }
 
@@ -580,7 +604,7 @@ where
                     Some(receiver) => {
                         // Block on this specific storage proof receiver - enables interleaved
                         // parallelism
-                        let proof = receiver.recv().map_err(|_| {
+                        let proof_msg = receiver.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(
                                 reth_execution_errors::StorageRootError::Database(
                                     DatabaseError::Other(format!(
@@ -588,7 +612,17 @@ where
                                     )),
                                 ),
                             )
-                        })??;
+                        })?;
+
+                        // Extract storage proof from the multiproof wrapper
+                        let (mut multiproof, _stats) = proof_msg.result?;
+                        let proof =
+                            multiproof.storages.remove(&hashed_address).ok_or_else(|| {
+                                ParallelStateRootError::Other(format!(
+                                    "storage proof not found in multiproof for {hashed_address}"
+                                ))
+                            })?;
+
                         let root = proof.root;
                         collected_decoded_storages.insert(hashed_address, proof);
                         root
@@ -638,8 +672,13 @@ where
 
     // Consume remaining storage proof receivers for accounts not encountered during trie walk.
     for (hashed_address, receiver) in storage_proof_receivers {
-        if let Ok(Ok(proof)) = receiver.recv() {
-            collected_decoded_storages.insert(hashed_address, proof);
+        if let Ok(proof_msg) = receiver.recv() {
+            // Extract storage proof from the multiproof wrapper
+            if let Ok((mut multiproof, _stats)) = proof_msg.result &&
+                let Some(proof) = multiproof.storages.remove(&hashed_address)
+            {
+                collected_decoded_storages.insert(hashed_address, proof);
+            }
         }
     }
 
@@ -679,7 +718,7 @@ fn dispatch_storage_proofs(
     storage_prefix_sets: &mut B256Map<PrefixSet>,
     with_branch_node_masks: bool,
     multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
-) -> Result<B256Map<Receiver<StorageProofResult>>, ParallelStateRootError> {
+) -> Result<B256Map<CrossbeamReceiver<ProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
 
@@ -687,8 +726,11 @@ fn dispatch_storage_proofs(
     for (hashed_address, target_slots) in targets.iter() {
         let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
 
-        // Always queue a storage proof so we obtain the storage root even when no slots are
-        // requested.
+        // Create channel for receiving ProofResultMessage
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let start = Instant::now();
+
+        // Create computation input (data only, no communication channel)
         let input = StorageProofInput::new(
             *hashed_address,
             prefix_set,
@@ -697,11 +739,13 @@ fn dispatch_storage_proofs(
             multi_added_removed_keys.cloned(),
         );
 
-        let (sender, receiver) = channel();
-
-        // If queuing fails, propagate error up (no fallback)
+        // Always queue a storage proof so we obtain the storage root even when no slots are
+        // requested.
         storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, result_sender: sender })
+            .send(StorageWorkerJob::StorageProof {
+                input,
+                proof_result_sender: (result_tx, 0, HashedPostState::default(), start),
+            })
             .map_err(|_| {
                 ParallelStateRootError::Other(format!(
                     "Failed to queue storage proof for {}: storage worker pool unavailable",
@@ -709,7 +753,7 @@ fn dispatch_storage_proofs(
                 ))
             })?;
 
-        storage_proof_receivers.insert(*hashed_address, receiver);
+        storage_proof_receivers.insert(*hashed_address, result_rx);
     }
 
     Ok(storage_proof_receivers)
@@ -828,7 +872,11 @@ where
     }
 }
 
-/// This represents an input for a storage proof.
+/// Storage proof computation parameters.
+///
+/// This struct contains only the data needed to compute a storage proof,
+/// without any communication channels. The communication channel is stored
+/// separately in the `StorageWorkerJob` envelope.
 #[derive(Debug)]
 pub struct StorageProofInput {
     /// The hashed address for which the proof is calculated.
@@ -892,7 +940,7 @@ struct AccountMultiproofParams<'a> {
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<&'a Arc<MultiAddedRemovedKeys>>,
     /// Receivers for storage proofs being computed in parallel.
-    storage_proof_receivers: B256Map<Receiver<StorageProofResult>>,
+    storage_proof_receivers: B256Map<CrossbeamReceiver<ProofResultMessage>>,
     /// Cached storage proof roots for missed leaves encountered during account trie walk.
     missed_leaves_storage_roots: &'a DashMap<B256, B256>,
 }
@@ -1117,18 +1165,32 @@ impl ProofWorkerHandle {
     }
 
     /// Dispatch a storage proof computation to storage worker pool
+    ///
+    /// The result will be sent via the `proof_result_sender` channel.
     pub fn dispatch_storage_proof(
         &self,
         input: StorageProofInput,
-    ) -> Result<Receiver<StorageProofResult>, ProviderError> {
-        let (tx, rx) = channel();
+        proof_result_sender: ProofResultContext,
+    ) -> Result<(), ProviderError> {
         self.storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, result_sender: tx })
-            .map_err(|_| {
-                ProviderError::other(std::io::Error::other("storage workers unavailable"))
-            })?;
+            .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
+            .map_err(|err| {
+                let error =
+                    ProviderError::other(std::io::Error::other("storage workers unavailable"));
 
-        Ok(rx)
+                if let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0 {
+                    let (result_tx, seq, state, start) = proof_result_sender;
+
+                    let _ = result_tx.send(ProofResultMessage {
+                        sequence_number: seq,
+                        result: Err(ParallelStateRootError::Provider(error.clone())),
+                        elapsed: start.elapsed(),
+                        state,
+                    });
+                }
+
+                error
+            })
     }
 
     /// Dispatch an account multiproof computation
