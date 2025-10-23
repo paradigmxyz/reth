@@ -146,12 +146,12 @@ fn storage_worker_loop<Factory>(
     let mut storage_proofs_processed = 0u64;
     let mut storage_nodes_processed = 0u64;
 
+    // Initially mark this worker as available.
+    available_workers.fetch_add(1, Ordering::Relaxed);
+
     while let Ok(job) = work_rx.recv() {
-        // Reserve a worker slot with saturating decrement to prevent underflow.
-        // Only decrement if counter is above zero.
-        let decremented = available_workers
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_sub(1))
-            .is_ok();
+        // Mark worker as busy.
+        available_workers.fetch_sub(1, Ordering::Relaxed);
 
         match job {
             StorageWorkerJob::StorageProof { input, result_sender } => {
@@ -195,11 +195,8 @@ fn storage_worker_loop<Factory>(
                     "Storage proof completed"
                 );
 
-                // Release worker slot only if we successfully reserved it.
-                // Prevents counter from wrapping to usize::MAX on underflow.
-                if decremented {
-                    available_workers.fetch_add(1, Ordering::Relaxed);
-                }
+                // Mark worker as available again.
+                available_workers.fetch_add(1, Ordering::Relaxed);
             }
 
             StorageWorkerJob::BlindedStorageNode { account, path, result_sender } => {
@@ -239,11 +236,8 @@ fn storage_worker_loop<Factory>(
                     "Blinded storage node completed"
                 );
 
-                // Release worker slot only if we successfully reserved it.
-                // Prevents counter from wrapping to usize::MAX on underflow.
-                if decremented {
-                    available_workers.fetch_add(1, Ordering::Relaxed);
-                }
+                // Mark worker as available again.
+                available_workers.fetch_add(1, Ordering::Relaxed);
             }
         }
     }
@@ -264,13 +258,9 @@ fn storage_worker_loop<Factory>(
 ///
 /// # Lifecycle
 ///
-/// Each worker:
-/// 1. Receives `AccountWorkerJob` from crossbeam unbounded channel
-/// 2. Decrements availability counter to mark itself as busy
-/// 3. Computes result using its dedicated long-lived transaction
-/// 4. Sends result directly to original caller via `std::mpsc`
-/// 5. Increments availability counter to mark itself as available
-/// 6. Repeats until channel closes (graceful shutdown)
+/// Each worker initializes its providers, advertises availability, then loops:
+/// receive an account job, mark busy, process the work, respond, and mark available again.
+/// The loop ends gracefully once the channel closes.
 ///
 /// # Transaction Reuse
 ///
@@ -320,12 +310,12 @@ fn account_worker_loop<Factory>(
     let mut account_proofs_processed = 0u64;
     let mut account_nodes_processed = 0u64;
 
+    // Count this worker as available only after successful initialization.
+    available_workers.fetch_add(1, Ordering::Relaxed);
+
     while let Ok(job) = work_rx.recv() {
-        // Reserve a worker slot with saturating decrement to prevent underflow.
-        // Only decrement if counter is above zero.
-        let decremented = available_workers
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_sub(1))
-            .is_ok();
+        // Mark worker as busy.
+        available_workers.fetch_sub(1, Ordering::Relaxed);
 
         match job {
             AccountWorkerJob::AccountMultiproof { mut input, result_sender } => {
@@ -411,11 +401,8 @@ fn account_worker_loop<Factory>(
                 );
                 drop(_span_guard);
 
-                // Release worker slot only if we successfully reserved it.
-                // Prevents counter from wrapping to usize::MAX on underflow.
-                if decremented {
-                    available_workers.fetch_add(1, Ordering::Relaxed);
-                }
+                // Mark worker as available again.
+                available_workers.fetch_add(1, Ordering::Relaxed);
             }
 
             AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
@@ -456,11 +443,8 @@ fn account_worker_loop<Factory>(
                 );
                 drop(_span_guard);
 
-                // Release worker slot only if we successfully reserved it.
-                // Prevents counter from wrapping to usize::MAX on underflow.
-                if decremented {
-                    available_workers.fetch_add(1, Ordering::Relaxed);
-                }
+                // Mark worker as available again.
+                available_workers.fetch_add(1, Ordering::Relaxed);
             }
         }
     }
@@ -940,9 +924,10 @@ impl ProofWorkerHandle {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
-        // Initialize availability counters
-        let storage_available_workers = Arc::new(AtomicUsize::new(storage_worker_count));
-        let account_available_workers = Arc::new(AtomicUsize::new(account_worker_count));
+        // Initialize availability counters at zero. Each worker will increment when it
+        // successfully initializes, ensuring only healthy workers are counted.
+        let storage_available_workers = Arc::new(AtomicUsize::new(0));
+        let account_available_workers = Arc::new(AtomicUsize::new(0));
 
         tracing::debug!(
             target: "trie::proof_task",
