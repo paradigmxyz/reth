@@ -52,7 +52,7 @@ engine-auth: []
 # 4844: reth unwinds from block 2 to genesis but tests expect to unwind to block 1 if chain.rlp has an invalid block
 # 7610: tests are related to empty account that has storage, close to impossible to trigger
 # worth re-visiting when more of these related tests are passing
-eest/consume-engine:
+eels/consume-engine:
   - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test_engine-zero_nonce]-reth
   - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine-deploy_after_fork-nonzero_balance]-reth
   - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine-deploy_after_fork-zero_balance]-reth
@@ -138,7 +138,7 @@ eest/consume-engine:
   - tests/cancun/eip4844_blobs/test_blob_txs.py::test_invalid_tx_max_fee_per_blob_gas[fork_Osaka-invalid_max_fee_per_blob_gas-blockchain_test_engine-account_balance_modifier_1000000000]-reth
   - tests/cancun/eip4844_blobs/test_blob_txs.py::test_invalid_tx_max_fee_per_blob_gas[fork_Prague-insufficient_max_fee_per_blob_gas-blockchain_test_engine-account_balance_modifier_1000000000]-reth
   - tests/cancun/eip4844_blobs/test_blob_txs.py::test_invalid_tx_max_fee_per_blob_gas[fork_Prague-invalid_max_fee_per_blob_gas-blockchain_test_engine-account_balance_modifier_1000000000]-reth
-eest/consume-rlp:
+eels/consume-rlp:
   - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test-zero_nonce]-reth
   - tests/prague/eip7251_consolidations/test_modified_consolidation_contract.py::test_system_contract_errors[fork_Prague-blockchain_test_engine-system_contract_reaches_gas_limit-system_contract_0x0000bbddc7ce488642fb579f8b00f3a590007251]-reth
   - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine-deploy_after_fork-nonzero_balance]-reth

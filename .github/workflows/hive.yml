@@ -161,7 +161,7 @@ jobs:
             limit: .*tests/osaka.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/prague.*
-          - sim: ethereum/eest/consume-rlp
+          - sim: ethereum/eels/consume-rlp
             limit: .*tests/cancun.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/shanghai.*
