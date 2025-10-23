@@ -34,6 +34,14 @@ pub struct DatabaseArgs {
     /// Maximum number of readers allowed to access the database concurrently.
     #[arg(long = "db.max-readers")]
     pub max_readers: Option<u64>,
+    /// Explicitly enabled static file writers.
+    ///
+    /// For release / backwards compatibility purposes, some static file writers are disabled by
+    /// default. See `read_only_segments` in `StaticFileProviderInner`.
+    ///
+    /// This flag enables writing for these static file segments.
+    #[arg(long = "db.enable-v2-static-files")]
+    pub enable_v2_static_files: bool,
 }
 
 impl DatabaseArgs {

@@ -625,7 +625,7 @@ mod tests {
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
-            StaticFileProvider::read_write(static_dir_path).unwrap(),
+            StaticFileProvider::read_write(static_dir_path, false).unwrap(),
         )
         .unwrap();
         let provider = factory.provider().unwrap();
