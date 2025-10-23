@@ -119,7 +119,8 @@ pub struct OpNode {
     /// By default no throttling is applied.
     pub da_config: OpDAConfig,
     /// Gas limit configuration for the OP builder.
-    /// Used to control the gas limit of the blocks produced by the OP builder.(configured by the batcher via the `miner_` api)
+    /// Used to control the gas limit of the blocks produced by the OP builder.(configured by the
+    /// batcher via the `miner_` api)
     pub gas_limit_config: OpGasLimitConfig,
 }
 
@@ -942,8 +943,8 @@ where
         let Self { pool_config_overrides, .. } = self;
 
         // supervisor used for interop
-        if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp)
-            && self.supervisor_http == DEFAULT_SUPERVISOR_URL
+        if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) &&
+            self.supervisor_http == DEFAULT_SUPERVISOR_URL
         {
             info!(target: "reth::cli",
                 url=%DEFAULT_SUPERVISOR_URL,
@@ -1046,7 +1047,12 @@ impl OpPayloadBuilder {
     /// Create a new instance with the given `compute_pending_block` flag and data availability
     /// config.
     pub fn new(compute_pending_block: bool) -> Self {
-        Self { compute_pending_block, best_transactions: (), da_config: OpDAConfig::default(), gas_limit_config: OpGasLimitConfig::default() }
+        Self {
+            compute_pending_block,
+            best_transactions: (),
+            da_config: OpDAConfig::default(),
+            gas_limit_config: OpGasLimitConfig::default(),
+        }
     }
 
     /// Configure the data availability configuration for the OP payload builder.
@@ -1108,7 +1114,10 @@ where
             pool,
             ctx.provider().clone(),
             evm_config,
-            OpBuilderConfig { da_config: self.da_config.clone(), gas_limit_config: self.gas_limit_config.clone() },
+            OpBuilderConfig {
+                da_config: self.da_config.clone(),
+                gas_limit_config: self.gas_limit_config.clone(),
+            },
         )
         .with_transactions(self.best_transactions.clone())
         .set_compute_pending_block(self.compute_pending_block);
