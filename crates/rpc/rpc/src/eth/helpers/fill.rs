@@ -45,6 +45,17 @@ mod tests {
         let evm_config = EthEvmConfig::new(mock_provider.chain_spec());
         mock_provider.extend_accounts(accounts);
 
+        use alloy_consensus::Header;
+        use alloy_primitives::B256;
+
+        let mut genesis_header = Header::default();
+        genesis_header.number = 0;
+        genesis_header.gas_limit = 30_000_000;
+        genesis_header.timestamp = 1;
+
+        let genesis_hash = B256::ZERO;
+        mock_provider.add_header(genesis_hash, genesis_header);
+
         EthApi::builder(mock_provider, pool, NoopNetwork::default(), evm_config).build()
     }
 
@@ -65,12 +76,13 @@ mod tests {
 
         let block_id = BlockId::Number(BlockNumberOrTag::Latest);
 
-        let result = eth_api.fill_transaction(tx_req, block_id, None).await;
+        let filled = eth_api
+            .fill_transaction(tx_req, block_id, None)
+            .await
+            .expect("fill_transaction should succeed");
 
-        if let Ok(filled) = result {
-            // Should fill with the chain id from provider
-            assert!(filled.chain_id.is_some());
-        }
+        // Should fill with the chain id from provider
+        assert!(filled.chain_id.is_some());
     }
 
     #[tokio::test]
@@ -93,11 +105,12 @@ mod tests {
 
         let block_id = BlockId::Number(BlockNumberOrTag::Latest);
 
-        let result = eth_api.fill_transaction(tx_req, block_id, None).await;
+        let filled = eth_api
+            .fill_transaction(tx_req, block_id, None)
+            .await
+            .expect("fill_transaction should succeed");
 
-        if let Ok(filled) = result {
-            assert_eq!(filled.nonce, Some(nonce));
-        }
+        assert_eq!(filled.nonce, Some(nonce));
     }
 
     #[tokio::test]
@@ -122,13 +135,14 @@ mod tests {
 
         let block_id = BlockId::Number(BlockNumberOrTag::Latest);
 
-        let result = eth_api.fill_transaction(tx_req, block_id, None).await;
+        let filled = eth_api
+            .fill_transaction(tx_req, block_id, None)
+            .await
+            .expect("fill_transaction should succeed");
 
-        if let Ok(filled) = result {
-            // Should preserve the provided nonce and gas limit
-            assert_eq!(filled.nonce, Some(provided_nonce));
-            assert_eq!(filled.gas, Some(provided_gas_limit));
-        }
+        // Should preserve the provided nonce and gas limit
+        assert_eq!(filled.nonce, Some(provided_nonce));
+        assert_eq!(filled.gas, Some(provided_gas_limit));
     }
 
     #[tokio::test]
@@ -140,22 +154,29 @@ mod tests {
 
         let eth_api = mock_eth_api(accounts);
 
-        let tx_req = TransactionRequest::default();
+        // Create a simple transfer transaction
+        let mut tx_req = TransactionRequest::default();
+        tx_req.from = Some(address);
+        tx_req.to = Some(Address::random().into());
 
         let block_id = BlockId::Number(BlockNumberOrTag::Latest);
 
-        let result = eth_api.fill_transaction(tx_req, block_id, None).await;
+        let filled = eth_api
+            .fill_transaction(tx_req, block_id, None)
+            .await
+            .expect("fill_transaction should succeed");
 
-        if let Ok(filled) = result {
-            // Verify fields are filled
-            assert!(filled.chain_id.is_some(), "chain_id should be filled");
-            assert!(filled.nonce.is_some(), "nonce should be filled");
+        // Verify fields are filled
+        assert!(filled.chain_id.is_some(), "chain_id should be filled");
+        assert!(filled.nonce.is_some(), "nonce should be filled");
 
-            // Should have some fee field filled (either gas_price or EIP-1559 fields)
-            let has_fees = filled.gas_price.is_some() ||
-                filled.max_fee_per_gas.is_some() ||
-                filled.max_priority_fee_per_gas.is_some();
-            assert!(has_fees, "at least one fee field should be filled");
-        }
+        // Should have some fee field filled (either gas_price or EIP-1559 fields)
+        let has_fees = filled.gas_price.is_some() ||
+            filled.max_fee_per_gas.is_some() ||
+            filled.max_priority_fee_per_gas.is_some();
+        assert!(has_fees, "at least one fee field should be filled");
+
+        // Gas limit should be filled
+        assert!(filled.gas.is_some(), "gas limit should be filled");
     }
 }

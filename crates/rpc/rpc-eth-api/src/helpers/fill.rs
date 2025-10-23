@@ -73,15 +73,15 @@ pub trait FillTransaction: Call + EstimateCall + EthFees + LoadPendingBlock + Lo
             };
 
             let nonce_fut = async {
-                if request.as_ref().nonce().is_none() &&
-                    let Some(from) = request.as_ref().from()
-                {
-                    let state = self.state_at_block_id(block_id).await?;
-                    let nonce = state
-                        .account_nonce(&from)
-                        .map_err(Self::Error::from_eth_err)?
-                        .unwrap_or_default();
-                    return Ok(Some(nonce));
+                if request.as_ref().nonce().is_none() {
+                    if let Some(from) = request.as_ref().from() {
+                        let state = self.state_at_block_id(block_id).await?;
+                        let nonce = state
+                            .account_nonce(&from)
+                            .map_err(Self::Error::from_eth_err)?
+                            .unwrap_or_default();
+                        return Ok(Some(nonce));
+                    }
                 }
                 Ok(None)
             };
