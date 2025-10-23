@@ -13,6 +13,9 @@ fn main() {
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if std::env::var_os("RUST_BACKTRACE").is_none() {
+        // SAFETY: This is safe because we're in main() before any threads are spawned.
+        // std::env::set_var is unsafe due to potential race conditions in multi-threaded
+        // environments, but we're still single-threaded at this point.
         unsafe {
             std::env::set_var("RUST_BACKTRACE", "1");
         }
