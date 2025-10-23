@@ -87,6 +87,9 @@ pub mod gas_oracle {
     /// The default minimum gas price, under which the sample will be ignored
     pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
 
+    /// 0.0001 gwei, for Optimism fee suggestion
+    pub const DEFAULT_MIN_SUGGESTED_PRIORITY_FEE: U256 = U256::from_limbs([100_000u64, 0, 0, 0]);
+
     /// The default gas limit for `eth_call` and adjacent calls.
     ///
     /// This is different from the default to regular 30M block gas limit

@@ -6,6 +6,7 @@ pub mod transaction;
 
 mod block;
 mod call;
+mod fee;
 mod pending_block;
 
 use alloy_primitives::U256;
@@ -13,7 +14,7 @@ use eyre::WrapErr;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reth_chain_state::CanonStateSubscriptions;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{FullNodeComponents, NodePrimitives};
@@ -22,12 +23,12 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
-        AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
+        AddDevSigners, EthApiSpec, EthSigner, EthState, LoadState,
         SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcNodeCore, RpcNodeCoreExt,
 };
-use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
+use reth_rpc_eth_types::EthStateCache;
 use reth_storage_api::{
     BlockNumReader, BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt,
     ProviderTx, StageCheckpointReader, StateProviderFactory,
@@ -199,26 +200,6 @@ where
     }
 }
 
-impl<N> LoadFee for OpEthApi<N>
-where
-    Self: LoadBlock<Provider = N::Provider>,
-    N: OpNodeCore<
-        Provider: BlockReaderIdExt
-                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-                      + StateProviderFactory,
-    >,
-{
-    #[inline]
-    fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
-        self.inner.eth_api.gas_oracle()
-    }
-
-    #[inline]
-    fn fee_history_cache(&self) -> &FeeHistoryCache {
-        self.inner.eth_api.fee_history_cache()
-    }
-}
-
 impl<N> LoadState for OpEthApi<N> where
     N: OpNodeCore<
         Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
@@ -238,12 +219,6 @@ where
     }
 }
 
-impl<N> EthFees for OpEthApi<N>
-where
-    Self: LoadFee,
-    N: OpNodeCore,
-{
-}
 
 impl<N> Trace for OpEthApi<N>
 where

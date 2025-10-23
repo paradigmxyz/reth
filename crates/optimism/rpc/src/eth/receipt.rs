@@ -268,7 +268,7 @@ impl OpReceiptBuilder {
 mod test {
     use super::*;
     use alloy_consensus::{Block, BlockBody};
-    use alloy_primitives::{hex, U256};
+    use alloy_primitives::hex;
     use op_alloy_network::eip2718::Decodable2718;
     use reth_optimism_chainspec::{BASE_MAINNET, OP_MAINNET};
 
