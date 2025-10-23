@@ -474,10 +474,10 @@ impl MultiproofManager {
         self.inflight += 1;
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
         self.metrics
-            .pending_storage_tasks_histogram
+            .pending_storage_multiproofs_histogram
             .record(self.proof_worker_handle.pending_storage_tasks() as f64);
         self.metrics
-            .pending_account_tasks_histogram
+            .pending_account_multiproofs_histogram
             .record(self.proof_worker_handle.pending_account_tasks() as f64);
     }
 
@@ -486,10 +486,10 @@ impl MultiproofManager {
         self.inflight = self.inflight.saturating_sub(1);
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
         self.metrics
-            .pending_storage_tasks_histogram
+            .pending_storage_multiproofs_histogram
             .record(self.proof_worker_handle.pending_storage_tasks() as f64);
         self.metrics
-            .pending_account_tasks_histogram
+            .pending_account_multiproofs_histogram
             .record(self.proof_worker_handle.pending_account_tasks() as f64);
     }
 
@@ -582,10 +582,10 @@ impl MultiproofManager {
         self.inflight += 1;
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
         self.metrics
-            .pending_storage_tasks_histogram
+            .pending_storage_multiproofs_histogram
             .record(self.proof_worker_handle.pending_storage_tasks() as f64);
         self.metrics
-            .pending_account_tasks_histogram
+            .pending_account_multiproofs_histogram
             .record(self.proof_worker_handle.pending_account_tasks() as f64);
     }
 }
@@ -595,6 +595,10 @@ impl MultiproofManager {
 pub(crate) struct MultiProofTaskMetrics {
     /// Histogram of inflight multiproofs.
     pub inflight_multiproofs_histogram: Histogram,
+    /// Histogram of pending storage multiproofs in the queue.
+    pub pending_storage_multiproofs_histogram: Histogram,
+    /// Histogram of pending account multiproofs in the queue.
+    pub pending_account_multiproofs_histogram: Histogram,
 
     /// Histogram of the number of prefetch proof target accounts.
     pub prefetch_proof_targets_accounts_histogram: Histogram,
@@ -630,11 +634,6 @@ pub(crate) struct MultiProofTaskMetrics {
     pub first_update_wait_time_histogram: Histogram,
     /// Total time spent waiting for the last proof result.
     pub last_proof_wait_time_histogram: Histogram,
-
-    /// Histogram of pending storage worker tasks in the queue.
-    pub pending_storage_tasks_histogram: Histogram,
-    /// Histogram of pending account worker tasks in the queue.
-    pub pending_account_tasks_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
