@@ -453,6 +453,12 @@ impl TrieUpdatesSorted {
         &self.storage_tries
     }
 
+    /// Returns the total number of updates including account nodes and all storage updates.
+    pub fn total_len(&self) -> usize {
+        self.account_nodes.len() +
+            self.storage_tries.values().map(|storage| storage.len()).sum::<usize>()
+    }
+
     /// Extends the trie updates with another set of sorted updates.
     ///
     /// This merges the account nodes and storage tries from `other` into `self`.
@@ -533,6 +539,16 @@ impl StorageTrieUpdatesSorted {
     /// Returns reference to updated storage nodes.
     pub fn storage_nodes_ref(&self) -> &[(Nibbles, Option<BranchNodeCompact>)] {
         &self.storage_nodes
+    }
+
+    /// Returns the total number of storage node updates.
+    pub const fn len(&self) -> usize {
+        self.storage_nodes.len()
+    }
+
+    /// Returns `true` if there are no storage node updates.
+    pub const fn is_empty(&self) -> bool {
+        self.storage_nodes.is_empty()
     }
 
     /// Extends the storage trie updates with another set of sorted updates.

@@ -20,15 +20,22 @@ impl<CF, T> InMemoryTrieCursorFactory<CF, T> {
     }
 }
 
-impl<'a, CF, T> TrieCursorFactory for InMemoryTrieCursorFactory<CF, &'a T>
+impl<'overlay, CF, T> TrieCursorFactory for InMemoryTrieCursorFactory<CF, &'overlay T>
 where
-    CF: TrieCursorFactory,
+    CF: TrieCursorFactory + 'overlay,
     T: AsRef<TrieUpdatesSorted>,
 {
-    type AccountTrieCursor = InMemoryTrieCursor<'a, CF::AccountTrieCursor>;
-    type StorageTrieCursor = InMemoryTrieCursor<'a, CF::StorageTrieCursor>;
+    type AccountTrieCursor<'cursor>
+        = InMemoryTrieCursor<'overlay, CF::AccountTrieCursor<'cursor>>
+    where
+        Self: 'cursor;
 
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+    type StorageTrieCursor<'cursor>
+        = InMemoryTrieCursor<'overlay, CF::StorageTrieCursor<'cursor>>
+    where
+        Self: 'cursor;
+
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.account_trie_cursor()?;
         Ok(InMemoryTrieCursor::new(Some(cursor), self.trie_updates.as_ref().account_nodes_ref()))
     }
@@ -36,7 +43,7 @@ where
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         // if the storage trie has no updates then we use this as the in-memory overlay.
         static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
 

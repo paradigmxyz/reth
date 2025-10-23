@@ -32,7 +32,11 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, instrument, trace};
+
+/// Default upper bound for inflight multiproof calculations. These would be sitting in the queue
+/// waiting to be processed.
+const DEFAULT_MULTIPROOF_INFLIGHT_LIMIT: usize = 128;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
@@ -214,7 +218,7 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
     for (address, account) in update {
         if account.is_touched() {
             let hashed_address = keccak256(address);
-            trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
+            trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
             let info = if destroyed { None } else { Some(account.info.into()) };
@@ -338,8 +342,8 @@ impl MultiproofInput {
 /// availability has been signaled.
 #[derive(Debug)]
 pub struct MultiproofManager {
-    /// Maximum number of concurrent calculations.
-    max_concurrent: usize,
+    /// Maximum number of proof calculations allowed to be inflight at once.
+    inflight_limit: usize,
     /// Currently running calculations.
     inflight: usize,
     /// Queued calculations.
@@ -370,11 +374,10 @@ impl MultiproofManager {
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
         proof_worker_handle: ProofWorkerHandle,
-        max_concurrent: usize,
     ) -> Self {
         Self {
-            pending: VecDeque::with_capacity(max_concurrent),
-            max_concurrent,
+            pending: VecDeque::with_capacity(DEFAULT_MULTIPROOF_INFLIGHT_LIMIT),
+            inflight_limit: DEFAULT_MULTIPROOF_INFLIGHT_LIMIT,
             executor,
             inflight: 0,
             metrics,
@@ -384,11 +387,10 @@ impl MultiproofManager {
     }
 
     const fn is_full(&self) -> bool {
-        self.inflight >= self.max_concurrent
+        self.inflight >= self.inflight_limit
     }
 
-    /// Spawns a new multiproof calculation or enqueues it for later if
-    /// `max_concurrent` are already inflight.
+    /// Spawns a new multiproof calculation or enqueues it if the inflight limit is reached.
     fn spawn_or_queue(&mut self, input: PendingMultiproofTask) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets_is_empty() {
@@ -454,7 +456,7 @@ impl MultiproofManager {
             let storage_targets = proof_targets.len();
 
             trace!(
-                target: "engine::root",
+                target: "engine::tree::payload_processor::multiproof",
                 proof_sequence_number,
                 ?proof_targets,
                 storage_targets,
@@ -473,7 +475,7 @@ impl MultiproofManager {
             .storage_proof(hashed_address, proof_targets);
             let elapsed = start.elapsed();
             trace!(
-                target: "engine::root",
+                target: "engine::tree::payload_processor::multiproof",
                 proof_sequence_number,
                 ?elapsed,
                 ?source,
@@ -527,7 +529,7 @@ impl MultiproofManager {
             let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
 
             trace!(
-                target: "engine::root",
+                target: "engine::tree::payload_processor::multiproof",
                 proof_sequence_number,
                 ?proof_targets,
                 account_targets,
@@ -565,7 +567,7 @@ impl MultiproofManager {
             })();
             let elapsed = start.elapsed();
             trace!(
-                target: "engine::root",
+                target: "engine::tree::payload_processor::multiproof",
                 proof_sequence_number,
                 ?elapsed,
                 ?source,
@@ -685,7 +687,6 @@ impl MultiProofTask {
         executor: WorkloadExecutor,
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: Sender<SparseTrieUpdate>,
-        max_concurrency: usize,
         chunk_size: Option<usize>,
     ) -> Self {
         let (tx, rx) = channel();
@@ -704,7 +705,6 @@ impl MultiProofTask {
                 executor,
                 metrics.clone(),
                 proof_worker_handle,
-                max_concurrency,
             ),
             metrics,
         }
@@ -718,6 +718,7 @@ impl MultiProofTask {
     /// Handles request for proof prefetch.
     ///
     /// Returns a number of proofs that were spawned.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip_all, fields(accounts = targets.len()))]
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
@@ -779,8 +780,8 @@ impl MultiProofTask {
         let all_proofs_processed =
             proofs_processed >= state_update_proofs_requested + prefetch_proofs_requested;
         let no_pending = !self.proof_sequencer.has_pending();
-        debug!(
-            target: "engine::root",
+        trace!(
+            target: "engine::tree::payload_processor::multiproof",
             proofs_processed,
             state_update_proofs_requested,
             prefetch_proofs_requested,
@@ -835,7 +836,7 @@ impl MultiProofTask {
         }
 
         if duplicates > 0 {
-            trace!(target: "engine::root", duplicates, "Removed duplicate prefetch proof targets");
+            trace!(target: "engine::tree::payload_processor::multiproof", duplicates, "Removed duplicate prefetch proof targets");
         }
 
         targets
@@ -844,6 +845,7 @@ impl MultiProofTask {
     /// Handles state updates.
     ///
     /// Returns a number of proofs that were spawned.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip(self, update), fields(accounts = update.len()))]
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
@@ -973,6 +975,12 @@ impl MultiProofTask {
     ///      currently being calculated, or if there are any pending proofs in the proof sequencer
     ///      left to be revealed by checking the pending tasks.
     /// 6. This task exits after all pending proofs are processed.
+    #[instrument(
+        level = "debug",
+        name = "MultiProofTask::run",
+        target = "engine::tree::payload_processor::multiproof",
+        skip_all
+    )]
     pub(crate) fn run(mut self) {
         // TODO convert those into fields
         let mut prefetch_proofs_requested = 0;
@@ -990,26 +998,26 @@ impl MultiProofTask {
         let mut updates_finished_time = None;
 
         loop {
-            trace!(target: "engine::root", "entering main channel receiving loop");
+            trace!(target: "engine::tree::payload_processor::multiproof", "entering main channel receiving loop");
             match self.rx.recv() {
                 Ok(message) => match message {
                     MultiProofMessage::PrefetchProofs(targets) => {
-                        trace!(target: "engine::root", "processing MultiProofMessage::PrefetchProofs");
+                        trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::PrefetchProofs");
                         if first_update_time.is_none() {
                             // record the wait time
                             self.metrics
                                 .first_update_wait_time_histogram
                                 .record(start.elapsed().as_secs_f64());
                             first_update_time = Some(Instant::now());
-                            debug!(target: "engine::root", "Started state root calculation");
+                            debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                         }
 
                         let account_targets = targets.len();
                         let storage_targets =
                             targets.values().map(|slots| slots.len()).sum::<usize>();
                         prefetch_proofs_requested += self.on_prefetch_proof(targets);
-                        debug!(
-                            target: "engine::root",
+                        trace!(
+                            target: "engine::tree::payload_processor::multiproof",
                             account_targets,
                             storage_targets,
                             prefetch_proofs_requested,
@@ -1017,20 +1025,20 @@ impl MultiProofTask {
                         );
                     }
                     MultiProofMessage::StateUpdate(source, update) => {
-                        trace!(target: "engine::root", "processing MultiProofMessage::StateUpdate");
+                        trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
                         if first_update_time.is_none() {
                             // record the wait time
                             self.metrics
                                 .first_update_wait_time_histogram
                                 .record(start.elapsed().as_secs_f64());
                             first_update_time = Some(Instant::now());
-                            debug!(target: "engine::root", "Started state root calculation");
+                            debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                         }
 
                         let len = update.len();
                         state_update_proofs_requested += self.on_state_update(source, update);
-                        debug!(
-                            target: "engine::root",
+                        trace!(
+                            target: "engine::tree::payload_processor::multiproof",
                             ?source,
                             len,
                             ?state_update_proofs_requested,
@@ -1038,7 +1046,7 @@ impl MultiProofTask {
                         );
                     }
                     MultiProofMessage::FinishedStateUpdates => {
-                        trace!(target: "engine::root", "processing MultiProofMessage::FinishedStateUpdates");
+                        trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
                         updates_finished = true;
                         updates_finished_time = Some(Instant::now());
                         if self.is_done(
@@ -1048,14 +1056,14 @@ impl MultiProofTask {
                             updates_finished,
                         ) {
                             debug!(
-                                target: "engine::root",
+                                target: "engine::tree::payload_processor::multiproof",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
                             break
                         }
                     }
                     MultiProofMessage::EmptyProof { sequence_number, state } => {
-                        trace!(target: "engine::root", "processing MultiProofMessage::EmptyProof");
+                        trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::EmptyProof");
 
                         proofs_processed += 1;
 
@@ -1073,14 +1081,14 @@ impl MultiProofTask {
                             updates_finished,
                         ) {
                             debug!(
-                                target: "engine::root",
+                                target: "engine::tree::payload_processor::multiproof",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
                             break
                         }
                     }
                     MultiProofMessage::ProofCalculated(proof_calculated) => {
-                        trace!(target: "engine::root", "processing
+                        trace!(target: "engine::tree::payload_processor::multiproof", "processing
         MultiProofMessage::ProofCalculated");
 
                         // we increment proofs_processed for both state updates and prefetches,
@@ -1091,8 +1099,8 @@ impl MultiProofTask {
                             .proof_calculation_duration_histogram
                             .record(proof_calculated.elapsed);
 
-                        debug!(
-                            target: "engine::root",
+                        trace!(
+                            target: "engine::tree::payload_processor::multiproof",
                             sequence = proof_calculated.sequence_number,
                             total_proofs = proofs_processed,
                             "Processing calculated proof"
@@ -1113,14 +1121,14 @@ impl MultiProofTask {
                             updates_finished,
                         ) {
                             debug!(
-                                target: "engine::root",
+                                target: "engine::tree::payload_processor::multiproof",
                                 "State updates finished and all proofs processed, ending calculation");
                             break
                         }
                     }
                     MultiProofMessage::ProofCalculationError(err) => {
                         error!(
-                            target: "engine::root",
+                            target: "engine::tree::payload_processor::multiproof",
                             ?err,
                             "proof calculation error"
                         );
@@ -1130,14 +1138,14 @@ impl MultiProofTask {
                 Err(_) => {
                     // this means our internal message channel is closed, which shouldn't happen
                     // in normal operation since we hold both ends
-                    error!(target: "engine::root", "Internal message channel closed unexpectedly");
+                    error!(target: "engine::tree::payload_processor::multiproof", "Internal message channel closed unexpectedly");
                     return
                 }
             }
         }
 
         debug!(
-            target: "engine::root",
+            target: "engine::tree::payload_processor::multiproof",
             total_updates = state_update_proofs_requested,
             total_proofs = proofs_processed,
             total_time = ?first_update_time.map(|t|t.elapsed()),
@@ -1231,7 +1239,7 @@ mod tests {
             ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1);
         let channel = channel();
 
-        MultiProofTask::new(config, executor, proof_handle, channel.0, 1, None)
+        MultiProofTask::new(config, executor, proof_handle, channel.0, Some(1))
     }
 
     #[test]

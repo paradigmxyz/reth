@@ -1,6 +1,7 @@
 //! Logic to export from database era1 block history
 //! and injecting them into era1 files with `Era1Writer`.
 
+use crate::calculate_td_by_number;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, B256, U256};
 use eyre::{eyre, Result};
@@ -114,9 +115,7 @@ where
 
     let mut total_difficulty = if config.first_block_number > 0 {
         let prev_block_number = config.first_block_number - 1;
-        provider
-            .header_td_by_number(prev_block_number)?
-            .ok_or_else(|| eyre!("Total difficulty not found for block {prev_block_number}"))?
+        calculate_td_by_number(provider, prev_block_number)?
     } else {
         U256::ZERO
     };

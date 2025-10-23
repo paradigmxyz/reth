@@ -1,4 +1,4 @@
-use crate::{any::AnyError, db::DatabaseError, writer::UnifiedStorageWriterError};
+use crate::{any::AnyError, db::DatabaseError};
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
@@ -58,9 +58,6 @@ pub enum ProviderError {
         /// The account address.
         address: Address,
     },
-    /// The total difficulty for a block is missing.
-    #[error("total difficulty not found for block #{_0}")]
-    TotalDifficultyNotFound(BlockNumber),
     /// When required header related data was not found but was required.
     #[error("no header found for {_0:?}")]
     HeaderNotFound(BlockHashOrNumber),
@@ -128,9 +125,6 @@ pub enum ProviderError {
     /// Consistent view error.
     #[error("failed to initialize consistent view: {_0}")]
     ConsistentView(Box<ConsistentViewError>),
-    /// Storage writer error.
-    #[error(transparent)]
-    UnifiedStorageWriterError(#[from] UnifiedStorageWriterError),
     /// Received invalid output from configured storage implementation.
     #[error("received invalid output from storage")]
     InvalidStorageOutput,

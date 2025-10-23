@@ -39,7 +39,7 @@ pub struct TraceArgs {
         long = "tracing-otlp.filter",
         global = true,
         value_name = "FILTER",
-        default_value = "TRACE",
+        default_value = "debug",
         help_heading = "Tracing"
     )]
     pub otlp_filter: EnvFilter,

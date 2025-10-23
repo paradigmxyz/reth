@@ -734,6 +734,11 @@ Dev testnet:
           Parses strings using [`humantime::parse_duration`]
           --dev.block-time 12s
 
+      --dev.mnemonic <MNEMONIC>
+          Derive dev accounts from a fixed mnemonic instead of random ones.
+
+          [default: "test test test test test test test test test test test junk"]
+
 Pruning:
       --full
           Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored
@@ -770,9 +775,6 @@ Pruning:
 
       --prune.receipts.before <BLOCK_NUMBER>
           Prune receipts before the specified block number. The specified block number is not pruned
-
-      --prune.receiptslogfilter <FILTER_CONFIG>
-          Configure receipts log filter. Format: <`address`>:<`prune_mode`>... where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
 
       --prune.accounthistory.full
           Prunes all account history
@@ -834,11 +836,6 @@ Engine:
 
       --engine.accept-execution-requests-hash
           Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`
-
-      --engine.max-proof-task-concurrency <MAX_PROOF_TASK_CONCURRENCY>
-          Configure the maximum number of concurrent proof tasks
-
-          [default: 256]
 
       --engine.multiproof-chunking
           Whether multiproof task should chunk proof targets
@@ -976,7 +973,7 @@ Logging:
 
           Possible values:
           - always: Colors on
-          - auto:   Colors on
+          - auto:   Auto-detect
           - never:  Colors off
 
           [default: always]
@@ -1011,5 +1008,5 @@ Tracing:
 
           Defaults to TRACE if not specified.
 
-          [default: TRACE]
+          [default: debug]
 ```

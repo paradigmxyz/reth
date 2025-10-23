@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 /// 5. Appending and re-sorting only if new items were added
 pub(crate) fn extend_sorted_vec<K, V>(target: &mut Vec<(K, V)>, other: &[(K, V)])
 where
-    K: Clone + Ord + core::hash::Hash + Eq,
+    K: Clone + Ord,
     V: Clone,
 {
     if other.is_empty() {

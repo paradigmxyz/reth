@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::B256;
 use reth_ethereum_primitives::BlockBody;
 use reth_network_p2p::bodies::response::BlockResponse;
 use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
@@ -55,9 +55,7 @@ pub(crate) fn insert_headers(
         .expect("failed to create writer");
 
     for header in headers {
-        writer
-            .append_header(header.header(), U256::ZERO, &header.hash())
-            .expect("failed to append header");
+        writer.append_header(header.header(), &header.hash()).expect("failed to append header");
     }
     drop(writer);
     provider_rw.commit().expect("failed to commit");

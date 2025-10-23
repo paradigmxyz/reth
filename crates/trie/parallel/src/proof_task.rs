@@ -57,7 +57,7 @@ use std::{
     time::Instant,
 };
 use tokio::runtime::Handle;
-use tracing::trace;
+use tracing::{debug_span, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskTrieMetrics;
@@ -300,10 +300,16 @@ fn account_worker_loop<Factory>(
     while let Ok(job) = work_rx.recv() {
         match job {
             AccountWorkerJob::AccountMultiproof { mut input, result_sender } => {
+                let span = tracing::debug_span!(
+                    target: "trie::proof_task",
+                    "Account multiproof calculation",
+                    targets = input.targets.len(),
+                    worker_id,
+                );
+                let _span_guard = span.enter();
+
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
-                    targets = input.targets.len(),
                     "Processing account multiproof"
                 );
 
@@ -370,18 +376,24 @@ fn account_worker_loop<Factory>(
 
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
                     proof_time_us = proof_elapsed.as_micros(),
                     total_processed = account_proofs_processed,
                     "Account multiproof completed"
                 );
+                drop(_span_guard);
             }
 
             AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
+                let span = tracing::debug_span!(
+                    target: "trie::proof_task",
+                    "Blinded account node calculation",
+                    ?path,
+                    worker_id,
+                );
+                let _span_guard = span.enter();
+
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
-                    ?path,
                     "Processing blinded account node"
                 );
 
@@ -403,12 +415,11 @@ fn account_worker_loop<Factory>(
 
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
-                    ?path,
                     node_time_us = elapsed.as_micros(),
                     total_processed = account_nodes_processed,
                     "Blinded account node completed"
                 );
+                drop(_span_guard);
             }
         }
     }
@@ -693,7 +704,7 @@ where
             multi_added_removed_keys.unwrap_or_else(|| Arc::new(MultiAddedRemovedKeys::new()));
         let added_removed_keys = multi_added_removed_keys.get_storage(&hashed_address);
 
-        let span = tracing::trace_span!(
+        let span = tracing::debug_span!(
             target: "trie::proof_task",
             "Storage proof calculation",
             hashed_address = ?hashed_address,
@@ -889,8 +900,13 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
+        let storage_worker_parent =
+            debug_span!(target: "trie::proof_task", "Storage worker tasks", ?storage_worker_count);
+        let _guard = storage_worker_parent.enter();
+
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
+            let parent_span = debug_span!(target: "trie::proof_task", "Storage worker", ?worker_id);
             let view_clone = view.clone();
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = storage_work_rx.clone();
@@ -899,6 +915,7 @@ impl ProofWorkerHandle {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
 
+                let _guard = parent_span.enter();
                 storage_worker_loop(
                     view_clone,
                     task_ctx_clone,
@@ -916,8 +933,15 @@ impl ProofWorkerHandle {
             );
         }
 
+        drop(_guard);
+
+        let account_worker_parent =
+            debug_span!(target: "trie::proof_task", "Account worker tasks", ?account_worker_count);
+        let _guard = account_worker_parent.enter();
+
         // Spawn account workers
         for worker_id in 0..account_worker_count {
+            let parent_span = debug_span!(target: "trie::proof_task", "Account worker", ?worker_id);
             let view_clone = view.clone();
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = account_work_rx.clone();
@@ -927,6 +951,7 @@ impl ProofWorkerHandle {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
 
+                let _guard = parent_span.enter();
                 account_worker_loop(
                     view_clone,
                     task_ctx_clone,
@@ -945,6 +970,8 @@ impl ProofWorkerHandle {
             );
         }
 
+        drop(_guard);
+
         Self::new_handle(storage_work_tx, account_work_tx)
     }
 
@@ -958,8 +985,8 @@ impl ProofWorkerHandle {
         Self { storage_work_tx, account_work_tx }
     }
 
-    /// Queue a storage proof computation
-    pub fn queue_storage_proof(
+    /// Dispatch a storage proof computation to storage worker pool
+    pub fn dispatch_storage_proof(
         &self,
         input: StorageProofInput,
     ) -> Result<Receiver<StorageProofResult>, ProviderError> {
@@ -988,8 +1015,8 @@ impl ProofWorkerHandle {
         Ok(rx)
     }
 
-    /// Internal: Queue blinded storage node request
-    fn queue_blinded_storage_node(
+    /// Dispatch blinded storage node request to storage worker pool
+    pub(crate) fn dispatch_blinded_storage_node(
         &self,
         account: B256,
         path: Nibbles,
@@ -1004,8 +1031,8 @@ impl ProofWorkerHandle {
         Ok(rx)
     }
 
-    /// Internal: Queue blinded account node request
-    fn queue_blinded_account_node(
+    /// Dispatch blinded account node request to account worker pool
+    pub(crate) fn dispatch_blinded_account_node(
         &self,
         path: Nibbles,
     ) -> Result<Receiver<TrieNodeProviderResult>, ProviderError> {
@@ -1055,13 +1082,13 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
         match self {
             Self::AccountNode { handle } => {
                 let rx = handle
-                    .queue_blinded_account_node(*path)
+                    .dispatch_blinded_account_node(*path)
                     .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
                 rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
             Self::StorageNode { handle, account } => {
                 let rx = handle
-                    .queue_blinded_storage_node(*account, *path)
+                    .dispatch_blinded_storage_node(*account, *path)
                     .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
                 rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }

@@ -1,6 +1,5 @@
 use crate::{segments::SegmentSet, Pruner};
 use alloy_eips::eip2718::Encodable2718;
-use reth_chainspec::MAINNET_PRUNE_DELETE_LIMIT;
 use reth_config::PruneConfig;
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_exex_types::FinishedExExHeight;
@@ -30,9 +29,6 @@ pub struct PrunerBuilder {
 }
 
 impl PrunerBuilder {
-    /// Default timeout for a prune run.
-    pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(100);
-
     /// Creates a new [`PrunerBuilder`] from the given [`PruneConfig`].
     pub fn new(pruner_config: PruneConfig) -> Self {
         Self::default()
@@ -47,7 +43,7 @@ impl PrunerBuilder {
     }
 
     /// Sets the configuration for every part of the data that can be pruned.
-    pub fn segments(mut self, segments: PruneModes) -> Self {
+    pub const fn segments(mut self, segments: PruneModes) -> Self {
         self.segments = segments;
         self
     }
@@ -135,7 +131,7 @@ impl Default for PrunerBuilder {
         Self {
             block_interval: 5,
             segments: PruneModes::default(),
-            delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
+            delete_limit: usize::MAX,
             timeout: None,
             finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,
         }
