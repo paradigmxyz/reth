@@ -869,9 +869,7 @@ mod tests {
             })
             .unwrap();
 
-            loop {
-                let _ = st.next().await;
-            }
+            while st.next().await.is_some() {}
         });
 
         let conn = connect_passthrough(local_addr, test_hello().0).await;
