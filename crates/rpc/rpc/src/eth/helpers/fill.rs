@@ -48,10 +48,8 @@ mod tests {
         use alloy_consensus::Header;
         use alloy_primitives::B256;
 
-        let mut genesis_header = Header::default();
-        genesis_header.number = 0;
-        genesis_header.gas_limit = 30_000_000;
-        genesis_header.timestamp = 1;
+        let genesis_header =
+            Header { number: 0, gas_limit: 30_000_000, timestamp: 1, ..Default::default() };
 
         let genesis_hash = B256::ZERO;
         mock_provider.add_header(genesis_hash, genesis_header);
@@ -69,10 +67,12 @@ mod tests {
 
         let eth_api = mock_eth_api(accounts);
 
-        let mut tx_req = TransactionRequest::default();
-        tx_req.from = Some(address);
-        tx_req.to = Some(Address::random().into());
-        tx_req.gas = Some(21_000);
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(Address::random().into()),
+            gas: Some(21_000),
+            ..Default::default()
+        };
 
         let block_id = BlockId::Number(BlockNumberOrTag::Latest);
 
@@ -97,11 +97,13 @@ mod tests {
 
         let eth_api = mock_eth_api(accounts);
 
-        let mut tx_req = TransactionRequest::default();
-        tx_req.from = Some(address);
-        tx_req.to = Some(Address::random().into());
-        tx_req.value = Some(U256::from(1000));
-        tx_req.gas = Some(21_000);
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(Address::random().into()),
+            value: Some(U256::from(1000)),
+            gas: Some(21_000),
+            ..Default::default()
+        };
 
         let block_id = BlockId::Number(BlockNumberOrTag::Latest);
 
@@ -126,12 +128,14 @@ mod tests {
 
         let eth_api = mock_eth_api(accounts);
 
-        let mut tx_req = TransactionRequest::default();
-        tx_req.from = Some(address);
-        tx_req.to = Some(Address::random().into());
-        tx_req.value = Some(U256::from(1000));
-        tx_req.nonce = Some(provided_nonce); // Explicitly set nonce
-        tx_req.gas = Some(provided_gas_limit); // Explicitly set gas limit
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(Address::random().into()),
+            value: Some(U256::from(1000)),
+            nonce: Some(provided_nonce),
+            gas: Some(provided_gas_limit),
+            ..Default::default()
+        };
 
         let block_id = BlockId::Number(BlockNumberOrTag::Latest);
 
@@ -155,9 +159,11 @@ mod tests {
         let eth_api = mock_eth_api(accounts);
 
         // Create a simple transfer transaction
-        let mut tx_req = TransactionRequest::default();
-        tx_req.from = Some(address);
-        tx_req.to = Some(Address::random().into());
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(Address::random().into()),
+            ..Default::default()
+        };
 
         let block_id = BlockId::Number(BlockNumberOrTag::Latest);
 
