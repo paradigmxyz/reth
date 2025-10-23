@@ -9813,6 +9813,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-prune-db"
+version = "1.8.2"
+
+[[package]]
 name = "reth-prune-types"
 version = "1.8.2"
 dependencies = [

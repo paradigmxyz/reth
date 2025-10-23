@@ -93,6 +93,7 @@ members = [
     "crates/payload/util/",
     "crates/primitives-traits/",
     "crates/primitives/",
+    "crates/prune/db",
     "crates/prune/prune",
     "crates/prune/types",
     "crates/ress/protocol",
