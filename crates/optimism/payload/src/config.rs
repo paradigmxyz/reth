@@ -108,7 +108,10 @@ struct OpDAConfigInner {
 /// builder.
 #[derive(Debug, Clone, Default)]
 pub struct OpGasLimitConfig {
-    inner: Arc<OpGasLimitConfigInner>,
+    /// Gas limit for a transaction
+    ///
+    /// 0 means use the default gas limit.
+    gas_limit: Arc<AtomicU64>,
 }
 
 impl OpGasLimitConfig {
@@ -120,7 +123,7 @@ impl OpGasLimitConfig {
     }
     /// Returns the gas limit for a transaction, if any.
     pub fn gas_limit(&self) -> Option<u64> {
-        let val = self.inner.gas_limit.load(std::sync::atomic::Ordering::Relaxed);
+        let val = self.gas_limit.load(std::sync::atomic::Ordering::Relaxed);
         if val == 0 {
             None
         } else {
@@ -129,16 +132,8 @@ impl OpGasLimitConfig {
     }
     /// Sets the gas limit for a transaction. 0 means use the default gas limit.
     pub fn set_gas_limit(&self, gas_limit: u64) {
-        self.inner.gas_limit.store(gas_limit, std::sync::atomic::Ordering::Relaxed);
+        self.gas_limit.store(gas_limit, std::sync::atomic::Ordering::Relaxed);
     }
-}
-
-#[derive(Debug, Default)]
-struct OpGasLimitConfigInner {
-    /// Gas limit for a transaction
-    ///
-    /// 0 means use the default gas limit.
-    gas_limit: AtomicU64,
 }
 
 #[cfg(test)]
