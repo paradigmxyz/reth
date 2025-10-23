@@ -168,13 +168,11 @@ impl StaticFileSegment {
 
     /// Returns `true` if a segment row is linked to a block.
     pub const fn is_block_based(&self) -> bool {
-        // TODO(rjected): figure out if this is correct for account change sets
         matches!(self, Self::Headers | Self::AccountChangeSets)
     }
 }
 
 /// A changeset offset, also with the number of elements in the offset for convenience
-// TODO: should this be replaced with a method in SegmentHeader?
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
 pub struct ChangesetOffset {
     /// Offset for the row for this block
@@ -445,8 +443,7 @@ impl SegmentHeader {
     }
 
     /// Sets a new `block_range`.
-    #[allow(clippy::missing_const_for_fn)] // False positive: function mutates self
-    pub fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
+    pub const fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
         if let Some(block_range) = &mut self.block_range {
             block_range.start = block_start;
             block_range.end = block_end;
