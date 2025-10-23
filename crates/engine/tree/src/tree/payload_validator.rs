@@ -584,6 +584,18 @@ where
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(&output.state));
 
+        // Write block's trie updates to JSON file
+        if let Err(err) = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let trie_input_dir = std::env::current_dir()?.join("trie-input");
+            fs::create_dir_all(&trie_input_dir)?;
+            let file_path = trie_input_dir.join(format!("{}-trie-updates.json", block_num_hash.hash));
+            let sorted_updates = trie_output.clone().into_sorted();
+            fs::write(&file_path, serde_json::to_string_pretty(&sorted_updates)?)?;
+            Ok(())
+        })() {
+            warn!(target: "engine::tree::payload_validator", %err, "Failed to write block trie updates to file");
+        }
+
         Ok(ExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
@@ -1036,7 +1048,7 @@ where
             if let Err(err) = (|| -> Result<(), Box<dyn std::error::Error>> {
                 let trie_input_dir = std::env::current_dir()?.join("trie-input");
                 fs::create_dir_all(&trie_input_dir)?;
-                let file_path = trie_input_dir.join(format!("{}.json", block_hash));
+                let file_path = trie_input_dir.join(format!("{}-trie-inputs.json", block_hash));
 
                 let blocks_data: Vec<_> = blocks
                     .iter()
