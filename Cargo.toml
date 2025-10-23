@@ -768,19 +768,19 @@ alloy-transport-ws = { git = "https://github.com/Soubhik-10/alloy", branch = "ba
 # op-alloy-rpc-jsonrpsee = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 #
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
-revm = { git = "https://github.com/Rimeeeeee/revm", branch = "rakita/bal" }
-alloy-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "temp-fix" }
-alloy-op-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "temp-fix" }
-revm-bytecode = { git = "https://github.com/Rimeeeeee/revm", branch = "rakita/bal" }
-revm-database = { git = "https://github.com/Rimeeeeee/revm", branch = "rakita/bal" }
-revm-state = { git = "https://github.com/Rimeeeeee/revm", branch = "rakita/bal" }
-revm-primitives = { git = "https://github.com/Rimeeeeee/revm", branch = "rakita/bal" }
-revm-interpreter = { git = "https://github.com/Rimeeeeee/revm", branch = "rakita/bal" }
-revm-inspector = { git = "https://github.com/Rimeeeeee/revm", branch = "rakita/bal" }
-revm-context = { git = "https://github.com/Rimeeeeee/revm", branch = "rakita/bal" }
-revm-context-interface = { git = "https://github.com/Rimeeeeee/revm", branch = "rakita/bal" }
-revm-database-interface = { git = "https://github.com/Rimeeeeee/revm", branch = "rakita/bal" }
-op-revm = { git = "https://github.com/Rimeeeeee/revm", branch = "rakita/bal" }
+revm = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
+alloy-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "new-approach1" }
+alloy-op-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "new-approach1" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
+revm-database = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
+revm-state = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
+revm-context = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
+op-revm = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
 #
 # jsonrpsee = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-core = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
