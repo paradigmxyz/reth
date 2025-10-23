@@ -35,6 +35,25 @@ impl Decodable for UpgradeStatus {
 }
 
 impl UpgradeStatus {
+    /// Creates a new `UpgradeStatus` with the specified extension.
+    pub fn new(extension: UpgradeStatusExtension) -> Self {
+        Self { extension }
+    }
+
+    /// Creates a new `UpgradeStatus` that allows peer transaction broadcasting.
+    pub fn allow_broadcast() -> Self {
+        Self {
+            extension: UpgradeStatusExtension::allow_broadcast(),
+        }
+    }
+
+    /// Creates a new `UpgradeStatus` that disables peer transaction broadcasting.
+    pub fn disable_broadcast() -> Self {
+        Self {
+            extension: UpgradeStatusExtension::disable_broadcast(),
+        }
+    }
+
     /// Encode the upgrade status message into RLPx bytes.
     pub fn into_rlpx(self) -> Bytes {
         let mut out = BytesMut::new();
@@ -44,11 +63,26 @@ impl UpgradeStatus {
 }
 
 /// The extension to define whether to enable or disable the flag.
-/// This flag is currently ignored, and will be supported later.
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UpgradeStatusExtension {
-    // TODO: support disable_peer_tx_broadcast flag
     /// To notify a peer to disable the broadcast of transactions or not.
     pub disable_peer_tx_broadcast: bool,
+}
+
+impl UpgradeStatusExtension {
+    /// Creates a new `UpgradeStatusExtension` with the specified broadcast setting.
+    pub fn new(disable_peer_tx_broadcast: bool) -> Self {
+        Self { disable_peer_tx_broadcast }
+    }
+
+    /// Creates a new `UpgradeStatusExtension` that allows peer transaction broadcasting.
+    pub fn allow_broadcast() -> Self {
+        Self { disable_peer_tx_broadcast: false }
+    }
+
+    /// Creates a new `UpgradeStatusExtension` that disables peer transaction broadcasting.
+    pub fn disable_broadcast() -> Self {
+        Self { disable_peer_tx_broadcast: true }
+    }
 }
