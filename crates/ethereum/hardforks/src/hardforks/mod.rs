@@ -2,7 +2,7 @@ mod dev;
 pub use dev::DEV_HARDFORKS;
 
 use crate::{ForkCondition, ForkFilter, ForkId, Hardfork, Head};
-#[cfg(all(feature = "std", feature = "rustc-hash"))]
+#[cfg(feature = "std")]
 use rustc_hash::FxHashMap;
 #[cfg(feature = "std")]
 use std::collections::hash_map::Entry;
@@ -48,10 +48,8 @@ pub trait Hardforks: Clone {
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct ChainHardforks {
     forks: Vec<(Box<dyn Hardfork>, ForkCondition)>,
-    #[cfg(all(feature = "std", feature = "rustc-hash"))]
+    #[cfg(feature = "std")]
     map: FxHashMap<&'static str, ForkCondition>,
-    #[cfg(all(feature = "std", not(feature = "rustc-hash")))]
-    map: std::collections::HashMap<&'static str, ForkCondition>,
     #[cfg(not(feature = "std"))]
     map: alloc::collections::BTreeMap<&'static str, ForkCondition>,
 }
