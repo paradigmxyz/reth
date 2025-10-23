@@ -76,7 +76,7 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
         address: Address,
         block_number: LenientBlockNumberOrTag,
         page_size: usize,
-    ) -> RpcResult<TransactionsWithReceipts>;
+    ) -> RpcResult<TransactionsWithReceipts<T>>;
 
     /// Gets paginated inbound/outbound transaction calls for a certain address.
     #[method(name = "searchTransactionsAfter")]
@@ -85,7 +85,7 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
         address: Address,
         block_number: LenientBlockNumberOrTag,
         page_size: usize,
-    ) -> RpcResult<TransactionsWithReceipts>;
+    ) -> RpcResult<TransactionsWithReceipts<T>>;
 
     /// Gets the transaction hash for a certain sender address, given its nonce.
     #[method(name = "getTransactionBySenderAndNonce")]
