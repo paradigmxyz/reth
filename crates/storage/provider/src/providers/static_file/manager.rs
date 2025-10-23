@@ -1149,7 +1149,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     {
         let mut result = Vec::with_capacity((range.end - range.start).min(100) as usize);
 
-        // TODO(rjected): what kind of change do we need here for account changeset?
         /// Resolves to the provider for the given block or transaction number.
         ///
         /// If the static file is missing, the `result` is returned.
@@ -1501,9 +1500,6 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
-        let header = provider.user_header();
-        trace!(target: "provider::static_file", ?header, "Got user header");
-
         if let Some(offset) = provider.user_header().changeset_offset(block_number) {
             let mut cursor = provider.cursor()?;
             let range = offset.changeset_range();
@@ -1515,7 +1511,6 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
                 if let Some(change) =
                     cursor.get_one::<reth_db::static_file::AccountChangesetMask>(mid.into())?
                 {
-                    trace!(target: "provider::static_file", ?change, "In binary search for addr");
                     if change.address < address {
                         low = mid + 1;
                     } else {
