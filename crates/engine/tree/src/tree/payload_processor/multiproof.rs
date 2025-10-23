@@ -21,7 +21,6 @@ use reth_trie::{
 use reth_trie_parallel::{
     proof::ParallelProof,
     proof_task::{AccountMultiproofInput, ProofResultMessage, ProofWorkerHandle},
-    stats::ParallelTrieTracker,
 };
 use std::{
     collections::BTreeMap,
@@ -396,7 +395,7 @@ impl MultiproofManager {
     /// Spawns a single storage proof calculation task.
     fn spawn_storage_proof(&mut self, storage_multiproof_input: StorageMultiproofInput) {
         let StorageMultiproofInput {
-            config,
+            config: _,
             source,
             hashed_state_update,
             hashed_address,
@@ -406,57 +405,42 @@ impl MultiproofManager {
             ..
         } = storage_multiproof_input;
 
-        let storage_proof_worker_handle = self.proof_worker_handle.clone();
-        let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
-        let proof_result_tx = self.proof_result_tx.clone();
+        let storage_targets = proof_targets.len();
 
-        self.executor.spawn_blocking(move || {
-            let storage_targets = proof_targets.len();
+        trace!(
+            target: "engine::root",
+            proof_sequence_number,
+            ?proof_targets,
+            storage_targets,
+            ?source,
+            "Dispatching storage proof to workers"
+        );
 
-            trace!(
-                target: "engine::tree::payload_processor::multiproof",
-                proof_sequence_number,
-                ?proof_targets,
-                storage_targets,
-                "Starting dedicated storage proof calculation",
-            );
-            let start = Instant::now();
-            let proof_result = ParallelProof::new(
-                config.nodes_sorted,
-                config.state_sorted,
-                config.prefix_sets,
-                missed_leaves_storage_roots,
-                storage_proof_worker_handle,
-            )
-            .with_branch_node_masks(true)
-            .with_multi_added_removed_keys(Some(multi_added_removed_keys))
-            .storage_proof(hashed_address, proof_targets);
-            let elapsed = start.elapsed();
-            trace!(
-                target: "engine::tree::payload_processor::multiproof",
-                proof_sequence_number,
-                ?elapsed,
-                ?source,
-                storage_targets,
-                "Storage multiproofs calculated",
-            );
+        let start = Instant::now();
 
-            let result_msg = match proof_result {
-                Ok(proof) => {
-                    let multiproof = DecodedMultiProof::from_storage_proof(hashed_address, proof);
-                    let stats = ParallelTrieTracker::default().finish();
-                    Ok((multiproof, stats))
-                }
-                Err(e) => Err(e),
-            };
+        // Create prefix set from targets
+        let prefix_set = reth_trie::prefix_set::PrefixSetMut::from(
+            proof_targets.iter().map(reth_trie::Nibbles::unpack),
+        );
+        let prefix_set = prefix_set.freeze();
 
-            let _ = proof_result_tx.send(ProofResultMessage {
-                sequence_number: proof_sequence_number,
-                result: result_msg,
-                elapsed,
-                state: hashed_state_update,
-            });
-        });
+        // Build computation input (data only)
+        let input = reth_trie_parallel::proof_task::StorageProofInput::new(
+            hashed_address,
+            prefix_set,
+            proof_targets,
+            true, // with_branch_node_masks
+            Some(multi_added_removed_keys),
+        );
+
+        // Dispatch to storage worker - NO spawn_blocking!
+        if let Err(e) = self.proof_worker_handle.dispatch_storage_proof(
+            input,
+            (self.proof_result_tx.clone(), proof_sequence_number, hashed_state_update, start),
+        ) {
+            error!(target: "engine::root", ?e, "Failed to dispatch storage proof");
+            return;
+        }
 
         self.inflight += 1;
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
