@@ -1530,43 +1530,42 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
-        if let Some(offset) = provider.user_header().changeset_offset(block_number) {
-            let mut cursor = provider.cursor()?;
-            let range = offset.changeset_range();
-            let mut low = range.start;
-            let mut high = range.end;
+        let Some(offset) = provider.user_header().changeset_offset(block_number) else {
+            return Ok(None);
+        };
 
-            while low < high {
-                let mid = low + (high - low) / 2;
-                if let Some(change) =
-                    cursor.get_one::<reth_db::static_file::AccountChangesetMask>(mid.into())?
-                {
-                    if change.address < address {
-                        low = mid + 1;
-                    } else {
-                        high = mid;
-                    }
-                } else {
-                    // This is unexpected in a consistent file. The binary search can't
-                    // proceed reliably. For safety, we abort the search.
-                    low = range.end;
-                    break;
-                }
-            }
+        let mut cursor = provider.cursor()?;
+        let range = offset.changeset_range();
+        let mut low = range.start;
+        let mut high = range.end;
 
-            if low < range.end &&
-                let Some(change) = cursor
-                    .get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
-                    .filter(|change| change.address == address)
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if let Some(change) =
+                cursor.get_one::<reth_db::static_file::AccountChangesetMask>(mid.into())?
             {
-                return Ok(Some(change));
+                if change.address < address {
+                    low = mid + 1;
+                } else {
+                    high = mid;
+                }
+            } else {
+                // This is not expected but means we are out of the range / file somehow, and can't
+                // continue
+                low = range.end;
+                break;
             }
-
-            Ok(None)
-        } else {
-            // TODO(rjected) right thing to return here?
-            Ok(None)
         }
+
+        if low < range.end &&
+            let Some(change) = cursor
+                .get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
+                .filter(|change| change.address == address)
+        {
+            return Ok(Some(change));
+        }
+
+        Ok(None)
     }
 
     fn account_changesets_range(
