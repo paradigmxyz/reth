@@ -128,6 +128,7 @@ Tracing:
           - http: HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
           - grpc: gRPC transport, port 4317
 
+          [env: OTEL_EXPORTER_OTLP_PROTOCOL=]
           [default: http]
 
       --tracing-otlp.filter <FILTER>
