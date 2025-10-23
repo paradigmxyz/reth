@@ -1155,12 +1155,25 @@ mod tests {
     use reth_trie::{MultiProof, TrieInput};
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
+    use std::sync::OnceLock;
+    use tokio::runtime::{Handle, Runtime};
+
+    /// Get a handle to the test runtime, creating it if necessary
+    fn get_test_runtime_handle() -> Handle {
+        static TEST_RT: OnceLock<Runtime> = OnceLock::new();
+        TEST_RT
+            .get_or_init(|| {
+                tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()
+            })
+            .handle()
+            .clone()
+    }
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
     where
         F: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {
-        let executor = WorkloadExecutor::default();
+        let rt_handle = get_test_runtime_handle();
         let (_trie_input, config) = MultiProofConfig::from_input(TrieInput::default());
         let task_ctx = ProofTaskCtx::new(
             config.nodes_sorted.clone(),
@@ -1168,8 +1181,7 @@ mod tests {
             config.prefix_sets.clone(),
         );
         let consistent_view = ConsistentDbView::new(factory, None);
-        let proof_handle =
-            ProofWorkerHandle::new(executor.handle().clone(), consistent_view, task_ctx, 1, 1);
+        let proof_handle = ProofWorkerHandle::new(rt_handle, consistent_view, task_ctx, 1, 1);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
 
         MultiProofTask::new(config, proof_handle, to_sparse_trie, Some(1))
