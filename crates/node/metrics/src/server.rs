@@ -8,6 +8,7 @@ use eyre::WrapErr;
 use http::{header::CONTENT_TYPE, HeaderValue, Response};
 use metrics::describe_gauge;
 use metrics_process::Collector;
+use reqwest::Client;
 use reth_metrics::metrics::Unit;
 use reth_tasks::TaskExecutor;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc, time::Duration};
@@ -92,7 +93,7 @@ impl MetricServer {
                 *push_gateway_interval,
                 hooks.clone(),
                 task_executor.clone(),
-            );
+            )?;
         }
 
         // Describe metrics after recorder installation
@@ -170,22 +171,14 @@ impl MetricServer {
         interval: Duration,
         hooks: Hooks,
         task_executor: TaskExecutor,
-    ) {
+    ) -> eyre::Result<()> {
+        let client = Client::builder()
+            .build()
+            .wrap_err("Could not create HTTP client to push metrics to gateway")?;
         task_executor.spawn_with_graceful_shutdown_signal(move |mut signal| {
             Box::pin(async move {
-                let client = reqwest::Client::builder()
-                    .build();
-
-                let client = match client {
-                    Ok(c) => c,
-                    Err(err) => {
-                        tracing::error!(%err, "Failed to create HTTP client to push metrics to gateway");
-                        return;
-                    }
-                };
-
                 tracing::info!(url = %url, interval = ?interval, "Starting task to push metrics to gateway");
-
+                let handle = install_prometheus_recorder();
                 loop {
                     tokio::select! {
                         _ = &mut signal => {
@@ -194,7 +187,6 @@ impl MetricServer {
                         }
                         _ = tokio::time::sleep(interval) => {
                             hooks.iter().for_each(|hook| hook());
-                            let handle = install_prometheus_recorder();
                             let metrics = handle.handle().render();
                             match client.put(&url).header("Content-Type", "text/plain").body(metrics).send().await {
                                 Ok(response) => {
@@ -214,6 +206,7 @@ impl MetricServer {
                 }
             })
         });
+        Ok(())
     }
 }
 
