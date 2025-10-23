@@ -20,6 +20,7 @@ pub mod call;
 pub mod config;
 pub mod estimate;
 pub mod fee;
+pub mod fill;
 pub mod pending_block;
 pub mod receipt;
 pub mod signer;
@@ -32,6 +33,7 @@ pub use block::{EthBlocks, LoadBlock};
 pub use blocking_task::SpawnBlocking;
 pub use call::{Call, EthCall};
 pub use fee::{EthFees, LoadFee};
+pub use fill::FillTransaction;
 pub use pending_block::LoadPendingBlock;
 pub use receipt::LoadReceipt;
 pub use signer::EthSigner;
@@ -58,6 +60,7 @@ pub trait FullEthApi:
     + EthState
     + EthCall
     + EthFees
+    + FillTransaction
     + Trace
     + LoadReceipt
 {
@@ -71,6 +74,7 @@ impl<T> FullEthApi for T where
         + EthState
         + EthCall
         + EthFees
+        + FillTransaction
         + Trace
         + LoadReceipt
 {

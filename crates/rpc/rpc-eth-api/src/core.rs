@@ -1,7 +1,10 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
 use crate::{
-    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
+    helpers::{
+        EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FillTransaction,
+        FullEthApi,
+    },
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
@@ -269,6 +272,21 @@ pub trait EthApi<TxReq: RpcObject, T: RpcObject, B: RpcObject, R: RpcObject, H: 
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<U256>;
+
+    /// Fills missing fields in a transaction request.
+    ///
+    /// This method takes a transaction request and fills in any missing fields
+    /// (nonce, gas limit, gas price/fees, chain id) based on the current state
+    /// at the specified block.
+    ///
+    /// Returns the filled transaction.
+    #[method(name = "fillTransaction")]
+    async fn fill_transaction(
+        &self,
+        request: TxReq,
+        block_number: BlockId,
+        state_override: Option<StateOverride>,
+    ) -> RpcResult<TxReq>;
 
     /// Returns the current price per gas in wei.
     #[method(name = "gasPrice")]
@@ -719,6 +737,17 @@ where
             state_override,
         )
         .await?)
+    }
+
+    /// Handler for: `eth_fillTransaction`
+    async fn fill_transaction(
+        &self,
+        request: RpcTxReq<T::NetworkTypes>,
+        block_number: BlockId,
+        state_override: Option<StateOverride>,
+    ) -> RpcResult<RpcTxReq<T::NetworkTypes>> {
+        trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_fillTransaction");
+        Ok(FillTransaction::fill_transaction(self, request, block_number, state_override).await?)
     }
 
     /// Handler for: `eth_gasPrice`
