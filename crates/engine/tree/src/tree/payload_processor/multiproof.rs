@@ -502,7 +502,7 @@ impl MultiproofManager {
         };
 
         if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(input) {
-            error!(target: "engine::root", ?e, "Failed to dispatch account multiproof");
+            error!(target: "engine::tree::payload_processor::multiproof", ?e, "Failed to dispatch account multiproof");
             return;
         }
 
@@ -1016,21 +1016,21 @@ impl MultiProofTask {
         let mut updates_finished_time = None;
 
         loop {
-            trace!(target: "engine::root", "entering main channel receiving loop");
+            trace!(target: "engine::tree::payload_processor::multiproof", "entering main channel receiving loop");
 
             crossbeam_channel::select! {
                     recv(self.rx) -> message => {
                         match message {
                             Ok(msg) => match msg {
                                 MultiProofMessage::PrefetchProofs(targets) => {
-                            trace!(target: "engine::root", "processing MultiProofMessage::PrefetchProofs");
+                            trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::PrefetchProofs");
                             if first_update_time.is_none() {
                                 // record the wait time
                                 self.metrics
                                     .first_update_wait_time_histogram
                                     .record(start.elapsed().as_secs_f64());
                                 first_update_time = Some(Instant::now());
-                                debug!(target: "engine::root", "Started state root calculation");
+                                debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                             }
 
                             let account_targets = targets.len();
@@ -1046,14 +1046,14 @@ impl MultiProofTask {
                             );
                         }
                         MultiProofMessage::StateUpdate(source, update) => {
-                            trace!(target: "engine::root", "processing MultiProofMessage::StateUpdate");
+                            trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
                             if first_update_time.is_none() {
                                 // record the wait time
                                 self.metrics
                                     .first_update_wait_time_histogram
                                     .record(start.elapsed().as_secs_f64());
                                 first_update_time = Some(Instant::now());
-                                debug!(target: "engine::root", "Started state root calculation");
+                                debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                             }
 
                             let len = update.len();
@@ -1067,7 +1067,7 @@ impl MultiProofTask {
                             );
                         }
                         MultiProofMessage::FinishedStateUpdates => {
-                            trace!(target: "engine::root", "processing MultiProofMessage::FinishedStateUpdates");
+                            trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
                             updates_finished = true;
                             updates_finished_time = Some(Instant::now());
                             if self.is_done(
@@ -1084,7 +1084,7 @@ impl MultiProofTask {
                                 }
                             }
                             MultiProofMessage::EmptyProof { sequence_number, state } => {
-                                trace!(target: "engine::root", "processing MultiProofMessage::EmptyProof");
+                                trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::EmptyProof");
 
                                 proofs_processed += 1;
 
@@ -1129,12 +1129,38 @@ impl MultiProofTask {
 
                             // Convert ProofResultMessage to SparseTrieUpdate
                             match proof_result.result {
-                                Ok((multiproof, _stats)) => {
+                                Ok(reth_trie_parallel::proof_task::ProofResultVariant::Account { multiproof, stats: _ }) => {
                                     debug!(
                                         target: "engine::tree::payload_processor::multiproof",
                                         sequence = proof_result.sequence_number,
                                         total_proofs = proofs_processed,
-                                        "Processing calculated proof from worker"
+                                        "Processing calculated account multiproof from worker"
+                                    );
+
+                                    let update = SparseTrieUpdate {
+                                        state: proof_result.state,
+                                        multiproof,
+                                    };
+
+                                    if let Some(combined_update) =
+                                        self.on_proof(proof_result.sequence_number, update)
+                                    {
+                                        let _ = self.to_sparse_trie.send(combined_update);
+                                    }
+                                }
+                                Ok(reth_trie_parallel::proof_task::ProofResultVariant::Storage { hashed_address, proof, stats: _ }) => {
+                                    debug!(
+                                        target: "engine::tree::payload_processor::multiproof",
+                                        sequence = proof_result.sequence_number,
+                                        total_proofs = proofs_processed,
+                                        ?hashed_address,
+                                        "Processing calculated storage proof from worker"
+                                    );
+
+                                    // Convert storage proof to multiproof format for sparse trie
+                                    let multiproof = reth_trie::DecodedMultiProof::from_storage_proof(
+                                        hashed_address,
+                                        proof,
                                     );
 
                                     let update = SparseTrieUpdate {
