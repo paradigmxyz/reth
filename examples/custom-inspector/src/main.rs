@@ -120,7 +120,7 @@ impl RethCliTxpoolExt {
 
 /// A dummy inspector that logs the opcodes and their corresponding program counter for a
 /// transaction
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 struct DummyInspector {
     ret_val: Vec<String>,
 }
