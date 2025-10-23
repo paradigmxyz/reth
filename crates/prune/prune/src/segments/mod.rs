@@ -8,10 +8,7 @@ use alloy_primitives::{BlockNumber, TxNumber};
 use reth_provider::{errors::provider::ProviderResult, BlockReader, PruneCheckpointWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 pub use set::SegmentSet;
-pub use static_file::{
-    Headers as StaticFileHeaders, Receipts as StaticFileReceipts,
-    Transactions as StaticFileTransactions,
-};
+pub use static_file::Receipts as StaticFileReceipts;
 use std::{fmt::Debug, ops::RangeInclusive};
 use tracing::error;
 pub use user::{

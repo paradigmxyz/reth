@@ -1042,6 +1042,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.static_files_min_block.read().get(&segment).map(|range| range.end())
     }
 
+    /// Gets the lowest static file's block range if it exists for a static file segment.
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
+    pub fn get_lowest_range(&self, segment: StaticFileSegment) -> Option<SegmentRangeInclusive> {
+        self.static_files_min_block.read().get(&segment).copied()
+    }
+
     /// Gets the highest static file's block height if it exists for a static file segment.
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
