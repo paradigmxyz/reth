@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn test_command_parser_with_valid_default_sync_mode() {
-        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth", "durable"]).unwrap();
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth"]).unwrap();
         assert!(matches!(cmd.args.sync_mode, Some(SyncMode::Durable)));
     }
 
