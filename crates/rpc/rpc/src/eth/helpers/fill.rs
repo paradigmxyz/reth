@@ -20,7 +20,7 @@ where
 mod tests {
     use super::*;
     use crate::eth::helpers::types::EthRpcConverter;
-    use alloy_primitives::{Address, Bytes, U256};
+    use alloy_primitives::{Address, U256};
     use alloy_rpc_types_eth::{request::TransactionRequest, BlockId, BlockNumberOrTag};
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
