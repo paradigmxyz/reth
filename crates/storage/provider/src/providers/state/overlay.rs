@@ -1,5 +1,6 @@
 use alloy_primitives::{BlockNumber, B256};
-use reth_db_api::DatabaseError;
+use reth_db::tables::{AccountsTrieChangeSets, StoragesTrieChangeSets};
+use reth_db_api::{cursor::DbCursorRO, transaction::DbTx, DatabaseError};
 use reth_errors::ProviderError;
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
@@ -16,8 +17,8 @@ use reth_trie::{
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
-use std::sync::Arc;
-use tracing::trace;
+use std::{ops::RangeInclusive, sync::Arc};
+use tracing::{debug, trace};
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
@@ -82,7 +83,7 @@ where
         &self,
         provider: &F::Provider,
         requested_block: BlockNumber,
-    ) -> Result<(), ProviderError> {
+    ) -> Result<RangeInclusive<BlockNumber>, ProviderError> {
         // Get the MerkleChangeSets stage and prune checkpoints.
         let stage_checkpoint = provider.get_stage_checkpoint(StageId::MerkleChangeSets)?;
         let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::MerkleChangeSets)?;
@@ -125,7 +126,7 @@ where
             });
         }
 
-        Ok(())
+        Ok(available_range)
     }
 }
 
@@ -144,7 +145,7 @@ where
         // If block_number is provided, collect reverts
         let (trie_updates, hashed_state) = if let Some(from_block) = self.block_number {
             // Validate that we have sufficient changesets for the requested block
-            self.validate_changesets_availability(&provider, from_block)?;
+            let available_range = self.validate_changesets_availability(&provider, from_block)?;
 
             // Collect trie reverts
             let mut trie_updates_mut = provider.trie_reverts(from_block + 1)?;
@@ -155,6 +156,9 @@ where
                 from_block + 1..,
             )?;
             let mut hashed_state_mut = reverted_state.into_sorted();
+
+            let reverted_trie_updates = trie_updates_mut.total_len();
+            let reverted_state_updates = hashed_state_mut.total_len();
 
             // Extend with overlays if provided
             if let Some(trie_overlay) = &self.trie_overlay {
@@ -168,8 +172,11 @@ where
             trace!(
                 target: "providers::state::overlay",
                 ?from_block,
-                num_trie_updates = ?trie_updates_mut.total_len(),
-                num_state_updates = ?hashed_state_mut.total_len(),
+                ?available_range,
+                overlay_trie_updates = ?self.trie_overlay.as_ref().map(|t| t.total_len()),
+                overlay_state_updates = ?self.hashed_state_overlay.as_ref().map(|t| t.total_len()),
+                ?reverted_trie_updates,
+                ?reverted_state_updates,
                 "Reverted to target block",
             );
 

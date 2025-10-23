@@ -588,7 +588,8 @@ where
         if let Err(err) = (|| -> Result<(), Box<dyn std::error::Error>> {
             let trie_input_dir = std::env::current_dir()?.join("trie-input");
             fs::create_dir_all(&trie_input_dir)?;
-            let file_path = trie_input_dir.join(format!("{}-trie-updates.json", block_num_hash.hash));
+            let file_path =
+                trie_input_dir.join(format!("{}-trie-updates.json", block_num_hash.hash));
             let sorted_updates = trie_output.clone().into_sorted();
             fs::write(&file_path, serde_json::to_string_pretty(&sorted_updates)?)?;
             Ok(())
