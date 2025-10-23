@@ -311,8 +311,6 @@ impl MultiproofInput {
 pub struct MultiproofManager {
     /// Currently running calculations.
     inflight: usize,
-    /// Queued calculations.
-    pending: VecDeque<PendingMultiproofTask>,
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,
     /// Cached storage proof roots for missed leaves; this maps
@@ -338,14 +336,10 @@ impl MultiproofManager {
     fn new(
         metrics: MultiProofTaskMetrics,
         proof_worker_handle: ProofWorkerHandle,
-        max_concurrent: usize,
         proof_result_tx: CrossbeamSender<ProofResultMessage>,
     ) -> Self {
         Self {
-            pending: VecDeque::with_capacity(DEFAULT_MULTIPROOF_INFLIGHT_LIMIT),
-            inflight_limit: DEFAULT_MULTIPROOF_INFLIGHT_LIMIT,
             inflight: 0,
-            executor,
             metrics,
             proof_worker_handle,
             missed_leaves_storage_roots: Default::default(),
@@ -353,13 +347,8 @@ impl MultiproofManager {
         }
     }
 
-    const fn is_full(&self) -> bool {
-        self.inflight >= self.max_concurrent
-    }
-
-    /// Spawns a new multiproof calculation or enqueues it for later if
-    /// `max_concurrent` are already inflight.
-    fn spawn_or_queue(&mut self, input: PendingMultiproofTask) {
+    /// Spawns a new multiproof calculation.
+    fn spawn(&mut self, input: PendingMultiproofTask) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets_is_empty() {
             debug!(
@@ -609,7 +598,6 @@ impl MultiProofTask {
         config: MultiProofConfig,
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
-        max_concurrency: usize,
         chunk_size: Option<usize>,
     ) -> Self {
         let (tx, rx) = unbounded();
@@ -629,7 +617,6 @@ impl MultiProofTask {
             multiproof_manager: MultiproofManager::new(
                 metrics.clone(),
                 proof_worker_handle,
-                max_concurrency,
                 proof_result_tx,
             ),
             metrics,
