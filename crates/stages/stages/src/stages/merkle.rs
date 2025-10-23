@@ -8,9 +8,10 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
-    DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
-    StatsReader, TrieWriter,
+    DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
+    StageCheckpointWriter, StatsReader, TrieReader, TrieWriter,
 };
+use reth_prune_types::PruneSegment;
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
     StageCheckpoint, StageError, StageId, StorageRootMerkleCheckpoint, UnwindInput, UnwindOutput,
@@ -156,10 +157,12 @@ impl<Provider> Stage<Provider> for MerkleStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + TrieWriter
+        + TrieReader
         + StatsReader
         + HeaderProvider
         + StageCheckpointReader
-        + StageCheckpointWriter,
+        + StageCheckpointWriter
+        + PruneCheckpointReader,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -389,18 +392,48 @@ where
         if range.is_empty() {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
-            let (block_root, updates) = StateRoot::incremental_root_with_updates(tx, range)
-                .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            // Check if trie changesets exist for the range we're unwinding
+            let from_block = input.unwind_to + 1;
+            let changesets_available = validate_changesets_availability(provider, from_block);
 
-            // Validate the calculated state root
-            let target = provider
-                .header_by_number(input.unwind_to)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
+            match changesets_available {
+                Ok(()) => {
+                    // Changesets exist, use trie_reverts to collect them
+                    info!(
+                        target: "sync::stages::merkle::unwind",
+                        from = ?from_block,
+                        to = ?input.checkpoint.block_number,
+                        "Using trie changesets for unwind"
+                    );
+                    let updates = provider.trie_reverts(from_block)?;
+                    provider.write_trie_updates(updates.into())?;
+                }
+                Err(_) => {
+                    // Changesets don't exist, recompute the trie
+                    info!(
+                        target: "sync::stages::merkle::unwind",
+                        from = ?from_block,
+                        to = ?input.checkpoint.block_number,
+                        "Recomputing trie for unwind (changesets not available)"
+                    );
+                    let (block_root, updates) = StateRoot::incremental_root_with_updates(tx, range)
+                        .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
-            validate_state_root(block_root, SealedHeader::seal_slow(target), input.unwind_to)?;
+                    // Validate the calculated state root
+                    let target = provider
+                        .header_by_number(input.unwind_to)?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
 
-            // Validation passed, apply unwind changes to the database.
-            provider.write_trie_updates(updates)?;
+                    validate_state_root(
+                        block_root,
+                        SealedHeader::seal_slow(target),
+                        input.unwind_to,
+                    )?;
+
+                    // Apply unwind changes to the database
+                    provider.write_trie_updates(updates)?;
+                }
+            }
 
             // Update entities checkpoint to reflect the unwind operation
             // Since we're unwinding, we need to recalculate the total entities at the target block
@@ -416,6 +449,59 @@ where
                 .with_entities_stage_checkpoint(entities_checkpoint),
         })
     }
+}
+
+/// Validates that there are sufficient changesets to revert to the requested block number.
+///
+/// Returns an error if the `MerkleChangeSets` checkpoint doesn't cover the requested block.
+/// Takes into account both the stage checkpoint and the prune checkpoint to determine the
+/// available data range.
+fn validate_changesets_availability<Provider>(
+    provider: &Provider,
+    requested_block: BlockNumber,
+) -> Result<(), ProviderError>
+where
+    Provider: StageCheckpointReader + PruneCheckpointReader,
+{
+    // Get the MerkleChangeSets stage and prune checkpoints.
+    let stage_checkpoint = provider.get_stage_checkpoint(StageId::MerkleChangeSets)?;
+    let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::MerkleChangeSets)?;
+
+    // Get the upper bound from stage checkpoint
+    let upper_bound = stage_checkpoint.as_ref().map(|chk| chk.block_number).ok_or_else(|| {
+        ProviderError::InsufficientChangesets { requested: requested_block, available: 0..=0 }
+    })?;
+
+    // Extract a possible lower bound from stage checkpoint if available
+    let stage_lower_bound = stage_checkpoint.as_ref().and_then(|chk| {
+        chk.merkle_changesets_stage_checkpoint().map(|stage_chk| stage_chk.block_range.from)
+    });
+
+    // Extract a possible lower bound from prune checkpoint if available
+    // The prune checkpoint's block_number is the highest pruned block, so data is available
+    // starting from the next block
+    let prune_lower_bound =
+        prune_checkpoint.and_then(|chk| chk.block_number.map(|block| block + 1));
+
+    // Use the higher of the two lower bounds (or error if neither is available)
+    let Some(lower_bound) = stage_lower_bound.max(prune_lower_bound) else {
+        return Err(ProviderError::InsufficientChangesets {
+            requested: requested_block,
+            available: 0..=upper_bound,
+        })
+    };
+
+    let available_range = lower_bound..=upper_bound;
+
+    // Check if the requested block is within the available range
+    if !available_range.contains(&requested_block) {
+        return Err(ProviderError::InsufficientChangesets {
+            requested: requested_block,
+            available: available_range,
+        });
+    }
+
+    Ok(())
 }
 
 /// Check that the computed state root matches the root in the expected header.
