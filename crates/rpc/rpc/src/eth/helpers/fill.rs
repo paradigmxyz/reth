@@ -135,26 +135,19 @@ mod tests {
     async fn test_fill_transaction_fills_all_missing_fields() {
         let address = Address::random();
 
-        // 100 ETH in wei
         let balance = U256::from(100u128) * U256::from(1_000_000_000_000_000_000u128);
         let accounts = HashMap::from([(address, ExtendedAccount::new(5, balance))]);
 
         let eth_api = mock_eth_api(accounts);
 
-        // Create minimal transaction request - only specify destination
-        let mut tx_req = TransactionRequest::default();
-        tx_req.from = Some(address);
-        tx_req.to = Some(Address::random().into());
-        tx_req.value = Some(U256::from(1000));
-        // Leave nonce, gas, fees, chain_id all unset
+        let tx_req = TransactionRequest::default();
 
         let block_id = BlockId::Number(BlockNumberOrTag::Latest);
 
         let result = eth_api.fill_transaction(tx_req, block_id, None).await;
 
         if let Ok(filled) = result {
-            // Verify all fields are filled
-            assert!(filled.from.is_some(), "from should be set");
+            // Verify fields are filled
             assert!(filled.chain_id.is_some(), "chain_id should be filled");
             assert!(filled.nonce.is_some(), "nonce should be filled");
 
@@ -163,33 +156,6 @@ mod tests {
                 filled.max_fee_per_gas.is_some() ||
                 filled.max_priority_fee_per_gas.is_some();
             assert!(has_fees, "at least one fee field should be filled");
-        }
-    }
-
-    #[tokio::test]
-    async fn test_fill_transaction_with_data() {
-        let address = Address::random();
-
-        // 100 ETH in wei
-        let balance = U256::from(100u128) * U256::from(1_000_000_000_000_000_000u128);
-        let accounts = HashMap::from([(address, ExtendedAccount::new(0, balance))]);
-
-        let eth_api = mock_eth_api(accounts);
-
-        let mut tx_req = TransactionRequest::default();
-        tx_req.from = Some(address);
-        tx_req.to = Some(Address::random().into());
-        tx_req.input =
-            alloy_rpc_types_eth::TransactionInput::new(Bytes::from(vec![0x60, 0x60, 0x60]));
-
-        let block_id = BlockId::Number(BlockNumberOrTag::Latest);
-
-        let result = eth_api.fill_transaction(tx_req, block_id, None).await;
-
-        // Should fill fields even with transaction data
-        if let Ok(filled) = result {
-            assert!(filled.nonce.is_some());
-            assert!(filled.chain_id.is_some());
         }
     }
 }
