@@ -868,7 +868,7 @@ where
     }
 }
 
-/// Input parameters for account multiproof computation.
+/// Input parameters for storage proof computation.
 #[derive(Debug)]
 pub struct StorageProofInput {
     /// The hashed address for which the proof is calculated.
