@@ -702,8 +702,9 @@ impl From<Genesis> for ChainSpec {
                             // this is the case for perfnet testing for example
                             // at the time of this fix, only two networks transitioned: MAINNET +
                             // SEPOLIA and this parsing from genesis is used for shadowforking, so
-                            // we can reasoable assume that if the TTD and the chainid matches those
-                            // networks we use the activation blocks of those networks
+                            // we can reasonably assume that if the TTD and the chainid matches
+                            // those networks we use the activation
+                            // blocks of those networks
                             match genesis.config.chain_id {
                                 1 => {
                                     if ttd == MAINNET_PARIS_TTD {
@@ -2736,10 +2737,13 @@ Post-merge hard forks (timestamp based):
         let genesis = serde_json::from_str::<Genesis>(s).unwrap();
         let chainspec = ChainSpec::from_genesis(genesis);
         let activation = chainspec.hardforks.fork(EthereumHardfork::Paris);
-       assert_eq!(activation, ForkCondition::TTD {
-           activation_block_number: MAINNET_PARIS_BLOCK,
-           total_difficulty: MAINNET_PARIS_TTD,
-           fork_block: None,
-       })
+        assert_eq!(
+            activation,
+            ForkCondition::TTD {
+                activation_block_number: MAINNET_PARIS_BLOCK,
+                total_difficulty: MAINNET_PARIS_TTD,
+                fork_block: None,
+            }
+        )
     }
 }
