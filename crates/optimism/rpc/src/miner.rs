@@ -41,7 +41,7 @@ impl MinerApiExtServer for OpMinerExtApi {
         Ok(true)
     }
 
-    // TODO@frankudoags: Handler for `miner_setGasLimit` RPC method.(do we need to update this from alloy)
+    // TODO@frankudoags: Handler for `miner_setGasLimit` RPC method.(do we need to update this from alloy? the trait is missing this method)
     // async fn set_gas_limit(&self, gas_limit: U64) -> RpcResult<bool> {
     //     debug!(target: "rpc", "Setting gas limit: {}", gas_limit);
     //     self.gas_limit_config.set_gas_limit(gas_limit.to());
