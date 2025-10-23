@@ -16,6 +16,7 @@ use alloy_rpc_types_eth::{
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_types::FillTransactionResult;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -30,6 +31,7 @@ pub trait FullEthApiServer:
         RpcBlock<Self::NetworkTypes>,
         RpcReceipt<Self::NetworkTypes>,
         RpcHeader<Self::NetworkTypes>,
+        TxTy<Self::Primitives>,
     > + FullEthApi
     + Clone
 {
@@ -42,6 +44,7 @@ impl<T> FullEthApiServer for T where
             RpcBlock<T::NetworkTypes>,
             RpcReceipt<T::NetworkTypes>,
             RpcHeader<T::NetworkTypes>,
+            TxTy<T::Primitives>,
         > + FullEthApi
         + Clone
 {
@@ -50,7 +53,15 @@ impl<T> FullEthApiServer for T where
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthApi<TxReq: RpcObject, T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
+pub trait EthApi<
+    TxReq: RpcObject,
+    T: RpcObject,
+    B: RpcObject,
+    R: RpcObject,
+    H: RpcObject,
+    RawTx: RpcObject,
+>
+{
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -231,7 +242,7 @@ pub trait EthApi<TxReq: RpcObject, T: RpcObject, B: RpcObject, R: RpcObject, H: 
 
     /// Fills the defaults on a given unsigned transaction.
     #[method(name = "fillTransaction")]
-    async fn fill_transaction(&self, request: TxReq) -> RpcResult<FillTransactionResult<TxReq>>;
+    async fn fill_transaction(&self, request: TxReq) -> RpcResult<FillTransactionResult<RawTx>>;
 
     /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the
     /// optionality of state overrides
@@ -393,6 +404,7 @@ impl<T>
         RpcBlock<T::NetworkTypes>,
         RpcReceipt<T::NetworkTypes>,
         RpcHeader<T::NetworkTypes>,
+        TxTy<T::Primitives>,
     > for T
 where
     T: FullEthApi,
@@ -691,7 +703,7 @@ where
     async fn fill_transaction(
         &self,
         request: RpcTxReq<T::NetworkTypes>,
-    ) -> RpcResult<FillTransactionResult<RpcTxReq<T::NetworkTypes>>> {
+    ) -> RpcResult<FillTransactionResult<TxTy<T::Primitives>>> {
         trace!(target: "rpc::eth", ?request, "Serving eth_fillTransaction");
         Ok(EthTransactions::fill_transaction(self, request).await?)
     }

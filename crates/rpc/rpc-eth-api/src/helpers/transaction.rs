@@ -13,13 +13,13 @@ use alloy_consensus::{
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
-use alloy_network::TransactionBuilder;
+use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInfo};
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
+use reth_primitives_traits::{RecoveredBlock, SignedTransaction, TxTy};
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     utils::binary_search, EthApiError, EthApiError::TransactionConfirmationTimeout,
@@ -440,8 +440,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn fill_transaction(
         &self,
         mut request: RpcTxReq<Self::NetworkTypes>,
-    ) -> impl Future<Output = Result<FillTransactionResult<RpcTxReq<Self::NetworkTypes>>, Self::Error>>
-           + Send
+    ) -> impl Future<Output = Result<FillTransactionResult<TxTy<Self::Primitives>>, Self::Error>> + Send
     where
         Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
     {
@@ -463,45 +462,46 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             let chain_id = self.chain_id();
             request.as_mut().set_chain_id(chain_id.to());
 
+            if request.as_ref().has_eip4844_fields() &&
+                request.as_ref().max_fee_per_blob_gas().is_none()
+            {
+                let blob_fee = self.blob_base_fee().await?;
+                request.as_mut().set_max_fee_per_blob_gas(blob_fee.to());
+            }
+
+            if request.as_ref().blob_sidecar().is_some() &&
+                request.as_ref().blob_versioned_hashes.is_none()
+            {
+                request.as_mut().populate_blob_hashes();
+            }
+
             if request.as_ref().gas_limit().is_none() {
                 let estimated_gas =
                     self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
                 request.as_mut().set_gas_limit(estimated_gas.to());
             }
 
-            // get suggested gas prices
-            let suggested_gas_price = LoadFee::gas_price(self).await?;
-
-            let tx_type = request.as_ref().output_tx_type();
-
-            if tx_type.is_legacy() || tx_type.is_eip2930() {
-                if request.as_ref().gas_price().is_none() {
-                    request.as_mut().set_gas_price(suggested_gas_price.to());
-                }
-            } else {
+            if request.as_ref().gas_price().is_none() {
+                let tip = if let Some(tip) = request.as_ref().max_priority_fee_per_gas() {
+                    tip
+                } else {
+                    let tip = self.suggested_priority_fee().await?.to::<u128>();
+                    request.as_mut().set_max_priority_fee_per_gas(tip);
+                    tip
+                };
                 if request.as_ref().max_fee_per_gas().is_none() {
-                    let mut max_fee_per_gas = suggested_gas_price.to();
-                    if let Some(prio_fee) = request.as_ref().max_priority_fee_per_gas() {
-                        max_fee_per_gas = prio_fee.max(max_fee_per_gas);
-                    }
-                    request.as_mut().set_max_fee_per_gas(max_fee_per_gas);
-                }
-                if request.as_ref().max_priority_fee_per_gas().is_none() {
-                    let suggested_tip = self.suggested_priority_fee().await?;
-                    request.as_mut().set_max_priority_fee_per_gas(suggested_tip.to());
+                    let header =
+                        self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+                    let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
+                    request.as_mut().set_max_fee_per_gas(base_fee as u128 + tip);
                 }
             }
 
-            let _unsigned_tx = request
-                .as_ref()
-                .clone()
-                .build_typed_tx()
-                .map_err(|_| EthApiError::TransactionConversionError)?;
+            let tx = self.tx_resp_builder().build_simulate_v1_transaction(request)?;
 
-            // todo: encode the tx
-            let raw = Bytes::new(); // placeholder
+            let raw = tx.encoded_2718().into();
 
-            Ok(FillTransactionResult { raw, tx: request })
+            Ok(FillTransactionResult { raw, tx })
         }
     }
 
