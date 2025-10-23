@@ -11,7 +11,7 @@ use reth_provider::{
 };
 use reth_prune_types::PruneModes;
 
-use super::{StaticFileHeaders, StaticFileReceipts, StaticFileTransactions};
+use super::StaticFileReceipts;
 
 /// Collection of [`Segment`]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
@@ -74,10 +74,6 @@ where
         } = prune_modes;
 
         Self::default()
-            // Static file headers
-            .segment(StaticFileHeaders::new(static_file_provider.clone()))
-            // Static file transactions
-            .segment(StaticFileTransactions::new(static_file_provider.clone()))
             // Static file receipts
             .segment(StaticFileReceipts::new(static_file_provider))
             // Merkle changesets
