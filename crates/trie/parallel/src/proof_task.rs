@@ -868,11 +868,7 @@ where
     }
 }
 
-/// Storage proof computation parameters.
-///
-/// This struct contains only the data needed to compute a storage proof,
-/// without any communication channels. The communication channel is stored
-/// separately in the `StorageWorkerJob` envelope.
+/// Input parameters for account multiproof computation.
 #[derive(Debug)]
 pub struct StorageProofInput {
     /// The hashed address for which the proof is calculated.
