@@ -311,8 +311,9 @@ impl MultiproofInput {
 /// 1. `MultiProofTask` asks the manager to spawn either storage or account proof work.
 /// 2. The manager builds the request, clones `proof_result_tx`, and hands everything to
 ///    [`ProofWorkerHandle`].
-/// 3. A worker finishes the proof and sends a [`ProofResultMessage`](reth_trie_parallel::proof_task::ProofResultMessage)
-///    through the channel included in the job.
+/// 3. A worker finishes the proof and sends a
+///    [`ProofResultMessage`](reth_trie_parallel::proof_task::ProofResultMessage) through the
+///    channel included in the job.
 /// 4. `MultiProofTask` consumes the message from the same channel and sequences it with
 ///    `ProofSequencer`.
 #[derive(Debug)]
@@ -333,7 +334,8 @@ pub struct MultiproofManager {
     /// a big account change into different chunks, which may repeatedly
     /// revisit missed leaves.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-    /// Channel sender cloned into each dispatched job so workers can send back the `ProofResultMessage`.
+    /// Channel sender cloned into each dispatched job so workers can send back the
+    /// `ProofResultMessage`.
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
@@ -565,12 +567,104 @@ pub(crate) struct MultiProofTaskMetrics {
 /// Standalone task that receives a transaction state stream and updates relevant
 /// data structures to calculate state root.
 ///
-/// It is responsible of  initializing a blinded sparse trie and subscribe to
-/// transaction state stream. As it receives transaction execution results, it
-/// fetches the proofs for relevant accounts from the database and reveal them
-/// to the tree.
-/// Then it updates relevant leaves according to the result of the transaction.
-/// This feeds updates to the sparse trie task.
+/// ## Architecture: Dual-Channel Multiproof System
+///
+/// This task orchestrates parallel proof computation using a dual-channel architecture that
+/// separates control messages from proof computation results:
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────────────────┐
+/// │                        MultiProofTask                            │
+/// │                  Event Loop (crossbeam::select!)                 │
+/// └──┬──────────────────────────────────────────────────────────▲───┘
+///    │                                                           │
+///    │ (1) Send proof request                                   │
+///    │     via tx (control channel)                             │
+///    │                                                           │
+///    ▼                                                           │
+/// ┌──────────────────────────────────────────────────────────────┐ │
+/// │             MultiproofManager                                │ │
+/// │  - Tracks inflight calculations                              │ │
+/// │  - Deduplicates against fetched_proof_targets                │ │
+/// │  - Routes to appropriate worker pool                         │ │
+/// └──┬───────────────────────────────────────────────────────────┘ │
+///    │                                                             │
+///    │ (2) Dispatch to workers                                    │
+///    │     OR send EmptyProof (fast path)                         │
+///    ▼                                                             │
+/// ┌──────────────────────────────────────────────────────────────┐ │
+/// │              ProofWorkerHandle                                │ │
+/// │  ┌─────────────────────┐   ┌────────────────────────┐        │ │
+/// │  │ Storage Worker Pool │   │ Account Worker Pool     │        │ │
+/// │  │ (spawn_blocking)    │   │ (spawn_blocking)        │        │ │
+/// │  └─────────────────────┘   └────────────────────────┘        │ │
+/// └──┬───────────────────────────────────────────────────────────┘ │
+///    │                                                             │
+///    │ (3) Compute proofs in parallel                             │
+///    │     Send results back                                      │
+///    │                                                             │
+///    ▼                                                             │
+/// ┌──────────────────────────────────────────────────────────────┐ │
+/// │  proof_result_tx (crossbeam unbounded channel)                │ │
+/// │    → ProofResultMessage { multiproof, sequence_number, ... }  │ │
+/// └──────────────────────────────────────────────────────────────┘ │
+///                                                                   │
+///   (4) Receive via crossbeam::select! on two channels: ───────────┘
+///       - rx: Control messages (PrefetchProofs, StateUpdate,
+///             EmptyProof, FinishedStateUpdates)
+///       - proof_result_rx: Computed proof results from workers
+/// ```
+///
+/// ## Component Responsibilities
+///
+/// - **[`MultiProofTask`]**: Event loop coordinator
+///   - Receives state updates from transaction execution
+///   - Deduplicates proof targets against already-fetched proofs
+///   - Sequences proofs to maintain transaction ordering
+///   - Feeds sequenced updates to sparse trie task
+///
+/// - **[`MultiproofManager`]**: Calculation orchestrator
+///   - Decides between fast path ([`EmptyProof`]) and worker dispatch
+///   - Tracks inflight calculations
+///   - Routes storage-only vs full multiproofs to appropriate workers
+///   - Records metrics for monitoring
+///
+/// - **[`ProofWorkerHandle`]**: Worker pool manager
+///   - Maintains separate pools for storage and account proofs
+///   - Dispatches work to blocking threads (CPU-intensive)
+///   - Sends results directly via `proof_result_tx` (bypasses control channel)
+///
+/// [`EmptyProof`]: MultiProofMessage::EmptyProof
+/// [`ProofWorkerHandle`]: reth_trie_parallel::proof_task::ProofWorkerHandle
+///
+/// ## Dual-Channel Design Rationale
+///
+/// The system uses two separate crossbeam channels:
+///
+/// 1. **Control Channel (`tx`/`rx`)**: For orchestration messages
+///    - `PrefetchProofs`: Pre-fetch proofs before execution
+///    - `StateUpdate`: New transaction execution results
+///    - `EmptyProof`: Fast path when all targets already fetched
+///    - `FinishedStateUpdates`: Signal to drain pending work
+///
+/// 2. **Proof Result Channel (`proof_result_tx`/`proof_result_rx`)**: For worker results
+///    - `ProofResultMessage`: Computed multiproofs from worker pools
+///    - Direct path from workers to event loop (no intermediate hops)
+///    - Keeps control messages separate from high-throughput proof data
+///
+/// This separation enables:
+/// - **Non-blocking control**: Control messages never wait behind large proof data
+/// - **Backpressure management**: Each channel can apply different policies
+/// - **Clear ownership**: Workers only need proof result sender, not control channel
+///
+/// ## Initialization and Lifecycle
+///
+/// The task initializes a blinded sparse trie and subscribes to transaction state streams.
+/// As it receives transaction execution results, it fetches proofs for relevant accounts
+/// from the database and reveals them to the tree, then updates relevant leaves according
+/// to transaction results. This feeds updates to the sparse trie task.
+///
+/// See the `run()` method documentation for detailed lifecycle flow.
 #[derive(Debug)]
 pub(super) struct MultiProofTask {
     /// The size of proof targets chunk to spawn in one calculation.
