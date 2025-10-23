@@ -38,6 +38,7 @@ pub struct TraceArgs {
     /// Defaults to HTTP if not specified.
     #[arg(
         long = "tracing-otlp-protocol",
+        env = "OTEL_EXPORTER_OTLP_PROTOCOL",
         global = true,
         value_name = "PROTOCOL",
         default_value = "http",
