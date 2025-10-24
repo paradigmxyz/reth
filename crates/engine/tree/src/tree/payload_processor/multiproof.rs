@@ -262,7 +262,7 @@ impl From<MultiproofInput> for PendingMultiproofTask {
     }
 }
 
-/// Input parameters for spawning a dedicated storage multiproof calculation.
+/// Input parameters for dispatching a dedicated storage multiproof calculation.
 #[derive(Debug)]
 struct StorageMultiproofInput {
     hashed_state_update: HashedPostState,
@@ -283,7 +283,7 @@ impl StorageMultiproofInput {
     }
 }
 
-/// Input parameters for spawning a multiproof calculation.
+/// Input parameters for dispatching a multiproof calculation.
 #[derive(Debug)]
 struct MultiproofInput {
     config: MultiProofConfig,
@@ -308,7 +308,7 @@ impl MultiproofInput {
 /// Coordinates multiproof dispatch between `MultiProofTask` and the parallel trie workers.
 ///
 /// # Flow
-/// 1. `MultiProofTask` asks the manager to spawn either storage or account proof work.
+/// 1. `MultiProofTask` asks the manager to dispatch either storage or account proof work.
 /// 2. The manager builds the request, clones `proof_result_tx`, and hands everything to
 ///    [`ProofWorkerHandle`].
 /// 3. A worker finishes the proof and sends a [`ProofResultMessage`] through the channel included
@@ -356,8 +356,8 @@ impl MultiproofManager {
         }
     }
 
-    /// Spawns a new multiproof calculation.
-    fn spawn(&mut self, input: PendingMultiproofTask) {
+    /// Dispatches a new multiproof calculation to worker pools.
+    fn dispatch(&mut self, input: PendingMultiproofTask) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets_is_empty() {
             debug!(
@@ -368,24 +368,24 @@ impl MultiproofManager {
             return
         }
 
-        self.spawn_multiproof_task(input);
+        self.dispatch_task(input);
     }
 
-    /// Spawns a multiproof task, dispatching to `spawn_storage_proof` if the input is a storage
-    /// multiproof, and dispatching to `spawn_multiproof` otherwise.
-    fn spawn_multiproof_task(&mut self, input: PendingMultiproofTask) {
+    /// Dispatches a multiproof task to `dispatch_storage_proof` if the input is a storage
+    /// multiproof, and to `dispatch_multiproof` otherwise.
+    fn dispatch_task(&mut self, input: PendingMultiproofTask) {
         match input {
             PendingMultiproofTask::Storage(storage_input) => {
-                self.spawn_storage_proof(storage_input);
+                self.dispatch_storage_proof(storage_input);
             }
             PendingMultiproofTask::Regular(multiproof_input) => {
-                self.spawn_multiproof(multiproof_input);
+                self.dispatch_multiproof(multiproof_input);
             }
         }
     }
 
-    /// Spawns a single storage proof calculation task.
-    fn spawn_storage_proof(&mut self, storage_multiproof_input: StorageMultiproofInput) {
+    /// Dispatches a single storage proof calculation to worker pool.
+    fn dispatch_storage_proof(&mut self, storage_multiproof_input: StorageMultiproofInput) {
         let StorageMultiproofInput {
             hashed_state_update,
             hashed_address,
@@ -453,8 +453,8 @@ impl MultiproofManager {
             .record(self.proof_worker_handle.pending_account_tasks() as f64);
     }
 
-    /// Spawns a single multiproof calculation task.
-    fn spawn_multiproof(&mut self, multiproof_input: MultiproofInput) {
+    /// Dispatches a single multiproof calculation to worker pool.
+    fn dispatch_multiproof(&mut self, multiproof_input: MultiproofInput) {
         let MultiproofInput {
             config,
             source,
@@ -740,7 +740,7 @@ impl MultiProofTask {
         // we still want to optimistically fetch extension children for the leaf addition case.
         self.multi_added_removed_keys.touch_accounts(proof_targets.keys().copied());
 
-        // Clone+Arc MultiAddedRemovedKeys for sharing with the spawned multiproof tasks
+        // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
         let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
 
         self.metrics.prefetch_proof_targets_accounts_histogram.record(proof_targets.len() as f64);
@@ -756,8 +756,8 @@ impl MultiProofTask {
             self.multiproof_manager.proof_worker_handle.has_available_account_workers() ||
                 self.multiproof_manager.proof_worker_handle.has_available_storage_workers();
 
-        let mut spawn = |proof_targets| {
-            self.multiproof_manager.spawn(
+        let mut dispatch = |proof_targets| {
+            self.multiproof_manager.dispatch(
                 MultiproofInput {
                     config: self.config.clone(),
                     source: None,
@@ -774,10 +774,10 @@ impl MultiProofTask {
 
         if should_chunk && let Some(chunk_size) = self.chunk_size {
             for proof_targets_chunk in proof_targets.chunks(chunk_size) {
-                spawn(proof_targets_chunk);
+                dispatch(proof_targets_chunk);
             }
         } else {
-            spawn(proof_targets);
+            dispatch(proof_targets);
         }
 
         self.metrics.prefetch_proof_chunks_histogram.record(chunks as f64);
@@ -875,7 +875,7 @@ impl MultiProofTask {
 
         let mut state_updates = 0;
         // If there are any accounts or storage slots that we already fetched the proofs for,
-        // send them immediately, as they don't require spawning any additional multiproofs.
+        // send them immediately, as they don't require dispatching any additional multiproofs.
         if !fetched_state_update.is_empty() {
             let _ = self.tx.send(MultiProofMessage::EmptyProof {
                 sequence_number: self.proof_sequencer.next_sequence(),
@@ -884,7 +884,7 @@ impl MultiProofTask {
             state_updates += 1;
         }
 
-        // Clone+Arc MultiAddedRemovedKeys for sharing with the spawned multiproof tasks
+        // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
         let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
 
         // Process state updates in chunks.
@@ -897,7 +897,7 @@ impl MultiProofTask {
             self.multiproof_manager.proof_worker_handle.has_available_account_workers() ||
                 self.multiproof_manager.proof_worker_handle.has_available_storage_workers();
 
-        let mut spawn = |hashed_state_update| {
+        let mut dispatch = |hashed_state_update| {
             let proof_targets = get_proof_targets(
                 &hashed_state_update,
                 &self.fetched_proof_targets,
@@ -905,7 +905,7 @@ impl MultiProofTask {
             );
             spawned_proof_targets.extend_ref(&proof_targets);
 
-            self.multiproof_manager.spawn(
+            self.multiproof_manager.dispatch(
                 MultiproofInput {
                     config: self.config.clone(),
                     source: Some(source),
@@ -923,10 +923,10 @@ impl MultiProofTask {
 
         if should_chunk && let Some(chunk_size) = self.chunk_size {
             for chunk in not_fetched_state_update.chunks(chunk_size) {
-                spawn(chunk);
+                dispatch(chunk);
             }
         } else {
-            spawn(not_fetched_state_update);
+            dispatch(not_fetched_state_update);
         }
 
         self.metrics
@@ -1129,38 +1129,12 @@ impl MultiProofTask {
 
                             // Convert ProofResultMessage to SparseTrieUpdate
                             match proof_result.result {
-                                Ok(reth_trie_parallel::proof_task::ProofResultVariant::Account { multiproof, stats: _ }) => {
+                                Ok((multiproof, _stats)) => {
                                     debug!(
                                         target: "engine::tree::payload_processor::multiproof",
                                         sequence = proof_result.sequence_number,
                                         total_proofs = proofs_processed,
-                                        "Processing calculated account multiproof from worker"
-                                    );
-
-                                    let update = SparseTrieUpdate {
-                                        state: proof_result.state,
-                                        multiproof,
-                                    };
-
-                                    if let Some(combined_update) =
-                                        self.on_proof(proof_result.sequence_number, update)
-                                    {
-                                        let _ = self.to_sparse_trie.send(combined_update);
-                                    }
-                                }
-                                Ok(reth_trie_parallel::proof_task::ProofResultVariant::Storage { hashed_address, proof, stats: _ }) => {
-                                    debug!(
-                                        target: "engine::tree::payload_processor::multiproof",
-                                        sequence = proof_result.sequence_number,
-                                        total_proofs = proofs_processed,
-                                        ?hashed_address,
-                                        "Processing calculated storage proof from worker"
-                                    );
-
-                                    // Convert storage proof to multiproof format for sparse trie
-                                    let multiproof = reth_trie::DecodedMultiProof::from_storage_proof(
-                                        hashed_address,
-                                        proof,
+                                        "Processing calculated proof from worker"
                                     );
 
                                     let update = SparseTrieUpdate {
