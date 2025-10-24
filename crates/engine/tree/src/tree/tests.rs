@@ -1391,13 +1391,8 @@ fn test_validate_block_synchronous_strategy_during_persistence() {
     let genesis_hash = MAINNET.genesis_hash();
     let valid_block = block_factory.create_valid_block(genesis_hash);
 
-    // Call validate_block_with_state directly
-    // This should execute the Synchronous strategy logic during active persistence
-    let result = test_harness.validate_block_direct(valid_block);
-
-    // Verify validation was attempted (may fail due to test environment limitations)
-    // The key test is that the Synchronous strategy path is executed during persistence
-    assert!(result.is_ok() || result.is_err(), "Validation should complete")
+    // Test that Synchronous strategy executes during active persistence without panicking
+    let _result = test_harness.validate_block_direct(valid_block);
 }
 
 /// Test multiple validation scenarios including valid, consensus-invalid, and execution-invalid
@@ -1411,15 +1406,9 @@ fn test_validate_block_multiple_scenarios() {
     let mut block_factory = TestBlockFactory::new(MAINNET.as_ref().clone());
     let genesis_hash = MAINNET.genesis_hash();
 
-    // Scenario 1: Valid block validation (may fail due to test environment limitations)
+    // Scenario 1: Valid block validation (test execution, not result)
     let valid_block = block_factory.create_valid_block(genesis_hash);
-    let result1 = test_harness.validate_block_direct(valid_block);
-    // Note: Valid blocks might fail in test environment due to missing provider data,
-    // but the important thing is that the validation logic executes without panicking
-    assert!(
-        result1.is_ok() || result1.is_err(),
-        "Valid block validation should complete (may fail due to test environment)"
-    );
+    let _result1 = test_harness.validate_block_direct(valid_block);
 
     // Scenario 2: Block with consensus issues should be rejected
     let consensus_invalid = block_factory.create_invalid_consensus_block(genesis_hash);

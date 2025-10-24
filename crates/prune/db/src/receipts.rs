@@ -1,9 +1,7 @@
-//! Common receipts pruning logic shared between user and static file pruning segments.
+//! Common receipts pruning logic.
 //!
-//! - [`crate::user::Receipts`] is responsible for pruning receipts according to the user-configured
-//!   settings (for example, on a full node or with a custom prune config)
-//! - [`crate::static_file::Receipts`] is responsible for pruning receipts on an archive node after
-//!   static file producer has finished
+//! - [`crate::segments::user::Receipts`] is responsible for pruning receipts according to the
+//!   user-configured settings (for example, on a full node or with a custom prune config)
 
 use crate::db_ext::DbTxPruneExt;
 use reth_db_api::{table::Value, tables, transaction::DbTxMut};
@@ -90,9 +88,10 @@ mod tests {
     };
     use reth_db_api::tables;
     use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
-    use reth_prune::{segments::PruneInput, PruneLimiter, SegmentOutput};
+    use reth_prune::{segments::PruneInput, PruneLimiter};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
+        SegmentOutput,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{

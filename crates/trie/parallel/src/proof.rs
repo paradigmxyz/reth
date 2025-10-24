@@ -101,7 +101,7 @@ impl ParallelProof {
         );
 
         self.proof_worker_handle
-            .queue_storage_proof(input)
+            .dispatch_storage_proof(input)
             .map_err(|e| ParallelStateRootError::Other(e.to_string()))
     }
 

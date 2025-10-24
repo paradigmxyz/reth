@@ -13,7 +13,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{
     map::{hash_map, HashMap},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::ChainInfo;
@@ -661,37 +661,6 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
             |db_provider| db_provider.header_by_number(num),
             |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_header())),
         )
-    }
-
-    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
-        if let Some(num) = self.block_number(hash)? {
-            self.header_td_by_number(num)
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        let number = if self.head_block.as_ref().map(|b| b.block_on_chain(number.into())).is_some()
-        {
-            // If the block exists in memory, we should return a TD for it.
-            //
-            // The canonical in memory state should only store post-merge blocks. Post-merge blocks
-            // have zero difficulty. This means we can use the total difficulty for the last
-            // finalized block number if present (so that we are not affected by reorgs), if not the
-            // last number in the database will be used.
-            if let Some(last_finalized_num_hash) =
-                self.canonical_in_memory_state.get_finalized_num_hash()
-            {
-                last_finalized_num_hash.number
-            } else {
-                self.last_block_number()?
-            }
-        } else {
-            // Otherwise, return what we have on disk for the input block
-            number
-        };
-        self.storage_provider.header_td_by_number(number)
     }
 
     fn headers_range(

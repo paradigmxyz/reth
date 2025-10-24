@@ -42,7 +42,8 @@ pub trait Segment<Provider>: Debug + Send + Sync {
 }
 
 /// Segment pruning input, see [`Segment::prune`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
 pub struct PruneInput {
     pub previous_checkpoint: Option<PruneCheckpoint>,
     /// Target block up to which the pruning needs to be done, inclusive.

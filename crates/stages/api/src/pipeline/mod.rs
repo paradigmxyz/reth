@@ -9,7 +9,7 @@ use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ChainStateBlockReader,
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
-    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -31,7 +31,7 @@ use crate::{
 };
 pub use builder::*;
 use progress::*;
-use reth_errors::{ProviderResult, RethResult};
+use reth_errors::RethResult;
 pub use set::*;
 
 /// A container for a queued stage.
@@ -101,6 +101,12 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         PipelineBuilder::default()
     }
 
+    /// Return the minimum block number achieved by
+    /// any stage during the execution of the pipeline.
+    pub const fn minimum_block_number(&self) -> Option<u64> {
+        self.progress.minimum_block_number
+    }
+
     /// Set tip for reverse sync.
     #[track_caller]
     pub fn set_tip(&self, tip: B256) {
@@ -121,7 +127,9 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     ) -> &mut dyn Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW> {
         &mut self.stages[idx]
     }
+}
 
+impl<N: ProviderNodeTypes> Pipeline<N> {
     /// Registers progress metrics for each registered stage
     pub fn register_metrics(&mut self) -> Result<(), PipelineError> {
         let Some(metrics_tx) = &mut self.metrics_tx else { return Ok(()) };
@@ -278,81 +286,6 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
             );
 
             pruner.run(prune_tip)?;
-        }
-
-        Ok(())
-    }
-
-    /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
-    /// than the checkpoint of the first stage).
-    ///
-    /// This will return the pipeline target if:
-    ///  * the pipeline was interrupted during its previous run
-    ///  * a new stage was added
-    ///  * stage data was dropped manually through `reth stage drop ...`
-    ///
-    /// # Returns
-    ///
-    /// A target block hash if the pipeline is inconsistent, otherwise `None`.
-    pub fn initial_backfill_target(&self) -> ProviderResult<Option<B256>> {
-        let provider = self.provider_factory.provider()?;
-
-        // If no target was provided, check if the stages are congruent - check if the
-        // checkpoint of the last stage matches the checkpoint of the first.
-        let first_stage_checkpoint = provider
-            .get_stage_checkpoint(self.stages.first().unwrap().id())?
-            .unwrap_or_default()
-            .block_number;
-
-        // Skip the first stage as we've already retrieved it and comparing all other checkpoints
-        // against it.
-        for stage in self.stages.iter().skip(1) {
-            let stage_id = stage.id();
-
-            let stage_checkpoint =
-                provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
-
-            // If the checkpoint of any stage is less than the checkpoint of the first stage,
-            // retrieve and return the block hash of the latest header and use it as the target.
-            if stage_checkpoint < first_stage_checkpoint {
-                debug!(
-                    target: "consensus::engine",
-                    first_stage_checkpoint,
-                    inconsistent_stage_id = %stage_id,
-                    inconsistent_stage_checkpoint = stage_checkpoint,
-                    "Pipeline sync progress is inconsistent"
-                );
-                return provider.block_hash(first_stage_checkpoint);
-            }
-        }
-
-        Ok(None)
-    }
-
-    /// Checks for consistency between database and static files. If it fails, it unwinds to
-    /// the first block that's consistent between database and static files.
-    pub async fn ensure_static_files_consistency(&mut self) -> Result<(), PipelineError> {
-        let maybe_unwind_target = self
-            .provider_factory
-            .static_file_provider()
-            .check_consistency(&self.provider_factory.provider()?)?;
-
-        self.move_to_static_files()?;
-
-        if let Some(unwind_target) = maybe_unwind_target {
-            // Highly unlikely to happen, and given its destructive nature, it's better to panic
-            // instead.
-            assert_ne!(
-                unwind_target,
-                0,
-                "A static file <> database inconsistency was found that would trigger an unwind to block 0"
-            );
-
-            info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
-
-            self.unwind(unwind_target, None).inspect_err(|err| {
-                error!(target: "reth::cli", unwind_target = %unwind_target, %err, "failed to run unwind")
-            })?;
         }
 
         Ok(())

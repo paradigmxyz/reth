@@ -6,7 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Pruning implementation"
+exclude.workspace = true
+description = "Database integration with prune implementation"
 
 [lints]
 workspace = true

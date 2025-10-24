@@ -40,12 +40,15 @@ use reth_trie_sparse::{
     ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
-use std::sync::{
-    atomic::AtomicBool,
-    mpsc::{self, channel, Sender},
-    Arc,
+use std::{
+    sync::{
+        atomic::AtomicBool,
+        mpsc::{self, channel, Sender},
+        Arc,
+    },
+    time::Instant,
 };
-use tracing::{debug, instrument, warn};
+use tracing::{debug, debug_span, instrument, warn};
 
 mod configured_sparse_trie;
 pub mod executor;
@@ -62,6 +65,29 @@ use configured_sparse_trie::ConfiguredSparseTrie;
 /// would deteriorate to the point where PST might as well not be used.
 pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
     ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
+
+/// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
+/// nodes in allocated sparse tries.
+///
+/// Node maps have a key of `Nibbles` and value of `SparseNode`.
+/// The `size_of::<Nibbles>` is 40, and `size_of::<SparseNode>` is 80.
+///
+/// If we have 1 million entries of 120 bytes each, this conservative estimate comes out at around
+/// 120MB.
+pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
+
+/// Default value capacity for shrinking the sparse trie. This is used to limit the number of values
+/// in allocated sparse tries.
+///
+/// There are storage and account values, the largest of the two being account values, which are
+/// essentially `TrieAccount`s.
+///
+/// Account value maps have a key of `Nibbles` and value of `TrieAccount`.
+/// The `size_of::<Nibbles>` is 40, and `size_of::<TrieAccount>` is 104.
+///
+/// If we have 1 million entries of 144 bytes each, this conservative estimate comes out at around
+/// 144MB.
+pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -167,6 +193,12 @@ where
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
     #[allow(clippy::type_complexity)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor",
+        name = "payload processor",
+        skip_all
+    )]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -187,6 +219,7 @@ where
             + Clone
             + 'static,
     {
+        let span = tracing::Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task, save the trie input
         let (trie_input, state_root_config) = MultiProofConfig::from_input(trie_input);
@@ -200,7 +233,6 @@ where
         );
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
             consistent_view,
@@ -209,15 +241,11 @@ where
             account_worker_count,
         );
 
-        // We set it to half of the proof task concurrency, because often for each multiproof we
-        // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
-        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
             proof_handle.clone(),
             to_sparse_trie,
-            max_multi_proof_task_concurrency,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );
 
@@ -237,6 +265,7 @@ where
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
+            let _enter = span.entered();
             multi_proof_task.run();
         });
 
@@ -257,6 +286,7 @@ where
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
     ///
     /// Returns a [`PayloadHandle`] to communicate with the task.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     pub(super) fn spawn_cache_exclusive<P, I: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
@@ -353,7 +383,9 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
+            let span = debug_span!(target: "engine::tree::payload_processor", "prewarm task");
             self.executor.spawn_blocking(move || {
+                let _enter = span.entered();
                 prewarm_task.run(transactions, to_prewarm_task);
             });
         }
@@ -370,7 +402,7 @@ where
     ///
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
-    #[instrument(target = "engine::caching", skip(self))]
+    #[instrument(level = "debug", target = "engine::caching", skip(self))]
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
         if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
             debug!("reusing execution cache");
@@ -383,6 +415,7 @@ where
     }
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task<BPF>(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
@@ -421,14 +454,27 @@ where
                 sparse_state_trie,
             );
 
+        let span = tracing::Span::current();
         self.executor.spawn_blocking(move || {
+            let _enter = span.entered();
+
             let (result, trie) = task.run();
             // Send state root computation result
             let _ = state_root_tx.send(result);
 
-            // Clear the SparseStateTrie and replace it back into the mutex _after_ sending results
-            // to the next step, so that time spent clearing doesn't block the step after this one.
-            cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
+            // Clear the SparseStateTrie, shrink, and replace it back into the mutex _after_ sending
+            // results to the next step, so that time spent clearing doesn't block the step after
+            // this one.
+            let _enter = debug_span!(target: "engine::tree::payload_processor", "clear").entered();
+            let mut cleared_trie = ClearedSparseStateTrie::from_state_trie(trie);
+
+            // Shrink the sparse trie so that we don't have ever increasing memory.
+            cleared_trie.shrink_to(
+                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+            );
+
+            cleared_sparse_trie.lock().replace(cleared_trie);
         });
     }
 }
@@ -452,6 +498,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.state_root
             .take()
@@ -583,8 +630,16 @@ impl ExecutionCache {
     /// A cache is considered available when:
     /// - It exists and matches the requested parent hash
     /// - No other tasks are currently using it (checked via Arc reference count)
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
     pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
+        let start = Instant::now();
         let cache = self.inner.read();
+
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 5 {
+            warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
+        }
+
         cache
             .as_ref()
             .filter(|c| c.executed_block_hash() == parent_hash && c.is_available())

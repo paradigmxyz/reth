@@ -11,7 +11,7 @@
 
 use core::{fmt::Debug, marker::PhantomData};
 pub use reth_primitives_traits::{
-    Block, BlockBody, FullBlock, FullNodePrimitives, FullReceipt, FullSignedTx, NodePrimitives,
+    Block, BlockBody, FullBlock, FullReceipt, FullSignedTx, NodePrimitives,
 };
 
 use reth_chainspec::EthChainSpec;

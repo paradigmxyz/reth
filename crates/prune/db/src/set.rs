@@ -1,6 +1,6 @@
 use crate::{
-    user::MerkleChangeSets, AccountHistory, ReceiptsByLogs, SenderRecovery, StaticFileHeaders,
-    StaticFileReceipts, StaticFileTransactions, StorageHistory, TransactionLookup, UserReceipts,
+    user::MerkleChangeSets, AccountHistory, SenderRecovery, StorageHistory, TransactionLookup,
+    UserReceipts,
 };
 use alloy_eips::Encodable2718;
 use reth_db_api::{table::Value, transaction::DbTxMut};
@@ -15,7 +15,7 @@ use reth_prune_types::PruneModes;
 /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
 /// [`PruneModes`].
 pub fn from_components<Provider>(
-    static_file_provider: StaticFileProvider<Provider::Primitives>,
+    _static_file_provider: StaticFileProvider<Provider::Primitives>,
     prune_modes: PruneModes,
 ) -> SegmentSet<Provider>
 where
@@ -35,16 +35,10 @@ where
         storage_history,
         bodies_history: _,
         merkle_changesets,
-        receipts_log_filter,
+        receipts_log_filter: _,
     } = prune_modes;
 
     SegmentSet::default()
-        // Static file headers
-        .segment(StaticFileHeaders::new(static_file_provider.clone()))
-        // Static file transactions
-        .segment(StaticFileTransactions::new(static_file_provider.clone()))
-        // Static file receipts
-        .segment(StaticFileReceipts::new(static_file_provider))
         // Merkle changesets
         .segment(MerkleChangeSets::new(merkle_changesets))
         // Account history
@@ -53,11 +47,6 @@ where
         .segment_opt(storage_history.map(StorageHistory::new))
         // User receipts
         .segment_opt(receipts.map(UserReceipts::new))
-        // Receipts by logs
-        .segment_opt(
-            (!receipts_log_filter.is_empty())
-                .then(|| ReceiptsByLogs::new(receipts_log_filter.clone())),
-        )
         // Transaction lookup
         .segment_opt(transaction_lookup.map(TransactionLookup::new))
         // Sender recovery
