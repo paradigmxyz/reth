@@ -170,7 +170,7 @@ we have sent/received and the timeouts associated with them.
 pub(crate) struct Pinger {
     /// The timer used for the next ping.
     ping_interval: Interval,
-    /// The timer used for the next ping.
+    /// The timer used to detect a ping timeout.
     timeout_timer: Pin<Box<Sleep>>,
     timeout: Duration,
     state: PingState,
