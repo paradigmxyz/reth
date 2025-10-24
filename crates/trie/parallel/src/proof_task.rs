@@ -261,7 +261,6 @@ fn storage_worker_loop<Factory>(
                     Err(e) => Err(e),
                 };
 
-                // Send result directly to MultiProofTask
                 if sender
                     .send(ProofResultMessage {
                         sequence_number: seq,
