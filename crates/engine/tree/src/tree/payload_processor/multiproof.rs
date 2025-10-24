@@ -1167,8 +1167,11 @@ impl MultiProofTask {
                             }
                         }
                         Err(_) => {
-                            error!(target: "engine::tree::payload_processor::multiproof", "Proof result channel closed unexpectedly");
-                            return
+                            // SAFETY: This is unreachable because `self.multiproof_manager` owns
+                            // `proof_result_tx` (the sender), which keeps the channel open for
+                            // the entire lifetime of this task. The channel cannot close while
+                            // `self` exists.
+                            unreachable!("proof result channel closed while multiproof manager still exists")
                         }
                     }
                 }
