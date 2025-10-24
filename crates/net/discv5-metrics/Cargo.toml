@@ -1,0 +1,20 @@
+[package]
+name = "reth-discv5-metrics-derive"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Ethereum peer discovery V5 metrics"
+
+[lints]
+workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote.workspace = true
+syn = { workspace = true, features = ["full"] }
+proc-macro2.workspace = true

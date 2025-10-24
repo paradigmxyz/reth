@@ -1,8 +1,8 @@
 //! Tracks peer discovery for [`Discv5`](crate::Discv5).
-use metrics::{Counter, Gauge};
-use reth_metrics::Metrics;
-
 use crate::NetworkStackId;
+use metrics::{Counter, Gauge};
+use reth_discv5_metrics_derive::kbuckets_metrics;
+use reth_metrics::Metrics;
 
 /// Information tracked by [`Discv5`](crate::Discv5).
 #[derive(Debug, Default, Clone)]
@@ -137,3 +137,6 @@ impl AdvertisedChainMetrics {
         }
     }
 }
+
+#[kbuckets_metrics]
+pub struct KBucketMetrics {}
