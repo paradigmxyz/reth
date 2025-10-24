@@ -167,59 +167,43 @@ where
 
             let mut tx_index = 0usize;
 
-            // Handle first transaction - special case for system transactions
-            if let Ok(first_tx) = pending.recv() {
-                // Move the transaction into the indexed wrapper to avoid an extra clone
-                let indexed_tx = IndexedTransaction { index: tx_index, tx: first_tx };
-                // Compute metadata from the moved value
-                let tx_ref = indexed_tx.tx.tx();
-                let is_system_tx = tx_ref.ty() > MAX_STANDARD_TX_TYPE;
-                let first_tx_hash = tx_ref.tx_hash();
+            // Distribute transactions to workers
+            for tx in core::iter::from_fn(|| pending.recv().ok()) {
+                // Stop distributing if termination was requested
+                if ctx.terminate_execution.load(Ordering::Relaxed) {
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        "Termination requested, stopping transaction distribution"
+                    );
+                    break;
+                }
 
-                // Check if this is a system transaction (type > 4)
-                // System transactions in the first position typically set critical metadata
-                // that affects all subsequent transactions (e.g., L1 block info, fees on L2s).
-                if is_system_tx {
-                    // Broadcast system transaction to all workers to ensure they have the
-                    // critical state. This is particularly important for L2s like Optimism
-                    // where the first deposit transaction contains essential block metadata.
+                let indexed_tx = IndexedTransaction { index: tx_index, tx };
+                let is_system_tx = indexed_tx.tx.tx().ty() > MAX_STANDARD_TX_TYPE;
+
+                // System transactions (type > 4) in the first position set critical metadata
+                // that affects all subsequent transactions (e.g., L1 block info on L2s).
+                // Broadcast the first system transaction to all workers to ensure they have
+                // the critical state. This is particularly important for L2s like Optimism
+                // where the first deposit transaction (type 126) contains essential block metadata.
+                if tx_index == 0 && is_system_tx {
                     for handle in &handles {
-                        if let Err(err) = handle.send(indexed_tx.clone()) {
-                            warn!(
-                                target: "engine::tree::payload_processor::prewarm",
-                                tx_hash = %first_tx_hash,
-                                error = %err,
-                                "Failed to send deposit transaction to worker"
-                            );
-                        }
+                        // Ignore send errors: workers listen to terminate_execution and may
+                        // exit early when signaled. Sending to a disconnected worker is
+                        // possible and harmless and should happen at most once due to
+                        //  the terminate_execution check above.
+                        let _ = handle.send(indexed_tx.clone());
                     }
                 } else {
-                    // Not a deposit, send to first worker via round-robin
-                    if let Err(err) = handles[0].send(indexed_tx) {
-                        warn!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            task_idx = 0,
-                            error = %err,
-                            "Failed to send transaction to worker"
-                        );
-                    }
+                    // Round-robin distribution for all other transactions
+                    let worker_idx = executing % workers_needed;
+                    // Ignore send errors: workers listen to terminate_execution and may
+                    // exit early when signaled. Sending to a disconnected worker is
+                    // possible and harmless and should happen at most once due to
+                    //  the terminate_execution check above.
+                    let _ = handles[worker_idx].send(indexed_tx);
                 }
-                executing += 1;
-                tx_index += 1;
-            }
 
-            // Process remaining transactions with round-robin distribution
-            while let Ok(executable) = pending.recv() {
-                let indexed_tx = IndexedTransaction { index: tx_index, tx: executable };
-                let task_idx = executing % workers_needed;
-                if let Err(err) = handles[task_idx].send(indexed_tx) {
-                    warn!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        task_idx,
-                        error = %err,
-                        "Failed to send transaction to worker"
-                    );
-                }
                 executing += 1;
                 tx_index += 1;
             }
