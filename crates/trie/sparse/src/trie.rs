@@ -3203,7 +3203,7 @@ mod tests {
     }
 
     /// We have three leaves that share the same prefix: 0x00, 0x01 and 0x02. Hash builder trie has
-    /// only nodes 0x00 and 0x01, and we have proofs for them. Node B is new and inserted in the
+    /// only nodes 0x00 and 0x02, and we have proofs for them. Node 0x01 is new and inserted in the
     /// sparse trie first.
     ///
     /// 1. Reveal the hash builder proof to leaf 0x00 in the sparse trie.
