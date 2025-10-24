@@ -1062,7 +1062,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Gets the highest static file block for all segments.
     pub fn get_highest_static_files(&self) -> HighestStaticFiles {
         HighestStaticFiles {
+            headers: self.get_highest_static_file_block(StaticFileSegment::Headers),
             receipts: self.get_highest_static_file_block(StaticFileSegment::Receipts),
+            transactions: self.get_highest_static_file_block(StaticFileSegment::Transactions),
         }
     }
 

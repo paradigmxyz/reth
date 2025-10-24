@@ -66,29 +66,6 @@ use configured_sparse_trie::ConfiguredSparseTrie;
 pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
     ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
 
-/// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
-/// nodes in allocated sparse tries.
-///
-/// Node maps have a key of `Nibbles` and value of `SparseNode`.
-/// The `size_of::<Nibbles>` is 40, and `size_of::<SparseNode>` is 80.
-///
-/// If we have 1 million entries of 120 bytes each, this conservative estimate comes out at around
-/// 120MB.
-pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
-
-/// Default value capacity for shrinking the sparse trie. This is used to limit the number of values
-/// in allocated sparse tries.
-///
-/// There are storage and account values, the largest of the two being account values, which are
-/// essentially `TrieAccount`s.
-///
-/// Account value maps have a key of `Nibbles` and value of `TrieAccount`.
-/// The `size_of::<Nibbles>` is 40, and `size_of::<TrieAccount>` is 104.
-///
-/// If we have 1 million entries of 144 bytes each, this conservative estimate comes out at around
-/// 144MB.
-pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
-
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
 pub struct PayloadProcessor<Evm>
@@ -462,19 +439,11 @@ where
             // Send state root computation result
             let _ = state_root_tx.send(result);
 
-            // Clear the SparseStateTrie, shrink, and replace it back into the mutex _after_ sending
+            // Clear the SparseStateTrie and replace it back into the mutex _after_ sending
             // results to the next step, so that time spent clearing doesn't block the step after
             // this one.
             let _enter = debug_span!(target: "engine::tree::payload_processor", "clear").entered();
-            let mut cleared_trie = ClearedSparseStateTrie::from_state_trie(trie);
-
-            // Shrink the sparse trie so that we don't have ever increasing memory.
-            cleared_trie.shrink_to(
-                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-            );
-
-            cleared_sparse_trie.lock().replace(cleared_trie);
+            cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
         });
     }
 }

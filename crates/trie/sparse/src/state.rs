@@ -43,32 +43,6 @@ where
         Self(trie)
     }
 
-    /// Shrink the cleared sparse trie's capacity to the given node and value size.
-    /// This helps reduce memory usage when the trie has excess capacity.
-    /// The capacity is distributed equally across the account trie and all storage tries.
-    pub fn shrink_to(&mut self, node_size: usize, value_size: usize) {
-        // Count total number of storage tries (active + cleared + default)
-        let storage_tries_count = self.0.storage.tries.len() + self.0.storage.cleared_tries.len();
-
-        // Total tries = 1 account trie + all storage tries
-        let total_tries = 1 + storage_tries_count;
-
-        // Distribute capacity equally among all tries
-        let node_size_per_trie = node_size / total_tries;
-        let value_size_per_trie = value_size / total_tries;
-
-        // Shrink the account trie
-        self.0.state.shrink_nodes_to(node_size_per_trie);
-        self.0.state.shrink_values_to(value_size_per_trie);
-
-        // Give storage tries the remaining capacity after account trie allocation
-        let storage_node_size = node_size.saturating_sub(node_size_per_trie);
-        let storage_value_size = value_size.saturating_sub(value_size_per_trie);
-
-        // Shrink all storage tries (they will redistribute internally)
-        self.0.storage.shrink_to(storage_node_size, storage_value_size);
-    }
-
     /// Returns the cleared [`SparseStateTrie`], consuming this instance.
     pub fn into_inner(self) -> SparseStateTrie<A, S> {
         self.0
@@ -885,31 +859,6 @@ impl<S: SparseTrieInterface> StorageTries<S> {
             set.clear();
             set
         }));
-    }
-
-    /// Shrinks the capacity of all storage tries (active, cleared, and default) to the given sizes.
-    /// The capacity is distributed equally among all tries that have allocations.
-    fn shrink_to(&mut self, node_size: usize, value_size: usize) {
-        // Count total number of tries with capacity (active + cleared + default)
-        let active_count = self.tries.len();
-        let cleared_count = self.cleared_tries.len();
-        let total_tries = 1 + active_count + cleared_count;
-
-        // Distribute capacity equally among all tries
-        let node_size_per_trie = node_size / total_tries;
-        let value_size_per_trie = value_size / total_tries;
-
-        // Shrink active storage tries
-        for trie in self.tries.values_mut() {
-            trie.shrink_nodes_to(node_size_per_trie);
-            trie.shrink_values_to(value_size_per_trie);
-        }
-
-        // Shrink cleared storage tries
-        for trie in &mut self.cleared_tries {
-            trie.shrink_nodes_to(node_size_per_trie);
-            trie.shrink_values_to(value_size_per_trie);
-        }
     }
 }
 

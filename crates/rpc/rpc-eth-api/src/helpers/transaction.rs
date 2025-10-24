@@ -91,8 +91,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         let this = self.clone();
         let timeout_duration = self.send_raw_transaction_sync_timeout();
         async move {
-            let mut stream = this.provider().canonical_state_stream();
             let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
+            let mut stream = this.provider().canonical_state_stream();
             tokio::time::timeout(timeout_duration, async {
                 while let Some(notification) = stream.next().await {
                     let chain = notification.committed();
