@@ -368,12 +368,12 @@ impl MultiproofManager {
             return
         }
 
-        self.dispatch_task(input);
+        self.dispatch_multiproof_task(input);
     }
 
     /// Dispatches a multiproof task to `dispatch_storage_proof` if the input is a storage
     /// multiproof, and to `dispatch_multiproof` otherwise.
-    fn dispatch_task(&mut self, input: PendingMultiproofTask) {
+    fn dispatch_multiproof_task(&mut self, input: PendingMultiproofTask) {
         match input {
             PendingMultiproofTask::Storage(storage_input) => {
                 self.dispatch_storage_proof(storage_input);
