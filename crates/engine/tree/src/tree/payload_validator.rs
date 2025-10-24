@@ -631,7 +631,8 @@ where
                 .with_bundle_update()
                 .without_state_clear()
                 .build(),
-        );
+        )
+        .with_bal_builder();
 
         let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
         let ctx =

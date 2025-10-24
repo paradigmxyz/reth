@@ -566,7 +566,8 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
     pub fn new(strategy_factory: F, db: DB) -> Self {
         let db = BalDatabase::new(
             State::builder().with_database(db).with_bundle_update().without_state_clear().build(),
-        );
+        )
+        .with_bal_builder();
 
         Self { strategy_factory, db }
     }

@@ -240,7 +240,8 @@ pub trait LoadPendingBlock:
             .map_err(Self::Error::from_eth_err)?;
         let state = StateProviderDatabase::new(&state_provider);
         let mut db =
-            BalDatabase::new(State::builder().with_database(state).with_bundle_update().build());
+            BalDatabase::new(State::builder().with_database(state).with_bundle_update().build())
+                .with_bal_builder();
 
         let mut builder = self
             .evm_config()

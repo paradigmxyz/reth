@@ -342,7 +342,8 @@ impl<Txs> OpBuilder<'_, Txs> {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number(), "building new payload");
 
         let mut db =
-            BalDatabase::new(State::builder().with_database(db).with_bundle_update().build());
+            BalDatabase::new(State::builder().with_database(db).with_bundle_update().build())
+                .with_bal_builder();
 
         let mut builder = ctx.block_builder(&mut db)?;
 

@@ -288,7 +288,8 @@ where
             .with_database_ref(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
             .build(),
-    );
+    )
+    .with_bal_builder();
 
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
     let evm = evm_config.evm_for_block(&mut state, &reorg_target).map_err(RethError::other)?;

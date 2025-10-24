@@ -96,7 +96,8 @@ where
         let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
         let mut state = BalDatabase::new(
             State::builder().with_database(cached_db).with_bundle_update().build(),
-        );
+        )
+        .with_bal_builder();
 
         let mut builder = self
             .evm_config

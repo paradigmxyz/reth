@@ -307,7 +307,8 @@ mod tests {
                     .with_bundle_update()
                     .without_state_clear()
                     .build(),
-            );
+            )
+            .with_bal_builder();
             let evm = EthEvm::new(
                 Context::mainnet().with_db(db).build_mainnet_with_inspector(NoOpInspector {}),
                 false,

@@ -159,7 +159,8 @@ where
     let state = StateProviderDatabase::new(&state_provider);
     let mut db = BalDatabase::new(
         State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build(),
-    );
+    )
+    .with_bal_builder();
 
     let mut builder = evm_config
         .builder_for_next_block(

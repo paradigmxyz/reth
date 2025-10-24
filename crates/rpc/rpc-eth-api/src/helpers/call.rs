@@ -100,7 +100,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 //todo?
                 let mut db = BalDatabase::new(
                     State::builder().with_database(StateProviderDatabase::new(state)).build(),
-                );
+                )
+                .with_bal_builder();
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
                 for block in block_state_calls {

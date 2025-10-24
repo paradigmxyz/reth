@@ -539,7 +539,8 @@ mod tests {
                 ))
                 .with_bundle_update()
                 .build(),
-        );
+        )
+        .with_bal_builder();
 
         // Insert contracts from the fixture into the state cache
         for (code_hash, bytecode) in &bundle_state.contracts {
