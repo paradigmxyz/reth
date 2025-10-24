@@ -88,6 +88,7 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
+        let mut blocks_processed = 0;
         for block_number in self.range.clone() {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -122,9 +123,13 @@ where
 
             // Seal the block back and save it
             blocks.push(block);
+            
+            // Increment the counter of processed blocks
+            blocks_processed += 1;
+            
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
-                block_number - *self.range.start() + 1,
+                blocks_processed,
                 executor.size_hint() as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
