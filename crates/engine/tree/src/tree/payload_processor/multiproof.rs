@@ -973,7 +973,7 @@ impl MultiProofTask {
     ///      so that the proofs for accounts and storage slots that were already fetched are not
     ///      requested again.
     /// 2. Using the proof targets, a new multiproof is calculated using
-    ///    [`MultiproofManager::spawn`].
+    ///    [`MultiproofManager::dispatch`].
     ///    * If the list of proof targets is empty, the [`MultiProofMessage::EmptyProof`] message is
     ///      sent back to this task along with the original state update.
     ///    * Otherwise, the multiproof is dispatched to worker pools and results are sent directly
