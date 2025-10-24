@@ -95,6 +95,8 @@ pub struct EthConfig {
     pub raw_tx_forwarder: ForwardConfig,
     /// Timeout duration for `send_raw_transaction_sync` RPC method.
     pub send_raw_transaction_sync_timeout: Duration,
+    /// Maximum memory the EVM can allocate per RPC request.
+    pub rpc_evm_memory_limit: u64,
 }
 
 impl EthConfig {
@@ -126,6 +128,7 @@ impl Default for EthConfig {
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
+            rpc_evm_memory_limit: u64::MAX,
         }
     }
 }
@@ -214,6 +217,12 @@ impl EthConfig {
     /// Configures the timeout duration for `send_raw_transaction_sync` RPC method.
     pub const fn send_raw_transaction_sync_timeout(mut self, timeout: Duration) -> Self {
         self.send_raw_transaction_sync_timeout = timeout;
+        self
+    }
+
+    /// Configures the maximum memory the EVM can allocate per RPC request.
+    pub const fn rpc_evm_memory_limit(mut self, memory_limit: u64) -> Self {
+        self.rpc_evm_memory_limit = memory_limit;
         self
     }
 }
