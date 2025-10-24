@@ -4,6 +4,7 @@ use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_prune::PrunerBuilder;
+use reth_prune_db::build_with_provider_factory;
 use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
 use tracing::info;
@@ -34,9 +35,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         if let Some(prune_tip) = lowest_static_file_height {
             info!(target: "reth::cli", ?prune_tip, ?config, "Pruning data from database...");
             // Run the pruner according to the configuration, and don't enforce any limits on it
-            let mut pruner = PrunerBuilder::new(config)
-                .delete_limit(usize::MAX)
-                .build_with_provider_factory(provider_factory);
+            let mut pruner = build_with_provider_factory(
+                PrunerBuilder::new(config).delete_limit(usize::MAX),
+                provider_factory,
+            );
 
             pruner.run(prune_tip)?;
             info!(target: "reth::cli", "Pruned data from database");

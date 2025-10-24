@@ -1,6 +1,4 @@
-mod receipts;
 mod set;
-mod user;
 
 use crate::{PruneLimiter, PrunerError};
 use alloy_primitives::{BlockNumber, TxNumber};
@@ -9,10 +7,6 @@ use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, S
 pub use set::SegmentSet;
 use std::{fmt::Debug, ops::RangeInclusive};
 use tracing::error;
-pub use user::{
-    AccountHistory, MerkleChangeSets, Receipts as UserReceipts, SenderRecovery, StorageHistory,
-    TransactionLookup,
-};
 
 /// A segment represents a pruning of some portion of the data.
 ///
@@ -51,11 +45,11 @@ pub trait Segment<Provider>: Debug + Send + Sync {
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone))]
 pub struct PruneInput {
-    pub(crate) previous_checkpoint: Option<PruneCheckpoint>,
+    pub previous_checkpoint: Option<PruneCheckpoint>,
     /// Target block up to which the pruning needs to be done, inclusive.
-    pub(crate) to_block: BlockNumber,
+    pub to_block: BlockNumber,
     /// Limits pruning of a segment.
-    pub(crate) limiter: PruneLimiter,
+    pub limiter: PruneLimiter,
 }
 
 impl PruneInput {
@@ -67,7 +61,7 @@ impl PruneInput {
     /// 2. If checkpoint doesn't exist, return 0.
     ///
     /// To get the range end: get last tx number for `to_block`.
-    pub(crate) fn get_next_tx_num_range<Provider: BlockReader>(
+    pub fn get_next_tx_num_range<Provider: BlockReader>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<Option<RangeInclusive<TxNumber>>> {
@@ -113,7 +107,7 @@ impl PruneInput {
     /// 2. If checkpoint doesn't exist, use block 0.
     ///
     /// To get the range end: use block `to_block`.
-    pub(crate) fn get_next_block_range(&self) -> Option<RangeInclusive<BlockNumber>> {
+    pub fn get_next_block_range(&self) -> Option<RangeInclusive<BlockNumber>> {
         let from_block = self.get_start_next_block_range();
         let range = from_block..=self.to_block;
         if range.is_empty() {
@@ -127,7 +121,7 @@ impl PruneInput {
     ///
     /// 1. If checkpoint exists, use next block.
     /// 2. If checkpoint doesn't exist, use block 0.
-    pub(crate) fn get_start_next_block_range(&self) -> u64 {
+    pub fn get_start_next_block_range(&self) -> u64 {
         self.previous_checkpoint
             .and_then(|checkpoint| checkpoint.block_number)
             // Checkpoint exists, prune from the next block after the highest pruned one

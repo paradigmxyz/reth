@@ -9,7 +9,34 @@ repository.workspace = true
 exclude.workspace = true
 description = "Database integration with prune implementation"
 
-[dependencies]
-
 [lints]
 workspace = true
+
+[dependencies]
+# reth
+reth-db-api.workspace = true
+reth-provider.workspace = true
+reth-prune-types.workspace = true
+reth-primitives-traits.workspace = true
+reth-static-file-types.workspace = true
+reth-prune.workspace = true
+
+# ethereum
+alloy-eips.workspace = true
+
+# misc
+tracing.workspace = true
+itertools.workspace = true
+rayon.workspace = true
+rustc-hash.workspace = true
+alloy-primitives.workspace = true
+
+[dev-dependencies]
+# reth
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-stages = { workspace = true, features = ["test-utils"] }
+reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
+reth-testing-utils.workspace = true
+reth-tracing.workspace = true
+
+assert_matches.workspace = true

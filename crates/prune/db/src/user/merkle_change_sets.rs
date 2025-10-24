@@ -1,8 +1,4 @@
-use crate::{
-    db_ext::DbTxPruneExt,
-    segments::{PruneInput, Segment},
-    PrunerError,
-};
+use crate::db_ext::DbTxPruneExt;
 use alloy_primitives::B256;
 use reth_db_api::{models::BlockNumberHashedAddress, table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
@@ -10,17 +6,23 @@ use reth_provider::{
     errors::provider::ProviderResult, BlockReader, ChainStateBlockReader, DBProvider,
     NodePrimitivesProvider, PruneCheckpointWriter, TransactionsProvider,
 };
+use reth_prune::{
+    segments::{PruneInput, Segment},
+    PrunerError,
+};
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use tracing::{instrument, trace};
 
+/// Responsible for pruning merkle change sets tables.
 #[derive(Debug)]
 pub struct MerkleChangeSets {
     mode: PruneMode,
 }
 
 impl MerkleChangeSets {
+    /// Creates a new merkle change sets pruner with `mode`.
     pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }

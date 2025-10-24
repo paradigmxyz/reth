@@ -1,24 +1,26 @@
-use crate::{
-    db_ext::DbTxPruneExt,
-    segments::{PruneInput, Segment, SegmentOutput},
-    PrunerError,
-};
+use crate::db_ext::DbTxPruneExt;
 use alloy_eips::eip2718::Encodable2718;
 use rayon::prelude::*;
 use reth_db_api::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider, PruneCheckpointReader, StaticFileProviderFactory};
+use reth_prune::{
+    segments::{PruneInput, Segment},
+    PrunerError,
+};
 use reth_prune_types::{
-    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
+    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, instrument, trace};
 
+/// Prunes transaction lookup entries from the database.
 #[derive(Debug)]
 pub struct TransactionLookup {
     mode: PruneMode,
 }
 
 impl TransactionLookup {
+    /// Creates a new [`TransactionLookup`] with the given prune mode.
     pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
@@ -144,7 +146,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneLimiter, Segment, SegmentOutput, TransactionLookup};
+    use crate::TransactionLookup;
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -153,8 +155,13 @@ mod tests {
     };
     use reth_db_api::tables;
     use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_prune::{
+        segments::{PruneInput, Segment},
+        PruneLimiter,
+    };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
+        SegmentOutput,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
