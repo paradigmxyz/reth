@@ -336,7 +336,7 @@ mod tests {
 
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let (proof_worker_handle, _) =
+        let proof_worker_handle =
             ProofWorkerHandle::new(rt.handle().clone(), consistent_view, task_ctx, 1, 1);
 
         let parallel_result = ParallelProof::new(
