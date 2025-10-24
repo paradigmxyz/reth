@@ -77,7 +77,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::runtime::Handle;
-use tracing::{debug, debug_span, error, span::EnteredSpan, trace};
+use tracing::{debug, debug_span, error, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskTrieMetrics;
@@ -1067,7 +1067,7 @@ impl ProofWorkerHandle {
         task_ctx: ProofTaskCtx,
         storage_worker_count: usize,
         account_worker_count: usize,
-    ) -> (Self, EnteredSpan)
+    ) -> Self
     where
         Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {
@@ -1079,10 +1079,6 @@ impl ProofWorkerHandle {
         let storage_available_workers = Arc::new(AtomicUsize::new(0));
         let account_available_workers = Arc::new(AtomicUsize::new(0));
 
-        let parent_span =
-            debug_span!(target: "trie::proof_task", "proof workers", ?storage_worker_count)
-                .entered();
-
         debug!(
             target: "trie::proof_task",
             storage_worker_count,
@@ -1090,9 +1086,12 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
+        let parent_span =
+            debug_span!(target: "trie::proof_task", "storage proof workers", ?storage_worker_count)
+                .entered();
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
-            let span = debug_span!(target: "trie::proof_task", "Storage worker", ?worker_id);
+            let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
             let view_clone = view.clone();
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = storage_work_rx.clone();
@@ -1114,10 +1113,14 @@ impl ProofWorkerHandle {
                 )
             });
         }
+        drop(parent_span);
 
+        let parent_span =
+            debug_span!(target: "trie::proof_task", "account proof workers", ?storage_worker_count)
+                .entered();
         // Spawn account workers
         for worker_id in 0..account_worker_count {
-            let span = debug_span!(target: "trie::proof_task", "Account worker", ?worker_id);
+            let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
             let view_clone = view.clone();
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = account_work_rx.clone();
@@ -1141,16 +1144,14 @@ impl ProofWorkerHandle {
                 )
             });
         }
+        drop(parent_span);
 
-        (
-            Self {
-                storage_work_tx,
-                account_work_tx,
-                storage_available_workers,
-                account_available_workers,
-            },
-            parent_span,
-        )
+        Self {
+            storage_work_tx,
+            account_work_tx,
+            storage_available_workers,
+            account_available_workers,
+        }
     }
 
     /// Returns true if there are available storage workers to process tasks.
@@ -1358,7 +1359,7 @@ mod tests {
             let view = ConsistentDbView::new(factory, None);
             let ctx = test_ctx();
 
-            let (proof_handle, _) = ProofWorkerHandle::new(handle.clone(), view, ctx, 5, 3);
+            let proof_handle = ProofWorkerHandle::new(handle.clone(), view, ctx, 5, 3);
 
             // Verify handle can be cloned
             let _cloned_handle = proof_handle.clone();
