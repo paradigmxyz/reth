@@ -9432,6 +9432,7 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-optimism-chainspec",
+ "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-optimism-forks",
  "reth-optimism-payload-builder",
