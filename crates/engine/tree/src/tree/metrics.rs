@@ -13,6 +13,7 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives_traits::SignedTransaction;
+use reth_revm::db::bal::BalDatabase;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
 use std::time::Instant;
@@ -65,7 +66,10 @@ impl EngineApiMetrics {
     ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
     where
         DB: alloy_evm::Database,
-        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction: SignedTransaction>,
+        E: BlockExecutor<
+            Evm: Evm<DB: BorrowMut<BalDatabase<State<DB>>>>,
+            Transaction: SignedTransaction,
+        >,
     {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are globally registered so that the data recorded in the hook will
@@ -246,7 +250,7 @@ mod tests {
     }
 
     // Mock Evm type for testing
-    type MockEvm = EthEvm<State<EmptyDB>, NoOpInspector>;
+    type MockEvm = EthEvm<BalDatabase<State<EmptyDB>>, NoOpInspector>;
 
     impl BlockExecutor for MockExecutor {
         type Transaction = TransactionSigned;
@@ -297,11 +301,14 @@ mod tests {
             }
 
             // Create a mock EVM
-            let db = State::builder()
-                .with_database(EmptyDB::default())
-                .with_bundle_update()
-                .without_state_clear()
-                .build();
+            let db = BalDatabase::new(
+                State::builder()
+                    .with_database(EmptyDB::default())
+                    .with_bundle_update()
+                    .without_state_clear()
+                    .build(),
+            )
+            .with_bal_builder();
             let evm = EthEvm::new(
                 Context::mainnet().with_db(db).build_mainnet_with_inspector(NoOpInspector {}),
                 false,
@@ -314,6 +321,7 @@ mod tests {
                     receipts: vec![],
                     requests: Requests::default(),
                     gas_used: 1000,
+                    block_access_list: None,
                     blob_gas_used: 0,
                 },
             ))
@@ -407,10 +415,12 @@ mod tests {
                         nonce: 10,
                         code_hash: B256::random(),
                         code: Default::default(),
+                        storage_id: None,
                     },
                     storage,
                     status: AccountStatus::default(),
                     transaction_id: 0,
+                    ..Default::default()
                 },
             );
             state

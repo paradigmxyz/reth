@@ -37,7 +37,7 @@ use reth_provider::{
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider, StateProviderFactory,
     StateReader, StateRootProvider, TrieReader,
 };
-use reth_revm::db::State;
+use reth_revm::db::{bal::BalDatabase, State};
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, KeccakKeyHasher, TrieInput,
@@ -625,12 +625,14 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
-
-        let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(&state_provider))
-            .with_bundle_update()
-            .without_state_clear()
-            .build();
+        let mut db = BalDatabase::new(
+            State::builder()
+                .with_database(StateProviderDatabase::new(&state_provider))
+                .with_bundle_update()
+                .without_state_clear()
+                .build(),
+        )
+        .with_bal_builder();
 
         let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
         let ctx =

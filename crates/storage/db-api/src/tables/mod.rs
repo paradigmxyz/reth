@@ -15,6 +15,7 @@ pub mod codecs;
 
 mod raw;
 pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
+use reth_db_models::blocks::StoredBlockAccessList;
 
 use crate::{
     models::{
@@ -345,6 +346,12 @@ tables! {
     table BlockWithdrawals {
         type Key = BlockNumber;
         type Value = StoredBlockWithdrawals;
+    }
+
+    /// Stores the block access lists.
+    table BlockAccessLists {
+        type Key = BlockNumber;
+        type Value = StoredBlockAccessList;
     }
 
     /// Canonical only Stores the transaction body for canonical transactions.

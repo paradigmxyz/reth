@@ -23,7 +23,7 @@ pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
     context::result::ExecutionResult,
-    database::{states::bundle_state::BundleRetention, BundleState, State},
+    database::{bal::BalDatabase, states::bundle_state::BundleRetention, BundleState, State},
 };
 
 /// A type that knows how to execute a block. It is assumed to operate on a
@@ -140,7 +140,7 @@ pub trait Executor<DB: Database>: Sized {
     }
 
     /// Consumes the executor and returns the [`State`] containing all state changes.
-    fn into_state(self) -> State<DB>;
+    fn into_state(self) -> BalDatabase<State<DB>>;
 
     /// The size hint of the batch's tracked state size.
     ///
@@ -470,7 +470,7 @@ where
             Spec = <F::EvmFactory as EvmFactory>::Spec,
             HaltReason = <F::EvmFactory as EvmFactory>::HaltReason,
             BlockEnv = <F::EvmFactory as EvmFactory>::BlockEnv,
-            DB = &'a mut State<DB>,
+            DB = &'a mut BalDatabase<State<DB>>,
         >,
         Transaction = N::SignedTx,
         Receipt = N::Receipt,
@@ -558,14 +558,17 @@ pub struct BasicBlockExecutor<F, DB> {
     /// Block execution strategy.
     pub(crate) strategy_factory: F,
     /// Database.
-    pub(crate) db: State<DB>,
+    pub(crate) db: BalDatabase<State<DB>>,
 }
 
 impl<F, DB: Database> BasicBlockExecutor<F, DB> {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
     pub fn new(strategy_factory: F, db: DB) -> Self {
-        let db =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        let db = BalDatabase::new(
+            State::builder().with_database(db).with_bundle_update().without_state_clear().build(),
+        )
+        .with_bal_builder();
+
         Self { strategy_factory, db }
     }
 }
@@ -614,7 +617,7 @@ where
         Ok(result)
     }
 
-    fn into_state(self) -> State<DB> {
+    fn into_state(self) -> BalDatabase<State<DB>> {
         self.db
     }
 
@@ -711,7 +714,7 @@ mod tests {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
 
-        fn into_state(self) -> State<DB> {
+        fn into_state(self) -> BalDatabase<State<DB>> {
             unreachable!()
         }
 
@@ -741,6 +744,7 @@ mod tests {
             nonce,
             code_hash: KECCAK_EMPTY,
             code: None,
+            storage_id: None,
         };
         state.insert_account(addr, account_info);
         state
@@ -777,8 +781,13 @@ mod tests {
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
-        let account2 =
-            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        let account2 = AccountInfo {
+            balance: U256::from(200),
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+            storage_id: None,
+        };
         state.insert_account(addr2, account2);
 
         let mut increments = HashMap::default();
@@ -799,8 +808,13 @@ mod tests {
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
-        let account2 =
-            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        let account2 = AccountInfo {
+            balance: U256::from(200),
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+            storage_id: None,
+        };
         state.insert_account(addr2, account2);
 
         let mut increments = HashMap::default();

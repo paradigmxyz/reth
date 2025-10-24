@@ -228,14 +228,6 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
 
     /// This returns the capacity of any inner data structures which store leaf values.
     fn value_capacity(&self) -> usize;
-
-    /// Shrink the capacity of the sparse trie's node storage to the given size.
-    /// This will reduce memory usage if the current capacity is higher than the given size.
-    fn shrink_nodes_to(&mut self, size: usize);
-
-    /// Shrink the capacity of the sparse trie's value storage to the given size.
-    /// This will reduce memory usage if the current capacity is higher than the given size.
-    fn shrink_values_to(&mut self, size: usize);
 }
 
 /// Struct for passing around branch node mask information.

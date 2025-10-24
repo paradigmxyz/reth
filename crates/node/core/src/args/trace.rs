@@ -1,19 +1,17 @@
 //! Opentelemetry tracing configuration through CLI args.
 
 use clap::Parser;
-use eyre::WrapErr;
+use eyre::{ensure, WrapErr};
 use reth_tracing::tracing_subscriber::EnvFilter;
-use reth_tracing_otlp::OtlpProtocol;
 use url::Url;
 
 /// CLI arguments for configuring `Opentelemetry` trace and span export.
 #[derive(Debug, Clone, Parser)]
 pub struct TraceArgs {
-    /// Enable `Opentelemetry` tracing export to an OTLP endpoint.
+    /// Enable `Opentelemetry` tracing export to an OTLP endpoint. Currently
+    /// only http exporting is supported.
     ///
-    /// If no value provided, defaults based on protocol:
-    /// - HTTP: `http://localhost:4318/v1/traces`
-    /// - gRPC: `http://localhost:4317`
+    /// If no value provided, defaults to `http://localhost:4318/v1/traces`.
     ///
     /// Example: --tracing-otlp=http://collector:4318/v1/traces
     #[arg(
@@ -29,22 +27,6 @@ pub struct TraceArgs {
         help_heading = "Tracing"
     )]
     pub otlp: Option<Url>,
-
-    /// OTLP transport protocol to use for exporting traces.
-    ///
-    /// - `http`: expects endpoint path to end with `/v1/traces`
-    /// - `grpc`: expects endpoint without a path
-    ///
-    /// Defaults to HTTP if not specified.
-    #[arg(
-        long = "tracing-otlp-protocol",
-        env = "OTEL_EXPORTER_OTLP_PROTOCOL",
-        global = true,
-        value_name = "PROTOCOL",
-        default_value = "http",
-        help_heading = "Tracing"
-    )]
-    pub protocol: OtlpProtocol,
 
     /// Set a filter directive for the OTLP tracer. This controls the verbosity
     /// of spans and events sent to the OTLP endpoint. It follows the same
@@ -65,25 +47,25 @@ pub struct TraceArgs {
 
 impl Default for TraceArgs {
     fn default() -> Self {
-        Self {
-            otlp: None,
-            protocol: OtlpProtocol::Http,
-            otlp_filter: EnvFilter::from_default_env(),
-        }
+        Self { otlp: None, otlp_filter: EnvFilter::from_default_env() }
     }
 }
 
-impl TraceArgs {
-    /// Validate the configuration
-    pub fn validate(&mut self) -> eyre::Result<()> {
-        if let Some(url) = &mut self.otlp {
-            self.protocol.validate_endpoint(url)?;
-        }
-        Ok(())
-    }
-}
-
-// Parses an OTLP endpoint url.
+// Parses and validates an OTLP endpoint url.
 fn parse_otlp_endpoint(arg: &str) -> eyre::Result<Url> {
-    Url::parse(arg).wrap_err("Invalid URL for OTLP trace output")
+    let mut url = Url::parse(arg).wrap_err("Invalid URL for OTLP trace output")?;
+
+    // If the path is empty, we set the path.
+    if url.path() == "/" {
+        url.set_path("/v1/traces")
+    }
+
+    // OTLP url must end with `/v1/traces` per the OTLP specification.
+    ensure!(
+        url.path().ends_with("/v1/traces"),
+        "OTLP trace endpoint must end with /v1/traces, got path: {}",
+        url.path()
+    );
+
+    Ok(url)
 }

@@ -748,6 +748,9 @@ where
             self.fork_tracker.osaka.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
+        if self.chain_spec().is_amsterdam_active_at_timestamp(new_tip_block.timestamp()) {
+            self.fork_tracker.amsterdam.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         self.fork_tracker
             .tip_timestamp
             .store(new_tip_block.timestamp(), std::sync::atomic::Ordering::Relaxed);
@@ -836,6 +839,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     prague: bool,
     /// Fork indicator whether we are in the Osaka hardfork.
     osaka: bool,
+    /// Fork indicator whether we are in the Amsterdam hardfork.
+    amsterdam: bool,
     /// Timestamp of the tip block.
     tip_timestamp: u64,
     /// Max blob count at the block's timestamp.
@@ -912,6 +917,8 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             // osaka not yet activated
             osaka: false,
 
+            // amsterdam not yet activated
+            amsterdam: true,
             tip_timestamp: 0,
 
             // max blob count is prague by default
@@ -1102,6 +1109,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             cancun,
             prague,
             osaka,
+            amsterdam,
             tip_timestamp,
             eip2718,
             eip1559,
@@ -1125,6 +1133,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             cancun: AtomicBool::new(cancun),
             prague: AtomicBool::new(prague),
             osaka: AtomicBool::new(osaka),
+            amsterdam: AtomicBool::new(amsterdam),
             tip_timestamp: AtomicU64::new(tip_timestamp),
             max_blob_count: AtomicU64::new(max_blob_count),
         };
@@ -1205,6 +1214,8 @@ pub struct ForkTracker {
     pub prague: AtomicBool,
     /// Tracks if osaka is activated at the block's timestamp.
     pub osaka: AtomicBool,
+    /// Tracks if amsterdam is activated at the block's timestamp.
+    pub amsterdam: AtomicBool,
     /// Tracks max blob count per transaction at the block's timestamp.
     pub max_blob_count: AtomicU64,
     /// Tracks the timestamp of the tip block.
@@ -1232,6 +1243,10 @@ impl ForkTracker {
         self.osaka.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Returns `true` if Amsterdam fork is activated.
+    pub fn is_amsterdam_activated(&self) -> bool {
+        self.amsterdam.load(std::sync::atomic::Ordering::Relaxed)
+    }
     /// Returns the timestamp of the tip block.
     pub fn tip_timestamp(&self) -> u64 {
         self.tip_timestamp.load(std::sync::atomic::Ordering::Relaxed)
@@ -1311,6 +1326,7 @@ mod tests {
             cancun: false.into(),
             prague: false.into(),
             osaka: false.into(),
+            amsterdam: false.into(),
             tip_timestamp: 0.into(),
             max_blob_count: 0.into(),
         };

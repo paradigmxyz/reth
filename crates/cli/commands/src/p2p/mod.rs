@@ -192,7 +192,6 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
         let net = NetworkConfigBuilder::<N::NetworkPrimitives>::new(p2p_secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(None))
             .external_ip_resolver(self.network.nat)
-            .network_id(self.network.network_id)
             .boot_nodes(boot_nodes.clone())
             .apply(|builder| {
                 self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes)

@@ -6,8 +6,7 @@
 //! applications. It allows for easily capturing and exporting distributed traces to compatible
 //! backends like Jaeger, Zipkin, or any other OpenTelemetry-compatible tracing system.
 
-use clap::ValueEnum;
-use eyre::ensure;
+use eyre::{ensure, WrapErr};
 use opentelemetry::{global, trace::TracerProvider, KeyValue, Value};
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{
@@ -21,10 +20,6 @@ use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;
 use url::Url;
 
-// Otlp http endpoint is expected to end with this path.
-// See also <https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/#otel_exporter_otlp_traces_endpoint>.
-const HTTP_TRACE_ENDPOINT: &str = "/v1/traces";
-
 /// Creates a tracing [`OpenTelemetryLayer`] that exports spans to an OTLP endpoint.
 ///
 /// This layer can be added to a [`tracing_subscriber::Registry`] to enable `OpenTelemetry` tracing
@@ -32,7 +27,6 @@ const HTTP_TRACE_ENDPOINT: &str = "/v1/traces";
 pub fn span_layer<S>(
     service_name: impl Into<Value>,
     endpoint: &Url,
-    protocol: OtlpProtocol,
 ) -> eyre::Result<OpenTelemetryLayer<S, SdkTracer>>
 where
     for<'span> S: Subscriber + LookupSpan<'span>,
@@ -41,12 +35,8 @@ where
 
     let resource = build_resource(service_name);
 
-    let span_builder = SpanExporter::builder();
-
-    let span_exporter = match protocol {
-        OtlpProtocol::Http => span_builder.with_http().with_endpoint(endpoint.as_str()).build()?,
-        OtlpProtocol::Grpc => span_builder.with_tonic().with_endpoint(endpoint.as_str()).build()?,
-    };
+    let span_exporter =
+        SpanExporter::builder().with_http().with_endpoint(endpoint.to_string()).build()?;
 
     let tracer_provider = SdkTracerProvider::builder()
         .with_resource(resource)
@@ -55,7 +45,7 @@ where
 
     global::set_tracer_provider(tracer_provider.clone());
 
-    let tracer = tracer_provider.tracer("reth");
+    let tracer = tracer_provider.tracer("reth-otlp");
     Ok(tracing_opentelemetry::layer().with_tracer(tracer))
 }
 
@@ -67,37 +57,34 @@ fn build_resource(service_name: impl Into<Value>) -> Resource {
         .build()
 }
 
-/// OTLP transport protocol type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum OtlpProtocol {
-    /// HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
-    Http,
-    /// gRPC transport, port 4317
-    Grpc,
+/// Destination for exported trace spans.
+#[derive(Debug, Clone)]
+pub enum TraceOutput {
+    /// Export traces as JSON to stdout.
+    Stdout,
+    /// Export traces to an OTLP collector at the specified URL.
+    Otlp(Url),
 }
 
-impl OtlpProtocol {
-    /// Validate and correct the URL to match protocol requirements.
+impl TraceOutput {
+    /// Parses the trace output destination from a string.
     ///
-    /// For HTTP: Ensures the path ends with `/v1/traces`, appending it if necessary.
-    /// For gRPC: Ensures the path does NOT include `/v1/traces`.
-    pub fn validate_endpoint(&self, url: &mut Url) -> eyre::Result<()> {
-        match self {
-            Self::Http => {
-                if !url.path().ends_with(HTTP_TRACE_ENDPOINT) {
-                    let path = url.path().trim_end_matches('/');
-                    url.set_path(&format!("{}{}", path, HTTP_TRACE_ENDPOINT));
-                }
-            }
-            Self::Grpc => {
-                ensure!(
-                    !url.path().ends_with(HTTP_TRACE_ENDPOINT),
-                    "OTLP gRPC endpoint should not include {} path, got: {}",
-                    HTTP_TRACE_ENDPOINT,
-                    url
-                );
-            }
+    /// Returns `TraceOutput::Stdout` for "stdout", or `TraceOutput::Otlp` for valid OTLP URLs.
+    /// OTLP URLs must end with `/v1/traces` per the OTLP specification.
+    pub fn parse(s: &str) -> eyre::Result<Self> {
+        if s == "stdout" {
+            return Ok(Self::Stdout);
         }
-        Ok(())
+
+        let url = Url::parse(s).wrap_err("Invalid URL for trace output")?;
+
+        // OTLP specification requires the `/v1/traces` path for trace endpoints
+        ensure!(
+            url.path().ends_with("/v1/traces"),
+            "OTLP trace endpoint must end with /v1/traces, got path: {}",
+            url.path()
+        );
+
+        Ok(Self::Otlp(url))
     }
 }

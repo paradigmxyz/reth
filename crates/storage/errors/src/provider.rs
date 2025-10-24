@@ -1,4 +1,4 @@
-use crate::{any::AnyError, db::DatabaseError};
+use crate::{any::AnyError, db::DatabaseError, writer::UnifiedStorageWriterError};
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
@@ -125,6 +125,9 @@ pub enum ProviderError {
     /// Consistent view error.
     #[error("failed to initialize consistent view: {_0}")]
     ConsistentView(Box<ConsistentViewError>),
+    /// Storage writer error.
+    #[error(transparent)]
+    UnifiedStorageWriterError(#[from] UnifiedStorageWriterError),
     /// Received invalid output from configured storage implementation.
     #[error("received invalid output from storage")]
     InvalidStorageOutput,

@@ -8,7 +8,10 @@ use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
     eth::{EthBlockExecutionCtx, EthBlockExecutor},
     precompiles::PrecompilesMap,
-    revm::context::{result::ResultAndState, Block as _},
+    revm::{
+        context::{result::ResultAndState, Block as _},
+        database::bal::BalDatabase,
+    },
     EthEvm, EthEvmFactory,
 };
 use alloy_sol_macro::sol;
@@ -102,12 +105,12 @@ impl BlockExecutorFactory for CustomEvmConfig {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: EthEvm<&'a mut State<DB>, I, PrecompilesMap>,
+        evm: EthEvm<&'a mut BalDatabase<State<DB>>, I, PrecompilesMap>,
         ctx: EthBlockExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
         DB: Database + 'a,
-        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+        I: InspectorFor<Self, &'a mut BalDatabase<State<DB>>> + 'a,
     {
         CustomBlockExecutor {
             inner: EthBlockExecutor::new(
@@ -191,7 +194,7 @@ pub struct CustomBlockExecutor<'a, Evm> {
 impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<'_, E>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = TxEnv>,
+    E: Evm<DB = &'db mut BalDatabase<State<DB>>, Tx = TxEnv>,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;

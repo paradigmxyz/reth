@@ -743,25 +743,25 @@ Pruning:
       --full
           Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored
 
-      --prune.block-interval <BLOCK_INTERVAL>
+      --block-interval <BLOCK_INTERVAL>
           Minimum pruning interval measured in blocks
 
-      --prune.sender-recovery.full
+      --prune.senderrecovery.full
           Prunes all sender recovery data
 
-      --prune.sender-recovery.distance <BLOCKS>
+      --prune.senderrecovery.distance <BLOCKS>
           Prune sender recovery data before the `head-N` block number. In other words, keep last N + 1 blocks
 
-      --prune.sender-recovery.before <BLOCK_NUMBER>
+      --prune.senderrecovery.before <BLOCK_NUMBER>
           Prune sender recovery data before the specified block number. The specified block number is not pruned
 
-      --prune.transaction-lookup.full
+      --prune.transactionlookup.full
           Prunes all transaction lookup data
 
-      --prune.transaction-lookup.distance <BLOCKS>
+      --prune.transactionlookup.distance <BLOCKS>
           Prune transaction lookup data before the `head-N` block number. In other words, keep last N + 1 blocks
 
-      --prune.transaction-lookup.before <BLOCK_NUMBER>
+      --prune.transactionlookup.before <BLOCK_NUMBER>
           Prune transaction lookup data before the specified block number. The specified block number is not pruned
 
       --prune.receipts.full
@@ -776,22 +776,22 @@ Pruning:
       --prune.receipts.before <BLOCK_NUMBER>
           Prune receipts before the specified block number. The specified block number is not pruned
 
-      --prune.account-history.full
+      --prune.accounthistory.full
           Prunes all account history
 
-      --prune.account-history.distance <BLOCKS>
+      --prune.accounthistory.distance <BLOCKS>
           Prune account before the `head-N` block number. In other words, keep last N + 1 blocks
 
-      --prune.account-history.before <BLOCK_NUMBER>
+      --prune.accounthistory.before <BLOCK_NUMBER>
           Prune account history before the specified block number. The specified block number is not pruned
 
-      --prune.storage-history.full
+      --prune.storagehistory.full
           Prunes all storage history data
 
-      --prune.storage-history.distance <BLOCKS>
+      --prune.storagehistory.distance <BLOCKS>
           Prune storage history before the `head-N` block number. In other words, keep last N + 1 blocks
 
-      --prune.storage-history.before <BLOCK_NUMBER>
+      --prune.storagehistory.before <BLOCK_NUMBER>
           Prune storage history before the specified block number. The specified block number is not pruned
 
       --prune.bodies.pre-merge
@@ -993,27 +993,13 @@ Display:
 
 Tracing:
       --tracing-otlp[=<URL>]
-          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+          Enable `Opentelemetry` tracing export to an OTLP endpoint. Currently only http exporting is supported.
 
-          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
+          If no value provided, defaults to `http://localhost:4318/v1/traces`.
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
 
           [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
-
-      --tracing-otlp-protocol <PROTOCOL>
-          OTLP transport protocol to use for exporting traces.
-
-          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
-
-          Defaults to HTTP if not specified.
-
-          Possible values:
-          - http: HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
-          - grpc: gRPC transport, port 4317
-
-          [env: OTEL_EXPORTER_OTLP_PROTOCOL=]
-          [default: http]
 
       --tracing-otlp.filter <FILTER>
           Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.

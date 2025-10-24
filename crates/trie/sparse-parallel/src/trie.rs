@@ -883,42 +883,6 @@ impl SparseTrieInterface for ParallelSparseTrie {
         self.upper_subtrie.value_capacity() +
             self.lower_subtries.iter().map(|trie| trie.value_capacity()).sum::<usize>()
     }
-
-    fn shrink_nodes_to(&mut self, size: usize) {
-        // Distribute the capacity across upper and lower subtries
-        //
-        // Always include upper subtrie, plus any lower subtries
-        let total_subtries = 1 + NUM_LOWER_SUBTRIES;
-        let size_per_subtrie = size / total_subtries;
-
-        // Shrink the upper subtrie
-        self.upper_subtrie.shrink_nodes_to(size_per_subtrie);
-
-        // Shrink lower subtries (works for both revealed and blind with allocation)
-        for subtrie in &mut self.lower_subtries {
-            subtrie.shrink_nodes_to(size_per_subtrie);
-        }
-
-        // shrink masks maps
-        self.branch_node_hash_masks.shrink_to(size);
-        self.branch_node_tree_masks.shrink_to(size);
-    }
-
-    fn shrink_values_to(&mut self, size: usize) {
-        // Distribute the capacity across upper and lower subtries
-        //
-        // Always include upper subtrie, plus any lower subtries
-        let total_subtries = 1 + NUM_LOWER_SUBTRIES;
-        let size_per_subtrie = size / total_subtries;
-
-        // Shrink the upper subtrie
-        self.upper_subtrie.shrink_values_to(size_per_subtrie);
-
-        // Shrink lower subtries (works for both revealed and blind with allocation)
-        for subtrie in &mut self.lower_subtries {
-            subtrie.shrink_values_to(size_per_subtrie);
-        }
-    }
 }
 
 impl ParallelSparseTrie {
@@ -2147,16 +2111,6 @@ impl SparseSubtrie {
     pub(crate) fn value_capacity(&self) -> usize {
         self.inner.value_capacity()
     }
-
-    /// Shrinks the capacity of the subtrie's node storage.
-    pub(crate) fn shrink_nodes_to(&mut self, size: usize) {
-        self.nodes.shrink_to(size);
-    }
-
-    /// Shrinks the capacity of the subtrie's value storage.
-    pub(crate) fn shrink_values_to(&mut self, size: usize) {
-        self.inner.values.shrink_to(size);
-    }
 }
 
 /// Helper type for [`SparseSubtrie`] to mutably access only a subset of fields from the original
@@ -2617,19 +2571,10 @@ impl SparseSubtrieBuffers {
     /// Clears all buffers.
     fn clear(&mut self) {
         self.path_stack.clear();
-        self.path_stack.shrink_to_fit();
-
         self.rlp_node_stack.clear();
-        self.rlp_node_stack.shrink_to_fit();
-
         self.branch_child_buf.clear();
-        self.branch_child_buf.shrink_to_fit();
-
         self.branch_value_stack_buf.clear();
-        self.branch_value_stack_buf.shrink_to_fit();
-
         self.rlp_buf.clear();
-        self.rlp_buf.shrink_to_fit();
     }
 }
 
