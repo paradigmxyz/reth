@@ -23,36 +23,32 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
         self.is_empty
     }
 
-    /// Returns the last entry iterated to. Returns `None` if never iterated or if exhausted.
+    /// Returns the current entry pointed to be the cursor, or `None` if no entries are left.
     #[inline]
-    pub fn current(&self) -> Option<&'a (K, V)> {
+    pub fn current(&self) -> Option<&(K, V)> {
         self.entries.clone().next()
     }
-}
 
-impl<'a, K, V> Iterator for ForwardInMemoryCursor<'a, K, V> {
-    type Item = &'a (K, V);
-
-    fn next(&mut self) -> Option<&'a (K, V)> {
-        self.entries.next();
-        self.current()
+    #[inline]
+    fn next(&mut self) -> Option<&(K, V)> {
+        self.entries.next()
     }
 }
 
-impl<'a, K, V> ForwardInMemoryCursor<'a, K, V>
+impl<K, V> ForwardInMemoryCursor<'_, K, V>
 where
     K: PartialOrd + Clone,
     V: Clone,
 {
     /// Returns the first entry from the current cursor position that's greater or equal to the
     /// provided key. This method advances the cursor forward.
-    pub fn seek(&mut self, key: &K) -> Option<&'a (K, V)> {
+    pub fn seek(&mut self, key: &K) -> Option<(K, V)> {
         self.advance_while(|k| k < key)
     }
 
     /// Returns the first entry from the current cursor position that's greater than the provided
     /// key. This method advances the cursor forward.
-    pub fn first_after(&mut self, key: &K) -> Option<&'a (K, V)> {
+    pub fn first_after(&mut self, key: &K) -> Option<(K, V)> {
         self.advance_while(|k| k <= key)
     }
 
@@ -61,15 +57,17 @@ where
     ///
     /// Returns the first entry for which `predicate` returns `false` or `None`. The cursor will
     /// point to the returned entry.
-    fn advance_while(&mut self, predicate: impl Fn(&'a K) -> bool) -> Option<&'a (K, V)> {
+    fn advance_while(&mut self, predicate: impl Fn(&K) -> bool) -> Option<(K, V)> {
+        let mut entry;
         loop {
-            if self.current().is_some_and(|(k, _)| predicate(k)) {
-                self.entries.next();
+            entry = self.current();
+            if entry.is_some_and(|(k, _)| predicate(k)) {
+                self.next();
             } else {
                 break;
             }
         }
-        self.current()
+        entry.cloned()
     }
 }
 
@@ -80,17 +78,18 @@ mod tests {
     #[test]
     fn test_cursor() {
         let mut cursor = ForwardInMemoryCursor::new(&[(1, ()), (2, ()), (3, ()), (4, ()), (5, ())]);
-
-        assert_eq!(cursor.seek(&0), Some(&(1, ())));
         assert_eq!(cursor.current(), Some(&(1, ())));
 
-        assert_eq!(cursor.seek(&3), Some(&(3, ())));
+        assert_eq!(cursor.seek(&0), Some((1, ())));
+        assert_eq!(cursor.current(), Some(&(1, ())));
+
+        assert_eq!(cursor.seek(&3), Some((3, ())));
         assert_eq!(cursor.current(), Some(&(3, ())));
 
-        assert_eq!(cursor.seek(&3), Some(&(3, ())));
+        assert_eq!(cursor.seek(&3), Some((3, ())));
         assert_eq!(cursor.current(), Some(&(3, ())));
 
-        assert_eq!(cursor.seek(&4), Some(&(4, ())));
+        assert_eq!(cursor.seek(&4), Some((4, ())));
         assert_eq!(cursor.current(), Some(&(4, ())));
 
         assert_eq!(cursor.seek(&6), None);

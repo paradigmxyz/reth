@@ -111,16 +111,13 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     }
 
     /// Seeks the `entry` field of the struct using the cursor.
-    fn cursor_seek(&mut self, key: Nibbles, exact: bool) -> Result<(), DatabaseError> {
+    fn cursor_seek(&mut self, key: Nibbles) -> Result<(), DatabaseError> {
         if let Some(entry) = self.cursor_entry.as_ref() &&
             entry.0 >= key
         {
             // If already seeked to the given key then don't do anything. Also if we're seeked past
             // the given key then don't anything, because `TrieCursor` is specifically a
             // forward-only cursor.
-        } else if exact {
-            self.cursor_entry =
-                self.cursor.as_mut().map(|c| c.seek_exact(key)).transpose()?.flatten();
         } else {
             self.cursor_entry = self.cursor.as_mut().map(|c| c.seek(key)).transpose()?.flatten();
         }
@@ -140,57 +137,44 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         if self.cursor_entry.is_some() {
             self.cursor_entry = self.cursor.as_mut().map(|c| c.next()).transpose()?.flatten();
         }
+
         Ok(())
     }
 
     /// Compares the current in-memory entry with the current entry of the cursor, and applies the
-    /// in-memory entry to the cursor entry as an overlay. This will consume and move forward the
-    /// current entries as-necessary to produce a "next" entry.
+    /// in-memory entry to the cursor entry as an overlay.
+    //
+    /// This may consume and move forward the current entries when the overlay indicates a removed
+    /// node.
     fn next_inner(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         loop {
-            match (self.in_memory_cursor.current(), &self.cursor_entry) {
+            match (self.in_memory_cursor.current().cloned(), &self.cursor_entry) {
                 (Some((mem_key, None)), _)
-                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| mem_key < db_key) =>
+                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key < db_key) =>
                 {
                     // If overlay has a removed node but DB cursor is exhausted or ahead of the
                     // in-memory cursor then move ahead in-memory, as there might be further
                     // non-removed overlay nodes.
-                    self.in_memory_cursor.next();
+                    self.in_memory_cursor.first_after(&mem_key);
                 }
-                (Some((mem_key, None)), Some((db_key, _))) if mem_key == db_key => {
+                (Some((mem_key, None)), Some((db_key, _))) if &mem_key == db_key => {
                     // If overlay has a removed node which is returned from DB then move both
                     // cursors ahead to the next key.
-                    self.in_memory_cursor.next();
+                    self.in_memory_cursor.first_after(&mem_key);
                     self.cursor_next()?;
                 }
                 (Some((mem_key, Some(node))), _)
-                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| mem_key <= db_key) =>
+                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key <= db_key) =>
                 {
                     // If overlay returns a node prior to the DB's node, or the DB is exhausted,
-                    // then we consume and return the overlay's node.
-                    let this_entry = (*mem_key, node.clone());
-
-                    // If the db entry is at the same key as the in-memory cursor then we want to
-                    // consume it as well.
-                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| mem_key == db_key) {
-                        self.cursor_next()?;
-                    }
-
-                    self.in_memory_cursor.next();
-
-                    return Ok(Some(this_entry))
+                    // then we return the overlay's node.
+                    return Ok(Some((mem_key, node)))
                 }
                 // All other cases:
                 // - mem_key > db_key
                 // - overlay is exhausted
-                // Consume and return the db_entry. If DB is also exhausted then this returns None.
-                _ => {
-                    let this_entry = self.cursor_entry.clone();
-                    if this_entry.is_some() {
-                        self.cursor_next()?;
-                    }
-                    return Ok(this_entry)
-                }
+                // Return the db_entry. If DB is also exhausted then this returns None.
+                _ => return Ok(self.cursor_entry.clone()),
             }
         }
     }
@@ -201,7 +185,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        self.cursor_seek(key, true)?;
+        self.cursor_seek(key)?;
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         #[cfg(debug_assertions)]
@@ -210,8 +194,8 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         }
 
         let entry = match (mem_entry, &self.cursor_entry) {
-            (Some((mem_key, entry_inner)), _) if mem_key == &key => {
-                entry_inner.clone().map(|node| (key, node))
+            (Some((mem_key, entry_inner)), _) if mem_key == key => {
+                entry_inner.map(|node| (key, node))
             }
             (_, Some((db_key, node))) if db_key == &key => Some((key, node.clone())),
             _ => None,
@@ -225,7 +209,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        self.cursor_seek(key, false)?;
+        self.cursor_seek(key)?;
         self.in_memory_cursor.seek(&key);
 
         #[cfg(debug_assertions)]
@@ -246,8 +230,22 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
 
         // A `last_key` of `None` indicates that the cursor was never seeked, or is exhausted. If it
         // was never seeked then `next` would be undefined, just return `None`.
-        if self.last_key.is_none() {
+        let Some(last_key) = self.last_key else {
             return Ok(None);
+        };
+
+        // If either cursor is currently pointing to the last entry which was returned then consume
+        // that entry so that `next_inner` is looking at the subsequent one.
+        if let Some((key, _)) = self.in_memory_cursor.current() &&
+            key == &last_key
+        {
+            self.in_memory_cursor.first_after(&last_key);
+        }
+
+        if let Some((key, _)) = &self.cursor_entry &&
+            key == &last_key
+        {
+            self.cursor_next()?;
         }
 
         let entry = self.next_inner()?;
@@ -578,5 +576,239 @@ mod tests {
 
         cursor.next().unwrap();
         assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x3])));
+    }
+
+    mod proptest_tests {
+        use super::*;
+        use itertools::Itertools;
+        use proptest::prelude::*;
+
+        /// Merge `db_nodes` with `in_memory_nodes`, applying the in-memory overlay.
+        /// This properly handles deletions (None values in `in_memory_nodes`).
+        fn merge_with_overlay(
+            db_nodes: Vec<(Nibbles, BranchNodeCompact)>,
+            in_memory_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
+        ) -> Vec<(Nibbles, BranchNodeCompact)> {
+            db_nodes
+                .into_iter()
+                .merge_join_by(in_memory_nodes, |db_entry, mem_entry| db_entry.0.cmp(&mem_entry.0))
+                .filter_map(|entry| match entry {
+                    // Only in db: keep it
+                    itertools::EitherOrBoth::Left((key, node)) => Some((key, node)),
+                    // Only in memory: keep if not a deletion
+                    itertools::EitherOrBoth::Right((key, node_opt)) => {
+                        node_opt.map(|node| (key, node))
+                    }
+                    // In both: memory takes precedence (keep if not a deletion)
+                    itertools::EitherOrBoth::Both(_, (key, node_opt)) => {
+                        node_opt.map(|node| (key, node))
+                    }
+                })
+                .collect()
+        }
+
+        /// Generate a strategy for a `BranchNodeCompact` with simplified parameters.
+        /// The constraints are:
+        /// - `tree_mask` must be a subset of `state_mask`
+        /// - `hash_mask` must be a subset of `state_mask`
+        /// - `hash_mask.count_ones()` must equal `hashes.len()`
+        ///
+        /// To keep it simple, we use an empty hashes vec and `hash_mask` of 0.
+        fn branch_node_strategy() -> impl Strategy<Value = BranchNodeCompact> {
+            any::<u16>()
+                .prop_flat_map(|state_mask| {
+                    let tree_mask_strategy = any::<u16>().prop_map(move |tree| tree & state_mask);
+                    (Just(state_mask), tree_mask_strategy)
+                })
+                .prop_map(|(state_mask, tree_mask)| {
+                    BranchNodeCompact::new(state_mask, tree_mask, 0, vec![], None)
+                })
+        }
+
+        /// Generate a sorted vector of (Nibbles, `BranchNodeCompact`) entries
+        fn sorted_db_nodes_strategy() -> impl Strategy<Value = Vec<(Nibbles, BranchNodeCompact)>> {
+            prop::collection::vec(
+                (prop::collection::vec(any::<u8>(), 0..3), branch_node_strategy()),
+                0..20,
+            )
+            .prop_map(|entries| {
+                // Convert Vec<u8> to Nibbles and sort
+                let mut result: Vec<(Nibbles, BranchNodeCompact)> = entries
+                    .into_iter()
+                    .map(|(bytes, node)| (Nibbles::from_nibbles_unchecked(bytes), node))
+                    .collect();
+                result.sort_by(|a, b| a.0.cmp(&b.0));
+                result.dedup_by(|a, b| a.0 == b.0);
+                result
+            })
+        }
+
+        /// Generate a sorted vector of (Nibbles, Option<BranchNodeCompact>) entries
+        fn sorted_in_memory_nodes_strategy(
+        ) -> impl Strategy<Value = Vec<(Nibbles, Option<BranchNodeCompact>)>> {
+            prop::collection::vec(
+                (
+                    prop::collection::vec(any::<u8>(), 0..3),
+                    prop::option::of(branch_node_strategy()),
+                ),
+                0..20,
+            )
+            .prop_map(|entries| {
+                // Convert Vec<u8> to Nibbles and sort
+                let mut result: Vec<(Nibbles, Option<BranchNodeCompact>)> = entries
+                    .into_iter()
+                    .map(|(bytes, node)| (Nibbles::from_nibbles_unchecked(bytes), node))
+                    .collect();
+                result.sort_by(|a, b| a.0.cmp(&b.0));
+                result.dedup_by(|a, b| a.0 == b.0);
+                result
+            })
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(1000))]
+
+            #[test]
+            fn proptest_in_memory_trie_cursor(
+                db_nodes in sorted_db_nodes_strategy(),
+                in_memory_nodes in sorted_in_memory_nodes_strategy(),
+                op_choices in prop::collection::vec(any::<u8>(), 10..500),
+            ) {
+                reth_tracing::init_test_tracing();
+                use tracing::debug;
+
+                debug!("Starting proptest!");
+
+                // Create the expected results by merging the two sorted vectors,
+                // properly handling deletions (None values in in_memory_nodes)
+                let expected_combined = merge_with_overlay(db_nodes.clone(), in_memory_nodes.clone());
+
+                // Collect all keys for operation generation
+                let all_keys: Vec<Nibbles> = expected_combined.iter().map(|(k, _)| *k).collect();
+
+                // Create a control cursor using the combined result with a mock cursor
+                let control_db_map: BTreeMap<Nibbles, BranchNodeCompact> =
+                    expected_combined.into_iter().collect();
+                let control_db_arc = Arc::new(control_db_map);
+                let control_visited_keys = Arc::new(Mutex::new(Vec::new()));
+                let mut control_cursor = MockTrieCursor::new(control_db_arc, control_visited_keys);
+
+                // Create the InMemoryTrieCursor being tested
+                let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> =
+                    db_nodes.into_iter().collect();
+                let db_nodes_arc = Arc::new(db_nodes_map);
+                let visited_keys = Arc::new(Mutex::new(Vec::new()));
+                let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
+                let mut test_cursor = InMemoryTrieCursor::new(Some(mock_cursor), &in_memory_nodes);
+
+                // Test: seek to the beginning first
+                let control_first = control_cursor.seek(Nibbles::default()).unwrap();
+                let test_first = test_cursor.seek(Nibbles::default()).unwrap();
+                debug!(
+                    control=?control_first.as_ref().map(|(k, _)| k),
+                    test=?test_first.as_ref().map(|(k, _)| k),
+                    "Initial seek returned",
+                );
+                assert_eq!(control_first, test_first, "Initial seek mismatch");
+
+                // If both cursors returned None, nothing to test
+                if control_first.is_none() && test_first.is_none() {
+                    return Ok(());
+                }
+
+                // Track the last key returned from the cursor
+                let mut last_returned_key = control_first.as_ref().map(|(k, _)| *k);
+
+                // Execute a sequence of random operations
+                for choice in op_choices {
+                    let op_type = choice % 3;
+
+                    match op_type {
+                        0 => {
+                            // Next operation
+                            let control_result = control_cursor.next().unwrap();
+                            let test_result = test_cursor.next().unwrap();
+                            debug!(
+                                control=?control_result.as_ref().map(|(k, _)| k),
+                                test=?test_result.as_ref().map(|(k, _)| k),
+                                "Next returned",
+                            );
+                            assert_eq!(control_result, test_result, "Next operation mismatch");
+
+                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
+
+                            // Stop if both cursors are exhausted
+                            if control_result.is_none() && test_result.is_none() {
+                                break;
+                            }
+                        }
+                        1 => {
+                            // Seek operation - choose a key >= last_returned_key
+                            if all_keys.is_empty() {
+                                continue;
+                            }
+
+                            let valid_keys: Vec<_> = all_keys
+                                .iter()
+                                .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
+                                .collect();
+
+                            if valid_keys.is_empty() {
+                                continue;
+                            }
+
+                            let key = *valid_keys[(choice as usize / 3) % valid_keys.len()];
+
+                            let control_result = control_cursor.seek(key).unwrap();
+                            let test_result = test_cursor.seek(key).unwrap();
+                            debug!(
+                                control=?control_result.as_ref().map(|(k, _)| k),
+                                test=?test_result.as_ref().map(|(k, _)| k),
+                                ?key,
+                                "Seek returned",
+                            );
+                            assert_eq!(control_result, test_result, "Seek operation mismatch for key {:?}", key);
+
+                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
+
+                            // Stop if both cursors are exhausted
+                            if control_result.is_none() && test_result.is_none() {
+                                break;
+                            }
+                        }
+                        _ => {
+                            // SeekExact operation - choose a key >= last_returned_key
+                            if all_keys.is_empty() {
+                                continue;
+                            }
+
+                            let valid_keys: Vec<_> = all_keys
+                                .iter()
+                                .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
+                                .collect();
+
+                            if valid_keys.is_empty() {
+                                continue;
+                            }
+
+                            let key = *valid_keys[(choice as usize / 3) % valid_keys.len()];
+
+                            let control_result = control_cursor.seek_exact(key).unwrap();
+                            let test_result = test_cursor.seek_exact(key).unwrap();
+                            debug!(
+                                control=?control_result.as_ref().map(|(k, _)| k),
+                                test=?test_result.as_ref().map(|(k, _)| k),
+                                ?key,
+                                "SeekExact returned",
+                            );
+                            assert_eq!(control_result, test_result, "SeekExact operation mismatch for key {:?}", key);
+
+                            // seek_exact updates the last_key internally but only if it found something
+                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
