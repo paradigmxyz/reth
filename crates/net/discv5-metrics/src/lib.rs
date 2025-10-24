@@ -23,7 +23,7 @@ pub fn kbuckets_metrics(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let vis = input.vis;
     let name = input.ident;
 
-    const COUNT: usize = 5;
+    const COUNT: usize = 256;
     const FIELD: &str = "kbucket";
 
     let index_arg = format_ident!("kbucket_index");
