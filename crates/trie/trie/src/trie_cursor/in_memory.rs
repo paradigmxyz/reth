@@ -3,6 +3,7 @@ use crate::{forward_cursor::ForwardInMemoryCursor, updates::TrieUpdatesSorted};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
+use tracing::info;
 
 /// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
@@ -153,6 +154,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let entry = self.seek_inner(key, true)?;
         self.last_key = entry.as_ref().map(|(nibbles, _)| *nibbles);
+        info!(target: "trie_cursor::in_mem", res=?entry.as_ref().map(|r| r.0), ?key, "seek_exact");
         Ok(entry)
     }
 
@@ -162,6 +164,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let entry = self.seek_inner(key, false)?;
         self.last_key = entry.as_ref().map(|(nibbles, _)| *nibbles);
+        info!(target: "trie_cursor::in_mem", res=?entry.as_ref().map(|r| r.0), ?key, "seek");
         Ok(entry)
     }
 
@@ -175,6 +178,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
             // no previous entry was found
             None => None,
         };
+        info!(target: "trie_cursor::in_mem", res=?next.as_ref().map(|r| r.0),  "next");
         Ok(next)
     }
 

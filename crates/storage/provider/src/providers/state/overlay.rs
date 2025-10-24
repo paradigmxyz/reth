@@ -18,7 +18,7 @@ use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
 use std::{ops::RangeInclusive, sync::Arc};
-use tracing::{debug, trace};
+use tracing::{trace};
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///

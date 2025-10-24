@@ -1,14 +1,17 @@
+use alloy_primitives::BlockNumber;
 use clap::Parser;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory, StageCheckpointReader};
+use reth_provider::{
+    providers::{OverlayStateProviderFactory, ProviderNodeTypes},
+    DatabaseProviderROFactory, ProviderFactory, StageCheckpointReader,
+};
 use reth_stages::StageId;
 use reth_trie::{
+    trie_cursor::{TrieCursorFactory, TrieCursorIter},
     verify::{Output, Verifier},
     Nibbles,
 };
@@ -25,6 +28,9 @@ pub struct Command {
     /// Only show inconsistencies without making any repairs
     #[arg(long)]
     pub(crate) dry_run: bool,
+    /// Revert to the state at this block.
+    #[arg(long)]
+    pub(crate) from_block: Option<BlockNumber>,
 }
 
 impl Command {
@@ -34,7 +40,7 @@ impl Command {
         provider_factory: ProviderFactory<N>,
     ) -> eyre::Result<()> {
         if self.dry_run {
-            verify_only(provider_factory)?
+            verify_only(provider_factory, self.from_block)?
         } else {
             verify_and_repair(provider_factory)?
         }
@@ -43,16 +49,34 @@ impl Command {
     }
 }
 
-fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre::Result<()> {
-    // Get a database transaction directly from the database
-    let db = provider_factory.db_ref();
-    let mut tx = db.tx()?;
-    tx.disable_long_read_transaction_safety();
+fn verify_only<N: ProviderNodeTypes>(
+    provider_factory: ProviderFactory<N>,
+    from_block: Option<BlockNumber>,
+) -> eyre::Result<()> {
+    let factory = OverlayStateProviderFactory::new(provider_factory).with_block_number(from_block);
+    let provider = factory.database_provider_ro()?;
+    let hashed_cursor_factory = &provider;
+    let trie_cursor_factory = &provider;
+
+    {
+        let mut accounts_trie_cursor = trie_cursor_factory.account_trie_cursor()?;
+        let mut accounts_iter = TrieCursorIter::new(&mut accounts_trie_cursor);
+        while let Some(entry) = accounts_iter.next().transpose()? {
+            info!(path=?entry.0, "Accounts entry");
+        }
+        info!("finished iterating over accounts");
+    }
+
+    return Ok(());
+
+    //let provider = provider_factory.provider()?;
+    //let tx = provider.tx_ref();
+    //let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
+    //let trie_cursor_factory_v = DatabaseTrieCursorFactory::new(tx);
+    //let trie_cursor_factory = &trie_cursor_factory_v;
 
     // Create the verifier
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
-    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+    let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
 
     let mut inconsistent_nodes = 0;
     let start_time = Instant::now();
