@@ -94,6 +94,22 @@ type AccountMultiproofResult =
 /// Workers use this sender to deliver proof results directly to `MultiProofTask`.
 pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 
+/// Message containing a completed proof result with metadata for direct delivery to
+/// `MultiProofTask`.
+///
+/// This type enables workers to send proof results directly to the `MultiProofTask` event loop.
+#[derive(Debug)]
+pub struct ProofResultMessage {
+    /// Sequence number for ordering proofs
+    pub sequence_number: u64,
+    /// The proof calculation result
+    pub result: AccountMultiproofResult,
+    /// Time taken for the entire proof calculation (from dispatch to completion)
+    pub elapsed: Duration,
+    /// Original state update that triggered this proof
+    pub state: HashedPostState,
+}
+
 /// Context for sending proof calculation results back to `MultiProofTask`.
 ///
 /// This struct contains all context needed to send and track proof calculation results.
@@ -120,22 +136,6 @@ impl ProofResultContext {
     ) -> Self {
         Self { sender, sequence_number, state, start_time }
     }
-}
-
-/// Message containing a completed proof result with metadata for direct delivery to
-/// `MultiProofTask`.
-///
-/// This type enables workers to send proof results directly to the `MultiProofTask` event loop.
-#[derive(Debug)]
-pub struct ProofResultMessage {
-    /// Sequence number for ordering proofs
-    pub sequence_number: u64,
-    /// The proof calculation result
-    pub result: AccountMultiproofResult,
-    /// Time taken for the entire proof calculation (from dispatch to completion)
-    pub elapsed: Duration,
-    /// Original state update that triggered this proof
-    pub state: HashedPostState,
 }
 
 /// Internal message for storage workers.
