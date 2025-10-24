@@ -15,6 +15,7 @@ use crate::tree::{
 };
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
+use crossbeam_channel::Sender as CrossbeamSender;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
@@ -43,7 +44,7 @@ use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     sync::{
         atomic::AtomicBool,
-        mpsc::{self, channel, Sender},
+        mpsc::{self, channel},
         Arc,
     },
     time::Instant,
@@ -243,7 +244,6 @@ where
 
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
-            self.executor.clone(),
             proof_handle.clone(),
             to_sparse_trie,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
@@ -345,7 +345,7 @@ where
         mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
-        to_multi_proof: Option<Sender<MultiProofMessage>>,
+        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     ) -> CacheTaskHandle
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -483,7 +483,7 @@ where
 #[derive(Debug)]
 pub struct PayloadHandle<Tx, Err> {
     /// Channel for evm state updates
-    to_multi_proof: Option<Sender<MultiProofMessage>>,
+    to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle,
     /// Receiver for the state root
@@ -561,7 +561,7 @@ pub(crate) struct CacheTaskHandle {
     /// Metrics for the caches
     cache_metrics: CachedStateMetrics,
     /// Channel to the spawned prewarm task if any
-    to_prewarm_task: Option<Sender<PrewarmTaskEvent>>,
+    to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent>>,
 }
 
 impl CacheTaskHandle {

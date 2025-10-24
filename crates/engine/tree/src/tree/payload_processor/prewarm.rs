@@ -24,6 +24,7 @@ use alloy_consensus::transaction::TxHashRef;
 use alloy_eips::Typed2718;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
+use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
@@ -83,7 +84,7 @@ where
     /// The number of transactions to be processed
     transaction_count_hint: usize,
     /// Sender to emit evm state outcome messages, if any.
-    to_multi_proof: Option<Sender<MultiProofMessage>>,
+    to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
 }
@@ -99,7 +100,7 @@ where
         executor: WorkloadExecutor,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        to_multi_proof: Option<Sender<MultiProofMessage>>,
+        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         transaction_count_hint: usize,
         max_concurrency: usize,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
