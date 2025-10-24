@@ -38,16 +38,20 @@ where
         Ok(HashedPostStateCursor::new(Some(cursor), Some(&self.post_state.as_ref().accounts)))
     }
 
+    /// Returns a `HashedPostStateCursor` for storage slots that merges:
+    /// 1. `post_state_cursor` - In-memory overlay of storage updates (None if address has no
+    ///    updates)
+    /// 2. `cursor` - DB cursor for existing storage (None if storage was wiped via SELFDESTRUCT)
+    ///
+    /// When storage is wiped, the DB cursor is omitted since all previous storage is destroyed.
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        static EMPTY_POST_STATES: Vec<(B256, Option<U256>)> = Vec::new();
-
         let post_state_storage = self.post_state.as_ref().storages.get(&hashed_address);
         let (storage_slots, wiped) = post_state_storage
-            .map(|u| (u.storage_slots_ref(), u.is_wiped()))
-            .unwrap_or((&EMPTY_POST_STATES, false));
+            .map(|u| (Some(u.storage_slots_ref()), u.is_wiped()))
+            .unwrap_or((None, false));
 
         let cursor = if wiped {
             None
@@ -55,15 +59,7 @@ where
             Some(self.cursor_factory.hashed_storage_cursor(hashed_address)?)
         };
 
-        // Only pass storage_slots if there are any non-zero (Some) values.
-        // This ensures is_storage_empty() works correctly by checking post_state_cursor is None.
-        let storage_slots_opt = if storage_slots.iter().any(|(_, v)| v.is_some()) {
-            Some(storage_slots)
-        } else {
-            None
-        };
-
-        Ok(HashedPostStateCursor::new(cursor, storage_slots_opt))
+        Ok(HashedPostStateCursor::new(cursor, storage_slots))
     }
 }
 
@@ -133,7 +129,7 @@ where
                     if db_entry.as_ref().is_none_or(|(db_key, _)| post_key < *db_key) =>
                 {
                     post_state_entry =
-                        self.post_state_cursor.as_mut().and_then(|c| c.first_after(&post_key));
+                        self.post_state_cursor.as_mut().and_then(|c| c.seek(&post_key));
                 }
 
                 // Post state zeroed out exact DB entry
@@ -196,14 +192,15 @@ where
     /// This function should be called before attempting to call [`HashedCursor::seek`] or
     /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        let is_empty = match (&self.post_state_cursor, &mut self.cursor) {
-            // If we have post state cursor, it means there are non-zero values (filtered at factory)
-            (Some(_), _) => false,
-            // No post state, check DB cursor
-            (None, Some(c)) => c.is_storage_empty()?,
-            // No post state and no DB cursor means storage is empty
-            (None, None) => true,
-        };
-        Ok(is_empty)
+        match &self.post_state_cursor {
+            // if there are updates to the storage slot
+            Some(post_state_cursor) => {
+                // if cursor is empty, it's implied that the account was wiped.
+                // otherwise, there wouldn't be a StorageState created in the first place
+                Ok(post_state_cursor.is_empty())
+            }
+            // if no updates to the storage slot, we fall back to DB
+            None => self.cursor.as_mut().map_or(Ok(true), |c| c.is_storage_empty()),
+        }
     }
 }
