@@ -39,7 +39,7 @@ pub enum FsPathError {
     },
 
     /// Error variant for failed read link operation with additional path context.
-    #[error("failed to read from {path:?}: {source}")]
+    #[error("failed to read link {path:?}: {source}")]
     ReadLink {
         /// The source `io::Error`.
         source: io::Error,
@@ -228,6 +228,12 @@ pub fn read_to_string(path: impl AsRef<Path>) -> Result<String> {
 pub fn read(path: impl AsRef<Path>) -> Result<Vec<u8>> {
     let path = path.as_ref();
     fs::read(path).map_err(|err| FsPathError::read(err, path))
+}
+
+/// Wrapper for `std::fs::read_link`
+pub fn read_link(path: impl AsRef<Path>) -> Result<PathBuf> {
+    let path = path.as_ref();
+    fs::read_link(path).map_err(|err| FsPathError::read_link(err, path))
 }
 
 /// Wrapper for `std::fs::write`
