@@ -3,7 +3,6 @@ use crate::{forward_cursor::ForwardInMemoryCursor, updates::TrieUpdatesSorted};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
-use tracing::info;
 
 /// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
@@ -69,10 +68,15 @@ where
 pub struct InMemoryTrieCursor<'a, C> {
     /// The underlying cursor. If None then it is assumed there is no DB data.
     cursor: Option<C>,
+    /// Entry that `cursor` is currently pointing to.
+    cursor_entry: Option<(Nibbles, BranchNodeCompact)>,
     /// Forward-only in-memory cursor over storage trie nodes.
     in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>,
-    /// Last key returned by the cursor.
+    /// The key most recently returned from the Cursor.
     last_key: Option<Nibbles>,
+    #[cfg(debug_assertions)]
+    /// Whether an initial seek was called.
+    seeked: bool,
 }
 
 impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
@@ -83,67 +87,112 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         trie_updates: &'a [(Nibbles, Option<BranchNodeCompact>)],
     ) -> Self {
         let in_memory_cursor = ForwardInMemoryCursor::new(trie_updates);
-        Self { cursor, in_memory_cursor, last_key: None }
+        Self {
+            cursor,
+            cursor_entry: None,
+            in_memory_cursor,
+            last_key: None,
+            #[cfg(debug_assertions)]
+            seeked: false,
+        }
     }
 
-    fn seek_inner(
-        &mut self,
-        key: Nibbles,
-        exact: bool,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let mut mem_entry = self.in_memory_cursor.seek(&key);
-        let mut db_entry = self.cursor.as_mut().map(|c| c.seek(key)).transpose()?.flatten();
+    /// Asserts that the next entry to be returned from the cursor is not previous to the last entry
+    /// returned.
+    fn set_last_key(&mut self, next_entry: &Option<(Nibbles, BranchNodeCompact)>) {
+        let next_key = next_entry.as_ref().map(|e| e.0);
+        assert!(
+            self.last_key.is_none_or(|last| next_key.is_none_or(|next| next >= last)),
+            "Cannot return entry {:?} previous to the last returned entry at {:?}",
+            next_key,
+            self.last_key,
+        );
+        self.last_key = next_key;
+    }
 
-        // exact matching is easy, if overlay has a value then return that (updated or removed), or
-        // if db has a value then return that.
-        if exact {
-            return Ok(match (mem_entry, db_entry) {
-                (Some((mem_key, entry_inner)), _) if mem_key == key => {
-                    entry_inner.map(|node| (key, node))
-                }
-                (_, Some((db_key, node))) if db_key == key => Some((key, node)),
-                _ => None,
-            })
+    /// Seeks the `entry` field of the struct using the cursor.
+    fn cursor_seek(&mut self, key: Nibbles, exact: bool) -> Result<(), DatabaseError> {
+        if let Some(entry) = self.cursor_entry.as_ref() &&
+            entry.0 >= key
+        {
+            // If already seeked to the given key then don't do anything. Also if we're seeked past
+            // the given key then don't anything, because `TrieCursor` is specifically a
+            // forward-only cursor.
+        } else if exact {
+            self.cursor_entry =
+                self.cursor.as_mut().map(|c| c.seek_exact(key)).transpose()?.flatten();
+        } else {
+            self.cursor_entry = self.cursor.as_mut().map(|c| c.seek(key)).transpose()?.flatten();
         }
 
+        Ok(())
+    }
+
+    /// Seeks the `entry` field of the struct to the subsequent entry using the cursor.
+    fn cursor_next(&mut self) -> Result<(), DatabaseError> {
+        #[cfg(debug_assertions)]
+        {
+            debug_assert!(self.seeked);
+        }
+
+        // If the previous entry is `None`, and we've done a seek previously, then the cursor is
+        // exhausted and we shouldn't call `next` again.
+        if self.cursor_entry.is_some() {
+            self.cursor_entry = self.cursor.as_mut().map(|c| c.next()).transpose()?.flatten();
+        }
+        Ok(())
+    }
+
+    /// Compares the current in-memory entry with the current entry of the cursor, and applies the
+    /// in-memory entry to the cursor entry as an overlay. This will consume and move forward the
+    /// current entries as-necessary to produce a "next" entry.
+    fn next_inner(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         loop {
-            match (mem_entry, &db_entry) {
+            match (self.in_memory_cursor.current(), &self.cursor_entry) {
                 (Some((mem_key, None)), _)
-                    if db_entry.as_ref().is_none_or(|(db_key, _)| &mem_key < db_key) =>
+                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| mem_key < db_key) =>
                 {
                     // If overlay has a removed node but DB cursor is exhausted or ahead of the
                     // in-memory cursor then move ahead in-memory, as there might be further
                     // non-removed overlay nodes.
-                    mem_entry = self.in_memory_cursor.first_after(&mem_key);
+                    self.in_memory_cursor.next();
                 }
-                (Some((mem_key, None)), Some((db_key, _))) if &mem_key == db_key => {
+                (Some((mem_key, None)), Some((db_key, _))) if mem_key == db_key => {
                     // If overlay has a removed node which is returned from DB then move both
                     // cursors ahead to the next key.
-                    mem_entry = self.in_memory_cursor.first_after(&mem_key);
-                    db_entry = self.cursor.as_mut().map(|c| c.next()).transpose()?.flatten();
+                    self.in_memory_cursor.next();
+                    self.cursor_next()?;
                 }
                 (Some((mem_key, Some(node))), _)
-                    if db_entry.as_ref().is_none_or(|(db_key, _)| &mem_key <= db_key) =>
+                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| mem_key <= db_key) =>
                 {
                     // If overlay returns a node prior to the DB's node, or the DB is exhausted,
-                    // then we return the overlay's node.
-                    return Ok(Some((mem_key, node)))
+                    // then we consume and return the overlay's node.
+                    let this_entry = (*mem_key, node.clone());
+
+                    // If the db entry is at the same key as the in-memory cursor then we want to
+                    // consume it as well.
+                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| mem_key == db_key) {
+                        self.cursor_next()?;
+                    }
+
+                    self.in_memory_cursor.next();
+
+                    return Ok(Some(this_entry))
                 }
                 // All other cases:
                 // - mem_key > db_key
                 // - overlay is exhausted
-                // Return the db_entry. If DB is also exhausted then this returns None.
-                _ => return Ok(db_entry),
+                // Consume and return the db_entry. If DB is also exhausted then this returns None.
+                _ => {
+                    let this_entry = self.cursor_entry.clone();
+                    if this_entry.is_some() {
+                        self.cursor_next()?;
+                    }
+                    return Ok(this_entry)
+                }
             }
         }
-    }
-
-    fn next_inner(
-        &mut self,
-        last: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let Some(key) = last.increment() else { return Ok(None) };
-        self.seek_inner(key, false)
     }
 }
 
@@ -152,9 +201,23 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.seek_inner(key, true)?;
-        self.last_key = entry.as_ref().map(|(nibbles, _)| *nibbles);
-        info!(target: "trie_cursor::in_mem", res=?entry.as_ref().map(|r| r.0), ?key, "seek_exact");
+        self.cursor_seek(key, true)?;
+        let mem_entry = self.in_memory_cursor.seek(&key);
+
+        #[cfg(debug_assertions)]
+        {
+            self.seeked = true;
+        }
+
+        let entry = match (mem_entry, &self.cursor_entry) {
+            (Some((mem_key, entry_inner)), _) if mem_key == &key => {
+                entry_inner.clone().map(|node| (key, node))
+            }
+            (_, Some((db_key, node))) if db_key == &key => Some((key, node.clone())),
+            _ => None,
+        };
+
+        self.set_last_key(&entry);
         Ok(entry)
     }
 
@@ -162,24 +225,34 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.seek_inner(key, false)?;
-        self.last_key = entry.as_ref().map(|(nibbles, _)| *nibbles);
-        info!(target: "trie_cursor::in_mem", res=?entry.as_ref().map(|r| r.0), ?key, "seek");
+        self.cursor_seek(key, false)?;
+        self.in_memory_cursor.seek(&key);
+
+        #[cfg(debug_assertions)]
+        {
+            self.seeked = true;
+        }
+
+        let entry = self.next_inner()?;
+        self.set_last_key(&entry);
         Ok(entry)
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let next = match &self.last_key {
-            Some(last) => {
-                let entry = self.next_inner(*last)?;
-                self.last_key = entry.as_ref().map(|entry| entry.0);
-                entry
-            }
-            // no previous entry was found
-            None => None,
-        };
-        info!(target: "trie_cursor::in_mem", res=?next.as_ref().map(|r| r.0),  "next");
-        Ok(next)
+        #[cfg(debug_assertions)]
+        {
+            debug_assert!(self.seeked, "Cursor must be seek'd before next is called");
+        }
+
+        // A `last_key` of `None` indicates that the cursor was never seeked, or is exhausted. If it
+        // was never seeked then `next` would be undefined, just return `None`.
+        if self.last_key.is_none() {
+            return Ok(None);
+        }
+
+        let entry = self.next_inner()?;
+        self.set_last_key(&entry);
+        Ok(entry)
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
@@ -221,8 +294,10 @@ mod tests {
             results.push(entry);
         }
 
-        while let Ok(Some(entry)) = cursor.next() {
-            results.push(entry);
+        if !test_case.expected_results.is_empty() {
+            while let Ok(Some(entry)) = cursor.next() {
+                results.push(entry);
+            }
         }
 
         assert_eq!(
