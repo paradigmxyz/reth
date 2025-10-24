@@ -13,12 +13,14 @@ use reth_prune_types::{
 use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, instrument, trace};
 
+/// Prunes transaction lookup entries from the database.
 #[derive(Debug)]
 pub struct TransactionLookup {
     mode: PruneMode,
 }
 
 impl TransactionLookup {
+    /// Creates a new [`TransactionLookup`] with the given prune mode.
     pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }

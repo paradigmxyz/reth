@@ -9816,7 +9816,6 @@ dependencies = [
  "metrics",
  "reth-config",
  "reth-db",
- "reth-db-api",
  "reth-errors",
  "reth-exex-types",
  "reth-metrics",
@@ -9836,20 +9835,13 @@ dependencies = [
 name = "reth-prune-db"
 version = "1.8.2"
 dependencies = [
- "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "assert_matches",
  "itertools 0.14.0",
- "metrics",
  "rayon",
- "reth-chainspec",
- "reth-config",
  "reth-db",
  "reth-db-api",
- "reth-errors",
- "reth-exex-types",
- "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
@@ -9857,11 +9849,8 @@ dependencies = [
  "reth-stages",
  "reth-static-file-types",
  "reth-testing-utils",
- "reth-tokio-util",
  "reth-tracing",
  "rustc-hash",
- "thiserror 2.0.17",
- "tokio",
  "tracing",
 ]
 

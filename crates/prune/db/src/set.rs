@@ -27,6 +27,7 @@ where
         + PruneCheckpointReader
         + BlockReader<Transaction: Encodable2718>,
 {
+    #[allow(deprecated)]
     let PruneModes {
         sender_recovery,
         transaction_lookup,

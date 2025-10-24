@@ -14,34 +14,22 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
-reth-exex-types.workspace = true
 reth-db-api.workspace = true
-reth-errors.workspace = true
 reth-provider.workspace = true
-reth-tokio-util.workspace = true
-reth-config.workspace = true
 reth-prune-types.workspace = true
 reth-primitives-traits.workspace = true
 reth-static-file-types.workspace = true
 reth-prune.workspace = true
 
 # ethereum
-alloy-consensus.workspace = true
 alloy-eips.workspace = true
-
-# metrics
-reth-metrics.workspace = true
-metrics.workspace = true
-alloy-primitives.workspace = true
 
 # misc
 tracing.workspace = true
-thiserror.workspace = true
 itertools.workspace = true
 rayon.workspace = true
-tokio.workspace = true
 rustc-hash.workspace = true
+alloy-primitives.workspace = true
 
 [dev-dependencies]
 # reth

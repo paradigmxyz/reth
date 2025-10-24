@@ -8,7 +8,7 @@ use reth_prune::PruneLimiter;
 use std::{fmt::Debug, ops::RangeBounds};
 use tracing::debug;
 
-pub trait DbTxPruneExt: DbTxMut {
+pub(crate) trait DbTxPruneExt: DbTxMut {
     /// Prune the table for the specified pre-sorted key iterator.
     ///
     /// Returns number of rows pruned.
