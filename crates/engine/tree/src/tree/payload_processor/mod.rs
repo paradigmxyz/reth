@@ -49,7 +49,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, warn};
+use tracing::{debug, debug_span, instrument, span::EnteredSpan, warn};
 
 mod configured_sparse_trie;
 pub mod executor;
@@ -234,7 +234,7 @@ where
         );
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let proof_handle = ProofWorkerHandle::new(
+        let (proof_handle, proof_workers_span) = ProofWorkerHandle::new(
             self.executor.handle().clone(),
             consistent_view,
             task_ctx,
@@ -280,6 +280,7 @@ where
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
+            _proof_workers_span: Some(proof_workers_span),
         })
     }
 
@@ -304,6 +305,7 @@ where
             prewarm_handle,
             state_root: None,
             transactions: execution_rx,
+            _proof_workers_span: None,
         }
     }
 
@@ -490,6 +492,7 @@ pub struct PayloadHandle<Tx, Err> {
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
     /// Stream of block transactions
     transactions: mpsc::Receiver<Result<Tx, Err>>,
+    _proof_workers_span: Option<EnteredSpan>,
 }
 
 impl<Tx, Err> PayloadHandle<Tx, Err> {

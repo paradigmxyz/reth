@@ -77,7 +77,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::runtime::Handle;
-use tracing::{debug, debug_span, error, trace};
+use tracing::{debug, debug_span, error, span::EnteredSpan, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskTrieMetrics;
@@ -1067,7 +1067,7 @@ impl ProofWorkerHandle {
         task_ctx: ProofTaskCtx,
         storage_worker_count: usize,
         account_worker_count: usize,
-    ) -> Self
+    ) -> (Self, EnteredSpan)
     where
         Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {
@@ -1079,6 +1079,10 @@ impl ProofWorkerHandle {
         let storage_available_workers = Arc::new(AtomicUsize::new(0));
         let account_available_workers = Arc::new(AtomicUsize::new(0));
 
+        let parent_span =
+            debug_span!(target: "trie::proof_task", "proof workers", ?storage_worker_count)
+                .entered();
+
         debug!(
             target: "trie::proof_task",
             storage_worker_count,
@@ -1086,13 +1090,9 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
-        let storage_worker_parent =
-            debug_span!(target: "trie::proof_task", "Storage worker tasks", ?storage_worker_count);
-        let _guard = storage_worker_parent.enter();
-
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
-            let parent_span = debug_span!(target: "trie::proof_task", "Storage worker", ?worker_id);
+            let span = debug_span!(target: "trie::proof_task", "Storage worker", ?worker_id);
             let view_clone = view.clone();
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = storage_work_rx.clone();
@@ -1102,7 +1102,7 @@ impl ProofWorkerHandle {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
 
-                let _guard = parent_span.enter();
+                let _guard = span.enter();
                 storage_worker_loop(
                     view_clone,
                     task_ctx_clone,
@@ -1115,15 +1115,9 @@ impl ProofWorkerHandle {
             });
         }
 
-        drop(_guard);
-
-        let account_worker_parent =
-            debug_span!(target: "trie::proof_task", "Account worker tasks", ?account_worker_count);
-        let _guard = account_worker_parent.enter();
-
         // Spawn account workers
         for worker_id in 0..account_worker_count {
-            let parent_span = debug_span!(target: "trie::proof_task", "Account worker", ?worker_id);
+            let span = debug_span!(target: "trie::proof_task", "Account worker", ?worker_id);
             let view_clone = view.clone();
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = account_work_rx.clone();
@@ -1134,7 +1128,7 @@ impl ProofWorkerHandle {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
 
-                let _guard = parent_span.enter();
+                let _guard = span.enter();
                 account_worker_loop(
                     view_clone,
                     task_ctx_clone,
@@ -1148,31 +1142,15 @@ impl ProofWorkerHandle {
             });
         }
 
-        drop(_guard);
-
-        Self::new_handle(
-            storage_work_tx,
-            account_work_tx,
-            storage_available_workers,
-            account_available_workers,
+        (
+            Self {
+                storage_work_tx,
+                account_work_tx,
+                storage_available_workers,
+                account_available_workers,
+            },
+            parent_span,
         )
-    }
-
-    /// Creates a new [`ProofWorkerHandle`] with direct access to worker pools.
-    ///
-    /// This is an internal constructor used for creating handles.
-    const fn new_handle(
-        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
-        account_work_tx: CrossbeamSender<AccountWorkerJob>,
-        storage_available_workers: Arc<AtomicUsize>,
-        account_available_workers: Arc<AtomicUsize>,
-    ) -> Self {
-        Self {
-            storage_work_tx,
-            account_work_tx,
-            storage_available_workers,
-            account_available_workers,
-        }
     }
 
     /// Returns true if there are available storage workers to process tasks.
@@ -1380,7 +1358,7 @@ mod tests {
             let view = ConsistentDbView::new(factory, None);
             let ctx = test_ctx();
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), view, ctx, 5, 3);
+            let (proof_handle, _) = ProofWorkerHandle::new(handle.clone(), view, ctx, 5, 3);
 
             // Verify handle can be cloned
             let _cloned_handle = proof_handle.clone();
