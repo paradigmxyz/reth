@@ -11,7 +11,7 @@ go build .
 
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
-./hive -client reth --sim "ethereum/eels" --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz -sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/eels" --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz --sim.buildarg branch=v5.3.0 -sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
 ./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s || true &
