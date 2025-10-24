@@ -12,8 +12,8 @@
 //!
 //! # Message Flow
 //!
-//! 1. [`MultiProofTask`](reth_engine_tree::tree::payload_processor::multiproof::MultiProofTask)
-//!    prepares a storage or account job and hands it to [`ProofWorkerHandle`]. The job carries a
+//! 1. `MultiProofTask` prepares a storage or account job
+//!    and hands it to [`ProofWorkerHandle`]. The job carries a
 //!    [`ProofResultContext`] so the worker knows how to send the result back.
 //! 2. A worker receives the job, runs the proof, and sends a [`ProofResultMessage`] through the
 //!    provided [`ProofResultSender`].
