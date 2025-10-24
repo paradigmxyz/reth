@@ -1,6 +1,6 @@
 //! Main node command for launching a node
 
-use crate::launcher::Launcher;
+use crate::{common::CliNodeTypes, launcher::Launcher};
 use clap::{value_parser, Args, Parser};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -15,6 +15,7 @@ use reth_node_core::{
     node_config::NodeConfig,
     version,
 };
+use reth_provider::providers::ChainStorage;
 use std::{ffi::OsString, fmt, path::PathBuf, sync::Arc};
 
 /// Start the node
@@ -141,10 +142,11 @@ where
     ///
     /// This transforms the node command into a node config and launches the node using the given
     /// launcher.
-    pub async fn execute<L>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
-    where
-        L: Launcher<C, Ext>,
-    {
+    pub async fn execute<N: CliNodeTypes>(
+        self,
+        ctx: CliContext,
+        launcher: impl Launcher<C, Ext>,
+    ) -> eyre::Result<()> {
         tracing::info!(target: "reth::cli", version = ?version::version_metadata().short_version, "Starting reth");
 
         let Self {
@@ -190,7 +192,11 @@ where
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
+        let mut database =
+            Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
+        if let Some(extra) = N::Storage::extra_tables() {
+            database.create_tables_for_set(extra)?;
+        }
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();

@@ -1,8 +1,7 @@
 use crate::DBProvider;
 use alloc::vec::Vec;
-use alloy_consensus::Header;
+use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
-use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -12,23 +11,21 @@ use reth_db_api::{
     DbTxUnwindExt,
 };
 use reth_db_models::StoredBlockWithdrawals;
-use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::{
-    Block, BlockBody, FullBlockHeader, NodePrimitives, SignedTransaction,
-};
+use reth_execution_types::ExecutionOutcome;
+use reth_primitives_traits::{FullBlockHeader, NodePrimitives};
 use reth_storage_errors::provider::ProviderResult;
 
-/// Trait that implements how block bodies are written to the storage.
-///
-/// Note: Within the current abstraction, this should only write to tables unrelated to
-/// transactions. Writing of transactions is handled separately.
+/// Trait that implements how chain-specific types are written to the storage.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockBodyWriter<Provider, Body: BlockBody> {
+pub trait ChainStorageWriter<Provider, N: NodePrimitives> {
     /// Writes a set of block bodies to the storage.
+    ///
+    /// Note: Within the current abstraction, this should only write to tables unrelated to
+    /// transactions. Writing of transactions is handled separately.
     fn write_block_bodies(
         &self,
         provider: &Provider,
-        bodies: Vec<(BlockNumber, Option<Body>)>,
+        bodies: Vec<(BlockNumber, Option<N::BlockBody>)>,
     ) -> ProviderResult<()>;
 
     /// Removes all block bodies above the given block number from the database.
@@ -37,67 +34,47 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
         provider: &Provider,
         block: BlockNumber,
     ) -> ProviderResult<()>;
+
+    /// Hook to write any custom indices or state that is not covered by other methods.
+    fn write_custom_state(
+        &self,
+        _provider: &Provider,
+        _state: &ExecutionOutcome<N::Receipt>,
+    ) -> ProviderResult<()> {
+        Ok(())
+    }
+
+    /// Hook to revert any [`ChainStorageWriter::write_custom_state`] changes.
+    fn remove_custom_state_above(
+        &self,
+        _provider: &Provider,
+        _block: BlockNumber,
+    ) -> ProviderResult<()> {
+        Ok(())
+    }
 }
 
-/// Trait that implements how chain-specific types are written to the storage.
-pub trait ChainStorageWriter<Provider, Primitives: NodePrimitives>:
-    BlockBodyWriter<Provider, <Primitives::Block as Block>::Body>
-{
-}
-impl<T, Provider, Primitives: NodePrimitives> ChainStorageWriter<Provider, Primitives> for T where
-    T: BlockBodyWriter<Provider, <Primitives::Block as Block>::Body>
-{
-}
-
-/// Input for reading a block body. Contains a header of block being read and a list of pre-fetched
-/// transactions.
-pub type ReadBodyInput<'a, B> =
-    (&'a <B as Block>::Header, Vec<<<B as Block>::Body as BlockBody>::Transaction>);
-
-/// Trait that implements how block bodies are read from the storage.
-///
-/// Note: Within the current abstraction, transactions persistence is handled separately, thus this
-/// trait is provided with transactions read beforehand and is expected to construct the block body
-/// from those transactions and additional data read from elsewhere.
+/// Trait that implements how chain-specific types are read from storage.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockBodyReader<Provider> {
-    /// The block type.
-    type Block: Block;
-
+pub trait ChainStorageReader<Provider, N: NodePrimitives> {
     /// Receives a list of block headers along with block transactions and returns the block bodies.
     fn read_block_bodies(
         &self,
         provider: &Provider,
-        inputs: Vec<ReadBodyInput<'_, Self::Block>>,
-    ) -> ProviderResult<Vec<<Self::Block as Block>::Body>>;
-}
-
-/// Trait that implements how chain-specific types are read from storage.
-pub trait ChainStorageReader<Provider, Primitives: NodePrimitives>:
-    BlockBodyReader<Provider, Block = Primitives::Block>
-{
-}
-impl<T, Provider, Primitives: NodePrimitives> ChainStorageReader<Provider, Primitives> for T where
-    T: BlockBodyReader<Provider, Block = Primitives::Block>
-{
+        inputs: Vec<(&N::BlockHeader, Vec<N::SignedTx>)>,
+    ) -> ProviderResult<Vec<N::BlockBody>>;
 }
 
 /// Ethereum storage implementation.
-#[derive(Debug, Clone, Copy)]
-pub struct EthStorage<T = TransactionSigned, H = Header>(PhantomData<(T, H)>);
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct EthStorage;
 
-impl<T, H> Default for EthStorage<T, H> {
-    fn default() -> Self {
-        Self(Default::default())
-    }
-}
-
-impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>>
-    for EthStorage<T, H>
+impl<Provider, N, T, H> ChainStorageWriter<Provider, N> for EthStorage
 where
     Provider: DBProvider<Tx: DbTxMut>,
-    T: SignedTransaction,
     H: FullBlockHeader,
+    N: NodePrimitives<SignedTx = T, BlockHeader = H, BlockBody = alloy_consensus::BlockBody<T, H>>,
 {
     fn write_block_bodies(
         &self,
@@ -139,19 +116,17 @@ where
     }
 }
 
-impl<Provider, T, H> BlockBodyReader<Provider> for EthStorage<T, H>
+impl<Provider, N, T, H> ChainStorageReader<Provider, N> for EthStorage
 where
     Provider: DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>,
-    T: SignedTransaction,
     H: FullBlockHeader,
+    N: NodePrimitives<SignedTx = T, BlockHeader = H, BlockBody = alloy_consensus::BlockBody<T, H>>,
 {
-    type Block = alloy_consensus::Block<T, H>;
-
     fn read_block_bodies(
         &self,
         provider: &Provider,
-        inputs: Vec<ReadBodyInput<'_, Self::Block>>,
-    ) -> ProviderResult<Vec<<Self::Block as Block>::Body>> {
+        inputs: Vec<(&N::BlockHeader, Vec<N::SignedTx>)>,
+    ) -> ProviderResult<Vec<N::BlockBody>> {
         // TODO: Ideally storage should hold its own copy of chain spec
         let chain_spec = provider.chain_spec();
 
@@ -194,25 +169,15 @@ where
 /// This will never read nor write additional body content such as withdrawals or ommers.
 /// But will respect the optionality of withdrawals if activated and fill them if the corresponding
 /// hardfork is activated.
-#[derive(Debug, Clone, Copy)]
-pub struct EmptyBodyStorage<T, H>(PhantomData<(T, H)>);
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct EmptyBodyStorage;
 
-impl<T, H> Default for EmptyBodyStorage<T, H> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>>
-    for EmptyBodyStorage<T, H>
-where
-    T: SignedTransaction,
-    H: FullBlockHeader,
-{
+impl<Provider, N: NodePrimitives> ChainStorageWriter<Provider, N> for EmptyBodyStorage {
     fn write_block_bodies(
         &self,
         _provider: &Provider,
-        _bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
+        _bodies: Vec<(BlockNumber, Option<N::BlockBody>)>,
     ) -> ProviderResult<()> {
         // noop
         Ok(())
@@ -228,19 +193,17 @@ where
     }
 }
 
-impl<Provider, T, H> BlockBodyReader<Provider> for EmptyBodyStorage<T, H>
+impl<Provider, T, H, N> ChainStorageReader<Provider, N> for EmptyBodyStorage
 where
     Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
-    T: SignedTransaction,
-    H: FullBlockHeader,
+    H: BlockHeader,
+    N: NodePrimitives<SignedTx = T, BlockHeader = H, BlockBody = alloy_consensus::BlockBody<T, H>>,
 {
-    type Block = alloy_consensus::Block<T, H>;
-
     fn read_block_bodies(
         &self,
         provider: &Provider,
-        inputs: Vec<ReadBodyInput<'_, Self::Block>>,
-    ) -> ProviderResult<Vec<<Self::Block as Block>::Body>> {
+        inputs: Vec<(&N::BlockHeader, Vec<N::SignedTx>)>,
+    ) -> ProviderResult<Vec<N::BlockBody>> {
         let chain_spec = provider.chain_spec();
 
         Ok(inputs

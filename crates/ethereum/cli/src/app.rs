@@ -188,7 +188,7 @@ where
             }
 
             runner.run_command_until_exit(|ctx| {
-                command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
+                command.execute::<N>(ctx, FnLauncher::new::<C, Ext>(launcher))
             })
         }
         Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
