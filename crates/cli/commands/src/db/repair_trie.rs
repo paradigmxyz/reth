@@ -58,16 +58,16 @@ fn verify_only<N: ProviderNodeTypes>(
     let hashed_cursor_factory = &provider;
     let trie_cursor_factory = &provider;
 
-    {
-        let mut accounts_trie_cursor = trie_cursor_factory.account_trie_cursor()?;
-        let mut accounts_iter = TrieCursorIter::new(&mut accounts_trie_cursor);
-        while let Some(entry) = accounts_iter.next().transpose()? {
-            info!(path=?entry.0, "Accounts entry");
-        }
-        info!("finished iterating over accounts");
-    }
+    //{
+    //    let mut accounts_trie_cursor = trie_cursor_factory.account_trie_cursor()?;
+    //    let mut accounts_iter = TrieCursorIter::new(&mut accounts_trie_cursor);
+    //    while let Some(entry) = accounts_iter.next().transpose()? {
+    //        info!(path=?entry.0, "Accounts entry");
+    //    }
+    //    info!("finished iterating over accounts");
+    //}
 
-    return Ok(());
+    //return Ok(());
 
     //let provider = provider_factory.provider()?;
     //let tx = provider.tx_ref();

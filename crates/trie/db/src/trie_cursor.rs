@@ -10,7 +10,6 @@ use reth_trie::{
     updates::StorageTrieUpdatesSorted,
     BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
-use tracing::info;
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
 #[derive(Debug, Clone)]
@@ -73,7 +72,6 @@ where
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let res = self.0.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1));
-        info!(target: "trie_cursor::db", res=?res.as_ref().map(|v| v.0), ?key, "seek_exact");
         Ok(res)
     }
 
@@ -83,14 +81,12 @@ where
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let res = self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1));
-        info!(target: "trie_cursor::db", res=?res.as_ref().map(|v| v.0), ?key, "seek");
         Ok(res)
     }
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let res = self.0.next()?.map(|value| (value.0 .0, value.1));
-        info!(target: "trie_cursor::db", res=?res.as_ref().map(|v| v.0), "next");
         Ok(res)
     }
 

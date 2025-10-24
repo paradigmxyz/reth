@@ -18,7 +18,7 @@ use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
 use std::{ops::RangeInclusive, sync::Arc};
-use tracing::{trace};
+use tracing::trace;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
@@ -140,7 +140,7 @@ where
     /// Create a read-only [`OverlayStateProvider`].
     fn database_provider_ro(&self) -> Result<OverlayStateProvider<F::Provider>, ProviderError> {
         // Get a read-only provider
-        let provider = self.factory.database_provider_ro()?;
+        let provider = self.factory.database_provider_ro()?.disable_long_read_transaction_safety();
 
         // If block_number is provided, collect reverts
         let (trie_updates, hashed_state) = if let Some(from_block) = self.block_number {
