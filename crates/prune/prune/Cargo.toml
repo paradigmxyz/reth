@@ -33,9 +33,6 @@ tokio.workspace = true
 [dev-dependencies]
 # reth
 reth-db = { workspace = true, features = ["test-utils"] }
-reth-stages = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
-
-assert_matches.workspace = true

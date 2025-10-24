@@ -1,6 +1,6 @@
 //! Common receipts pruning logic.
 //!
-//! - [`crate::segments::user::Receipts`] is responsible for pruning receipts according to the
+//! - [`crate::user::Receipts`] is responsible for pruning receipts according to the
 //!   user-configured settings (for example, on a full node or with a custom prune config)
 
 use crate::db_ext::DbTxPruneExt;

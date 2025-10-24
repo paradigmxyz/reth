@@ -9812,7 +9812,6 @@ name = "reth-prune"
 version = "1.8.2"
 dependencies = [
  "alloy-primitives",
- "assert_matches",
  "metrics",
  "reth-config",
  "reth-db",
@@ -9822,7 +9821,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
- "reth-stages",
  "reth-testing-utils",
  "reth-tokio-util",
  "reth-tracing",
