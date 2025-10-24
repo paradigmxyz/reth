@@ -425,7 +425,12 @@ impl MultiproofManager {
         // Dispatch to storage worker
         if let Err(e) = self.proof_worker_handle.dispatch_storage_proof(
             input,
-            (self.proof_result_tx.clone(), proof_sequence_number, hashed_state_update, start),
+            reth_trie_parallel::proof_task::ProofResultContext::new(
+                self.proof_result_tx.clone(),
+                proof_sequence_number,
+                hashed_state_update,
+                start,
+            ),
         ) {
             error!(target: "engine::tree::payload_processor::multiproof", ?e, "Failed to dispatch storage proof");
             return;
@@ -493,7 +498,7 @@ impl MultiproofManager {
             multi_added_removed_keys,
             missed_leaves_storage_roots,
             // Workers will send ProofResultMessage directly to proof_result_rx
-            proof_result_sender: (
+            proof_result_sender: reth_trie_parallel::proof_task::ProofResultContext::new(
                 self.proof_result_tx.clone(),
                 proof_sequence_number,
                 hashed_state_update,

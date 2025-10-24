@@ -1,7 +1,8 @@
 use crate::{
     metrics::ParallelTrieMetrics,
     proof_task::{
-        AccountMultiproofInput, ProofResultMessage, ProofWorkerHandle, StorageProofInput,
+        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        StorageProofInput,
     },
     root::ParallelStateRootError,
     StorageRootTargets,
@@ -105,7 +106,10 @@ impl ParallelProof {
         );
 
         self.proof_worker_handle
-            .dispatch_storage_proof(input, (result_tx, 0, HashedPostState::default(), start))
+            .dispatch_storage_proof(
+                input,
+                ProofResultContext::new(result_tx, 0, HashedPostState::default(), start),
+            )
             .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
         Ok(result_rx)
@@ -208,7 +212,7 @@ impl ParallelProof {
             collect_branch_node_masks: self.collect_branch_node_masks,
             multi_added_removed_keys: self.multi_added_removed_keys.clone(),
             missed_leaves_storage_roots: self.missed_leaves_storage_roots.clone(),
-            proof_result_sender: (
+            proof_result_sender: ProofResultContext::new(
                 result_tx,
                 0,
                 HashedPostState::default(),
