@@ -36,6 +36,7 @@ impl Decodable for UpgradeStatus {
 
 impl UpgradeStatus {
     /// Creates a new `UpgradeStatus` with the specified extension.
+    #[allow(dead_code)]
     pub fn new(extension: UpgradeStatusExtension) -> Self {
         Self { extension }
     }
@@ -46,6 +47,7 @@ impl UpgradeStatus {
     }
 
     /// Creates a new `UpgradeStatus` that disables peer transaction broadcasting.
+    #[allow(dead_code)]
     pub fn disable_broadcast() -> Self {
         Self { extension: UpgradeStatusExtension::disable_broadcast() }
     }
@@ -68,6 +70,7 @@ pub struct UpgradeStatusExtension {
 
 impl UpgradeStatusExtension {
     /// Creates a new `UpgradeStatusExtension` with the specified broadcast setting.
+    #[allow(dead_code)]
     pub fn new(disable_peer_tx_broadcast: bool) -> Self {
         Self { disable_peer_tx_broadcast }
     }
@@ -78,6 +81,7 @@ impl UpgradeStatusExtension {
     }
 
     /// Creates a new `UpgradeStatusExtension` that disables peer transaction broadcasting.
+    #[allow(dead_code)]
     pub fn disable_broadcast() -> Self {
         Self { disable_peer_tx_broadcast: true }
     }
