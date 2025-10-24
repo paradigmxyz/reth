@@ -1282,7 +1282,7 @@ mod tests {
             config.prefix_sets.clone(),
         );
         let consistent_view = ConsistentDbView::new(factory, None);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, consistent_view, task_ctx, 1, 1);
+        let (proof_handle, _) = ProofWorkerHandle::new(rt_handle, consistent_view, task_ctx, 1, 1);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
 
         MultiProofTask::new(config, proof_handle, to_sparse_trie, Some(1))
