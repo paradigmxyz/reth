@@ -81,7 +81,9 @@ backon.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc", "reth-revm/portable"]
+default = ["jemalloc", "otlp", "reth-revm/portable"]
+
+otlp = ["reth-ethereum-cli/otlp"]
 
 dev = ["reth-ethereum-cli/dev"]
 
