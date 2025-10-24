@@ -275,6 +275,28 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
             _ => 0,
         }
     }
+
+    /// Shrinks the capacity of the sparse trie's node storage.
+    /// Works for both revealed and blind tries with allocated storage.
+    pub fn shrink_nodes_to(&mut self, size: usize) {
+        match self {
+            Self::Blind(Some(trie)) | Self::Revealed(trie) => {
+                trie.shrink_nodes_to(size);
+            }
+            _ => {}
+        }
+    }
+
+    /// Shrinks the capacity of the sparse trie's value storage.
+    /// Works for both revealed and blind tries with allocated storage.
+    pub fn shrink_values_to(&mut self, size: usize) {
+        match self {
+            Self::Blind(Some(trie)) | Self::Revealed(trie) => {
+                trie.shrink_values_to(size);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// The representation of revealed sparse trie.
@@ -964,12 +986,30 @@ impl SparseTrieInterface for SerialSparseTrie {
         self.rlp_buf.clear();
     }
 
-    #[inline]
     fn find_leaf(
         &self,
         full_path: &Nibbles,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
+        // Helper function to check if a value matches the expected value
+        #[inline]
+        fn check_value_match(
+            actual_value: &Vec<u8>,
+            expected_value: Option<&Vec<u8>>,
+            path: &Nibbles,
+        ) -> Result<(), LeafLookupError> {
+            if let Some(expected) = expected_value &&
+                actual_value != expected
+            {
+                return Err(LeafLookupError::ValueMismatch {
+                    path: *path,
+                    expected: Some(expected.clone()),
+                    actual: actual_value.clone(),
+                });
+            }
+            Ok(())
+        }
+
         let mut current = Nibbles::default(); // Start at the root
 
         // Inclusion proof
@@ -979,13 +1019,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         // be in the `values` map.
         if let Some(actual_value) = self.values.get(full_path) {
             // We found the leaf, check if the value matches (if expected value was provided)
-            if expected_value.is_some_and(|expected| actual_value != expected) {
-                return Err(LeafLookupError::ValueMismatch {
-                    path: *full_path,
-                    expected: expected_value.cloned(),
-                    actual: actual_value.clone(),
-                });
-            }
+            check_value_match(actual_value, expected_value, full_path)?;
             return Ok(LeafLookup::Exists);
         }
 
@@ -1012,13 +1046,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                     if &current == full_path {
                         // This should have been handled by our initial values map check
                         if let Some(value) = self.values.get(full_path) {
-                            if expected_value.is_some_and(|expected| value != expected) {
-                                return Err(LeafLookupError::ValueMismatch {
-                                    path: *full_path,
-                                    expected: expected_value.cloned(),
-                                    actual: value.clone(),
-                                });
-                            }
+                            check_value_match(value, expected_value, full_path)?;
                             return Ok(LeafLookup::Exists);
                         }
                     }
@@ -1059,13 +1087,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                 // We found a leaf with an empty key (exact match)
                 // This should be handled by the values map check above
                 if let Some(value) = self.values.get(full_path) {
-                    if expected_value.is_some_and(|expected| value != expected) {
-                        return Err(LeafLookupError::ValueMismatch {
-                            path: *full_path,
-                            expected: expected_value.cloned(),
-                            actual: value.clone(),
-                        });
-                    }
+                    check_value_match(value, expected_value, full_path)?;
                     return Ok(LeafLookup::Exists);
                 }
             }
@@ -1088,6 +1110,16 @@ impl SparseTrieInterface for SerialSparseTrie {
 
     fn value_capacity(&self) -> usize {
         self.values.capacity()
+    }
+
+    fn shrink_nodes_to(&mut self, size: usize) {
+        self.nodes.shrink_to(size);
+        self.branch_node_tree_masks.shrink_to(size);
+        self.branch_node_hash_masks.shrink_to(size);
+    }
+
+    fn shrink_values_to(&mut self, size: usize) {
+        self.values.shrink_to(size);
     }
 }
 
