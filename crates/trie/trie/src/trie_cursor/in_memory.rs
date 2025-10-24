@@ -101,7 +101,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     /// returned.
     fn set_last_key(&mut self, next_entry: &Option<(Nibbles, BranchNodeCompact)>) {
         let next_key = next_entry.as_ref().map(|e| e.0);
-        assert!(
+        debug_assert!(
             self.last_key.is_none_or(|last| next_key.is_none_or(|next| next >= last)),
             "Cannot return entry {:?} previous to the last returned entry at {:?}",
             next_key,
@@ -110,7 +110,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         self.last_key = next_key;
     }
 
-    /// Seeks the `entry` field of the struct using the cursor.
+    /// Seeks the `cursor_entry` field of the struct using the cursor.
     fn cursor_seek(&mut self, key: Nibbles) -> Result<(), DatabaseError> {
         if let Some(entry) = self.cursor_entry.as_ref() &&
             entry.0 >= key
@@ -125,7 +125,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         Ok(())
     }
 
-    /// Seeks the `entry` field of the struct to the subsequent entry using the cursor.
+    /// Seeks the `cursor_entry` field of the struct to the subsequent entry using the cursor.
     fn cursor_next(&mut self) -> Result<(), DatabaseError> {
         #[cfg(debug_assertions)]
         {
@@ -228,8 +228,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
             debug_assert!(self.seeked, "Cursor must be seek'd before next is called");
         }
 
-        // A `last_key` of `None` indicates that the cursor was never seeked, or is exhausted. If it
-        // was never seeked then `next` would be undefined, just return `None`.
+        // A `last_key` of `None` indicates that the cursor is exhausted.
         let Some(last_key) = self.last_key else {
             return Ok(None);
         };
