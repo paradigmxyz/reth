@@ -460,8 +460,8 @@ impl MultiproofManager {
             hashed_state_update,
             proof_targets,
             proof_sequence_number,
+            state_root_message_sender: _,
             multi_added_removed_keys,
-            ..
         } = multiproof_input;
 
         let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
