@@ -34,7 +34,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
     OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
@@ -670,6 +670,7 @@ where
             RpcBlock<EthApi::NetworkTypes>,
             RpcReceipt<EthApi::NetworkTypes>,
             RpcHeader<EthApi::NetworkTypes>,
+            TxTy<N>,
         > + EthApiTypes,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -691,7 +692,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self
     where
-        EthApi: TraceExt + EthTransactions,
+        EthApi: TraceExt + EthTransactions<Primitives = N>,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
