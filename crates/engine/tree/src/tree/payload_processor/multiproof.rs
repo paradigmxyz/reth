@@ -1023,6 +1023,7 @@ impl MultiProofTask {
                         Ok(msg) => match msg {
                             MultiProofMessage::PrefetchProofs(targets) => {
                                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::PrefetchProofs");
+
                                 if first_update_time.is_none() {
                                     // record the wait time
                                     self.metrics
@@ -1046,6 +1047,7 @@ impl MultiProofTask {
                             }
                             MultiProofMessage::StateUpdate(source, update) => {
                                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
+
                                 if first_update_time.is_none() {
                                     // record the wait time
                                     self.metrics
@@ -1067,8 +1069,10 @@ impl MultiProofTask {
                             }
                             MultiProofMessage::FinishedStateUpdates => {
                                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
+
                                 updates_finished = true;
                                 updates_finished_time = Some(Instant::now());
+
                                 if self.is_done(
                                     proofs_processed,
                                     state_update_proofs_requested,
