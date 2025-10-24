@@ -12,9 +12,8 @@
 //!
 //! # Message Flow
 //!
-//! 1. `MultiProofTask` prepares a storage or account job
-//!    and hands it to [`ProofWorkerHandle`]. The job carries a
-//!    [`ProofResultContext`] so the worker knows how to send the result back.
+//! 1. `MultiProofTask` prepares a storage or account job and hands it to [`ProofWorkerHandle`]. The
+//!    job carries a [`ProofResultContext`] so the worker knows how to send the result back.
 //! 2. A worker receives the job, runs the proof, and sends a [`ProofResultMessage`] through the
 //!    provided [`ProofResultSender`].
 //! 3. `MultiProofTask` receives the message, uses `sequence_number` to keep proofs in order, and
