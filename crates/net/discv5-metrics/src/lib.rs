@@ -1,4 +1,4 @@
-//! Discv5 peers per KBucket metric derive macro.
+//! Discv5 peers per `KBucket` metric derive macro.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -53,8 +53,8 @@ pub fn kbuckets_metrics(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         });
 
-    let expanded = quote! {
-        /// Tracks peers per KBucket.
+    let ty_def = quote! {
+        /// Tracks peers per `KBucket`.
         #[derive(Clone, Metrics)]
         #[metrics(scope = "discv5")]
         #vis #struct_token #name {
@@ -62,7 +62,7 @@ pub fn kbuckets_metrics(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    let expanded2 = quote! {
+    let impl_body = quote! {
         impl #name {
             /// Sets current total number of peers in KBucket of given index.
             pub fn set_total_peers_in(&mut self, #index_arg: usize, #peers_arg: usize) {
@@ -72,8 +72,8 @@ pub fn kbuckets_metrics(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let stream = quote! {
-        #expanded
-        #expanded2
+        #ty_def
+        #impl_body
     };
 
     TokenStream::from(stream)
