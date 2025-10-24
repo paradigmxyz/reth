@@ -94,14 +94,33 @@ type AccountMultiproofResult =
 /// Workers use this sender to deliver proof results directly to `MultiProofTask`.
 pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 
-/// Type alias for proof result context containing sender, sequence number, state, and timing.
+/// Context for sending proof calculation results back to `MultiProofTask`.
 ///
-/// This tuple contains all context needed to send and track proof calculation results:
-/// - `ProofResultSender`: Channel sender for result delivery
-/// - `u64`: Sequence number for proof ordering
-/// - `HashedPostState`: Original state update that triggered this proof
-/// - `Instant`: Calculation start time for measuring elapsed duration
-pub type ProofResultContext = (ProofResultSender, u64, HashedPostState, Instant);
+/// This struct contains all context needed to send and track proof calculation results.
+/// Workers use this to deliver completed proofs back to the main event loop.
+#[derive(Debug, Clone)]
+pub struct ProofResultContext {
+    /// Channel sender for result delivery
+    pub sender: ProofResultSender,
+    /// Sequence number for proof ordering
+    pub sequence_number: u64,
+    /// Original state update that triggered this proof
+    pub state: HashedPostState,
+    /// Calculation start time for measuring elapsed duration
+    pub start_time: Instant,
+}
+
+impl ProofResultContext {
+    /// Creates a new proof result context.
+    pub const fn new(
+        sender: ProofResultSender,
+        sequence_number: u64,
+        state: HashedPostState,
+        start_time: Instant,
+    ) -> Self {
+        Self { sender, sequence_number, state, start_time }
+    }
+}
 
 /// Message containing a completed proof result with metadata for direct delivery to
 /// `MultiProofTask`.
@@ -207,7 +226,8 @@ fn storage_worker_loop<Factory>(
         match job {
             StorageWorkerJob::StorageProof { input, proof_result_sender } => {
                 let hashed_address = input.hashed_address;
-                let (sender, seq, state, start_time) = proof_result_sender;
+                let ProofResultContext { sender, sequence_number: seq, state, start_time } =
+                    proof_result_sender;
 
                 trace!(
                     target: "trie::proof_task",
@@ -400,7 +420,13 @@ fn account_worker_loop<Factory>(
                     collect_branch_node_masks,
                     multi_added_removed_keys,
                     missed_leaves_storage_roots,
-                    proof_result_sender: (result_tx, seq, state, start),
+                    proof_result_sender:
+                        ProofResultContext {
+                            sender: result_tx,
+                            sequence_number: seq,
+                            state,
+                            start_time: start,
+                        },
                 } = *input;
 
                 let span = tracing::debug_span!(
@@ -761,7 +787,12 @@ fn dispatch_storage_proofs(
         storage_work_tx
             .send(StorageWorkerJob::StorageProof {
                 input,
-                proof_result_sender: (result_tx, 0, HashedPostState::default(), start),
+                proof_result_sender: ProofResultContext::new(
+                    result_tx,
+                    0,
+                    HashedPostState::default(),
+                    start,
+                ),
             })
             .map_err(|_| {
                 ParallelStateRootError::Other(format!(
@@ -1191,7 +1222,12 @@ impl ProofWorkerHandle {
                     ProviderError::other(std::io::Error::other("storage workers unavailable"));
 
                 if let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0 {
-                    let (result_tx, seq, state, start) = proof_result_sender;
+                    let ProofResultContext {
+                        sender: result_tx,
+                        sequence_number: seq,
+                        state,
+                        start_time: start,
+                    } = proof_result_sender;
 
                     let _ = result_tx.send(ProofResultMessage {
                         sequence_number: seq,
@@ -1220,7 +1256,13 @@ impl ProofWorkerHandle {
 
                 if let AccountWorkerJob::AccountMultiproof { input } = err.0 {
                     let AccountMultiproofInput {
-                        proof_result_sender: (result_tx, seq, state, start),
+                        proof_result_sender:
+                            ProofResultContext {
+                                sender: result_tx,
+                                sequence_number: seq,
+                                state,
+                                start_time: start,
+                            },
                         ..
                     } = *input;
 
