@@ -1,7 +1,7 @@
 //! Common receipts pruning logic.
 //!
-//! - [`crate::user::Receipts`] is responsible for pruning receipts according to the
-//!   user-configured settings (for example, on a full node or with a custom prune config)
+//! - [`crate::user::Receipts`] is responsible for pruning receipts according to the user-configured
+//!   settings (for example, on a full node or with a custom prune config)
 
 use crate::db_ext::DbTxPruneExt;
 use reth_db_api::{table::Value, tables, transaction::DbTxMut};
