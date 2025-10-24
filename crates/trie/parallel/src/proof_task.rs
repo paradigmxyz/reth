@@ -496,6 +496,7 @@ fn account_worker_loop<Factory>(
                 );
 
                 let proof_elapsed = proof_start.elapsed();
+                let total_elapsed = start.elapsed();
                 let stats = tracker.finish();
                 let result = result.map(|proof| (proof, stats));
                 account_proofs_processed += 1;
@@ -505,7 +506,7 @@ fn account_worker_loop<Factory>(
                     .send(ProofResultMessage {
                         sequence_number: seq,
                         result,
-                        elapsed: proof_elapsed,
+                        elapsed: total_elapsed,
                         state,
                     })
                     .is_err()
@@ -521,6 +522,7 @@ fn account_worker_loop<Factory>(
                 trace!(
                     target: "trie::proof_task",
                     proof_time_us = proof_elapsed.as_micros(),
+                    total_elapsed_us = total_elapsed.as_micros(),
                     total_processed = account_proofs_processed,
                     "Account multiproof completed"
                 );
