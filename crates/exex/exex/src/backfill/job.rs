@@ -15,7 +15,6 @@ use reth_provider::{
     BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError, StateProviderFactory,
     TransactionVariant,
 };
-use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
@@ -31,7 +30,6 @@ pub(super) type BackfillJobResult<T> = Result<T, BlockExecutionError>;
 pub struct BackfillJob<E, P> {
     pub(crate) evm_config: E,
     pub(crate) provider: P,
-    pub(crate) prune_modes: PruneModes,
     pub(crate) thresholds: ExecutionStageThresholds,
     pub(crate) range: RangeInclusive<BlockNumber>,
     pub(crate) stream_parallelism: usize,
