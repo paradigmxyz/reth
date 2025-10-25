@@ -433,7 +433,7 @@ where
                 }
             }
 
-            // first check that the compressed message length does not exceed the max
+            // first check that the decompressed message length does not exceed the max
             // payload size
             let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
             if decompressed_len > MAX_PAYLOAD_SIZE {
