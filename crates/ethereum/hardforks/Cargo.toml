@@ -19,7 +19,7 @@ alloy-primitives = { workspace = true, features = ["serde", "rlp"] }
 
 # misc
 once_cell.workspace = true
-rustc-hash = { workspace = true, optional = true }
+rustc-hash.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -29,7 +29,7 @@ auto_impl.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 
 [features]
-default = ["std", "serde", "rustc-hash"]
+default = ["std", "serde"]
 arbitrary = [
     "dep:arbitrary",
     "alloy-primitives/arbitrary",
@@ -46,4 +46,3 @@ std = [
     "alloy-eip2124/std",
     "once_cell/std",
 ]
-rustc-hash = ["dep:rustc-hash"]

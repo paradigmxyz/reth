@@ -17,6 +17,9 @@
 
 extern crate alloc;
 
+#[cfg(not(feature = "std"))]
+use rustc_hash as _;
+
 /// Re-exported [EIP-2124](https://eips.ethereum.org/EIPS/eip-2124) forkid types.
 pub use alloy_eip2124::*;
 
