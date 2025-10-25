@@ -318,8 +318,8 @@ where
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Tx>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
         usize,
-    ) 
-    where 
+    )
+    where
         I::Tx: Sync,
     {
         // Get the transaction count for prewarming task

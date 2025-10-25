@@ -696,10 +696,6 @@ impl<TxEnv: Clone, T> ToTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
     }
 }
 
-
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
