@@ -20,8 +20,9 @@ use tracing::info;
 pub(crate) struct BenchContext {
     /// The auth provider is used for engine API queries.
     pub(crate) auth_provider: RootProvider<AnyNetwork>,
-    /// The block provider is used for block queries.
-    pub(crate) block_provider: RootProvider<AnyNetwork>,
+    /// The block provider is used for block queries if we are using an RPC as the source of
+    /// blocks.
+    pub(crate) block_provider: Option<RootProvider<AnyNetwork>>,
     /// The benchmark mode, which defines whether the benchmark should run for a closed or open
     /// range of blocks.
     pub(crate) benchmark_mode: BenchMode,
@@ -34,9 +35,10 @@ pub(crate) struct BenchContext {
 impl BenchContext {
     /// This is the initialization code for most benchmarks, taking in a [`BenchmarkArgs`] and
     /// returning the providers needed to run a benchmark.
-    pub(crate) async fn new(bench_args: &BenchmarkArgs, rpc_url: String) -> eyre::Result<Self> {
-        info!("Running benchmark using data from RPC URL: {}", rpc_url);
-
+    pub(crate) async fn new(
+        bench_args: &BenchmarkArgs,
+        rpc_url: Option<String>,
+    ) -> eyre::Result<Self> {
         // Ensure that output directory exists and is a directory
         if let Some(output) = &bench_args.output {
             if output.is_file() {
@@ -49,34 +51,48 @@ impl BenchContext {
             }
         }
 
-        // set up alloy client for blocks
-        let client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
-            .http(rpc_url.parse()?);
-        let block_provider = RootProvider::<AnyNetwork>::new(client);
+        // Set up client if using RPC
+        let block_provider = if let Some(ref rpc_url) = rpc_url {
+            info!("Setting up block provider for RPC: {}", rpc_url);
+            let client = ClientBuilder::default()
+                .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
+                .http(rpc_url.parse()?);
+            Some(RootProvider::<AnyNetwork>::new(client))
+        } else {
+            None
+        };
 
-        // Check if this is an OP chain by checking code at a predeploy address.
-        let is_optimism = !block_provider
-            .get_code_at(address!("0x420000000000000000000000000000000000000F"))
-            .await?
-            .is_empty();
+        // Determine if this is Optimism
+        let is_optimism = if let Some(file_path) = &bench_args.from_file {
+            // Detect from file
+            info!("Reading blocks from file: {:?}", file_path);
+            let is_op = crate::bench::block_storage::detect_optimism_from_file(file_path)?;
+            is_op
+        } else {
+            // Check if this is an OP chain by checking code at a predeploy address
+            let is_op = !block_provider
+                .as_ref()
+                .unwrap()
+                .get_code_at(address!("0x420000000000000000000000000000000000000F"))
+                .await?
+                .is_empty();
+            is_op
+        };
 
-        // construct the authenticated provider
+        // Construct the authenticated provider
         let auth_jwt = bench_args
             .auth_jwtsecret
             .clone()
             .ok_or_else(|| eyre::eyre!("--jwt-secret must be provided for authenticated RPC"))?;
 
-        // fetch jwt from file
-        //
-        // the jwt is hex encoded so we will decode it after
+        // Fetch jwt from file (hex encoded)
         let jwt = std::fs::read_to_string(auth_jwt)?;
         let jwt = JwtSecret::from_hex(jwt)?;
 
-        // get engine url
+        // Get engine url
         let auth_url = Url::parse(&bench_args.engine_rpc_url)?;
 
-        // construct the authed transport
+        // Construct the authed transport
         info!("Connecting to Engine RPC at {} for replay", auth_url);
         let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
         let client = ClientBuilder::default().connect_with(auth_transport).await?;
@@ -107,31 +123,49 @@ impl BenchContext {
         // starting at the latest block.
         let mut benchmark_mode = BenchMode::new(from, to)?;
 
-        let first_block = match benchmark_mode {
-            BenchMode::Continuous => {
-                // fetch Latest block
-                block_provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap()
-            }
-            BenchMode::Range(ref mut range) => {
-                match range.next() {
-                    Some(block_number) => {
-                        // fetch first block in range
-                        block_provider
-                            .get_block_by_number(block_number.into())
-                            .full()
-                            .await?
-                            .unwrap()
-                    }
-                    None => {
-                        return Err(eyre::eyre!(
-                            "Benchmark mode range is empty, please provide a larger range"
-                        ));
+        // Only fetch first block if doing RPC benchmark
+        let next_block = if let Some(ref provider) = block_provider {
+            match benchmark_mode {
+                BenchMode::Continuous => {
+                    // Fetch latest block
+                    provider
+                        .get_block_by_number(BlockNumberOrTag::Latest)
+                        .full()
+                        .await?
+                        .ok_or_else(|| eyre::eyre!("Failed to fetch latest block"))?
+                        .header
+                        .number +
+                        1
+                }
+                BenchMode::Range(ref mut range) => {
+                    match range.next() {
+                        Some(block_number) => {
+                            // Fetch first block in range
+                            provider
+                                .get_block_by_number(block_number.into())
+                                .full()
+                                .await?
+                                .ok_or_else(|| {
+                                    eyre::eyre!("Failed to fetch block {}", block_number)
+                                })?
+                                .header
+                                .number +
+                                1
+                        }
+                        None => {
+                            return Err(eyre::eyre!(
+                                "Benchmark mode range is empty, please provide a larger range"
+                            ));
+                        }
                     }
                 }
             }
+        } else {
+            // For file-based benchmarks, next_block isn't used by the fetching logic
+            // Set to 0 as a sentinel value
+            0
         };
 
-        let next_block = first_block.header.number + 1;
         Ok(Self { auth_provider, block_provider, benchmark_mode, next_block, is_optimism })
     }
 }

@@ -5,7 +5,9 @@ use reth_cli_runner::CliContext;
 use reth_node_core::args::LogArgs;
 use reth_tracing::FileWorkerGuard;
 
+mod block_storage;
 mod context;
+mod generate_file;
 mod new_payload_fcu;
 mod new_payload_only;
 mod output;
@@ -41,6 +43,9 @@ pub enum Subcommands {
     /// `cast block latest --full --json | reth-bench send-payload --rpc-url localhost:5000
     /// --jwt-secret $(cat ~/.local/share/reth/mainnet/jwt.hex)`
     SendPayload(send_payload::Command),
+
+    /// Command for generating a file with the blocks.
+    GenerateFile(generate_file::Command),
 }
 
 impl BenchmarkCommand {
@@ -53,6 +58,7 @@ impl BenchmarkCommand {
             Subcommands::NewPayloadFcu(command) => command.execute(ctx).await,
             Subcommands::NewPayloadOnly(command) => command.execute(ctx).await,
             Subcommands::SendPayload(command) => command.execute(ctx).await,
+            Subcommands::GenerateFile(command) => command.execute(ctx).await,
         }
     }
 
