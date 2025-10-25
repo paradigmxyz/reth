@@ -478,7 +478,7 @@ where
     }
 
     fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        match Arc::try_unwrap(self) {
+        match Self::try_unwrap(self) {
             Ok(with_tx_env) => {
                 // Extract the Arc<T> and try to unwrap it
                 match Arc::try_unwrap(with_tx_env.tx) {
