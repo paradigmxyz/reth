@@ -146,11 +146,11 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
     }
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
-        let code = match self.cached.block_hashes.entry(number) {
+        let hash = match self.cached.block_hashes.entry(number) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => *entry.insert(self.db.block_hash_ref(number)?),
         };
-        Ok(code)
+        Ok(hash)
     }
 }
 
