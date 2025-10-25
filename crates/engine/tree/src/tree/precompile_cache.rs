@@ -1,4 +1,4 @@
-//! Contains a precompile cache that is backed by a moka cache.
+//! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
 
 use alloy_primitives::Bytes;
 use parking_lot::Mutex;
