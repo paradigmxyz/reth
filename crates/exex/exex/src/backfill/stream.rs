@@ -13,7 +13,6 @@ use reth_evm::{
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::RecoveredBlock;
 use reth_provider::{BlockReader, Chain, StateProviderFactory};
-use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::debug;
 use std::{
@@ -55,7 +54,6 @@ type BatchBlockStreamItem<N = EthPrimitives> = Chain<N>;
 pub struct StreamBackfillJob<E, P, T> {
     evm_config: E,
     provider: P,
-    prune_modes: PruneModes,
     range: RangeInclusive<BlockNumber>,
     tasks: BackfillTasks<T>,
     parallelism: usize,
@@ -178,7 +176,6 @@ where
                 let job = Box::new(BackfillJob {
                     evm_config: this.evm_config.clone(),
                     provider: this.provider.clone(),
-                    prune_modes: this.prune_modes.clone(),
                     thresholds: this.thresholds.clone(),
                     range,
                     stream_parallelism: this.parallelism,
@@ -205,7 +202,6 @@ impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, Single
         Self {
             evm_config: job.evm_config,
             provider: job.provider,
-            prune_modes: PruneModes::default(),
             range: job.range,
             tasks: FuturesOrdered::new(),
             parallelism: job.stream_parallelism,
@@ -224,7 +220,6 @@ where
         Self {
             evm_config: job.evm_config,
             provider: job.provider,
-            prune_modes: job.prune_modes,
             range: job.range,
             tasks: FuturesOrdered::new(),
             parallelism: job.stream_parallelism,

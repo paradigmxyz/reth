@@ -3,7 +3,6 @@ use std::{ops::RangeInclusive, time::Duration};
 
 use alloy_primitives::BlockNumber;
 use reth_node_api::FullNodeComponents;
-use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
 
 use super::stream::DEFAULT_PARALLELISM;
@@ -13,7 +12,6 @@ use super::stream::DEFAULT_PARALLELISM;
 pub struct BackfillJobFactory<E, P> {
     evm_config: E,
     provider: P,
-    prune_modes: PruneModes,
     thresholds: ExecutionStageThresholds,
     stream_parallelism: usize,
 }
@@ -24,7 +22,6 @@ impl<E, P> BackfillJobFactory<E, P> {
         Self {
             evm_config,
             provider,
-            prune_modes: PruneModes::default(),
             thresholds: ExecutionStageThresholds {
                 // Default duration for a database transaction to be considered long-lived is
                 // 60 seconds, so we limit the backfill job to the half of it to be sure we finish
@@ -36,12 +33,6 @@ impl<E, P> BackfillJobFactory<E, P> {
             },
             stream_parallelism: DEFAULT_PARALLELISM,
         }
-    }
-
-    /// Sets the prune modes
-    pub const fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
-        self.prune_modes = prune_modes;
-        self
     }
 
     /// Sets the thresholds
@@ -66,7 +57,6 @@ impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
         BackfillJob {
             evm_config: self.evm_config.clone(),
             provider: self.provider.clone(),
-            prune_modes: self.prune_modes.clone(),
             range,
             thresholds: self.thresholds.clone(),
             stream_parallelism: self.stream_parallelism,
