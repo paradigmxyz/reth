@@ -9215,6 +9215,7 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-hardforks",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "derive_more",
  "miniz_oxide",
@@ -14254,3 +14255,13 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "alloy-hardforks"
+version = "0.4.0"
+source = "git+https://github.com/alloy-rs/hardforks?rev=0fd230f5aa24c4f6a8c593918b7449df0c20f60a#0fd230f5aa24c4f6a8c593918b7449df0c20f60a"
+
+[[patch.unused]]
+name = "alloy-op-hardforks"
+version = "0.4.0"
+source = "git+https://github.com/alloy-rs/hardforks?rev=0fd230f5aa24c4f6a8c593918b7449df0c20f60a#0fd230f5aa24c4f6a8c593918b7449df0c20f60a"

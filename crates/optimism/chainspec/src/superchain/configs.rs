@@ -88,6 +88,11 @@ fn read_file(
 mod tests {
     use super::*;
     use crate::superchain::Superchain;
+    use alloy_op_hardforks::{
+        OP_MAINNET_CANYON_TIMESTAMP, OP_MAINNET_ECOTONE_TIMESTAMP, OP_MAINNET_ISTHMUS_TIMESTAMP,
+        OP_MAINNET_JOVIAN_TIMESTAMP, OP_SEPOLIA_CANYON_TIMESTAMP, OP_SEPOLIA_ECOTONE_TIMESTAMP,
+        OP_SEPOLIA_JOVIAN_TIMESTAMP,
+    };
     use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
     use tar_no_std::TarArchiveRef;
 
@@ -148,6 +153,31 @@ mod tests {
                 chain.name(),
                 chain.environment()
             );
+        }
+    }
+
+    #[test]
+    fn test_hardfork_timestamps() {
+        let archive = TarArchiveRef::new(SUPER_CHAIN_CONFIGS_TAR_BYTES).unwrap();
+
+        for &chain in Superchain::ALL {
+            let metadata =
+                read_superchain_metadata(chain.name(), chain.environment(), &archive).unwrap();
+            let environment = chain.environment();
+
+            if environment == "mainnet" {
+                assert_eq!(metadata.hardforks.canyon_time, Some(OP_MAINNET_CANYON_TIMESTAMP));
+                assert_eq!(metadata.hardforks.ecotone_time, Some(OP_MAINNET_ECOTONE_TIMESTAMP));
+                assert_eq!(metadata.hardforks.isthmus_time, Some(OP_MAINNET_ISTHMUS_TIMESTAMP));
+                assert_eq!(metadata.hardforks.jovian_time, Some(OP_MAINNET_JOVIAN_TIMESTAMP));
+            } else if environment == "sepolia" {
+                assert_eq!(metadata.hardforks.canyon_time, Some(OP_SEPOLIA_CANYON_TIMESTAMP));
+                assert_eq!(metadata.hardforks.ecotone_time, Some(OP_SEPOLIA_ECOTONE_TIMESTAMP));
+                assert_eq!(metadata.hardforks.isthmus_time, Some(OP_SEPOLIA_JOVIAN_TIMESTAMP));
+                assert_eq!(metadata.hardforks.jovian_time, Some(OP_SEPOLIA_JOVIAN_TIMESTAMP));
+            } else {
+                assert_eq!(metadata.hardforks.jovian_time, None);
+            }
         }
     }
 }
