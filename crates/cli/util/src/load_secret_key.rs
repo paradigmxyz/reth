@@ -1,3 +1,4 @@
+use rand_08::rngs::OsRng;
 use reth_fs_util::{self as fs, FsPathError};
 use secp256k1::{Error as SecretKeyBaseError, SecretKey};
 use std::{
@@ -7,8 +8,9 @@ use std::{
 use thiserror::Error;
 
 /// Convenience function to create a new random [`SecretKey`]
+/// Note: Use OS-backed CSPRNG for generating long-term node identity.
 pub fn rng_secret_key() -> SecretKey {
-    SecretKey::new(&mut rand_08::thread_rng())
+    SecretKey::new(&mut OsRng)
 }
 
 /// Errors returned by loading a [`SecretKey`], including IO errors.
