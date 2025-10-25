@@ -651,6 +651,9 @@ pub async fn lookup(
         discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
     );
 
+    // metrics.set_total_peers_per_bucket(discv5.with_kbuckets(|kbucket|
+    // kbucket.read().buckets_iter()))
+
     match discv5.find_node(target).await {
         Err(err) => trace!(target: "net::discv5",
             %err,

@@ -53,6 +53,7 @@ members = [
     "crates/net/banlist/",
     "crates/net/discv4/",
     "crates/net/discv5/",
+    "crates/net/discv5-metrics/",
     "crates/net/dns/",
     "crates/net/downloaders/",
     "crates/net/ecies/",
@@ -357,6 +358,7 @@ reth-db-common = { path = "crates/storage/db-common" }
 reth-db-models = { path = "crates/storage/db-models", default-features = false }
 reth-discv4 = { path = "crates/net/discv4" }
 reth-discv5 = { path = "crates/net/discv5" }
+reth-discv5-metrics-derive = { path = "crates/net/discv5-metrics" }
 reth-dns-discovery = { path = "crates/net/dns" }
 reth-downloaders = { path = "crates/net/downloaders" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
