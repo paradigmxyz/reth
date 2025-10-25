@@ -146,7 +146,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     //
     /// This may consume and move forward the current entries when the overlay indicates a removed
     /// node.
-    fn next_inner(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn choose_next_entry(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         loop {
             match (self.in_memory_cursor.current().cloned(), &self.cursor_entry) {
                 (Some((mem_key, None)), _)
@@ -217,7 +217,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
             self.seeked = true;
         }
 
-        let entry = self.next_inner()?;
+        let entry = self.choose_next_entry()?;
         self.set_last_key(&entry);
         Ok(entry)
     }
@@ -234,7 +234,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         };
 
         // If either cursor is currently pointing to the last entry which was returned then consume
-        // that entry so that `next_inner` is looking at the subsequent one.
+        // that entry so that `choose_next_entry` is looking at the subsequent one.
         if let Some((key, _)) = self.in_memory_cursor.current() &&
             key == &last_key
         {
@@ -247,7 +247,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
             self.cursor_next()?;
         }
 
-        let entry = self.next_inner()?;
+        let entry = self.choose_next_entry()?;
         self.set_last_key(&entry);
         Ok(entry)
     }
