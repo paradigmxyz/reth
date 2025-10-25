@@ -1,4 +1,4 @@
-use crate::upgrade_status::{UpgradeStatus, UpgradeStatusExtension};
+use crate::upgrade_status::UpgradeStatus;
 use alloy_rlp::Decodable;
 use futures::SinkExt;
 use reth_eth_wire::{
@@ -26,9 +26,7 @@ impl BscHandshake {
     ) -> Result<UnifiedStatus, EthStreamError> {
         if negotiated_status.version > EthVersion::Eth66 {
             // Send upgrade status message allowing peer to broadcast transactions
-            let upgrade_msg = UpgradeStatus {
-                extension: UpgradeStatusExtension { disable_peer_tx_broadcast: false },
-            };
+            let upgrade_msg = UpgradeStatus::allow_broadcast();
             unauth.start_send_unpin(upgrade_msg.into_rlpx())?;
 
             // Receive peer's upgrade status response
