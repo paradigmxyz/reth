@@ -1,10 +1,7 @@
 //! Transaction types.
 
-use crate::Recovered;
 pub use alloy_consensus::transaction::PooledTransaction;
 use once_cell as _;
-#[expect(deprecated)]
-pub use pooled::PooledTransactionsElementEcRecovered;
 pub use reth_primitives_traits::{
     sync::{LazyLock, OnceLock},
     transaction::{
@@ -28,7 +25,3 @@ mod tx_type;
 
 /// Signed transaction.
 pub use reth_ethereum_primitives::{Transaction, TransactionSigned};
-
-/// Type alias kept for backward compatibility.
-#[deprecated(note = "Use `Recovered` instead")]
-pub type TransactionSignedEcRecovered<T = TransactionSigned> = Recovered<T>;

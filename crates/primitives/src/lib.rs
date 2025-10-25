@@ -41,16 +41,10 @@ pub use alloy_consensus::{
     ReceiptWithBloom,
 };
 
-/// Recovered transaction
-#[deprecated(note = "use `Recovered` instead")]
-pub type RecoveredTx<T> = Recovered<T>;
-
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     InvalidTransactionError, Transaction, TransactionSigned, TxType,
 };
-#[expect(deprecated)]
-pub use transaction::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered};
 
 // Re-exports
 pub use reth_ethereum_forks::*;
