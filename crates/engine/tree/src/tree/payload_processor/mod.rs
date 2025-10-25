@@ -218,6 +218,7 @@ where
             + StateReader
             + Clone
             + 'static,
+        I::Tx: Sync,
     {
         let span = tracing::Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
@@ -295,6 +296,7 @@ where
     ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        I::Tx: Sync,
     {
         let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
         let prewarm_handle =
@@ -316,7 +318,10 @@ where
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Tx>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
         usize,
-    ) {
+    ) 
+    where 
+        I::Tx: Sync,
+    {
         // Get the transaction count for prewarming task
         // Use upper bound if available (more accurate), otherwise use lower bound
         let (lower, upper) = transactions.size_hint();
@@ -326,7 +331,7 @@ where
         let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
             for tx in transactions {
-                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx });
+                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
                 // only send Ok(_) variants to prewarming task
                 if let Ok(tx) = &tx {
                     let _ = prewarm_tx.send(tx.clone());

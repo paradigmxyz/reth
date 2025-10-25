@@ -43,7 +43,10 @@ use tracing::{debug, debug_span, instrument, trace, warn};
 
 /// A wrapper for transactions that includes their index in the block.
 #[derive(Clone)]
-struct IndexedTransaction<Tx> {
+struct IndexedTransaction<Tx>
+where
+    Tx: Clone,
+{
     /// The transaction index in the block.
     index: usize,
     /// The wrapped transaction.
@@ -133,7 +136,7 @@ where
     /// subsequent transactions in the block.
     fn spawn_all<Tx>(&self, pending: mpsc::Receiver<Tx>, actions_tx: Sender<PrewarmTaskEvent>)
     where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Send + Clone + 'static,
     {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
@@ -309,7 +312,7 @@ where
     )]
     pub(super) fn run(
         self,
-        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + Clone + 'static>,
         actions_tx: Sender<PrewarmTaskEvent>,
     ) {
         // spawn execution tasks.
@@ -461,7 +464,7 @@ where
         sender: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
     ) where
-        Tx: ExecutableTxFor<Evm>,
+        Tx: ExecutableTxFor<Evm> + Clone,
     {
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
@@ -539,7 +542,7 @@ where
         done_tx: Sender<()>,
     ) -> mpsc::Sender<IndexedTransaction<Tx>>
     where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Send + Clone + 'static,
     {
         let (tx, rx) = mpsc::channel();
         let ctx = self.clone();

@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
@@ -447,7 +447,7 @@ impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Trans
 impl<T, Executor> ExecutorTx<Executor>
     for WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>
 where
-    T: ExecutorTx<Executor>,
+    T: ExecutorTx<Executor> + Clone,
     Executor: BlockExecutor,
     <<Executor as BlockExecutor>::Evm as Evm>::Tx: Clone,
     Self: RecoveredTx<Executor::Transaction>,
@@ -457,7 +457,43 @@ where
     }
 
     fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        self.tx.into_recovered()
+        // Try to unwrap the Arc, or clone if there are multiple references
+        match Arc::try_unwrap(self.tx) {
+            Ok(tx) => tx.into_recovered(),
+            Err(arc_tx) => (*arc_tx).clone().into_recovered(),
+        }
+    }
+}
+
+impl<T, Executor> ExecutorTx<Executor>
+    for Arc<WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>>
+where
+    T: ExecutorTx<Executor> + Clone,
+    Executor: BlockExecutor,
+    <<Executor as BlockExecutor>::Evm as Evm>::Tx: Clone,
+    WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>: RecoveredTx<Executor::Transaction>,
+{
+    fn as_executable(&self) -> impl ExecutableTx<Executor> {
+        self.as_ref()
+    }
+
+    fn into_recovered(self) -> Recovered<Executor::Transaction> {
+        match Arc::try_unwrap(self) {
+            Ok(with_tx_env) => {
+                // Extract the Arc<T> and try to unwrap it
+                match Arc::try_unwrap(with_tx_env.tx) {
+                    Ok(tx) => tx.into_recovered(),
+                    Err(arc_tx) => {
+                        // If there are multiple references to the tx, clone it
+                        (*arc_tx).clone().into_recovered()
+                    }
+                }
+            }
+            Err(arc) => {
+                // If there are multiple references to WithTxEnv, clone the inner transaction
+                (*arc.tx).clone().into_recovered()
+            }
+        }
     }
 }
 
@@ -641,16 +677,16 @@ pub struct WithTxEnv<TxEnv, T> {
     /// The transaction environment for EVM.
     pub tx_env: TxEnv,
     /// The recovered transaction.
-    pub tx: T,
+    pub tx: Arc<T>,
 }
 
 impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
     fn tx(&self) -> &Tx {
-        self.tx.tx()
+        self.tx.as_ref().tx()
     }
 
     fn signer(&self) -> &Address {
-        self.tx.signer()
+        self.tx.as_ref().signer()
     }
 }
 
@@ -659,6 +695,10 @@ impl<TxEnv: Clone, T> ToTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
         self.tx_env.clone()
     }
 }
+
+
+
+
 
 #[cfg(test)]
 mod tests {
