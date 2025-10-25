@@ -21,6 +21,7 @@ tokio.workspace = true
 jsonrpsee-server.workspace = true
 http.workspace = true
 tower.workspace = true
+reqwest.workspace = true
 
 tracing.workspace = true
 eyre.workspace = true

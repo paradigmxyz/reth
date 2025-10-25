@@ -234,7 +234,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Set the metrics address for the node
-    pub const fn with_metrics(mut self, metrics: MetricArgs) -> Self {
+    pub fn with_metrics(mut self, metrics: MetricArgs) -> Self {
         self.metrics = metrics;
         self
     }
