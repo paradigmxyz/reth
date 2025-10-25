@@ -48,6 +48,7 @@ op-alloy-consensus.workspace = true
 
 [dev-dependencies]
 reth-chainspec = { workspace = true, features = ["test-utils"] }
+alloy-op-hardforks.workspace = true
 
 [features]
 default = ["std"]
