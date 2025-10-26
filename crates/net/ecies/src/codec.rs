@@ -110,7 +110,7 @@ impl Decoder for ECIESCodec {
                         self.ecies.read_header(&mut buf.split_to(ECIES::header_len()))?;
 
                     if body_size > MAX_INITIAL_HANDSHAKE_SIZE {
-                        trace!(?body_size, max=?MAX_INITIAL_HANDSHAKE_SIZE, "Header exceeds max initial handshake size");
+                        trace!(?body_size, max=?MAX_INITIAL_HANDSHAKE_SIZE, "Body exceeds max initial handshake size");
                         return Err(ECIESErrorImpl::InitialHeaderBodyTooLarge {
                             body_size,
                             max_body_size: MAX_INITIAL_HANDSHAKE_SIZE,

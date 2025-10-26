@@ -1,48 +1,34 @@
-#![allow(unused)]
 use crate::{
     providers::{ConsistentProvider, ProviderNodeTypes, StaticFileProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
-    ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProvider,
-    DatabaseProviderFactory, FullProvider, HashedPostStateProvider, HeaderProvider, ProviderError,
-    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProviderFactory,
+    HashedPostStateProvider, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
+    StateProviderFactory, StateReader, StaticFileProviderFactory, TransactionVariant,
+    TransactionsProvider, TrieReader,
 };
-use alloy_consensus::{transaction::TransactionMeta, Header};
-use alloy_eips::{
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
-};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
+use alloy_consensus::transaction::TransactionMeta;
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
     MemoryOverlayStateProvider,
 };
-use reth_chainspec::{ChainInfo, EthereumHardforks};
-use reth_db_api::{
-    models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices},
-    transaction::DbTx,
-    Database,
-};
-use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
-use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_chainspec::ChainInfo;
+use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_primitives_traits::{
-    Account, BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
-};
+use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{
-    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, StorageChangeSetReader,
-};
+use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{HashedPostState, KeccakKeyHasher};
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, KeccakKeyHasher};
 use revm_database::BundleState;
 use std::{
-    ops::{Add, RangeBounds, RangeInclusive, Sub},
+    ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
@@ -188,14 +174,6 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
         self.consistent_provider()?.header_by_number(num)
-    }
-
-    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
-        self.consistent_provider()?.header_td(hash)
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.consistent_provider()?.header_td_by_number(number)
     }
 
     fn headers_range(
@@ -753,6 +731,19 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> TrieReader for BlockchainProvider<N> {
+    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
+        self.consistent_provider()?.trie_reverts(from)
+    }
+
+    fn get_block_trie_updates(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<TrieUpdatesSorted> {
+        self.consistent_provider()?.get_block_trie_updates(block_number)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -761,8 +752,7 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        BlockWriter, CanonChainTracker, ProviderFactory, StaticFileProviderFactory,
-        StaticFileWriter,
+        BlockWriter, CanonChainTracker, ProviderFactory,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
@@ -770,25 +760,14 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonStateNotification, CanonStateSubscriptions,
-        CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
-        NewCanonicalChain,
+        CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
     };
-    use reth_chainspec::{
-        ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
-    };
-    use reth_db_api::{
-        cursor::DbCursorRO,
-        models::{AccountBeforeTx, StoredBlockBodyIndices},
-        tables,
-        transaction::DbTx,
-    };
+    use reth_chainspec::{ChainSpec, MAINNET};
+    use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
-    use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
+    use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives_traits::{
-        BlockBody, RecoveredBlock, SealedBlock, SignedTransaction, SignerRecoverable,
-    };
-    use reth_static_file_types::StaticFileSegment;
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
@@ -801,9 +780,8 @@ mod tests {
     };
     use revm_database::{BundleState, OriginalValuesKnown};
     use std::{
-        ops::{Bound, Deref, Range, RangeBounds},
+        ops::{Bound, Range, RangeBounds},
         sync::Arc,
-        time::Instant,
     };
 
     const TEST_BLOCKS_COUNT: usize = 5;
@@ -908,12 +886,14 @@ mod tests {
                     let execution_outcome =
                         ExecutionOutcome { receipts: vec![block_receipts], ..Default::default() };
 
-                    ExecutedBlockWithTrieUpdates::new(
-                        Arc::new(RecoveredBlock::new_sealed(block.clone(), senders)),
-                        execution_outcome.into(),
-                        Default::default(),
-                        ExecutedTrieUpdates::empty(),
-                    )
+                    ExecutedBlock {
+                        recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                            block.clone(),
+                            senders,
+                        )),
+                        execution_output: execution_outcome.into(),
+                        ..Default::default()
+                    }
                 })
                 .collect(),
         };
@@ -1035,15 +1015,13 @@ mod tests {
         let in_memory_block_senders =
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
-            new: vec![ExecutedBlockWithTrieUpdates::new(
-                Arc::new(RecoveredBlock::new_sealed(
+            new: vec![ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
                     first_in_mem_block.clone(),
                     in_memory_block_senders,
                 )),
-                Default::default(),
-                Default::default(),
-                ExecutedTrieUpdates::empty(),
-            )],
+                ..Default::default()
+            }],
         };
         provider.canonical_in_memory_state.update_chain(chain);
 
@@ -1071,16 +1049,12 @@ mod tests {
         assert_eq!(provider.find_block_by_hash(first_db_block.hash(), BlockSource::Pending)?, None);
 
         // Insert the last block into the pending state
-        provider.canonical_in_memory_state.set_pending_block(ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                    last_in_mem_block.clone(),
-                    Default::default(),
-                )),
-                execution_output: Default::default(),
-                hashed_state: Default::default(),
-            },
-            trie: ExecutedTrieUpdates::empty(),
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                last_in_mem_block.clone(),
+                Default::default(),
+            )),
+            ..Default::default()
         });
 
         // Now the last block should be found in memory
@@ -1131,15 +1105,13 @@ mod tests {
         let in_memory_block_senders =
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
-            new: vec![ExecutedBlockWithTrieUpdates::new(
-                Arc::new(RecoveredBlock::new_sealed(
+            new: vec![ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
                     first_in_mem_block.clone(),
                     in_memory_block_senders,
                 )),
-                Default::default(),
-                Default::default(),
-                ExecutedTrieUpdates::empty(),
-            )],
+                ..Default::default()
+            }],
         };
         provider.canonical_in_memory_state.update_chain(chain);
 
@@ -1185,16 +1157,12 @@ mod tests {
         );
 
         // Set the block as pending
-        provider.canonical_in_memory_state.set_pending_block(ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                    block.clone(),
-                    block.senders().unwrap(),
-                )),
-                execution_output: Default::default(),
-                hashed_state: Default::default(),
-            },
-            trie: ExecutedTrieUpdates::empty(),
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                block.clone(),
+                block.senders().unwrap(),
+            )),
+            ..Default::default()
         });
 
         // Assertions related to the pending block
@@ -1232,15 +1200,13 @@ mod tests {
         let in_memory_block_senders =
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
-            new: vec![ExecutedBlockWithTrieUpdates::new(
-                Arc::new(RecoveredBlock::new_sealed(
+            new: vec![ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
                     first_in_mem_block.clone(),
                     in_memory_block_senders,
                 )),
-                Default::default(),
-                Default::default(),
-                ExecutedTrieUpdates::empty(),
-            )],
+                ..Default::default()
+            }],
         };
         provider.canonical_in_memory_state.update_chain(chain);
 
@@ -1306,23 +1272,11 @@ mod tests {
             BlockRangeParams::default(),
         )?;
 
-        let database_block = database_blocks.first().unwrap().clone();
-        let in_memory_block = in_memory_blocks.last().unwrap().clone();
         // make sure that the finalized block is on db
         let finalized_block = database_blocks.get(database_blocks.len() - 3).unwrap();
         provider.set_finalized(finalized_block.clone_sealed_header());
 
         let blocks = [database_blocks, in_memory_blocks].concat();
-
-        assert_eq!(
-            provider.header_td_by_number(database_block.number)?,
-            Some(database_block.difficulty)
-        );
-
-        assert_eq!(
-            provider.header_td_by_number(in_memory_block.number)?,
-            Some(in_memory_block.difficulty)
-        );
 
         assert_eq!(
             provider.sealed_headers_while(0..=10, |header| header.number <= 8)?,
@@ -1712,9 +1666,12 @@ mod tests {
                 .first()
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
-                    ExecutedBlockWithTrieUpdates::new(
-                        Arc::new(RecoveredBlock::new_sealed(block.clone(), senders)),
-                        Arc::new(ExecutionOutcome {
+                    ExecutedBlock {
+                        recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                            block.clone(),
+                            senders,
+                        )),
+                        execution_output: Arc::new(ExecutionOutcome {
                             bundle: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
                                     (address, None, Some(account.into()), Default::default())
@@ -1727,9 +1684,8 @@ mod tests {
                             first_block: first_in_memory_block,
                             ..Default::default()
                         }),
-                        Default::default(),
-                        ExecutedTrieUpdates::empty(),
-                    )
+                        ..Default::default()
+                    }
                 })
                 .unwrap()],
         };
@@ -1847,19 +1803,13 @@ mod tests {
 
         // adding a pending block to state can test pending() and  pending_state_by_hash() function
         let pending_block = database_blocks[database_blocks.len() - 1].clone();
-        only_database_provider.canonical_in_memory_state.set_pending_block(
-            ExecutedBlockWithTrieUpdates {
-                block: ExecutedBlock {
-                    recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                        pending_block.clone(),
-                        Default::default(),
-                    )),
-                    execution_output: Default::default(),
-                    hashed_state: Default::default(),
-                },
-                trie: ExecutedTrieUpdates::empty(),
-            },
-        );
+        only_database_provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                pending_block.clone(),
+                Default::default(),
+            )),
+            ..Default::default()
+        });
 
         assert_eq!(
             pending_block.hash(),
@@ -1945,16 +1895,12 @@ mod tests {
 
         // Set the pending block in memory
         let pending_block = in_memory_blocks.last().unwrap();
-        provider.canonical_in_memory_state.set_pending_block(ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                    pending_block.clone(),
-                    Default::default(),
-                )),
-                execution_output: Default::default(),
-                hashed_state: Default::default(),
-            },
-            trie: ExecutedTrieUpdates::empty(),
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                pending_block.clone(),
+                Default::default(),
+            )),
+            ..Default::default()
         });
 
         // Set the safe block in memory
@@ -2594,14 +2540,15 @@ mod tests {
             persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[1].number);
             let to_be_persisted_tx = in_memory_blocks[1].body().transactions[0].clone();
 
-            assert!(matches!(
+            assert_eq!(
                 correct_transaction_hash_fn(
                     *to_be_persisted_tx.tx_hash(),
                     provider.canonical_in_memory_state(),
                     provider.database
-                ),
-                Ok(Some(to_be_persisted_tx))
-            ));
+                )
+                .unwrap(),
+                Some(to_be_persisted_tx)
+            );
         }
 
         Ok(())

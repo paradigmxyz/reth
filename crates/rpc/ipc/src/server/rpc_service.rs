@@ -25,17 +25,11 @@ pub struct RpcService {
 }
 
 /// Configuration of the `RpcService`.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub(crate) enum RpcServiceCfg {
-    /// The server supports only calls.
-    OnlyCalls,
-    /// The server supports both method calls and subscriptions.
-    CallsAndSubscriptions {
-        bounded_subscriptions: BoundedSubscriptions,
-        sink: MethodSink,
-        id_provider: Arc<dyn IdProvider>,
-    },
+pub(crate) struct RpcServiceCfg {
+    pub(crate) bounded_subscriptions: BoundedSubscriptions,
+    pub(crate) sink: MethodSink,
+    pub(crate) id_provider: Arc<dyn IdProvider>,
 }
 
 impl RpcService {
@@ -82,30 +76,20 @@ impl RpcServiceT for RpcService {
                     ResponseFuture::future(fut)
                 }
                 MethodCallback::Subscription(callback) => {
-                    let RpcServiceCfg::CallsAndSubscriptions {
-                        bounded_subscriptions,
-                        sink,
-                        id_provider,
-                    } = &self.cfg
-                    else {
-                        tracing::warn!(id = ?id, method = %name, "Attempted subscription on a service not configured for subscriptions.");
-                        let rp =
-                            MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError));
-                        return ResponseFuture::ready(rp);
-                    };
+                    let cfg = &self.cfg;
 
-                    if let Some(p) = bounded_subscriptions.acquire() {
+                    if let Some(p) = cfg.bounded_subscriptions.acquire() {
                         let conn_state = SubscriptionState {
                             conn_id,
-                            id_provider: &**id_provider,
+                            id_provider: &*cfg.id_provider,
                             subscription_permit: p,
                         };
 
                         let fut =
-                            callback(id.clone(), params, sink.clone(), conn_state, extensions);
+                            callback(id.clone(), params, cfg.sink.clone(), conn_state, extensions);
                         ResponseFuture::future(fut)
                     } else {
-                        let max = bounded_subscriptions.max();
+                        let max = cfg.bounded_subscriptions.max();
                         let rp = MethodResponse::error(id, reject_too_many_subscriptions(max));
                         ResponseFuture::ready(rp)
                     }
@@ -113,13 +97,6 @@ impl RpcServiceT for RpcService {
                 MethodCallback::Unsubscription(callback) => {
                     // Don't adhere to any resource or subscription limits; always let unsubscribing
                     // happen!
-
-                    let RpcServiceCfg::CallsAndSubscriptions { .. } = self.cfg else {
-                        tracing::warn!(id = ?id, method = %name, "Attempted unsubscription on a service not configured for subscriptions.");
-                        let rp =
-                            MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError));
-                        return ResponseFuture::ready(rp);
-                    };
 
                     let rp = callback(id, params, conn_id, max_response_body_size, extensions);
                     ResponseFuture::ready(rp)

@@ -226,6 +226,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     handshake: Arc<dyn EthRlpxHandshake>,
     /// List of block hashes to check for required blocks.
     required_block_hashes: Vec<B256>,
+    /// Optional network id
+    network_id: Option<u64>,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -267,6 +269,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
             required_block_hashes: Vec::new(),
+            network_id: None,
         }
     }
 
@@ -587,6 +590,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Set the optional network id.
+    pub const fn network_id(mut self, network_id: Option<u64>) -> Self {
+        self.network_id = network_id;
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
     ///
@@ -620,6 +629,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             nat,
             handshake,
             required_block_hashes,
+            network_id,
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
@@ -646,7 +656,11 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         hello_message.port = listener_addr.port();
 
         // set the status
-        let status = UnifiedStatus::spec_builder(&chain_spec, &head);
+        let mut status = UnifiedStatus::spec_builder(&chain_spec, &head);
+
+        if let Some(id) = network_id {
+            status.chain = id.into();
+        }
 
         // set a fork filter based on the chain spec and head
         let fork_filter = chain_spec.fork_filter(head);

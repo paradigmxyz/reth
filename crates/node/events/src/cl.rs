@@ -61,7 +61,7 @@ impl<H: Send + Sync> Stream for ConsensusLayerHealthEvents<H> {
                 ))
             }
 
-            // We never had both FCU and transition config exchange.
+            // We never received any forkchoice updates.
             return Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen))
         }
     }
@@ -71,12 +71,8 @@ impl<H: Send + Sync> Stream for ConsensusLayerHealthEvents<H> {
 /// Execution Layer point of view.
 #[derive(Clone, Copy, Debug)]
 pub enum ConsensusLayerHealthEvent {
-    /// Consensus Layer client was never seen.
+    /// Consensus Layer client was never seen (no forkchoice updates received).
     NeverSeen,
-    /// Consensus Layer client has not been seen for a while.
-    HasNotBeenSeenForAWhile(Duration),
-    /// Updates from the Consensus Layer client were never received.
-    NeverReceivedUpdates,
-    /// Updates from the Consensus Layer client have not been received for a while.
+    /// Forkchoice updates from the Consensus Layer client have not been received for a while.
     HaveNotReceivedUpdatesForAWhile(Duration),
 }

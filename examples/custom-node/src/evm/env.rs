@@ -1,6 +1,7 @@
 use crate::primitives::{CustomTransaction, TxPayment};
 use alloy_eips::{eip2930::AccessList, Typed2718};
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded, IntoTxEnv};
+use alloy_op_evm::block::OpTxEnv;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use op_alloy_consensus::OpTxEnvelope;
 use op_revm::OpTransaction;
@@ -326,5 +327,14 @@ impl FromTxWithEncoded<CustomTransaction> for CustomTxEnv {
 impl IntoTxEnv<Self> for CustomTxEnv {
     fn into_tx_env(self) -> Self {
         self
+    }
+}
+
+impl OpTxEnv for CustomTxEnv {
+    fn encoded_bytes(&self) -> Option<&Bytes> {
+        match self {
+            Self::Op(tx) => tx.encoded_bytes(),
+            Self::Payment(_) => None,
+        }
     }
 }

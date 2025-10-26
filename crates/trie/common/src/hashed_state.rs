@@ -3,6 +3,7 @@ use core::ops::Not;
 use crate::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    utils::extend_sorted_vec,
     KeyHasher, MultiProofTargets, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
@@ -484,6 +485,28 @@ impl HashedPostStateSorted {
     pub const fn account_storages(&self) -> &B256Map<HashedStorageSorted> {
         &self.storages
     }
+
+    /// Returns the total number of updates including all accounts and storage updates.
+    pub fn total_len(&self) -> usize {
+        self.accounts.accounts.len() +
+            self.accounts.destroyed_accounts.len() +
+            self.storages.values().map(|storage| storage.len()).sum::<usize>()
+    }
+
+    /// Extends this state with contents of another sorted state.
+    /// Entries in `other` take precedence for duplicate keys.
+    pub fn extend_ref(&mut self, other: &Self) {
+        // Extend accounts
+        self.accounts.extend_ref(&other.accounts);
+
+        // Extend storages
+        for (hashed_address, other_storage) in &other.storages {
+            self.storages
+                .entry(*hashed_address)
+                .and_modify(|existing| existing.extend_ref(other_storage))
+                .or_insert_with(|| other_storage.clone());
+        }
+    }
 }
 
 impl AsRef<Self> for HashedPostStateSorted {
@@ -509,6 +532,20 @@ impl HashedAccountsSorted {
             .map(|(address, account)| (*address, Some(*account)))
             .chain(self.destroyed_accounts.iter().map(|address| (*address, None)))
             .sorted_by_key(|entry| *entry.0)
+    }
+
+    /// Extends this collection with contents of another sorted collection.
+    /// Entries in `other` take precedence for duplicate keys.
+    pub fn extend_ref(&mut self, other: &Self) {
+        // Updates take precedence over removals, so we want removals from `other` to only apply to
+        // the previous accounts.
+        self.accounts.retain(|(addr, _)| !other.destroyed_accounts.contains(addr));
+
+        // Extend the sorted accounts vector
+        extend_sorted_vec(&mut self.accounts, &other.accounts);
+
+        // Merge destroyed accounts sets
+        self.destroyed_accounts.extend(&other.destroyed_accounts);
     }
 }
 
@@ -536,6 +573,38 @@ impl HashedStorageSorted {
             .map(|(hashed_slot, value)| (*hashed_slot, *value))
             .chain(self.zero_valued_slots.iter().map(|hashed_slot| (*hashed_slot, U256::ZERO)))
             .sorted_by_key(|entry| *entry.0)
+    }
+
+    /// Returns the total number of storage slot updates.
+    pub fn len(&self) -> usize {
+        self.non_zero_valued_slots.len() + self.zero_valued_slots.len()
+    }
+
+    /// Returns `true` if there are no storage slot updates.
+    pub fn is_empty(&self) -> bool {
+        self.non_zero_valued_slots.is_empty() && self.zero_valued_slots.is_empty()
+    }
+
+    /// Extends this storage with contents of another sorted storage.
+    /// Entries in `other` take precedence for duplicate keys.
+    pub fn extend_ref(&mut self, other: &Self) {
+        if other.wiped {
+            // If other is wiped, clear everything and copy from other
+            self.wiped = true;
+            self.non_zero_valued_slots.clear();
+            self.zero_valued_slots.clear();
+            self.non_zero_valued_slots.extend_from_slice(&other.non_zero_valued_slots);
+            self.zero_valued_slots.extend(&other.zero_valued_slots);
+            return;
+        }
+
+        self.non_zero_valued_slots.retain(|(slot, _)| !other.zero_valued_slots.contains(slot));
+
+        // Extend the sorted non-zero valued slots
+        extend_sorted_vec(&mut self.non_zero_valued_slots, &other.non_zero_valued_slots);
+
+        // Merge zero valued slots sets
+        self.zero_valued_slots.extend(&other.zero_valued_slots);
     }
 }
 
@@ -1071,5 +1140,103 @@ mod tests {
             })
         );
         assert_eq!(chunks.next(), None);
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_extend_ref() {
+        // Test extending accounts
+        let mut state1 = HashedPostStateSorted {
+            accounts: HashedAccountsSorted {
+                accounts: vec![
+                    (B256::from([1; 32]), Account::default()),
+                    (B256::from([3; 32]), Account::default()),
+                ],
+                destroyed_accounts: B256Set::from_iter([B256::from([5; 32])]),
+            },
+            storages: B256Map::default(),
+        };
+
+        let state2 = HashedPostStateSorted {
+            accounts: HashedAccountsSorted {
+                accounts: vec![
+                    (B256::from([2; 32]), Account::default()),
+                    (B256::from([3; 32]), Account { nonce: 1, ..Default::default() }), // Override
+                    (B256::from([4; 32]), Account::default()),
+                ],
+                destroyed_accounts: B256Set::from_iter([B256::from([6; 32])]),
+            },
+            storages: B256Map::default(),
+        };
+
+        state1.extend_ref(&state2);
+
+        // Check accounts are merged and sorted
+        assert_eq!(state1.accounts.accounts.len(), 4);
+        assert_eq!(state1.accounts.accounts[0].0, B256::from([1; 32]));
+        assert_eq!(state1.accounts.accounts[1].0, B256::from([2; 32]));
+        assert_eq!(state1.accounts.accounts[2].0, B256::from([3; 32]));
+        assert_eq!(state1.accounts.accounts[2].1.nonce, 1); // Should have state2's value
+        assert_eq!(state1.accounts.accounts[3].0, B256::from([4; 32]));
+
+        // Check destroyed accounts are merged
+        assert!(state1.accounts.destroyed_accounts.contains(&B256::from([5; 32])));
+        assert!(state1.accounts.destroyed_accounts.contains(&B256::from([6; 32])));
+    }
+
+    #[test]
+    fn test_hashed_storage_sorted_extend_ref() {
+        // Test normal extension
+        let mut storage1 = HashedStorageSorted {
+            non_zero_valued_slots: vec![
+                (B256::from([1; 32]), U256::from(10)),
+                (B256::from([3; 32]), U256::from(30)),
+            ],
+            zero_valued_slots: B256Set::from_iter([B256::from([5; 32])]),
+            wiped: false,
+        };
+
+        let storage2 = HashedStorageSorted {
+            non_zero_valued_slots: vec![
+                (B256::from([2; 32]), U256::from(20)),
+                (B256::from([3; 32]), U256::from(300)), // Override
+                (B256::from([4; 32]), U256::from(40)),
+            ],
+            zero_valued_slots: B256Set::from_iter([B256::from([6; 32])]),
+            wiped: false,
+        };
+
+        storage1.extend_ref(&storage2);
+
+        assert_eq!(storage1.non_zero_valued_slots.len(), 4);
+        assert_eq!(storage1.non_zero_valued_slots[0].0, B256::from([1; 32]));
+        assert_eq!(storage1.non_zero_valued_slots[1].0, B256::from([2; 32]));
+        assert_eq!(storage1.non_zero_valued_slots[2].0, B256::from([3; 32]));
+        assert_eq!(storage1.non_zero_valued_slots[2].1, U256::from(300)); // Should have storage2's value
+        assert_eq!(storage1.non_zero_valued_slots[3].0, B256::from([4; 32]));
+        assert!(storage1.zero_valued_slots.contains(&B256::from([5; 32])));
+        assert!(storage1.zero_valued_slots.contains(&B256::from([6; 32])));
+        assert!(!storage1.wiped);
+
+        // Test wiped storage
+        let mut storage3 = HashedStorageSorted {
+            non_zero_valued_slots: vec![(B256::from([1; 32]), U256::from(10))],
+            zero_valued_slots: B256Set::from_iter([B256::from([2; 32])]),
+            wiped: false,
+        };
+
+        let storage4 = HashedStorageSorted {
+            non_zero_valued_slots: vec![(B256::from([3; 32]), U256::from(30))],
+            zero_valued_slots: B256Set::from_iter([B256::from([4; 32])]),
+            wiped: true,
+        };
+
+        storage3.extend_ref(&storage4);
+
+        assert!(storage3.wiped);
+        // When wiped, should only have storage4's values
+        assert_eq!(storage3.non_zero_valued_slots.len(), 1);
+        assert_eq!(storage3.non_zero_valued_slots[0].0, B256::from([3; 32]));
+        assert_eq!(storage3.zero_valued_slots.len(), 1);
+        assert!(storage3.zero_valued_slots.contains(&B256::from([4; 32])));
     }
 }

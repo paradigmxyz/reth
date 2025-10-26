@@ -11,6 +11,7 @@ use alloy_rpc_types_engine::{
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::{collections::HashSet, marker::PhantomData, time::Duration};
@@ -79,6 +80,7 @@ where
                 Block,
                 Receipt,
                 Header,
+                TransactionSigned,
             >::block_by_number(
                 rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
             )
@@ -348,6 +350,7 @@ where
                     Block,
                     Receipt,
                     Header,
+                    TransactionSigned,
                 >::block_by_number(
                     rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
                 )
@@ -421,6 +424,7 @@ where
                 Block,
                 Receipt,
                 Header,
+                TransactionSigned,
             >::block_by_number(
                 rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
             )
@@ -510,7 +514,7 @@ where
         Box::pin(async move {
             let mut accepted_check: bool = false;
 
-            let mut latest_block = env
+            let latest_block = env
                 .current_block_info()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
@@ -531,6 +535,7 @@ where
                     Block,
                     Receipt,
                     Header,
+                    TransactionSigned,
                 >::header_by_number(
                     rpc_client, alloy_eips::BlockNumberOrTag::Latest
                 )
@@ -603,10 +608,6 @@ where
                         rpc_latest_header.inner.timestamp;
                     env.active_node_state_mut()?.latest_fork_choice_state.head_block_hash =
                         rpc_latest_header.hash;
-
-                    // update local copy for any further usage in this scope
-                    latest_block.hash = rpc_latest_header.hash;
-                    latest_block.number = rpc_latest_header.inner.number;
                 }
             }
 

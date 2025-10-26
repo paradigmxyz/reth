@@ -26,19 +26,19 @@ use reth_optimism_flashblocks::{
     ExecutionPayloadBaseV1, FlashBlockBuildInfo, FlashBlockCompleteSequenceRx, FlashBlockService,
     InProgressFlashBlockRx, PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
 };
-use reth_rpc::eth::{core::EthApiInner, DevSigner};
+use reth_rpc::eth::core::EthApiInner;
 use reth_rpc_eth_api::{
     helpers::{
-        pending_block::BuildPendingEnv, AddDevSigners, EthApiSpec, EthFees, EthState, LoadFee,
-        LoadPendingBlock, LoadState, SpawnBlocking, Trace,
+        pending_block::BuildPendingEnv, EthApiSpec, EthFees, EthState, LoadFee, LoadPendingBlock,
+        LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
-    RpcNodeCoreExt, RpcTypes, SignableTxRequest,
+    RpcNodeCoreExt, RpcTypes,
 };
 use reth_rpc_eth_types::{
     EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock, PendingBlockEnvOrigin,
 };
-use reth_storage_api::{ProviderHeader, ProviderTx};
+use reth_storage_api::ProviderHeader;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
@@ -290,8 +290,12 @@ where
     }
 
     async fn suggested_priority_fee(&self) -> Result<U256, Self::Error> {
-        let min_tip = U256::from(self.inner.min_suggested_priority_fee);
-        self.inner.eth_api.gas_oracle().op_suggest_tip_cap(min_tip).await.map_err(Into::into)
+        self.inner
+            .eth_api
+            .gas_oracle()
+            .op_suggest_tip_cap(self.inner.min_suggested_priority_fee)
+            .await
+            .map_err(Into::into)
     }
 }
 
@@ -329,18 +333,6 @@ where
     OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
-}
-
-impl<N, Rpc> AddDevSigners for OpEthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<
-        Network: RpcTypes<TransactionRequest: SignableTxRequest<ProviderTx<N::Provider>>>,
-    >,
-{
-    fn with_dev_accounts(&self) {
-        *self.inner.eth_api.signers().write() = DevSigner::random_signers(20)
-    }
 }
 
 impl<N: RpcNodeCore, Rpc: RpcConvert> fmt::Debug for OpEthApi<N, Rpc> {
@@ -479,7 +471,7 @@ where
     NetworkT: RpcTypes,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
     OpEthApi<N, OpRpcConvert<N, NetworkT>>:
-        FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
+        FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
 {
     type EthApi = OpEthApi<N, OpRpcConvert<N, NetworkT>>;
 

@@ -2,7 +2,7 @@
 
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockNumberOrTag;
-use alloy_evm::overrides::apply_block_overrides;
+use alloy_evm::{env::BlockEnvironment, overrides::apply_block_overrides};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::BlockId;
 use alloy_rpc_types_mev::{
@@ -22,7 +22,9 @@ use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
+use revm::{
+    context::Block, context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef,
+};
 use std::{sync::Arc, time::Duration};
 use tracing::trace;
 
@@ -242,12 +244,12 @@ where
             .spawn_with_state_at_block(current_block_id, move |state| {
                 // Setup environment
                 let current_block_number = current_block.number();
-                let coinbase = evm_env.block_env.beneficiary;
-                let basefee = evm_env.block_env.basefee;
+                let coinbase = evm_env.block_env.beneficiary();
+                let basefee = evm_env.block_env.basefee();
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 // apply overrides
-                apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
+                apply_block_overrides(block_overrides, &mut db, evm_env.block_env.inner_mut());
 
                 let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
                     .map_err(EthApiError::from_eth_err)?
@@ -424,7 +426,7 @@ where
 
         let timeout = override_timeout
             .map(Duration::from_secs)
-            .filter(|&custom_duration| custom_duration <= MAX_SIM_TIMEOUT)
+            .map(|d| d.min(MAX_SIM_TIMEOUT))
             .unwrap_or(DEFAULT_SIM_TIMEOUT);
 
         let bundle_res =
