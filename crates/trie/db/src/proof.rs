@@ -12,6 +12,9 @@ use reth_trie::{
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
 pub trait DatabaseProof<'a> {
+    /// Associated type for the database transaction.
+    type Tx;
+
     /// Create a new [`Proof`] instance from database transaction.
     fn from_tx(tx: &'a Self::Tx) -> Self;
 
@@ -29,9 +32,6 @@ pub trait DatabaseProof<'a> {
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError>;
-
-    /// Associated type for the database transaction.
-    type Tx;
 }
 
 impl<'a, TX: DbTx> DatabaseProof<'a>
@@ -50,17 +50,18 @@ impl<'a, TX: DbTx> DatabaseProof<'a>
     ) -> Result<AccountProof, StateProofError> {
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();
-        Self::new(self.trie_cursor_factory().clone(), self.hashed_cursor_factory().clone())
-            .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
+        Proof::new(
+            InMemoryTrieCursorFactory::new(
                 self.trie_cursor_factory().clone(),
                 &nodes_sorted,
-            ))
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
+            ),
+            HashedPostStateCursorFactory::new(
                 self.hashed_cursor_factory().clone(),
                 &state_sorted,
-            ))
-            .with_prefix_sets_mut(input.prefix_sets)
-            .account_proof(address, slots)
+            ),
+        )
+        .with_prefix_sets_mut(input.prefix_sets)
+        .account_proof(address, slots)
     }
 
     fn overlay_multiproof(
@@ -70,17 +71,18 @@ impl<'a, TX: DbTx> DatabaseProof<'a>
     ) -> Result<MultiProof, StateProofError> {
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();
-        Self::new(self.trie_cursor_factory().clone(), self.hashed_cursor_factory().clone())
-            .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
+        Proof::new(
+            InMemoryTrieCursorFactory::new(
                 self.trie_cursor_factory().clone(),
                 &nodes_sorted,
-            ))
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
+            ),
+            HashedPostStateCursorFactory::new(
                 self.hashed_cursor_factory().clone(),
                 &state_sorted,
-            ))
-            .with_prefix_sets_mut(input.prefix_sets)
-            .multiproof(targets)
+            ),
+        )
+        .with_prefix_sets_mut(input.prefix_sets)
+        .multiproof(targets)
     }
 }
 
