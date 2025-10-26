@@ -83,7 +83,7 @@ pub struct InMemoryTrieCursor<'a, C> {
 impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     /// Create new trie cursor which combines a DB cursor (None to assume empty DB) and a set of
     /// in-memory trie nodes.
-    pub fn new(
+    pub const fn new(
         cursor: Option<C>,
         trie_updates: &'a [(Nibbles, Option<BranchNodeCompact>)],
     ) -> Self {
