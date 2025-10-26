@@ -22,11 +22,6 @@ impl<T> DatabaseTrieCursorFactory<T> {
     }
 }
 
-impl<'a, TX> From<&'a TX> for DatabaseTrieCursorFactory<&'a TX> {
-    fn from(tx: &'a TX) -> Self {
-        Self::new(tx)
-    }
-}
 
 /// Implementation of the trie cursor factory for a database transaction.
 impl<TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<&TX> {
