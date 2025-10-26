@@ -70,7 +70,6 @@ impl<C: ChainSpecParser> Command<C> {
             StageEnum::Headers => {
                 tx.clear::<tables::CanonicalHeaders>()?;
                 tx.clear::<tables::Headers<HeaderTy<N>>>()?;
-                tx.clear::<tables::HeaderTerminalDifficulties>()?;
                 tx.clear::<tables::HeaderNumbers>()?;
                 reset_stage_checkpoint(tx, StageId::Headers)?;
 
@@ -79,7 +78,6 @@ impl<C: ChainSpecParser> Command<C> {
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
                 tx.clear::<tables::Transactions<TxTy<N>>>()?;
-                reset_prune_checkpoint(tx, PruneSegment::Transactions)?;
 
                 tx.clear::<tables::TransactionBlocks>()?;
                 tx.clear::<tables::BlockOmmers<HeaderTy<N>>>()?;

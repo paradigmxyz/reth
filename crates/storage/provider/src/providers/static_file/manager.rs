@@ -12,9 +12,7 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
-use alloy_primitives::{
-    b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
-};
+use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
@@ -23,7 +21,7 @@ use reth_db::{
     lockfile::StorageLock,
     static_file::{
         iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
-        StaticFileCursor, TDWithHashMask, TransactionMask,
+        StaticFileCursor, TransactionMask,
     },
 };
 use reth_db_api::{
@@ -35,9 +33,9 @@ use reth_db_api::{
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
-use reth_node_types::{FullNodePrimitives, NodePrimitives};
+use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{RecoveredBlock, SealedHeader, SignedTransaction};
-use reth_stages_types::StageId;
+use reth_stages_types::{PipelineTarget, StageId};
 use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
     DEFAULT_BLOCKS_PER_STATIC_FILE,
@@ -731,14 +729,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// * its highest block should match the stage checkpoint block number if it's equal or higher
     ///   than the corresponding database table last entry.
     ///
-    /// Returns a [`Option`] with block number to unwind to if any healing is further required.
+    /// Returns a [`Option`] of [`PipelineTarget::Unwind`] if any healing is further required.
     ///
     /// WARNING: No static file writer should be held before calling this function, otherwise it
     /// will deadlock.
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,
-    ) -> ProviderResult<Option<BlockNumber>>
+        has_receipt_pruning: bool,
+    ) -> ProviderResult<Option<PipelineTarget>>
     where
         Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
         N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
@@ -775,7 +774,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         for segment in StaticFileSegment::iter() {
-            if provider.prune_modes_ref().has_receipts_pruning() && segment.is_receipts() {
+            if has_receipt_pruning && segment.is_receipts() {
                 // Pruned nodes (including full node) do not store receipts as static files.
                 continue
             }
@@ -886,7 +885,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
         }
 
-        Ok(unwind_target)
+        Ok(unwind_target.map(PipelineTarget::Unwind))
     }
 
     /// Checks consistency of the latest static file segment and throws an error if at fault.
@@ -1043,6 +1042,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.static_files_min_block.read().get(&segment).map(|range| range.end())
     }
 
+    /// Gets the lowest static file's block range if it exists for a static file segment.
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
+    pub fn get_lowest_range(&self, segment: StaticFileSegment) -> Option<SegmentRangeInclusive> {
+        self.static_files_min_block.read().get(&segment).copied()
+    }
+
     /// Gets the highest static file's block height if it exists for a static file segment.
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
@@ -1063,9 +1069,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Gets the highest static file block for all segments.
     pub fn get_highest_static_files(&self) -> HighestStaticFiles {
         HighestStaticFiles {
-            headers: self.get_highest_static_file_block(StaticFileSegment::Headers),
             receipts: self.get_highest_static_file_block(StaticFileSegment::Receipts),
-            transactions: self.get_highest_static_file_block(StaticFileSegment::Transactions),
         }
     }
 
@@ -1402,27 +1406,6 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvide
             })
     }
 
-    fn header_td(&self, block_hash: BlockHash) -> ProviderResult<Option<U256>> {
-        self.find_static_file(StaticFileSegment::Headers, |jar_provider| {
-            Ok(jar_provider
-                .cursor()?
-                .get_two::<TDWithHashMask>((&block_hash).into())?
-                .and_then(|(td, hash)| (hash == block_hash).then_some(td.0)))
-        })
-    }
-
-    fn header_td_by_number(&self, num: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
-            .and_then(|provider| provider.header_td_by_number(num))
-            .or_else(|err| {
-                if let ProviderError::MissingStaticFileBlock(_, _) = err {
-                    Ok(None)
-                } else {
-                    Err(err)
-                }
-            })
-    }
-
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -1546,8 +1529,8 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> Rec
     }
 }
 
-impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
-    TransactionsProviderExt for StaticFileProvider<N>
+impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> TransactionsProviderExt
+    for StaticFileProvider<N>
 {
     fn transaction_hashes_by_range(
         &self,
@@ -1745,7 +1728,7 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileProvider<N> {
 
 /* Cannot be successfully implemented but must exist for trait requirements */
 
-impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> BlockReader
+impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> BlockReader
     for StaticFileProvider<N>
 {
     type Block = N::Block;

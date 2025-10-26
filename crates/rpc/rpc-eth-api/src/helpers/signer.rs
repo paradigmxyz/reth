@@ -32,11 +32,3 @@ pub trait EthSigner<T, TxReq = TransactionRequest>: Send + Sync + DynClone {
 }
 
 dyn_clone::clone_trait_object!(<T> EthSigner<T>);
-
-/// Adds 20 random dev signers for access via the API. Used in dev mode.
-#[auto_impl::auto_impl(&)]
-pub trait AddDevSigners {
-    /// Generates 20 random developer accounts.
-    /// Used in DEV mode.
-    fn with_dev_accounts(&self);
-}
