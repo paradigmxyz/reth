@@ -28,7 +28,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
@@ -1795,10 +1795,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
+        for (hashed_address, account) in hashed_state.accounts() {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(hashed_address, &account)?;
-            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts_cursor.upsert(*hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
         }
@@ -1812,8 +1812,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage.storage_slots_sorted() {
-                let entry = StorageEntry { key: hashed_slot, value };
+            for (hashed_slot, value) in storage.storage_slots_ref() {
+                let v = value.unwrap_or(U256::ZERO);
+                let entry = StorageEntry { key: *hashed_slot, value: v };
+
                 if let Some(db_entry) =
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
                     db_entry.key == entry.key
