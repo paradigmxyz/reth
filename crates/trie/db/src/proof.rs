@@ -51,14 +51,8 @@ impl<'a, TX: DbTx> DatabaseProof<'a>
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();
         Proof::new(
-            InMemoryTrieCursorFactory::new(
-                self.trie_cursor_factory().clone(),
-                &nodes_sorted,
-            ),
-            HashedPostStateCursorFactory::new(
-                self.hashed_cursor_factory().clone(),
-                &state_sorted,
-            ),
+            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
+            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
         )
         .with_prefix_sets_mut(input.prefix_sets)
         .account_proof(address, slots)
@@ -72,14 +66,8 @@ impl<'a, TX: DbTx> DatabaseProof<'a>
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();
         Proof::new(
-            InMemoryTrieCursorFactory::new(
-                self.trie_cursor_factory().clone(),
-                &nodes_sorted,
-            ),
-            HashedPostStateCursorFactory::new(
-                self.hashed_cursor_factory().clone(),
-                &state_sorted,
-            ),
+            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
+            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
         )
         .with_prefix_sets_mut(input.prefix_sets)
         .multiproof(targets)
