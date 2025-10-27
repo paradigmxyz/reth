@@ -742,9 +742,7 @@ where
     for (hashed_address, receiver) in storage_proof_receivers {
         if let Ok(proof_msg) = receiver.recv() {
             // Extract storage proof from the result
-            if let Ok(ProofResult::StorageProof { hashed_address: addr, proof }) = proof_msg.result &&
-                addr == hashed_address
-            {
+            if let Ok(ProofResult::StorageProof { proof, .. }) = proof_msg.result {
                 collected_decoded_storages.insert(hashed_address, proof);
             }
         }
