@@ -266,8 +266,9 @@ pub fn random_block_range<R: Rng>(
     block_numbers: RangeInclusive<BlockNumber>,
     block_range_params: BlockRangeParams,
 ) -> Vec<SealedBlock<Block>> {
-    let mut blocks =
-        Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
+    let (start, end) = (*block_numbers.start(), *block_numbers.end());
+    let capacity = if start > end { 0 } else { end.saturating_sub(start).saturating_add(1) };
+    let mut blocks = Vec::with_capacity(capacity as usize);
     for idx in block_numbers {
         let tx_count = block_range_params.tx_count.clone().sample_single(rng).unwrap();
         let requests_count =
@@ -345,7 +346,7 @@ where
                 let old = if entry.value.is_zero() {
                     let old = storage.remove(&entry.key);
                     if matches!(old, Some(U256::ZERO)) {
-                        return None
+                        return None;
                     }
                     old
                 } else {
