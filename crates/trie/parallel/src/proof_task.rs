@@ -143,7 +143,7 @@ impl ProofWorkerHandle {
 
         let storage_worker_parent =
             debug_span!(target: "trie::proof_task", "Storage worker tasks", ?storage_worker_count);
-        let _guard = storage_worker_parent.enter();
+        let _span_guard = storage_worker_parent.enter();
 
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
@@ -157,7 +157,7 @@ impl ProofWorkerHandle {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
 
-                let _guard = parent_span.enter();
+                let _span_guard = parent_span.enter();
                 storage_worker_loop(
                     view_clone,
                     task_ctx_clone,
@@ -176,11 +176,11 @@ impl ProofWorkerHandle {
             );
         }
 
-        drop(_guard);
+        drop(_span_guard);
 
         let account_worker_parent =
             debug_span!(target: "trie::proof_task", "Account worker tasks", ?account_worker_count);
-        let _guard = account_worker_parent.enter();
+        let _span_guard = account_worker_parent.enter();
 
         // Spawn account workers
         for worker_id in 0..account_worker_count {
@@ -195,7 +195,7 @@ impl ProofWorkerHandle {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
 
-                let _guard = parent_span.enter();
+                let _span_guard = parent_span.enter();
                 account_worker_loop(
                     view_clone,
                     task_ctx_clone,
@@ -215,7 +215,7 @@ impl ProofWorkerHandle {
             );
         }
 
-        drop(_guard);
+        drop(_span_guard);
 
         Self::new_handle(
             storage_work_tx,
