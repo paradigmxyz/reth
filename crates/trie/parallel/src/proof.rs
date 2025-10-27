@@ -126,15 +126,20 @@ impl ParallelProof {
             )))
         })?;
 
-        // Extract the multiproof from the result
-        let (mut multiproof, _stats) = proof_msg.result?;
-
-        // Extract storage proof from the multiproof
-        let storage_proof = multiproof.storages.remove(&hashed_address).ok_or_else(|| {
-            ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
-                format!("storage proof not found in multiproof for {hashed_address}"),
-            )))
-        })?;
+        // Extract storage proof directly from the result
+        let storage_proof = match proof_msg.result? {
+            crate::proof_task::ProofResult::StorageProof { hashed_address: addr, proof } => {
+                debug_assert_eq!(
+                    addr,
+                    hashed_address,
+                    "storage worker must return same address: expected {hashed_address}, got {addr}"
+                );
+                proof
+            }
+            crate::proof_task::ProofResult::AccountMultiproof { .. } => {
+                unreachable!("storage worker only sends StorageProof variant")
+            }
+        };
 
         trace!(
             target: "trie::parallel_proof",
@@ -218,7 +223,12 @@ impl ParallelProof {
             )
         })?;
 
-        let (multiproof, stats) = proof_result_msg.result?;
+        let (multiproof, stats) = match proof_result_msg.result? {
+            crate::proof_task::ProofResult::AccountMultiproof { proof, stats } => (proof, stats),
+            crate::proof_task::ProofResult::StorageProof { .. } => {
+                unreachable!("account worker only sends AccountMultiproof variant")
+            }
+        };
 
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);
