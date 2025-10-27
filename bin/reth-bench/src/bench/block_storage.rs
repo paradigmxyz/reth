@@ -69,6 +69,11 @@ impl BlockFileHeader {
         (self.from_block, self.to_block)
     }
 
+    /// Get the block type from the header
+    pub(super) fn block_type(&self) -> BlockType {
+        self.block_type
+    }
+
     fn write_to(&self, writer: &mut impl Write) -> eyre::Result<()> {
         writer.write_all(MAGIC_BYTES)?;
         writer.write_all(&[self.version])?;
@@ -235,7 +240,10 @@ impl Command {
         info!("Generating file from RPC: {}", self.rpc_url);
 
         let BenchContext { block_provider, benchmark_mode, mut next_block, is_optimism, .. } =
-            BenchContext::new(&self.benchmark, self.rpc_url.clone()).await?;
+            BenchContext::new(&self.benchmark, Some(self.rpc_url.clone())).await?;
+
+        let block_provider =
+            block_provider.as_ref().ok_or_eyre("Block provider not found").unwrap();
 
         // Initialize file writer with header
         let output_path = self
@@ -263,7 +271,7 @@ impl Command {
 
             // Fetch and encode block
             let rlp_data =
-                self.fetch_and_encode_block(&block_provider, next_block, is_optimism).await?;
+                self.fetch_and_encode_block(block_provider, next_block, is_optimism).await?;
 
             // Write to file
             file_writer.write_block(&rlp_data)?;

@@ -32,7 +32,7 @@ use tracing::{debug, info};
 pub struct Command {
     /// The RPC url to use for getting data.
     #[arg(long, value_name = "RPC_URL", verbatim_doc_comment)]
-    rpc_url: String,
+    rpc_url: Option<String>,
 
     /// How long to wait after a forkchoice update before sending the next payload.
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
@@ -135,6 +135,9 @@ impl Command {
             // Use RPC provider for blocks (existing code)
             tokio::task::spawn(async move {
                 while benchmark_mode.contains(next_block) {
+                    let block_provider =
+                        block_provider.as_ref().ok_or_eyre("Block provider not found").unwrap();
+
                     let block_res = block_provider
                         .get_block_by_number(next_block.into())
                         .full()

@@ -26,7 +26,7 @@ use tracing::{debug, info};
 pub struct Command {
     /// The RPC url to use for getting data.
     #[arg(long, value_name = "RPC_URL", verbatim_doc_comment)]
-    rpc_url: String,
+    rpc_url: Option<String>,
 
     /// The size of the block buffer (channel capacity) for prefetching blocks from the RPC
     /// endpoint.
@@ -106,6 +106,9 @@ impl Command {
         } else {
             tokio::task::spawn(async move {
                 while benchmark_mode.contains(next_block) {
+                    let block_provider =
+                        block_provider.as_ref().ok_or_eyre("Block provider not found").unwrap();
+
                     let block_res = block_provider
                         .get_block_by_number(next_block.into())
                         .full()

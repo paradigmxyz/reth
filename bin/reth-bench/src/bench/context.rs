@@ -2,7 +2,8 @@
 //! The initialization code is also the same, so this can be shared across benchmark commands.
 
 use crate::{
-    authenticated_transport::AuthenticatedTransportConnect, bench::block_storage::BlockFileReader,
+    authenticated_transport::AuthenticatedTransportConnect,
+    bench::block_storage::{BlockFileReader, BlockType},
     bench_mode::BenchMode,
 };
 use alloy_eips::BlockNumberOrTag;
@@ -24,7 +25,7 @@ pub(crate) struct BenchContext {
     /// The auth provider is used for engine API queries.
     pub(crate) auth_provider: RootProvider<AnyNetwork>,
     /// The block provider is used for block queries.
-    pub(crate) block_provider: RootProvider<AnyNetwork>,
+    pub(crate) block_provider: Option<RootProvider<AnyNetwork>>,
     /// The benchmark mode, which defines whether the benchmark should run for a closed or open
     /// range of blocks.
     pub(crate) benchmark_mode: BenchMode,
@@ -37,9 +38,10 @@ pub(crate) struct BenchContext {
 impl BenchContext {
     /// This is the initialization code for most benchmarks, taking in a [`BenchmarkArgs`] and
     /// returning the providers needed to run a benchmark.
-    pub(crate) async fn new(bench_args: &BenchmarkArgs, rpc_url: String) -> eyre::Result<Self> {
-        info!("Running benchmark using data from RPC URL: {}", rpc_url);
-
+    pub(crate) async fn new(
+        bench_args: &BenchmarkArgs,
+        rpc_url: Option<String>,
+    ) -> eyre::Result<Self> {
         // Ensure that output directory exists and is a directory
         if let Some(output) = &bench_args.output {
             if output.is_file() {
@@ -52,17 +54,31 @@ impl BenchContext {
             }
         }
 
-        // set up alloy client for blocks
-        let client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
-            .http(rpc_url.parse()?);
-        let block_provider = RootProvider::<AnyNetwork>::new(client);
+        let block_provider = if let Some(rpc_url) = rpc_url {
+            info!("Running benchmark using data from RPC URL: {}", rpc_url);
+            let client = ClientBuilder::default()
+                .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
+                .http(rpc_url.parse()?);
+            Some(RootProvider::<AnyNetwork>::new(client))
+        } else {
+            info!("Running benchmark using data from file: {:?}", bench_args.from_file);
+            None
+        };
 
         // Check if this is an OP chain by checking code at a predeploy address.
-        let is_optimism = !block_provider
-            .get_code_at(address!("0x420000000000000000000000000000000000000F"))
-            .await?
-            .is_empty();
+        let is_optimism = if let Some(ref provider) = block_provider {
+            !provider
+                .get_code_at(address!("0x420000000000000000000000000000000000000F"))
+                .await?
+                .is_empty()
+        } else {
+            // When loading from file, read the block type from the file header
+            let file_header =
+                BlockFileReader::get_header(bench_args.from_file.as_ref().ok_or_else(|| {
+                    eyre::eyre!("Either rpc_url or --from-file must be provided")
+                })?)?;
+            file_header.block_type() == BlockType::Optimism
+        };
 
         // construct the authenticated provider
         let auth_jwt = bench_args
@@ -103,8 +119,8 @@ impl BenchContext {
             let head_number = head_block.header.number;
             (Some(head_number), Some(head_number + advance))
         } else if bench_args.from_file.is_some() {
-            let file = BlockFileReader::get_header(bench_args.from_file.as_ref().unwrap())?;
-            let (start, end) = file.block_range();
+            let file_header = BlockFileReader::get_header(bench_args.from_file.as_ref().unwrap())?;
+            let (start, end) = file_header.block_range();
             (Some(start), Some(end))
         } else {
             (bench_args.from, bench_args.to)
@@ -117,13 +133,21 @@ impl BenchContext {
         let first_block = match benchmark_mode {
             BenchMode::Continuous => {
                 // fetch Latest block
-                block_provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap()
+                block_provider
+                    .as_ref()
+                    .unwrap()
+                    .get_block_by_number(BlockNumberOrTag::Latest)
+                    .full()
+                    .await?
+                    .unwrap()
             }
             BenchMode::Range(ref mut range) => {
                 match range.next() {
                     Some(block_number) => {
                         // fetch first block in range
                         block_provider
+                            .as_ref()
+                            .unwrap()
                             .get_block_by_number(block_number.into())
                             .full()
                             .await?
@@ -139,6 +163,7 @@ impl BenchContext {
         };
 
         let next_block = first_block.header.number + 1;
+
         Ok(Self { auth_provider, block_provider, benchmark_mode, next_block, is_optimism })
     }
 }
