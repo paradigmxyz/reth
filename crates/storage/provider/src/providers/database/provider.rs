@@ -2194,7 +2194,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         let tx = self.tx_ref();
 
         // Read account trie changes directly into a Vec - data is already sorted by nibbles
-        // within each block, and we want the oldest (first) version of each node
+        // within each block, and we want the oldest (first) version of each node sorted by path.
         let mut account_nodes = Vec::new();
         let mut seen_account_keys = HashSet::new();
         let mut accounts_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
@@ -2210,7 +2210,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         account_nodes.sort_by_key(|(path, _)| *path);
 
         // Read storage trie changes - data is sorted by (block, hashed_address, nibbles)
-        // Keep track of seen (address, nibbles) pairs to only keep the oldest version
+        // Keep track of seen (address, nibbles) pairs to only keep the oldest version per address,
+        // sorted by path.
         let mut storage_tries = B256Map::<Vec<_>>::default();
         let mut seen_storage_keys = HashSet::new();
         let mut storages_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
