@@ -571,8 +571,8 @@ impl ProofResult {
     /// For storage proofs, wraps the storage proof into a minimal multiproof.
     pub fn into_multiproof(self) -> DecodedMultiProof {
         match self {
-            ProofResult::AccountMultiproof(multiproof, _stats) => multiproof,
-            ProofResult::StorageProof { hashed_address, proof } => {
+            Self::AccountMultiproof(multiproof, _stats) => multiproof,
+            Self::StorageProof { hashed_address, proof } => {
                 DecodedMultiProof::from_storage_proof(hashed_address, proof)
             }
         }
@@ -1146,17 +1146,15 @@ where
                         // Extract storage proof from the result
                         let proof = match proof_msg.result? {
                             ProofResult::StorageProof { hashed_address: addr, proof } => {
-                                if addr != hashed_address {
-                                    return Err(ParallelStateRootError::Other(format!(
-                                        "storage proof address mismatch: expected {hashed_address}, got {addr}"
-                                    )));
-                                }
+                                debug_assert_eq!(
+                                    addr,
+                                    hashed_address,
+                                    "storage worker must return same address: expected {hashed_address}, got {addr}"
+                                );
                                 proof
                             }
                             ProofResult::AccountMultiproof(..) => {
-                                return Err(ParallelStateRootError::Other(
-                                    "expected storage proof, got account multiproof".to_string(),
-                                ));
+                                unreachable!("storage worker only sends StorageProof variant")
                             }
                         };
 
