@@ -28,9 +28,6 @@
 //!        |                                          v
 //! ProofResultMessage <-------- ProofResultSender ---
 //! ```
-//!
-//! Individual [`ProofTaskTx`] instances manage a dedicated [`InMemoryTrieCursorFactory`] and
-//! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
 
 use crate::{
     root::ParallelStateRootError,

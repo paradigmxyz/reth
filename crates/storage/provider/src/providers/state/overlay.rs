@@ -107,13 +107,8 @@ where
         let prune_lower_bound =
             prune_checkpoint.and_then(|chk| chk.block_number.map(|block| block + 1));
 
-        // Use the higher of the two lower bounds (or error if neither is available)
-        let Some(lower_bound) = stage_lower_bound.max(prune_lower_bound) else {
-            return Err(ProviderError::InsufficientChangesets {
-                requested: requested_block,
-                available: 0..=upper_bound,
-            })
-        };
+        // Use the higher of the two lower bounds. If neither is available assume unbounded.
+        let lower_bound = stage_lower_bound.max(prune_lower_bound).unwrap_or(0);
 
         let available_range = lower_bound..=upper_bound;
 
