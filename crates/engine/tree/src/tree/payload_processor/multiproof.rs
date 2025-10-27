@@ -360,8 +360,7 @@ impl MultiproofManager {
     }
 
     /// Dispatches a new multiproof calculation to worker pools.
-    fn dispatch(&mut self, input: impl Into<PendingMultiproofTask>) {
-        let input = input.into();
+    fn dispatch(&mut self, input: PendingMultiproofTask) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets_is_empty() {
             debug!(
@@ -760,7 +759,7 @@ impl MultiProofTask {
                 self.multiproof_manager.proof_worker_handle.has_available_storage_workers();
 
         let mut dispatch = |proof_targets| {
-            self.multiproof_manager.dispatch(MultiproofInput {
+            self.multiproof_manager.dispatch(PendingMultiproofTask::Regular(MultiproofInput {
                 config: self.config.clone(),
                 source: None,
                 hashed_state_update: Default::default(),
@@ -768,7 +767,7 @@ impl MultiProofTask {
                 proof_sequence_number: self.proof_sequencer.next_sequence(),
                 state_root_message_sender: self.tx.clone(),
                 multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
-            });
+            }));
             chunks += 1;
         };
 
@@ -905,7 +904,7 @@ impl MultiProofTask {
             );
             spawned_proof_targets.extend_ref(&proof_targets);
 
-            self.multiproof_manager.dispatch(MultiproofInput {
+            self.multiproof_manager.dispatch(PendingMultiproofTask::Regular(MultiproofInput {
                 config: self.config.clone(),
                 source: Some(source),
                 hashed_state_update,
@@ -913,7 +912,7 @@ impl MultiProofTask {
                 proof_sequence_number: self.proof_sequencer.next_sequence(),
                 state_root_message_sender: self.tx.clone(),
                 multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
-            });
+            }));
 
             chunks += 1;
         };
