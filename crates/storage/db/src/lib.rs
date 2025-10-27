@@ -226,6 +226,21 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn test_temp_database_cleanup() {
+        // Test that TempDatabase properly cleans up its directory when dropped
+        let temp_path = {
+            let db = crate::test_utils::create_test_rw_db();
+            let path = db.path().to_path_buf();
+            assert!(path.exists(), "Database directory should exist while TempDatabase is alive");
+            path
+            // TempDatabase dropped here
+        };
+        
+        // Verify the directory was cleaned up
+        assert!(!temp_path.exists(), "Database directory should be cleaned up after TempDatabase is dropped");
+    }
+
+    #[test]
     fn db_version() {
         let path = tempdir().unwrap();
 
