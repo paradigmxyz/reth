@@ -89,7 +89,12 @@ type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 #[derive(Debug)]
 pub enum ProofResult {
     /// Account multiproof with statistics
-    AccountMultiproof(DecodedMultiProof, ParallelTrieStats),
+    AccountMultiproof {
+        /// The account multiproof
+        proof: DecodedMultiProof,
+        /// Statistics collected during proof computation
+        stats: ParallelTrieStats,
+    },
     /// Storage proof for a specific account
     StorageProof {
         /// The hashed address this storage proof belongs to
@@ -106,7 +111,7 @@ impl ProofResult {
     /// For storage proofs, wraps the storage proof into a minimal multiproof.
     pub fn into_multiproof(self) -> DecodedMultiProof {
         match self {
-            Self::AccountMultiproof(multiproof, _stats) => multiproof,
+            Self::AccountMultiproof { proof, stats: _ } => proof,
             Self::StorageProof { hashed_address, proof } => {
                 DecodedMultiProof::from_storage_proof(hashed_address, proof)
             }
@@ -515,7 +520,7 @@ fn account_worker_loop<Factory>(
                 let proof_elapsed = proof_start.elapsed();
                 let total_elapsed = start.elapsed();
                 let stats = tracker.finish();
-                let result = result.map(|proof| ProofResult::AccountMultiproof(proof, stats));
+                let result = result.map(|proof| ProofResult::AccountMultiproof { proof, stats });
                 account_proofs_processed += 1;
 
                 // Send result to MultiProofTask
@@ -686,7 +691,7 @@ where
                                 );
                                 proof
                             }
-                            ProofResult::AccountMultiproof(..) => {
+                            ProofResult::AccountMultiproof { .. } => {
                                 unreachable!("storage worker only sends StorageProof variant")
                             }
                         };

@@ -149,7 +149,7 @@ impl ParallelProof {
                 );
                 proof
             }
-            crate::proof_task::ProofResult::AccountMultiproof(..) => {
+            crate::proof_task::ProofResult::AccountMultiproof { .. } => {
                 unreachable!("storage worker only sends StorageProof variant")
             }
         };
@@ -237,9 +237,7 @@ impl ParallelProof {
         })?;
 
         let (multiproof, stats) = match proof_result_msg.result? {
-            crate::proof_task::ProofResult::AccountMultiproof(multiproof, stats) => {
-                (multiproof, stats)
-            }
+            crate::proof_task::ProofResult::AccountMultiproof { proof, stats } => (proof, stats),
             crate::proof_task::ProofResult::StorageProof { .. } => {
                 unreachable!("account worker only sends AccountMultiproof variant")
             }
