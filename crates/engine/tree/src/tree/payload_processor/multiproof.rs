@@ -1,7 +1,11 @@
 //! Multiproof task related functionality.
 
 use alloy_evm::block::StateChangeSource;
-use alloy_primitives::{keccak256, map::HashSet, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{B256Set, HashSet},
+    B256,
+};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use derive_more::derive::Deref;
@@ -15,7 +19,10 @@ use reth_trie::{
 };
 use reth_trie_parallel::{
     proof::ParallelProof,
-    proof_task::{AccountMultiproofInput, ProofResultMessage, ProofWorkerHandle},
+    proof_task::{
+        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        StorageProofInput,
+    },
 };
 use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
@@ -211,6 +218,74 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
     hashed_state
 }
 
+/// A pending multiproof task, either [`StorageMultiproofInput`] or [`MultiproofInput`].
+#[derive(Debug)]
+enum PendingMultiproofTask {
+    /// A storage multiproof task input.
+    Storage(StorageMultiproofInput),
+    /// A regular multiproof task input.
+    Regular(MultiproofInput),
+}
+
+impl PendingMultiproofTask {
+    /// Returns the proof sequence number of the task.
+    const fn proof_sequence_number(&self) -> u64 {
+        match self {
+            Self::Storage(input) => input.proof_sequence_number,
+            Self::Regular(input) => input.proof_sequence_number,
+        }
+    }
+
+    /// Returns whether or not the proof targets are empty.
+    fn proof_targets_is_empty(&self) -> bool {
+        match self {
+            Self::Storage(input) => input.proof_targets.is_empty(),
+            Self::Regular(input) => input.proof_targets.is_empty(),
+        }
+    }
+
+    /// Destroys the input and sends a [`MultiProofMessage::EmptyProof`] message to the sender.
+    fn send_empty_proof(self) {
+        match self {
+            Self::Storage(input) => input.send_empty_proof(),
+            Self::Regular(input) => input.send_empty_proof(),
+        }
+    }
+}
+
+impl From<StorageMultiproofInput> for PendingMultiproofTask {
+    fn from(input: StorageMultiproofInput) -> Self {
+        Self::Storage(input)
+    }
+}
+
+impl From<MultiproofInput> for PendingMultiproofTask {
+    fn from(input: MultiproofInput) -> Self {
+        Self::Regular(input)
+    }
+}
+
+/// Input parameters for dispatching a dedicated storage multiproof calculation.
+#[derive(Debug)]
+struct StorageMultiproofInput {
+    hashed_state_update: HashedPostState,
+    hashed_address: B256,
+    proof_targets: B256Set,
+    proof_sequence_number: u64,
+    state_root_message_sender: CrossbeamSender<MultiProofMessage>,
+    multi_added_removed_keys: Arc<MultiAddedRemovedKeys>,
+}
+
+impl StorageMultiproofInput {
+    /// Destroys the input and sends a [`MultiProofMessage::EmptyProof`] message to the sender.
+    fn send_empty_proof(self) {
+        let _ = self.state_root_message_sender.send(MultiProofMessage::EmptyProof {
+            sequence_number: self.proof_sequence_number,
+            state: self.hashed_state_update,
+        });
+    }
+}
+
 /// Input parameters for dispatching a multiproof calculation.
 #[derive(Debug)]
 struct MultiproofInput {
@@ -285,23 +360,93 @@ impl MultiproofManager {
     }
 
     /// Dispatches a new multiproof calculation to worker pools.
-    fn dispatch(&mut self, input: MultiproofInput) {
+    fn dispatch(&mut self, input: impl Into<PendingMultiproofTask>) {
+        let input = input.into();
         // If there are no proof targets, we can just send an empty multiproof back immediately
-        if input.proof_targets.is_empty() {
+        if input.proof_targets_is_empty() {
             debug!(
-                sequence_number = input.proof_sequence_number,
+                sequence_number = input.proof_sequence_number(),
                 "No proof targets, sending empty multiproof back immediately"
             );
             input.send_empty_proof();
             return
         }
 
-        self.dispatch_multiproof(input);
+        match input {
+            PendingMultiproofTask::Storage(storage_input) => {
+                self.dispatch_storage_proof(storage_input);
+            }
+            PendingMultiproofTask::Regular(multiproof_input) => {
+                self.dispatch_multiproof(multiproof_input);
+            }
+        }
     }
 
     /// Signals that a multiproof calculation has finished.
     fn on_calculation_complete(&mut self) {
         self.inflight = self.inflight.saturating_sub(1);
+        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        self.metrics
+            .pending_storage_multiproofs_histogram
+            .record(self.proof_worker_handle.pending_storage_tasks() as f64);
+        self.metrics
+            .pending_account_multiproofs_histogram
+            .record(self.proof_worker_handle.pending_account_tasks() as f64);
+    }
+
+    /// Dispatches a single storage proof calculation to worker pool.
+    fn dispatch_storage_proof(&mut self, storage_multiproof_input: StorageMultiproofInput) {
+        let StorageMultiproofInput {
+            hashed_state_update,
+            hashed_address,
+            proof_targets,
+            proof_sequence_number,
+            multi_added_removed_keys,
+            state_root_message_sender: _,
+        } = storage_multiproof_input;
+
+        let storage_targets = proof_targets.len();
+
+        trace!(
+            target: "engine::tree::payload_processor::multiproof",
+            proof_sequence_number,
+            ?proof_targets,
+            storage_targets,
+            "Dispatching storage proof to workers"
+        );
+
+        let start = Instant::now();
+
+        // Create prefix set from targets
+        let prefix_set = reth_trie::prefix_set::PrefixSetMut::from(
+            proof_targets.iter().map(reth_trie::Nibbles::unpack),
+        );
+        let prefix_set = prefix_set.freeze();
+
+        // Build computation input (data only)
+        let input = StorageProofInput::new(
+            hashed_address,
+            prefix_set,
+            proof_targets,
+            true, // with_branch_node_masks
+            Some(multi_added_removed_keys),
+        );
+
+        // Dispatch to storage worker
+        if let Err(e) = self.proof_worker_handle.dispatch_storage_proof(
+            input,
+            ProofResultContext::new(
+                self.proof_result_tx.clone(),
+                proof_sequence_number,
+                hashed_state_update,
+                start,
+            ),
+        ) {
+            error!(target: "engine::tree::payload_processor::multiproof", ?e, "Failed to dispatch storage proof");
+            return;
+        }
+
+        self.inflight += 1;
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
         self.metrics
             .pending_storage_multiproofs_histogram
@@ -351,7 +496,7 @@ impl MultiproofManager {
             multi_added_removed_keys,
             missed_leaves_storage_roots,
             // Workers will send ProofResultMessage directly to proof_result_rx
-            proof_result_sender: reth_trie_parallel::proof_task::ProofResultContext::new(
+            proof_result_sender: ProofResultContext::new(
                 self.proof_result_tx.clone(),
                 proof_sequence_number,
                 hashed_state_update,
