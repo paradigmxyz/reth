@@ -184,7 +184,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
 
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
-                let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
                 let block_txs = block.transactions_recovered();
 
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
@@ -306,8 +307,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
 
                 // now get the state
                 let state = this.state_at_block_id(state_at.into()).await?;
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state))).build();
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)))
+                    .build();
 
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
