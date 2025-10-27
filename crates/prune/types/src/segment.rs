@@ -1,3 +1,5 @@
+#![allow(deprecated)] // necessary to all defining deprecated `PruneSegment` variants
+
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
 use thiserror::Error;
