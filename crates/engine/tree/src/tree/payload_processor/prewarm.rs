@@ -146,7 +146,6 @@ where
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
             let (done_tx, done_rx) = mpsc::channel();
-            let mut executing = 0usize;
 
             // When transaction_count_hint is 0, it means the count is unknown. In this case, spawn
             // max workers to handle potentially many transactions in parallel rather
@@ -195,7 +194,7 @@ where
                     }
                 } else {
                     // Round-robin distribution for all other transactions
-                    let worker_idx = executing % workers_needed;
+                    let worker_idx = tx_index % workers_needed;
                     // Ignore send errors: workers listen to terminate_execution and may
                     // exit early when signaled. Sending to a disconnected worker is
                     // possible and harmless and should happen at most once due to
@@ -203,7 +202,6 @@ where
                     let _ = handles[worker_idx].send(indexed_tx);
                 }
 
-                executing += 1;
                 tx_index += 1;
             }
 
@@ -213,7 +211,7 @@ where
             while done_rx.recv().is_ok() {}
 
             let _ = actions_tx
-                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: executing });
+                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_index });
         });
     }
 
