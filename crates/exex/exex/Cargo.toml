@@ -25,7 +25,6 @@ reth-node-core.workspace = true
 reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
-reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
@@ -76,7 +75,6 @@ serde = [
     "rand/serde",
     "secp256k1/serde",
     "reth-primitives-traits/serde",
-    "reth-prune-types/serde",
     "reth-config/serde",
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",
