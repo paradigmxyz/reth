@@ -82,7 +82,7 @@ impl DbTx for TxMock {
     /// Retrieves a value by encoded key from the specified table.
     ///
     /// **Mock behavior**: Always returns `None` regardless of the encoded key.
-    /// This is equivalent to [`get`] but works with pre-encoded keys.
+    /// This is equivalent to [`Self::get`] but works with pre-encoded keys.
     fn get_by_encoded_key<T: Table>(
         &self,
         _key: &<T::Key as Encode>::Encoded,
