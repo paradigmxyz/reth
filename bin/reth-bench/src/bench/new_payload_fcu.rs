@@ -4,7 +4,7 @@
 use crate::{
     bench::{
         block_storage::BlockFileReader,
-        context::BenchContext,
+        context::{BenchContext, BlockSource},
         output::{
             CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow, COMBINED_OUTPUT_SUFFIX,
             GAS_OUTPUT_SUFFIX,
@@ -55,13 +55,8 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let BenchContext {
-            benchmark_mode,
-            block_provider,
-            auth_provider,
-            mut next_block,
-            is_optimism,
-        } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
+        let BenchContext { block_source, auth_provider, is_optimism } =
+            BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let buffer_size = self.rpc_block_buffer_size;
 
@@ -69,51 +64,124 @@ impl Command {
         let (error_sender, mut error_receiver) = tokio::sync::oneshot::channel();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer_size);
 
-        // Choose block source based on --from-file argument
-        if let Some(file_path) = self.benchmark.from_file.clone() {
-            // Use file reader for blocks
-            tokio::task::spawn(async move {
-                let mut reader = match BlockFileReader::new(&file_path, buffer_size) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::error!("Failed to create block reader: {e}");
-                        let _ = error_sender.send(e);
-                        return;
-                    }
-                };
-
-                // At anypoint if we fail to process a block, or read a batch of blocks, it means
-                // the file is corrupted somehow so the benchmark should exit as the
-                // results are invalidated
-                loop {
-                    let blocks = match reader.read_batch() {
-                        Ok(batch) if batch.is_empty() => break, // EOF
-                        Ok(batch) => batch,
+        // Spawn task based on block source
+        match block_source {
+            BlockSource::File { path } => {
+                // Use file reader for blocks
+                tokio::task::spawn(async move {
+                    let mut reader = match BlockFileReader::new(&path, buffer_size) {
+                        Ok(r) => r,
                         Err(e) => {
-                            tracing::error!("Failed to read blocks from file: {e}");
+                            tracing::error!("Failed to create block reader: {e}");
                             let _ = error_sender.send(e);
                             return;
                         }
                     };
 
-                    for block in blocks {
-                        let header: Header = block.header.clone();
+                    // At anypoint if we fail to process a block, or read a batch of blocks, it
+                    // means the file is corrupted somehow so the benchmark should exit as the
+                    // results are invalidated
+                    loop {
+                        let blocks = match reader.read_batch() {
+                            Ok(batch) if batch.is_empty() => break, // EOF
+                            Ok(batch) => batch,
+                            Err(e) => {
+                                tracing::error!("Failed to read blocks from file: {e}");
+                                let _ = error_sender.send(e);
+                                return;
+                            }
+                        };
 
-                        let (version, params) =
-                            match consensus_block_to_new_payload(block, is_optimism) {
-                                Ok(result) => result,
+                        for block in blocks {
+                            let header: Header = block.header.clone();
+
+                            let (version, params) =
+                                match consensus_block_to_new_payload(block, is_optimism) {
+                                    Ok(result) => result,
+                                    Err(e) => {
+                                        tracing::error!(
+                                            "Failed to convert block to new payload: {e}"
+                                        );
+                                        let _ = error_sender.send(e);
+                                        return;
+                                    }
+                                };
+
+                            let head_block_hash = header.hash_slow();
+                            // For file-based blocks, use the same hash for safe/finalized
+                            let safe_block_hash = head_block_hash;
+                            let finalized_block_hash = head_block_hash;
+
+                            if let Err(e) = sender
+                                .send((
+                                    header,
+                                    version,
+                                    params,
+                                    head_block_hash,
+                                    safe_block_hash,
+                                    finalized_block_hash,
+                                ))
+                                .await
+                            {
+                                tracing::error!("Failed to send block data: {e}");
+                                return;
+                            }
+                        }
+                    }
+                });
+            }
+            BlockSource::Rpc { provider, mut next_block, mode } => {
+                // Use RPC provider for blocks
+                tokio::task::spawn(async move {
+                    while mode.contains(next_block) {
+                        let block_res = provider
+                            .get_block_by_number(next_block.into())
+                            .full()
+                            .await
+                            .wrap_err_with(|| {
+                                format!("Failed to fetch block by number {next_block}")
+                            });
+                        let block =
+                            match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
+                                Ok(block) => block,
                                 Err(e) => {
-                                    tracing::error!("Failed to convert block to new payload: {e}");
+                                    tracing::error!("Failed to fetch block {next_block}: {e}");
                                     let _ = error_sender.send(e);
-                                    return;
+                                    break;
                                 }
                             };
 
-                        let head_block_hash = header.hash_slow();
-                        // For file-based blocks, use the same hash for safe/finalized
-                        let safe_block_hash = head_block_hash;
-                        let finalized_block_hash = head_block_hash;
+                        let header = block.header.clone().inner.into_header_with_defaults();
 
+                        let (version, params) = match block_to_new_payload(block, is_optimism) {
+                            Ok(result) => result,
+                            Err(e) => {
+                                tracing::error!("Failed to convert block to new payload: {e}");
+                                let _ = error_sender.send(e);
+                                break;
+                            }
+                        };
+                        let head_block_hash = header.hash_slow();
+                        let safe_block_hash =
+                            provider.get_block_by_number(header.number.saturating_sub(32).into());
+
+                        let finalized_block_hash =
+                            provider.get_block_by_number(header.number.saturating_sub(64).into());
+
+                        let (safe, finalized) =
+                            tokio::join!(safe_block_hash, finalized_block_hash,);
+
+                        let safe_block_hash = match safe {
+                            Ok(Some(block)) => block.header.hash,
+                            Ok(None) | Err(_) => head_block_hash,
+                        };
+
+                        let finalized_block_hash = match finalized {
+                            Ok(Some(block)) => block.header.hash,
+                            Ok(None) | Err(_) => head_block_hash,
+                        };
+
+                        next_block += 1;
                         if let Err(e) = sender
                             .send((
                                 header,
@@ -126,78 +194,11 @@ impl Command {
                             .await
                         {
                             tracing::error!("Failed to send block data: {e}");
-                            return;
-                        }
-                    }
-                }
-            });
-        } else {
-            // Use RPC provider for blocks (existing code)
-            tokio::task::spawn(async move {
-                while benchmark_mode.contains(next_block) {
-                    let block_provider =
-                        block_provider.as_ref().ok_or_eyre("Block provider not found").unwrap();
-
-                    let block_res = block_provider
-                        .get_block_by_number(next_block.into())
-                        .full()
-                        .await
-                        .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"));
-                    let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
-                        Ok(block) => block,
-                        Err(e) => {
-                            tracing::error!("Failed to fetch block {next_block}: {e}");
-                            let _ = error_sender.send(e);
                             break;
                         }
-                    };
-
-                    let header = block.header.clone().inner.into_header_with_defaults();
-
-                    let (version, params) = match block_to_new_payload(block, is_optimism) {
-                        Ok(result) => result,
-                        Err(e) => {
-                            tracing::error!("Failed to convert block to new payload: {e}");
-                            let _ = error_sender.send(e);
-                            break;
-                        }
-                    };
-                    let head_block_hash = header.hash_slow();
-                    let safe_block_hash =
-                        block_provider.get_block_by_number(header.number.saturating_sub(32).into());
-
-                    let finalized_block_hash =
-                        block_provider.get_block_by_number(header.number.saturating_sub(64).into());
-
-                    let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
-
-                    let safe_block_hash = match safe {
-                        Ok(Some(block)) => block.header.hash,
-                        Ok(None) | Err(_) => head_block_hash,
-                    };
-
-                    let finalized_block_hash = match finalized {
-                        Ok(Some(block)) => block.header.hash,
-                        Ok(None) | Err(_) => head_block_hash,
-                    };
-
-                    next_block += 1;
-                    if let Err(e) = sender
-                        .send((
-                            header,
-                            version,
-                            params,
-                            head_block_hash,
-                            safe_block_hash,
-                            finalized_block_hash,
-                        ))
-                        .await
-                    {
-                        tracing::error!("Failed to send block data: {e}");
-                        break;
                     }
-                }
-            });
+                });
+            }
         }
 
         // put results in a summary vec so they can be printed at the end

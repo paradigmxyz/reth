@@ -1,4 +1,7 @@
-use crate::bench::{context::BenchContext, output::BLOCK_STORAGE_OUTPUT_SUFFIX};
+use crate::bench::{
+    context::{BenchContext, BlockSource},
+    output::BLOCK_STORAGE_OUTPUT_SUFFIX,
+};
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 
 use alloy_consensus::{
@@ -62,11 +65,6 @@ impl BlockFileHeader {
             from_block,
             to_block,
         }
-    }
-
-    /// Get the block range from the header
-    pub(super) fn block_range(&self) -> (u64, u64) {
-        (self.from_block, self.to_block)
     }
 
     /// Get the block type from the header
@@ -239,12 +237,16 @@ impl Command {
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         info!("Generating file from RPC: {}", self.rpc_url);
 
-        let BenchContext { block_provider, benchmark_mode, mut next_block, is_optimism, .. } =
+        let BenchContext { block_source, is_optimism, .. } =
             BenchContext::new(&self.benchmark, Some(self.rpc_url.clone())).await?;
 
-        let block_provider =
-            block_provider.as_ref().ok_or_eyre("Block provider not found").unwrap();
-
+        // Extract RPC provider, next_block, and mode
+        let (provider, mut next_block, mode) = match block_source {
+            BlockSource::Rpc { provider, next_block, mode } => (provider, next_block, mode),
+            BlockSource::File { .. } => {
+                return Err(eyre::eyre!("block-storage command requires RPC mode, not file mode"));
+            }
+        };
         // Initialize file writer with header
         let output_path = self
             .benchmark
@@ -266,12 +268,11 @@ impl Command {
         );
 
         // Process blocks
-        while benchmark_mode.contains(next_block) {
+        while mode.contains(next_block) {
             info!("Processing block {}", next_block);
 
             // Fetch and encode block
-            let rlp_data =
-                self.fetch_and_encode_block(block_provider, next_block, is_optimism).await?;
+            let rlp_data = self.fetch_and_encode_block(&provider, next_block, is_optimism).await?;
 
             // Write to file
             file_writer.write_block(&rlp_data)?;
