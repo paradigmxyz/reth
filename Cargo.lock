@@ -291,8 +291,7 @@ dependencies = [
 [[package]]
 name = "alloy-hardforks"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd78f8e1c274581c663d7949c863b10c8b015e48f2774a4b8e8efc82d43ea95c"
+source = "git+https://github.com/alloy-rs/hardforks?rev=b45961a#b45961a17ebf517c65def49f5183dd7fd1030b54"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -389,8 +388,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-hardforks"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "777759314eaa14fb125c1deba5cbc06eee953bbe77bc7cc60b4e8685bd03479e"
+source = "git+https://github.com/alloy-rs/hardforks?rev=b45961a#b45961a17ebf517c65def49f5183dd7fd1030b54"
 dependencies = [
  "alloy-chains",
  "alloy-hardforks",
@@ -14255,13 +14253,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "alloy-hardforks"
-version = "0.4.0"
-source = "git+https://github.com/alloy-rs/hardforks?rev=0fd230f5aa24c4f6a8c593918b7449df0c20f60a#0fd230f5aa24c4f6a8c593918b7449df0c20f60a"
-
-[[patch.unused]]
-name = "alloy-op-hardforks"
-version = "0.4.0"
-source = "git+https://github.com/alloy-rs/hardforks?rev=0fd230f5aa24c4f6a8c593918b7449df0c20f60a#0fd230f5aa24c4f6a8c593918b7449df0c20f60a"
