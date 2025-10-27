@@ -10,8 +10,8 @@ use crate::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
 use alloy_eips::{BlockNumberOrTag, Decodable2718, Encodable2718};
-use alloy_primitives::{Address, BlockHash, BlockNumber};
-use alloy_rlp::{Bytes, Encodable};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes};
+use alloy_rlp::Encodable;
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
