@@ -636,12 +636,12 @@ where
         #[cfg(feature = "metrics")]
         {
             self.metrics.record();
-            self.metrics.set_node_capacity(self.node_capacity());
-            self.metrics.set_value_capacity(self.value_capacity());
-            self.metrics.set_storage_trie_metrics(
-                self.storage.cleared_tries.len(),
-                self.storage.tries.len(),
-            );
+            //self.metrics.set_node_capacity(self.node_capacity());
+            //self.metrics.set_value_capacity(self.value_capacity());
+            //self.metrics.set_storage_trie_metrics(
+            //    self.storage.cleared_tries.len(),
+            //    self.storage.tries.len(),
+            //);
         }
 
         let storage_tries = self.storage_trie_updates();
