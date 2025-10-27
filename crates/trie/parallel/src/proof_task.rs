@@ -939,6 +939,8 @@ fn account_worker_loop<Factory>(
                             elapsed: start.elapsed(),
                             state,
                         });
+                        // Mark worker as available again before skipping the job.
+                        available_workers.fetch_add(1, Ordering::Relaxed);
                         continue;
                     }
                 };
