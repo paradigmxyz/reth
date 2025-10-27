@@ -107,11 +107,11 @@ where
             .await
             {
                 Ok(fcu_result) => {
-                    debug!("FCU v2 result: {:?}", fcu_result);
+                    debug!(?fcu_result, "FCU v2 result");
                     match fcu_result.payload_status.status {
                         PayloadStatusEnum::Valid => {
                             if let Some(payload_id) = fcu_result.payload_id {
-                                debug!("Got payload ID: {payload_id}");
+                                debug!(id=%payload_id, "Got payload");
                                 let _engine_payload = EngineApiClient::<Engine>::get_payload_v2(
                                     &engine_client,
                                     payload_id,
@@ -137,11 +137,11 @@ where
                     )
                     .await?;
 
-                    debug!("FCU v3 result: {:?}", fcu_result);
+                    debug!(?fcu_result, "FCU v3 result");
                     match fcu_result.payload_status.status {
                         PayloadStatusEnum::Valid => {
                             if let Some(payload_id) = fcu_result.payload_id {
-                                debug!("Got payload ID: {payload_id}");
+                                debug!(id=%payload_id, "Got payload");
                                 let _engine_payload = EngineApiClient::<Engine>::get_payload_v3(
                                     &engine_client,
                                     payload_id,
