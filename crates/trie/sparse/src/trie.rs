@@ -258,22 +258,6 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
         Ok(())
     }
 
-    /// Returns the allocated capacity for sparse trie nodes.
-    pub fn node_capacity(&self) -> usize {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => trie.node_capacity(),
-            _ => 0,
-        }
-    }
-
-    /// Returns the allocated capacity for sparse trie values.
-    pub fn value_capacity(&self) -> usize {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => trie.value_capacity(),
-            _ => 0,
-        }
-    }
-
     /// Shrinks the capacity of the sparse trie's node storage.
     /// Works for both revealed and blind tries with allocated storage.
     pub fn shrink_nodes_to(&mut self, size: usize) {
@@ -1099,14 +1083,6 @@ impl SparseTrieInterface for SerialSparseTrie {
 
         // If we get here, there's no leaf at the target path
         Ok(LeafLookup::NonExistent)
-    }
-
-    fn node_capacity(&self) -> usize {
-        self.nodes.capacity()
-    }
-
-    fn value_capacity(&self) -> usize {
-        self.values.capacity()
     }
 
     fn shrink_nodes_to(&mut self, size: usize) {
