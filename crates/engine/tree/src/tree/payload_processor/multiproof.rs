@@ -19,7 +19,10 @@ use reth_trie::{
 };
 use reth_trie_parallel::{
     proof::ParallelProof,
-    proof_task::{AccountMultiproofInput, ProofResultMessage, ProofWorkerHandle},
+    proof_task::{
+        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        StorageProofInput,
+    },
 };
 use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
@@ -408,7 +411,7 @@ impl MultiproofManager {
         let prefix_set = prefix_set.freeze();
 
         // Build computation input (data only)
-        let input = reth_trie_parallel::proof_task::StorageProofInput::new(
+        let input = StorageProofInput::new(
             hashed_address,
             prefix_set,
             proof_targets,
@@ -419,7 +422,7 @@ impl MultiproofManager {
         // Dispatch to storage worker
         if let Err(e) = self.proof_worker_handle.dispatch_storage_proof(
             input,
-            reth_trie_parallel::proof_task::ProofResultContext::new(
+            ProofResultContext::new(
                 self.proof_result_tx.clone(),
                 proof_sequence_number,
                 hashed_state_update,
@@ -492,7 +495,7 @@ impl MultiproofManager {
             multi_added_removed_keys,
             missed_leaves_storage_roots,
             // Workers will send ProofResultMessage directly to proof_result_rx
-            proof_result_sender: reth_trie_parallel::proof_task::ProofResultContext::new(
+            proof_result_sender: ProofResultContext::new(
                 self.proof_result_tx.clone(),
                 proof_sequence_number,
                 hashed_state_update,
@@ -1131,7 +1134,7 @@ impl MultiProofTask {
 
                             // Convert ProofResultMessage to SparseTrieUpdate
                             match proof_result.result {
-                                Ok((multiproof, _stats)) => {
+                                Ok(proof_result_data) => {
                                     debug!(
                                         target: "engine::tree::payload_processor::multiproof",
                                         sequence = proof_result.sequence_number,
@@ -1141,7 +1144,7 @@ impl MultiProofTask {
 
                                     let update = SparseTrieUpdate {
                                         state: proof_result.state,
-                                        multiproof,
+                                        multiproof: proof_result_data.into_multiproof(),
                                     };
 
                                     if let Some(combined_update) =
