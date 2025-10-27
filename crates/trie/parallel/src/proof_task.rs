@@ -84,8 +84,35 @@ use crate::proof_task_metrics::ProofTaskTrieMetrics;
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
-type AccountMultiproofResult =
-    Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError>;
+
+/// Result of a proof calculation, which can be either an account multiproof or a storage proof.
+#[derive(Debug)]
+pub enum ProofResult {
+    /// Account multiproof with statistics
+    AccountMultiproof(DecodedMultiProof, ParallelTrieStats),
+    /// Storage proof for a specific account
+    StorageProof {
+        /// The hashed address this storage proof belongs to
+        hashed_address: B256,
+        /// The storage multiproof
+        proof: DecodedStorageMultiProof,
+    },
+}
+
+impl ProofResult {
+    /// Convert this proof result into a `DecodedMultiProof`.
+    ///
+    /// For account multiproofs, returns the multiproof directly (discarding stats).
+    /// For storage proofs, wraps the storage proof into a minimal multiproof.
+    pub fn into_multiproof(self) -> DecodedMultiProof {
+        match self {
+            Self::AccountMultiproof(multiproof, _stats) => multiproof,
+            Self::StorageProof { hashed_address, proof } => {
+                DecodedMultiProof::from_storage_proof(hashed_address, proof)
+            }
+        }
+    }
+}
 
 /// Channel used by worker threads to deliver `ProofResultMessage` items back to
 /// `MultiProofTask`.
@@ -101,8 +128,8 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 pub struct ProofResultMessage {
     /// Sequence number for ordering proofs
     pub sequence_number: u64,
-    /// The proof calculation result
-    pub result: AccountMultiproofResult,
+    /// The proof calculation result (either account multiproof or storage proof)
+    pub result: Result<ProofResult, ParallelStateRootError>,
     /// Time taken for the entire proof calculation (from dispatch to completion)
     pub elapsed: Duration,
     /// Original state update that triggered this proof
@@ -248,18 +275,10 @@ fn storage_worker_loop<Factory>(
                 let proof_elapsed = proof_start.elapsed();
                 storage_proofs_processed += 1;
 
-                // Convert storage proof to account multiproof format
-                let result_msg = match result {
-                    Ok(storage_proof) => {
-                        let multiproof = reth_trie::DecodedMultiProof::from_storage_proof(
-                            hashed_address,
-                            storage_proof,
-                        );
-                        let stats = crate::stats::ParallelTrieTracker::default().finish();
-                        Ok((multiproof, stats))
-                    }
-                    Err(e) => Err(e),
-                };
+                let result_msg = result.map(|storage_proof| ProofResult::StorageProof {
+                    hashed_address,
+                    proof: storage_proof,
+                });
 
                 if sender
                     .send(ProofResultMessage {
@@ -496,7 +515,7 @@ fn account_worker_loop<Factory>(
                 let proof_elapsed = proof_start.elapsed();
                 let total_elapsed = start.elapsed();
                 let stats = tracker.finish();
-                let result = result.map(|proof| (proof, stats));
+                let result = result.map(|proof| ProofResult::AccountMultiproof(proof, stats));
                 account_proofs_processed += 1;
 
                 // Send result to MultiProofTask
@@ -657,14 +676,20 @@ where
                             )
                         })?;
 
-                        // Extract storage proof from the multiproof wrapper
-                        let (mut multiproof, _stats) = proof_msg.result?;
-                        let proof =
-                            multiproof.storages.remove(&hashed_address).ok_or_else(|| {
-                                ParallelStateRootError::Other(format!(
-                                    "storage proof not found in multiproof for {hashed_address}"
-                                ))
-                            })?;
+                        // Extract storage proof from the result
+                        let proof = match proof_msg.result? {
+                            ProofResult::StorageProof { hashed_address: addr, proof } => {
+                                debug_assert_eq!(
+                                    addr,
+                                    hashed_address,
+                                    "storage worker must return same address: expected {hashed_address}, got {addr}"
+                                );
+                                proof
+                            }
+                            ProofResult::AccountMultiproof(..) => {
+                                unreachable!("storage worker only sends StorageProof variant")
+                            }
+                        };
 
                         let root = proof.root;
                         collected_decoded_storages.insert(hashed_address, proof);
@@ -716,9 +741,9 @@ where
     // Consume remaining storage proof receivers for accounts not encountered during trie walk.
     for (hashed_address, receiver) in storage_proof_receivers {
         if let Ok(proof_msg) = receiver.recv() {
-            // Extract storage proof from the multiproof wrapper
-            if let Ok((mut multiproof, _stats)) = proof_msg.result &&
-                let Some(proof) = multiproof.storages.remove(&hashed_address)
+            // Extract storage proof from the result
+            if let Ok(ProofResult::StorageProof { hashed_address: addr, proof }) = proof_msg.result &&
+                addr == hashed_address
             {
                 collected_decoded_storages.insert(hashed_address, proof);
             }
