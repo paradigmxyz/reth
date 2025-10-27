@@ -874,16 +874,6 @@ impl SparseTrieInterface for ParallelSparseTrie {
         }
     }
 
-    fn node_capacity(&self) -> usize {
-        self.upper_subtrie.node_capacity() +
-            self.lower_subtries.iter().map(|trie| trie.node_capacity()).sum::<usize>()
-    }
-
-    fn value_capacity(&self) -> usize {
-        self.upper_subtrie.value_capacity() +
-            self.lower_subtries.iter().map(|trie| trie.value_capacity()).sum::<usize>()
-    }
-
     fn shrink_nodes_to(&mut self, size: usize) {
         // Distribute the capacity across upper and lower subtries
         //
@@ -2138,16 +2128,6 @@ impl SparseSubtrie {
         self.inner.clear();
     }
 
-    /// Returns the capacity of the map containing trie nodes.
-    pub(crate) fn node_capacity(&self) -> usize {
-        self.nodes.capacity()
-    }
-
-    /// Returns the capacity of the map containing trie values.
-    pub(crate) fn value_capacity(&self) -> usize {
-        self.inner.value_capacity()
-    }
-
     /// Shrinks the capacity of the subtrie's node storage.
     pub(crate) fn shrink_nodes_to(&mut self, size: usize) {
         self.nodes.shrink_to(size);
@@ -2489,11 +2469,6 @@ impl SparseSubtrieInner {
     fn clear(&mut self) {
         self.values.clear();
         self.buffers.clear();
-    }
-
-    /// Returns the capacity of the map storing leaf values
-    fn value_capacity(&self) -> usize {
-        self.values.capacity()
     }
 }
 
