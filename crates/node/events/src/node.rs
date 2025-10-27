@@ -296,17 +296,6 @@ impl NodeState {
                         "Post-merge network, but never seen beacon client. Please launch one to follow the chain!"
                     )
                 }
-                ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
-                    warn!(
-                        ?period,
-                        "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!"
-                    )
-                }
-                ConsensusLayerHealthEvent::NeverReceivedUpdates => {
-                    warn!(
-                        "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!"
-                    )
-                }
                 ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
                     warn!(
                         ?period,

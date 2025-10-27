@@ -432,12 +432,35 @@ pub struct TrieUpdatesSortedRef<'a> {
 pub struct TrieUpdatesSorted {
     /// Sorted collection of updated state nodes with corresponding paths. None indicates that a
     /// node was removed.
-    pub account_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
+    account_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
     /// Storage tries stored by hashed address of the account the trie belongs to.
-    pub storage_tries: B256Map<StorageTrieUpdatesSorted>,
+    storage_tries: B256Map<StorageTrieUpdatesSorted>,
 }
 
 impl TrieUpdatesSorted {
+    /// Creates a new `TrieUpdatesSorted` with the given account nodes and storage tries.
+    ///
+    /// # Panics
+    ///
+    /// In debug mode, panics if `account_nodes` is not sorted by the `Nibbles` key,
+    /// or if any storage trie's `storage_nodes` is not sorted by its `Nibbles` key.
+    pub fn new(
+        account_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
+        storage_tries: B256Map<StorageTrieUpdatesSorted>,
+    ) -> Self {
+        debug_assert!(
+            account_nodes.is_sorted_by_key(|item| &item.0),
+            "account_nodes must be sorted by Nibbles key"
+        );
+        debug_assert!(
+            storage_tries.values().all(|storage_trie| {
+                storage_trie.storage_nodes.is_sorted_by_key(|item| &item.0)
+            }),
+            "all storage_nodes in storage_tries must be sorted by Nibbles key"
+        );
+        Self { account_nodes, storage_tries }
+    }
+
     /// Returns `true` if the updates are empty.
     pub fn is_empty(&self) -> bool {
         self.account_nodes.is_empty() && self.storage_tries.is_empty()
@@ -542,8 +565,13 @@ impl StorageTrieUpdatesSorted {
     }
 
     /// Returns the total number of storage node updates.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.storage_nodes.len()
+    }
+
+    /// Returns `true` if there are no storage node updates.
+    pub const fn is_empty(&self) -> bool {
+        self.storage_nodes.is_empty()
     }
 
     /// Extends the storage trie updates with another set of sorted updates.

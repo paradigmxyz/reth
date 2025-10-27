@@ -33,6 +33,16 @@ pub struct Command {
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
 
+    /// The size of the block buffer (channel capacity) for prefetching blocks from the RPC
+    /// endpoint.
+    #[arg(
+        long = "rpc-block-buffer-size",
+        value_name = "RPC_BLOCK_BUFFER_SIZE",
+        default_value = "20",
+        verbatim_doc_comment
+    )]
+    rpc_block_buffer_size: usize,
+
     #[command(flatten)]
     benchmark: BenchmarkArgs,
 }
@@ -48,7 +58,12 @@ impl Command {
             is_optimism,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
-        let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
+        let buffer_size = self.rpc_block_buffer_size;
+
+        // Use a oneshot channel to propagate errors from the spawned task
+        let (error_sender, mut error_receiver) = tokio::sync::oneshot::channel();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer_size);
+
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
                 let block_res = block_provider
@@ -60,6 +75,7 @@ impl Command {
                     Ok(block) => block,
                     Err(e) => {
                         tracing::error!("Failed to fetch block {next_block}: {e}");
+                        let _ = error_sender.send(e);
                         break;
                     }
                 };
@@ -69,6 +85,7 @@ impl Command {
                     Ok(result) => result,
                     Err(e) => {
                         tracing::error!("Failed to convert block to new payload: {e}");
+                        let _ = error_sender.send(e);
                         break;
                     }
                 };
@@ -161,6 +178,11 @@ impl Command {
             // record the current result
             let gas_row = TotalGasRow { block_number, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
+        }
+
+        // Check if the spawned task encountered an error
+        if let Ok(error) = error_receiver.try_recv() {
+            return Err(error);
         }
 
         let (gas_output_results, combined_results): (_, Vec<CombinedResult>) =

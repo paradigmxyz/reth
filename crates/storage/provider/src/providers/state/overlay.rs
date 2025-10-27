@@ -17,7 +17,7 @@ use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
 use std::sync::Arc;
-use tracing::trace;
+use tracing::debug;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
@@ -165,7 +165,7 @@ where
                 hashed_state_mut.extend_ref(hashed_state_overlay);
             }
 
-            trace!(
+            debug!(
                 target: "providers::state::overlay",
                 ?from_block,
                 num_trie_updates = ?trie_updates_mut.total_len(),

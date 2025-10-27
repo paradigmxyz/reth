@@ -1,6 +1,4 @@
 use crate::formatter::LogFormat;
-#[cfg(feature = "otlp")]
-use reth_tracing_otlp::span_layer;
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
     fmt,
@@ -8,6 +6,11 @@ use std::{
 };
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
+#[cfg(feature = "otlp")]
+use {
+    reth_tracing_otlp::{span_layer, OtlpProtocol},
+    url::Url,
+};
 
 /// A worker guard returned by the file layer.
 ///
@@ -18,17 +21,19 @@ pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
 ///  A boxed tracing [Layer].
 pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
-/// Default [directives](Directive) for [`EnvFilter`] which disables high-frequency debug logs from
-/// `hyper`, `hickory-resolver`, `jsonrpsee-server`, and `discv5`.
+/// Default [directives](Directive) for [`EnvFilter`] which:
+/// 1. Disable high-frequency debug logs from dependencies such as `hyper`, `hickory-resolver`,
+///    `hickory_proto`, `discv5`, `jsonrpsee-server`, and `hyper_util::client::legacy::pool`.
+/// 2. Set `opentelemetry_*` crates log level to `WARN`, as `DEBUG` is too noisy.
 const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 9] = [
     "hyper::proto::h1=off",
     "hickory_resolver=off",
     "hickory_proto=off",
     "discv5=off",
     "jsonrpsee-server=off",
-    "opentelemetry-otlp=off",
-    "opentelemetry_sdk=off",
-    "opentelemetry-http=off",
+    "opentelemetry-otlp=warn",
+    "opentelemetry_sdk=warn",
+    "opentelemetry-http=warn",
     "hyper_util::client::legacy::pool=off",
 ];
 
@@ -133,12 +138,13 @@ impl Layers {
     pub fn with_span_layer(
         &mut self,
         service_name: String,
-        endpoint_exporter: url::Url,
+        endpoint_exporter: Url,
         filter: EnvFilter,
+        otlp_protocol: OtlpProtocol,
     ) -> eyre::Result<()> {
         // Create the span provider
 
-        let span_layer = span_layer(service_name, &endpoint_exporter)
+        let span_layer = span_layer(service_name, &endpoint_exporter, otlp_protocol)
             .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?
             .with_filter(filter);
 
