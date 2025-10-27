@@ -322,6 +322,7 @@ where
     EthB: EthApiBuilder<N>,
 {
     /// Creates a new instance from components.
+    #[allow(clippy::too_many_arguments)]
     pub const fn new(
         rpc_add_ons: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>,
         da_config: OpDAConfig,
