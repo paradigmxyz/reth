@@ -731,7 +731,7 @@ where
     ///
     /// Returns false if the new account info and storage trie are empty, indicating the account
     /// leaf should be removed.
-    #[instrument(target = "trie::sparse", skip_all)]
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
     pub fn update_account(
         &mut self,
         address: B256,
