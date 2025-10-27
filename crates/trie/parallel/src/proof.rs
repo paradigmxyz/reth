@@ -88,7 +88,7 @@ impl ParallelProof {
         self
     }
     /// Queues a storage proof task and returns a receiver for the result.
-    fn queue_storage_proof(
+    fn send_storage_proof(
         &self,
         hashed_address: B256,
         prefix_set: PrefixSet,
@@ -132,7 +132,7 @@ impl ParallelProof {
             "Starting storage proof generation"
         );
 
-        let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots)?;
+        let receiver = self.send_storage_proof(hashed_address, prefix_set, target_slots)?;
         let proof_msg = receiver.recv().map_err(|_| {
             ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
                 format!("channel closed for {hashed_address}"),
