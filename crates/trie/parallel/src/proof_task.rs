@@ -1128,14 +1128,22 @@ where
                             )
                         })?;
 
-                        // Extract storage proof from the multiproof wrapper
-                        let (mut multiproof, _stats) = proof_msg.result?;
-                        let proof =
-                            multiproof.storages.remove(&hashed_address).ok_or_else(|| {
-                                ParallelStateRootError::Other(format!(
-                                    "storage proof not found in multiproof for {hashed_address}"
-                                ))
-                            })?;
+                        // Extract storage proof from the result
+                        let proof = match proof_msg.result? {
+                            ProofResult::StorageProof { hashed_address: addr, proof } => {
+                                if addr != hashed_address {
+                                    return Err(ParallelStateRootError::Other(format!(
+                                        "storage proof address mismatch: expected {hashed_address}, got {addr}"
+                                    )));
+                                }
+                                proof
+                            }
+                            ProofResult::AccountMultiproof(..) => {
+                                return Err(ParallelStateRootError::Other(
+                                    "expected storage proof, got account multiproof".to_string(),
+                                ));
+                            }
+                        };
 
                         let root = proof.root;
                         collected_decoded_storages.insert(hashed_address, proof);
