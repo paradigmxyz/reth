@@ -1,8 +1,11 @@
 use alloy_primitives::{BlockNumber, B256};
 use reth_db_api::DatabaseError;
 use reth_errors::ProviderError;
+use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
-use reth_storage_api::{DBProvider, DatabaseProviderFactory, StageCheckpointReader, TrieReader};
+use reth_storage_api::{
+    DBProvider, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader, TrieReader,
+};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
@@ -13,6 +16,7 @@ use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
 use std::sync::Arc;
+use tracing::debug;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
@@ -33,26 +37,31 @@ pub struct OverlayStateProviderFactory<F> {
 impl<F> OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: Clone + TrieReader + StageCheckpointReader,
+    F::Provider: Clone + TrieReader + StageCheckpointReader + PruneCheckpointReader,
 {
     /// Create a new overlay state provider factory
     pub const fn new(factory: F) -> Self {
         Self { factory, block_number: None, trie_overlay: None, hashed_state_overlay: None }
     }
 
-    /// Set the block number for collecting reverts
+    /// Set the block number for collecting reverts. All state will be reverted to the point
+    /// _after_ this block has been processed.
     pub const fn with_block_number(mut self, block_number: Option<BlockNumber>) -> Self {
         self.block_number = block_number;
         self
     }
 
-    /// Set the trie overlay
+    /// Set the trie overlay.
+    ///
+    /// This overlay will be applied on top of any reverts applied via `with_block_number`.
     pub fn with_trie_overlay(mut self, trie_overlay: Option<Arc<TrieUpdatesSorted>>) -> Self {
         self.trie_overlay = trie_overlay;
         self
     }
 
     /// Set the hashed state overlay
+    ///
+    /// This overlay will be applied on top of any reverts applied via `with_block_number`.
     pub fn with_hashed_state_overlay(
         mut self,
         hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
@@ -64,24 +73,46 @@ where
     /// Validates that there are sufficient changesets to revert to the requested block number.
     ///
     /// Returns an error if the `MerkleChangeSets` checkpoint doesn't cover the requested block.
+    /// Takes into account both the stage checkpoint and the prune checkpoint to determine the
+    /// available data range.
     fn validate_changesets_availability(
         &self,
         provider: &F::Provider,
         requested_block: BlockNumber,
     ) -> Result<(), ProviderError> {
-        // Get the MerkleChangeSets stage checkpoint - let errors propagate as-is
-        let checkpoint = provider.get_stage_checkpoint(StageId::MerkleChangeSets)?;
+        // Get the MerkleChangeSets stage and prune checkpoints.
+        let stage_checkpoint = provider.get_stage_checkpoint(StageId::MerkleChangeSets)?;
+        let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::MerkleChangeSets)?;
 
-        // If there's no checkpoint at all or block range details are missing, we can't revert
-        let available_range = checkpoint
-            .and_then(|chk| {
-                chk.merkle_changesets_stage_checkpoint()
-                    .map(|stage_chk| stage_chk.block_range.from..=chk.block_number)
-            })
-            .ok_or_else(|| ProviderError::InsufficientChangesets {
-                requested: requested_block,
-                available: 0..=0,
+        // Get the upper bound from stage checkpoint
+        let upper_bound =
+            stage_checkpoint.as_ref().map(|chk| chk.block_number).ok_or_else(|| {
+                ProviderError::InsufficientChangesets {
+                    requested: requested_block,
+                    available: 0..=0,
+                }
             })?;
+
+        // Extract a possible lower bound from stage checkpoint if available
+        let stage_lower_bound = stage_checkpoint.as_ref().and_then(|chk| {
+            chk.merkle_changesets_stage_checkpoint().map(|stage_chk| stage_chk.block_range.from)
+        });
+
+        // Extract a possible lower bound from prune checkpoint if available
+        // The prune checkpoint's block_number is the highest pruned block, so data is available
+        // starting from the next block
+        let prune_lower_bound =
+            prune_checkpoint.and_then(|chk| chk.block_number.map(|block| block + 1));
+
+        // Use the higher of the two lower bounds (or error if neither is available)
+        let Some(lower_bound) = stage_lower_bound.max(prune_lower_bound) else {
+            return Err(ProviderError::InsufficientChangesets {
+                requested: requested_block,
+                available: 0..=upper_bound,
+            })
+        };
+
+        let available_range = lower_bound..=upper_bound;
 
         // Check if the requested block is within the available range
         if !available_range.contains(&requested_block) {
@@ -105,11 +136,13 @@ where
             self.validate_changesets_availability(&provider, from_block)?;
 
             // Collect trie reverts
-            let mut trie_updates_mut = provider.trie_reverts(from_block)?;
+            let mut trie_updates_mut = provider.trie_reverts(from_block + 1)?;
 
             // Collect state reverts using HashedPostState::from_reverts
-            let reverted_state =
-                HashedPostState::from_reverts::<KeccakKeyHasher>(provider.tx_ref(), from_block..)?;
+            let reverted_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
+                provider.tx_ref(),
+                from_block + 1..,
+            )?;
             let mut hashed_state_mut = reverted_state.into_sorted();
 
             // Extend with overlays if provided
@@ -120,6 +153,14 @@ where
             if let Some(hashed_state_overlay) = &self.hashed_state_overlay {
                 hashed_state_mut.extend_ref(hashed_state_overlay);
             }
+
+            debug!(
+                target: "providers::state::overlay",
+                ?from_block,
+                num_trie_updates = ?trie_updates_mut.total_len(),
+                num_state_updates = ?hashed_state_mut.total_len(),
+                "Reverted to target block",
+            );
 
             (Arc::new(trie_updates_mut), Arc::new(hashed_state_mut))
         } else {

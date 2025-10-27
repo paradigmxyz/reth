@@ -1,20 +1,25 @@
 use crate::{
     metrics::ParallelTrieMetrics,
-    proof_task::{AccountMultiproofInput, ProofWorkerHandle, StorageProofInput},
+    proof_task::{
+        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        StorageProofInput,
+    },
     root::ParallelStateRootError,
     StorageRootTargets,
 };
 use alloy_primitives::{map::B256Set, B256};
+use crossbeam_channel::{unbounded as crossbeam_unbounded, Receiver as CrossbeamReceiver};
 use dashmap::DashMap;
 use reth_execution_errors::StorageRootError;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
     updates::TrieUpdatesSorted,
-    DecodedMultiProof, DecodedStorageMultiProof, HashedPostStateSorted, MultiProofTargets, Nibbles,
+    DecodedMultiProof, DecodedStorageMultiProof, HashedPostState, HashedPostStateSorted,
+    MultiProofTargets, Nibbles,
 };
 use reth_trie_common::added_removed_keys::MultiAddedRemovedKeys;
-use std::sync::{mpsc::Receiver, Arc};
+use std::{sync::Arc, time::Instant};
 use tracing::trace;
 
 /// Parallel proof calculator.
@@ -83,15 +88,15 @@ impl ParallelProof {
         self
     }
     /// Queues a storage proof task and returns a receiver for the result.
-    fn queue_storage_proof(
+    fn send_storage_proof(
         &self,
         hashed_address: B256,
         prefix_set: PrefixSet,
         target_slots: B256Set,
-    ) -> Result<
-        Receiver<Result<DecodedStorageMultiProof, ParallelStateRootError>>,
-        ParallelStateRootError,
-    > {
+    ) -> Result<CrossbeamReceiver<ProofResultMessage>, ParallelStateRootError> {
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let start = Instant::now();
+
         let input = StorageProofInput::new(
             hashed_address,
             prefix_set,
@@ -101,8 +106,13 @@ impl ParallelProof {
         );
 
         self.proof_worker_handle
-            .dispatch_storage_proof(input)
-            .map_err(|e| ParallelStateRootError::Other(e.to_string()))
+            .dispatch_storage_proof(
+                input,
+                ProofResultContext::new(result_tx, 0, HashedPostState::default(), start),
+            )
+            .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
+
+        Ok(result_rx)
     }
 
     /// Generate a storage multiproof according to the specified targets and hashed address.
@@ -122,10 +132,20 @@ impl ParallelProof {
             "Starting storage proof generation"
         );
 
-        let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots)?;
-        let proof_result = receiver.recv().map_err(|_| {
+        let receiver = self.send_storage_proof(hashed_address, prefix_set, target_slots)?;
+        let proof_msg = receiver.recv().map_err(|_| {
             ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
                 format!("channel closed for {hashed_address}"),
+            )))
+        })?;
+
+        // Extract the multiproof from the result
+        let (mut multiproof, _stats) = proof_msg.result?;
+
+        // Extract storage proof from the multiproof
+        let storage_proof = multiproof.storages.remove(&hashed_address).ok_or_else(|| {
+            ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
+                format!("storage proof not found in multiproof for {hashed_address}"),
             )))
         })?;
 
@@ -136,7 +156,7 @@ impl ParallelProof {
             "Storage proof generation completed"
         );
 
-        proof_result
+        Ok(storage_proof)
     }
 
     /// Extends prefix sets with the given multiproof targets and returns the frozen result.
@@ -182,6 +202,9 @@ impl ParallelProof {
         );
 
         // Queue account multiproof request to account worker pool
+        // Create channel for receiving ProofResultMessage
+        let (result_tx, result_rx) = crossbeam_unbounded();
+        let account_multiproof_start_time = Instant::now();
 
         let input = AccountMultiproofInput {
             targets,
@@ -189,19 +212,26 @@ impl ParallelProof {
             collect_branch_node_masks: self.collect_branch_node_masks,
             multi_added_removed_keys: self.multi_added_removed_keys.clone(),
             missed_leaves_storage_roots: self.missed_leaves_storage_roots.clone(),
+            proof_result_sender: ProofResultContext::new(
+                result_tx,
+                0,
+                HashedPostState::default(),
+                account_multiproof_start_time,
+            ),
         };
 
-        let receiver = self
-            .proof_worker_handle
+        self.proof_worker_handle
             .dispatch_account_multiproof(input)
             .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
         // Wait for account multiproof result from worker
-        let (multiproof, stats) = receiver.recv().map_err(|_| {
+        let proof_result_msg = result_rx.recv().map_err(|_| {
             ParallelStateRootError::Other(
                 "Account multiproof channel dropped: worker died or pool shutdown".to_string(),
             )
-        })??;
+        })?;
+
+        let (multiproof, stats) = proof_result_msg.result?;
 
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);

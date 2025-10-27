@@ -406,13 +406,14 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     where
         ChainSpec: reth_chainspec::EthereumHardforks,
     {
+        let toml_config = self.toml_config().prune.clone();
         let Some(mut node_prune_config) = self.node_config().prune_config() else {
             // No CLI config is set, use the toml config.
-            return self.toml_config().prune.clone();
+            return toml_config;
         };
 
         // Otherwise, use the CLI configuration and merge with toml config.
-        node_prune_config.merge(self.toml_config().prune.clone());
+        node_prune_config.merge(toml_config);
         node_prune_config
     }
 
@@ -1206,6 +1207,7 @@ mod tests {
                     storage_history_before: None,
                     bodies_pre_merge: false,
                     bodies_distance: None,
+                    #[expect(deprecated)]
                     receipts_log_filter: None,
                     bodies_before: None,
                 },
