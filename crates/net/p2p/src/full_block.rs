@@ -451,28 +451,27 @@ where
     }
 
     fn on_headers_response(&mut self, headers: WithPeerId<Vec<Client::Header>>) {
-        let (peer, mut headers_falling) =
+        let (peer, mut headers_desc) =
             headers.map(|h| h.into_iter().map(SealedHeader::seal_slow).collect::<Vec<_>>()).split();
 
         // fill in the response if it's the correct length
-        if headers_falling.len() == self.count as usize {
-            // sort headers from highest to lowest block number
-            headers_falling.sort_unstable_by_key(|h| Reverse(h.number()));
+        if headers_desc.len() == self.count as usize {
+            headers_desc.sort_unstable_by_key(|h| Reverse(h.number()));
 
             // check the starting hash
-            if headers_falling[0].hash() == self.start_hash {
-                let headers_rising = headers_falling.iter().rev().cloned().collect::<Vec<_>>();
+            if headers_desc[0].hash() == self.start_hash {
+                let headers_asc = headers_desc.iter().rev().cloned().collect::<Vec<_>>();
                 // check if the downloaded headers are valid
-                if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
+                if let Err(err) = self.consensus.validate_header_range(&headers_asc) {
                     debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
                     self.client.report_bad_message(peer);
                 }
 
                 // get the bodies request so it can be polled later
-                let hashes = headers_falling.iter().map(|h| h.hash()).collect::<Vec<_>>();
+                let hashes = headers_desc.iter().map(|h| h.hash()).collect::<Vec<_>>();
 
                 // populate the pending headers
-                self.pending_headers = headers_falling.clone().into();
+                self.pending_headers = headers_desc.clone().into();
 
                 // set the actual request if it hasn't been started yet
                 if !self.has_bodies_request_started() {
@@ -481,7 +480,7 @@ where
                 }
 
                 // set the headers response
-                self.headers = Some(headers_falling);
+                self.headers = Some(headers_desc);
             } else {
                 // received a different header than requested
                 self.client.report_bad_message(peer);
