@@ -759,15 +759,18 @@ impl MultiProofTask {
                 self.multiproof_manager.proof_worker_handle.has_available_storage_workers();
 
         let mut dispatch = |proof_targets| {
-            self.multiproof_manager.dispatch(PendingMultiproofTask::Regular(MultiproofInput {
-                config: self.config.clone(),
-                source: None,
-                hashed_state_update: Default::default(),
-                proof_targets,
-                proof_sequence_number: self.proof_sequencer.next_sequence(),
-                state_root_message_sender: self.tx.clone(),
-                multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
-            }));
+            self.multiproof_manager.dispatch(
+                MultiproofInput {
+                    config: self.config.clone(),
+                    source: None,
+                    hashed_state_update: Default::default(),
+                    proof_targets,
+                    proof_sequence_number: self.proof_sequencer.next_sequence(),
+                    state_root_message_sender: self.tx.clone(),
+                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
+                }
+                .into(),
+            );
             chunks += 1;
         };
 
@@ -904,15 +907,18 @@ impl MultiProofTask {
             );
             spawned_proof_targets.extend_ref(&proof_targets);
 
-            self.multiproof_manager.dispatch(PendingMultiproofTask::Regular(MultiproofInput {
-                config: self.config.clone(),
-                source: Some(source),
-                hashed_state_update,
-                proof_targets,
-                proof_sequence_number: self.proof_sequencer.next_sequence(),
-                state_root_message_sender: self.tx.clone(),
-                multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
-            }));
+            self.multiproof_manager.dispatch(
+                MultiproofInput {
+                    config: self.config.clone(),
+                    source: Some(source),
+                    hashed_state_update,
+                    proof_targets,
+                    proof_sequence_number: self.proof_sequencer.next_sequence(),
+                    state_root_message_sender: self.tx.clone(),
+                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
+                }
+                .into(),
+            );
 
             chunks += 1;
         };
