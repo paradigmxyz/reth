@@ -382,18 +382,6 @@ impl MultiproofManager {
         }
     }
 
-    /// Signals that a multiproof calculation has finished.
-    fn on_calculation_complete(&mut self) {
-        self.inflight = self.inflight.saturating_sub(1);
-        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
-        self.metrics
-            .pending_storage_multiproofs_histogram
-            .record(self.proof_worker_handle.pending_storage_tasks() as f64);
-        self.metrics
-            .pending_account_multiproofs_histogram
-            .record(self.proof_worker_handle.pending_account_tasks() as f64);
-    }
-
     /// Dispatches a single storage proof calculation to worker pool.
     fn dispatch_storage_proof(&mut self, storage_multiproof_input: StorageMultiproofInput) {
         let StorageMultiproofInput {
@@ -447,6 +435,18 @@ impl MultiproofManager {
         }
 
         self.inflight += 1;
+        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        self.metrics
+            .pending_storage_multiproofs_histogram
+            .record(self.proof_worker_handle.pending_storage_tasks() as f64);
+        self.metrics
+            .pending_account_multiproofs_histogram
+            .record(self.proof_worker_handle.pending_account_tasks() as f64);
+    }
+
+    /// Signals that a multiproof calculation has finished.
+    fn on_calculation_complete(&mut self) {
+        self.inflight = self.inflight.saturating_sub(1);
         self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
         self.metrics
             .pending_storage_multiproofs_histogram
