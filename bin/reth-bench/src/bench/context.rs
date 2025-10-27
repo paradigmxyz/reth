@@ -1,7 +1,10 @@
 //! This contains the [`BenchContext`], which is information that all replay-based benchmarks need.
 //! The initialization code is also the same, so this can be shared across benchmark commands.
 
-use crate::{authenticated_transport::AuthenticatedTransportConnect, bench_mode::BenchMode};
+use crate::{
+    authenticated_transport::AuthenticatedTransportConnect, bench::block_storage::BlockFileReader,
+    bench_mode::BenchMode,
+};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::address;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
@@ -99,6 +102,10 @@ impl BenchContext {
                 .ok_or_else(|| eyre::eyre!("Failed to fetch latest block for --advance"))?;
             let head_number = head_block.header.number;
             (Some(head_number), Some(head_number + advance))
+        } else if bench_args.from_file.is_some() {
+            let file = BlockFileReader::get_header(bench_args.from_file.as_ref().unwrap())?;
+            let (start, end) = file.block_range();
+            (Some(start), Some(end))
         } else {
             (bench_args.from, bench_args.to)
         };

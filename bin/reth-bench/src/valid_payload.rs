@@ -2,7 +2,8 @@
 //! response. This is useful for benchmarking, as it allows us to wait for a payload to be valid
 //! before sending additional calls.
 
-use alloy_eips::eip7685::Requests;
+use alloy_consensus::{Block, BlockHeader, Sealable, Transaction};
+use alloy_eips::{eip7685::Requests, Encodable2718};
 use alloy_provider::{ext::EngineApi, network::AnyRpcBlock, Network, Provider};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated,
@@ -146,6 +147,17 @@ pub(crate) fn block_to_new_payload(
         })?
         .into_consensus();
 
+    consensus_block_to_new_payload(block, is_optimism)
+}
+
+pub(crate) fn consensus_block_to_new_payload<T, H>(
+    block: Block<T, H>,
+    is_optimism: bool,
+) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value)>
+where
+    T: Encodable2718 + Transaction,
+    H: BlockHeader + Sealable,
+{
     // Convert to execution payload
     let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
 
@@ -160,7 +172,7 @@ pub(crate) fn block_to_new_payload(
                         serde_json::to_value((
                             OpExecutionPayloadV4 {
                                 payload_inner: payload,
-                                withdrawals_root: block.withdrawals_root.unwrap(),
+                                withdrawals_root: block.withdrawals_root().unwrap(),
                             },
                             cancun.versioned_hashes.clone(),
                             cancun.parent_beacon_block_root,

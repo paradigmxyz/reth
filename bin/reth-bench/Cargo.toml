@@ -25,6 +25,8 @@ reth-tracing.workspace = true
 # alloy
 alloy-eips.workspace = true
 alloy-json-rpc.workspace = true
+alloy-consensus.workspace = true
+alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-provider = { workspace = true, features = ["engine-api", "reqwest-rustls-tls"], default-features = false }
 alloy-pubsub.workspace = true

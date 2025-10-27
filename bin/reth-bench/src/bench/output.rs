@@ -15,6 +15,9 @@ pub(crate) const COMBINED_OUTPUT_SUFFIX: &str = "combined_latency.csv";
 /// This is the suffix for new payload output csv files.
 pub(crate) const NEW_PAYLOAD_OUTPUT_SUFFIX: &str = "new_payload_latency.csv";
 
+/// This is the suffix for block output files.
+pub(crate) const BLOCK_STORAGE_OUTPUT_SUFFIX: &str = "blocks.bin";
+
 /// This represents the results of a single `newPayload` call in the benchmark, containing the gas
 /// used and the `newPayload` latency.
 #[derive(Debug)]

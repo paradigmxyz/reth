@@ -45,6 +45,15 @@ pub struct BenchmarkArgs {
     )]
     pub engine_rpc_url: String,
 
+    /// The path to the file that contains blocks to be used for the benchmark.
+    #[arg(
+        long = "from-file",
+        value_name = "FILE",
+        conflicts_with_all = &["from", "to", "advance"],
+        verbatim_doc_comment
+        )]
+    pub from_file: Option<PathBuf>,
+
     /// The path to the output directory for granular benchmark results.
     #[arg(long, short, value_name = "BENCHMARK_OUTPUT", verbatim_doc_comment)]
     pub output: Option<PathBuf>,
