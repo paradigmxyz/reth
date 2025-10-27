@@ -38,7 +38,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             provider_rw.commit().unwrap();
         }
 
-        let view = OverlayStateProviderFactory::new(provider_factory.clone());
+        let factory = OverlayStateProviderFactory::new(provider_factory.clone());
 
         // state root
         group.bench_function(BenchmarkId::new("sync root", size), |b| {
