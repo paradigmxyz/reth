@@ -564,6 +564,21 @@ pub enum ProofResult {
     },
 }
 
+impl ProofResult {
+    /// Convert this proof result into a `DecodedMultiProof`.
+    ///
+    /// For account multiproofs, returns the multiproof directly (discarding stats).
+    /// For storage proofs, wraps the storage proof into a minimal multiproof.
+    pub fn into_multiproof(self) -> DecodedMultiProof {
+        match self {
+            ProofResult::AccountMultiproof(multiproof, _stats) => multiproof,
+            ProofResult::StorageProof { hashed_address, proof } => {
+                DecodedMultiProof::from_storage_proof(hashed_address, proof)
+            }
+        }
+    }
+}
+
 /// Channel used by worker threads to deliver `ProofResultMessage` items back to
 /// `MultiProofTask`.
 ///
