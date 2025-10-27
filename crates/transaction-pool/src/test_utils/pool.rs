@@ -70,8 +70,6 @@ pub(crate) struct MockTransactionSimulator<R: Rng> {
     senders: Vec<Address>,
     /// What scenarios to execute.
     scenarios: Vec<ScenarioType>,
-    /// All previous scenarios executed by a sender.
-    executed: HashMap<Address, ExecutedScenarios>,
     /// "Validates" generated transactions.
     validator: MockTransactionFactory,
     /// The rng instance used to select senders and scenarios.
@@ -89,7 +87,6 @@ impl<R: Rng> MockTransactionSimulator<R> {
             senders,
             scenarios: config.scenarios,
             tx_generator: config.tx_generator,
-            executed: Default::default(),
             validator: Default::default(),
             rng,
         }
@@ -172,44 +169,6 @@ impl MockSimulatorConfig {
 pub(crate) enum ScenarioType {
     OnchainNonce,
     HigherNonce { skip: u64 },
-}
-
-/// The actual scenario, ready to be executed
-///
-/// A scenario produces one or more transactions and expects a certain Outcome.
-///
-/// An executed scenario can affect previous executed transactions
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub(crate) enum Scenario {
-    /// Send a tx with the same nonce as on chain.
-    OnchainNonce { nonce: u64 },
-    /// Send a tx with a higher nonce that what the sender has on chain
-    HigherNonce { onchain: u64, nonce: u64 },
-    Multi {
-        // Execute multiple test scenarios
-        scenario: Vec<Self>,
-    },
-}
-
-/// Represents an executed scenario
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub(crate) struct ExecutedScenario {
-    /// balance at the time of execution
-    balance: U256,
-    /// nonce at the time of execution
-    nonce: u64,
-    /// The executed scenario
-    scenario: Scenario,
-}
-
-/// All executed scenarios by a sender
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub(crate) struct ExecutedScenarios {
-    sender: Address,
-    scenarios: Vec<ExecutedScenario>,
 }
 
 #[cfg(test)]
