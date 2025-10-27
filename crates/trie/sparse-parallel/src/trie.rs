@@ -688,6 +688,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         Ok(())
     }
 
+    #[instrument(level = "trace", target = "trie::sparse::parallel", skip(self))]
     fn root(&mut self) -> B256 {
         trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
 
@@ -703,6 +704,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         root_rlp.as_hash().unwrap_or(EMPTY_ROOT_HASH)
     }
 
+    #[instrument(level = "trace", target = "trie::sparse::parallel", skip(self))]
     fn update_subtrie_hashes(&mut self) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
@@ -1339,7 +1341,7 @@ impl ParallelSparseTrie {
 
     /// Drains any [`SparseTrieUpdatesAction`]s from the given subtrie, and applies each action to
     /// the given `updates` set. If the given set is None then this is a no-op.
-    #[instrument(target = "trie::parallel_sparse", skip_all)]
+    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all)]
     fn apply_subtrie_update_actions(
         &mut self,
         update_actions: impl Iterator<Item = SparseTrieUpdatesAction>,
@@ -1363,7 +1365,7 @@ impl ParallelSparseTrie {
     }
 
     /// Updates hashes for the upper subtrie, using nodes from both upper and lower subtries.
-    #[instrument(target = "trie::parallel_sparse", skip_all, ret(level = "trace"))]
+    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, ret)]
     fn update_upper_subtrie_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
         trace!(target: "trie::parallel_sparse", "Updating upper subtrie hashes");
 
@@ -1441,7 +1443,7 @@ impl ParallelSparseTrie {
     ///
     /// IMPORTANT: The method removes the subtries from `lower_subtries`, and the caller is
     /// responsible for returning them back into the array.
-    #[instrument(target = "trie::parallel_sparse", skip_all, fields(prefix_set_len = prefix_set.len()))]
+    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, fields(prefix_set_len = prefix_set.len()))]
     fn take_changed_lower_subtries(
         &mut self,
         prefix_set: &mut PrefixSet,
@@ -1598,7 +1600,7 @@ impl ParallelSparseTrie {
 
     /// Return updated subtries back to the trie after executing any actions required on the
     /// top-level `SparseTrieUpdates`.
-    #[instrument(target = "trie::parallel_sparse", skip_all)]
+    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all)]
     fn insert_changed_subtries(
         &mut self,
         changed_subtries: impl IntoIterator<Item = ChangedSubtrie>,
@@ -2086,7 +2088,7 @@ impl SparseSubtrie {
     /// # Panics
     ///
     /// If the node at the root path does not exist.
-    #[instrument(target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret(level = "trace"))]
+    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret)]
     fn update_hashes(
         &mut self,
         prefix_set: &mut PrefixSet,
