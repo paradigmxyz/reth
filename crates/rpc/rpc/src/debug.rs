@@ -645,7 +645,12 @@ where
         let (mut exec_witness, lowest_block_number) = self
             .eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
-                let db = StateProviderDatabase::new(&state_provider);
+                let mut db = State::builder().with_database(StateProviderDatabase::new(&state_provider)).build();
+                let evm_env = this.eth_api().evm_config().evm_env(block.header()).map_err(RethError::other).map_err(Eth::Error::from_eth_err)?;
+
+                // Apply pre-execution changes to ensure correct state setup, especially for pruned nodes
+                this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+
                 let block_executor = this.eth_api().evm_config().executor(db);
 
                 let mut witness_record = ExecutionWitnessRecord::default();
