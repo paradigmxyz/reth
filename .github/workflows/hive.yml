@@ -68,7 +68,7 @@ jobs:
           chmod +x hive
 
       - name: Upload hive assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: hive_assets
           path: ./hive_assets
