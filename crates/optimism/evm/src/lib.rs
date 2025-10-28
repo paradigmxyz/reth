@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
+use alloc::{collections::BTreeMap, sync::Arc};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::Decodable2718;
 use alloy_evm::{EvmFactory, FromRecoveredTx, FromTxWithEncoded};
@@ -511,7 +511,7 @@ mod tests {
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
         // including block1_hash and block2_hash, and the execution_outcome
         let chain: Chain<OpPrimitives> =
-            Chain::new([block1, block2], execution_outcome.clone(), None);
+            Chain::new([block1, block2], execution_outcome.clone(), BTreeMap::new());
 
         // Assert that the proper receipt vector is returned for block1_hash
         assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));

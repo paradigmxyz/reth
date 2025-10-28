@@ -2736,7 +2736,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
 
-        Ok(Chain::new(blocks, execution_state, None))
+        Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
     }
 
     fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {

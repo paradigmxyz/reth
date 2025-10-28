@@ -24,6 +24,7 @@ use reth_stages_api::{
 use reth_static_file_types::StaticFileSegment;
 use std::{
     cmp::Ordering,
+    collections::BTreeMap,
     ops::RangeInclusive,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -411,8 +412,11 @@ where
         // Note: Since we only write to `blocks` if there are any ExExes, we don't need to perform
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
-            let previous_input =
-                self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
+            let previous_input = self.post_execute_commit_input.replace(Chain::new(
+                blocks,
+                state.clone(),
+                BTreeMap::new(),
+            ));
 
             if previous_input.is_some() {
                 // Not processing the previous post execute commit input is a critical error, as it
@@ -512,7 +516,7 @@ where
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
                 bundle_state_with_receipts,
-                None,
+                BTreeMap::new(),
             ));
 
             debug_assert!(

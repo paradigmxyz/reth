@@ -1,6 +1,7 @@
 use crate::StreamBackfillJob;
 use reth_evm::ConfigureEvm;
 use std::{
+    collections::BTreeMap,
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -150,7 +151,7 @@ where
             executor.into_state().take_bundle(),
             results,
         );
-        let chain = Chain::new(blocks, outcome, None);
+        let chain = Chain::new(blocks, outcome, BTreeMap::new());
         Ok(chain)
     }
 }

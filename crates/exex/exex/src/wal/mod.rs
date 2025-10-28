@@ -12,6 +12,7 @@ mod error;
 pub use error::{WalError, WalResult};
 
 use std::{
+    collections::BTreeMap,
     path::Path,
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -243,7 +244,7 @@ mod tests {
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
-    use std::sync::Arc;
+    use std::{collections::BTreeMap, sync::Arc};
 
     fn read_notifications(wal: &Wal) -> WalResult<Vec<ExExNotification>> {
         wal.inner.storage.files_range()?.map_or(Ok(Vec::new()), |range| {
@@ -303,25 +304,25 @@ mod tests {
             new: Arc::new(Chain::new(
                 vec![blocks[0].clone(), blocks[1].clone()],
                 Default::default(),
-                None,
+                BTreeMap::new(),
             )),
         };
         let reverted_notification = ExExNotification::ChainReverted {
-            old: Arc::new(Chain::new(vec![blocks[1].clone()], Default::default(), None)),
+            old: Arc::new(Chain::new(vec![blocks[1].clone()], Default::default(), BTreeMap::new())),
         };
         let committed_notification_2 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
                 vec![block_1_reorged.clone(), blocks[2].clone()],
                 Default::default(),
-                None,
+                BTreeMap::new(),
             )),
         };
         let reorged_notification = ExExNotification::ChainReorged {
-            old: Arc::new(Chain::new(vec![blocks[2].clone()], Default::default(), None)),
+            old: Arc::new(Chain::new(vec![blocks[2].clone()], Default::default(), BTreeMap::new())),
             new: Arc::new(Chain::new(
                 vec![block_2_reorged.clone(), blocks[3].clone()],
                 Default::default(),
-                None,
+                BTreeMap::new(),
             )),
         };
 

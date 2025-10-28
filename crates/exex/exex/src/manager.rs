@@ -15,7 +15,7 @@ use reth_primitives_traits::SealedHeader;
 use reth_provider::HeaderProvider;
 use reth_tracing::tracing::{debug, warn};
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     fmt::Debug,
     future::{poll_fn, Future},
     ops::Not,
@@ -1320,10 +1320,14 @@ mod tests {
         );
 
         let genesis_notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![genesis_block.clone()], Default::default(), None)),
+            new: Arc::new(Chain::new(
+                vec![genesis_block.clone()],
+                Default::default(),
+                BTreeMap::new(),
+            )),
         };
         let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), None)),
+            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), BTreeMap::new())),
         };
 
         let (finalized_headers_tx, rx) = watch::channel(None);

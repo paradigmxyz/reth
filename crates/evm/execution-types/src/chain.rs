@@ -1,7 +1,7 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::ExecutionOutcome;
-use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
+use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc, vec::Vec};
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
@@ -35,10 +35,8 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     ///
     /// Additionally, it includes the individual state changes that led to the current state.
     execution_outcome: ExecutionOutcome<N::Receipt>,
-    /// State trie updates after block is added to the chain.
-    /// NOTE: Currently, trie updates are present only for
-    /// single-block chains that extend the canonical chain.
-    trie_updates: Option<TrieUpdates>,
+    /// State trie updates for each block in the chain, keyed by block number.
+    trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdates>>,
 }
 
 impl<N: NodePrimitives> Default for Chain<N> {
@@ -60,7 +58,7 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn new(
         blocks: impl IntoIterator<Item = RecoveredBlock<N::Block>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_updates: Option<TrieUpdates>,
+        trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdates>>,
     ) -> Self {
         let blocks =
             blocks.into_iter().map(|b| (b.header().number(), b)).collect::<BTreeMap<_, _>>();
@@ -73,9 +71,12 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn from_block(
         block: RecoveredBlock<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_updates: Option<TrieUpdates>,
+        trie_updates: Arc<TrieUpdates>,
     ) -> Self {
-        Self::new([block], execution_outcome, trie_updates)
+        let block_number = block.header().number();
+        let mut trie_updates_map = BTreeMap::new();
+        trie_updates_map.insert(block_number, trie_updates);
+        Self::new([block], execution_outcome, trie_updates_map)
     }
 
     /// Get the blocks in this chain.
@@ -93,14 +94,19 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks.values().map(|block| block.clone_sealed_header())
     }
 
-    /// Get cached trie updates for this chain.
-    pub const fn trie_updates(&self) -> Option<&TrieUpdates> {
-        self.trie_updates.as_ref()
+    /// Get all trie updates for this chain.
+    pub const fn trie_updates(&self) -> &BTreeMap<BlockNumber, Arc<TrieUpdates>> {
+        &self.trie_updates
     }
 
-    /// Remove cached trie updates for this chain.
+    /// Get trie updates for a specific block number.
+    pub fn trie_updates_at(&self, block_number: BlockNumber) -> Option<&Arc<TrieUpdates>> {
+        self.trie_updates.get(&block_number)
+    }
+
+    /// Remove all trie updates for this chain.
     pub fn clear_trie_updates(&mut self) {
-        self.trie_updates.take();
+        self.trie_updates.clear();
     }
 
     /// Get execution outcome of this chain
@@ -111,12 +117,6 @@ impl<N: NodePrimitives> Chain<N> {
     /// Get mutable execution outcome of this chain
     pub const fn execution_outcome_mut(&mut self) -> &mut ExecutionOutcome<N::Receipt> {
         &mut self.execution_outcome
-    }
-
-    /// Prepends the given state to the current state.
-    pub fn prepend_state(&mut self, state: BundleState) {
-        self.execution_outcome.prepend_state(state);
-        self.trie_updates.take(); // invalidate cached trie updates
     }
 
     /// Return true if chain is empty and has no blocks.
@@ -154,10 +154,14 @@ impl<N: NodePrimitives> Chain<N> {
     /// Destructure the chain into its inner components:
     /// 1. The blocks contained in the chain.
     /// 2. The execution outcome representing the final state.
-    /// 3. The optional trie updates.
+    /// 3. The trie updates map.
     pub fn into_inner(
         self,
-    ) -> (ChainBlocks<'static, N::Block>, ExecutionOutcome<N::Receipt>, Option<TrieUpdates>) {
+    ) -> (
+        ChainBlocks<'static, N::Block>,
+        ExecutionOutcome<N::Receipt>,
+        BTreeMap<BlockNumber, Arc<TrieUpdates>>,
+    ) {
         (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_updates)
     }
 
@@ -270,10 +274,12 @@ impl<N: NodePrimitives> Chain<N> {
         &mut self,
         block: RecoveredBlock<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
+        trie_updates: Arc<TrieUpdates>,
     ) {
-        self.blocks.insert(block.header().number(), block);
+        let block_number = block.header().number();
+        self.blocks.insert(block_number, block);
         self.execution_outcome.extend(execution_outcome);
-        self.trie_updates.take(); // reset
+        self.trie_updates.insert(block_number, trie_updates);
     }
 
     /// Merge two chains by appending the given chain into the current one.
@@ -292,7 +298,7 @@ impl<N: NodePrimitives> Chain<N> {
         // Insert blocks from other chain
         self.blocks.extend(other.blocks);
         self.execution_outcome.extend(other.execution_outcome);
-        self.trie_updates.take(); // reset
+        self.trie_updates.extend(other.trie_updates);
 
         Ok(())
     }
@@ -417,7 +423,7 @@ pub struct BlockReceipts<T = reth_ethereum_primitives::Receipt> {
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use crate::{serde_bincode_compat, ExecutionOutcome};
-    use alloc::{borrow::Cow, collections::BTreeMap};
+    use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc};
     use alloy_primitives::BlockNumber;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::{
@@ -452,7 +458,7 @@ pub(super) mod serde_bincode_compat {
     {
         blocks: RecoveredBlocks<'a, N::Block>,
         execution_outcome: serde_bincode_compat::ExecutionOutcome<'a, N::Receipt>,
-        trie_updates: Option<TrieUpdates<'a>>,
+        trie_updates: BTreeMap<BlockNumber, TrieUpdates<'a>>,
     }
 
     #[derive(Debug)]
@@ -505,7 +511,11 @@ pub(super) mod serde_bincode_compat {
             Self {
                 blocks: RecoveredBlocks(Cow::Borrowed(&value.blocks)),
                 execution_outcome: value.execution_outcome.as_repr(),
-                trie_updates: value.trie_updates.as_ref().map(Into::into),
+                trie_updates: value
+                    .trie_updates
+                    .iter()
+                    .map(|(k, v)| (*k, v.as_ref().into()))
+                    .collect(),
             }
         }
     }
@@ -520,7 +530,11 @@ pub(super) mod serde_bincode_compat {
             Self {
                 blocks: value.blocks.0.into_owned(),
                 execution_outcome: ExecutionOutcome::from_repr(value.execution_outcome),
-                trie_updates: value.trie_updates.map(Into::into),
+                trie_updates: value
+                    .trie_updates
+                    .into_iter()
+                    .map(|(k, v)| (k, Arc::new(v.into())))
+                    .collect(),
             }
         }
     }
@@ -564,6 +578,8 @@ pub(super) mod serde_bincode_compat {
 
         #[test]
         fn test_chain_bincode_roundtrip() {
+            use alloc::{collections::BTreeMap, sync::Arc};
+
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
@@ -578,7 +594,7 @@ pub(super) mod serde_bincode_compat {
                     vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                         .unwrap()],
                     Default::default(),
-                    None,
+                    BTreeMap::new(),
                 ),
             };
 
@@ -679,7 +695,7 @@ mod tests {
         block_state_extended.extend(execution_outcome2);
 
         let chain: Chain =
-            Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, None);
+            Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, BTreeMap::new());
 
         // return tip state
         assert_eq!(

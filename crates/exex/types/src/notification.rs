@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use reth_chain_state::CanonStateNotification;
 use reth_execution_types::Chain;
@@ -185,7 +185,7 @@ pub(super) mod serde_bincode_compat {
         use reth_primitives_traits::RecoveredBlock;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
-        use std::sync::Arc;
+        use std::{collections::BTreeMap, sync::Arc};
 
         #[test]
         fn test_exex_notification_bincode_roundtrip() {
@@ -206,13 +206,13 @@ pub(super) mod serde_bincode_compat {
                         vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                             .unwrap()],
                         Default::default(),
-                        None,
+                        BTreeMap::new(),
                     )),
                     new: Arc::new(Chain::new(
                         vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                             .unwrap()],
                         Default::default(),
-                        None,
+                        BTreeMap::new(),
                     )),
                 },
             };

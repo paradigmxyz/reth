@@ -822,6 +822,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                     chain.append_block(
                         exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
+                        exec.trie_updates.clone(),
                     );
                     chain
                 }));
@@ -832,6 +833,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                     chain.append_block(
                         exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
+                        exec.trie_updates.clone(),
                     );
                     chain
                 }));
@@ -839,6 +841,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                     chain.append_block(
                         exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
+                        exec.trie_updates.clone(),
                     );
                     chain
                 }));
@@ -1430,7 +1433,7 @@ mod tests {
                 new: Arc::new(Chain::new(
                     vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
                     sample_execution_outcome.clone(),
-                    None
+                    BTreeMap::new()
                 ))
             }
         );
@@ -1447,12 +1450,12 @@ mod tests {
                 old: Arc::new(Chain::new(
                     vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
                     sample_execution_outcome.clone(),
-                    None
+                    BTreeMap::new()
                 )),
                 new: Arc::new(Chain::new(
                     vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
                     sample_execution_outcome,
-                    None
+                    BTreeMap::new()
                 ))
             }
         );

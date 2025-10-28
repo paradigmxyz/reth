@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs::File,
     ops::RangeInclusive,
     path::{Path, PathBuf},
@@ -181,7 +182,7 @@ mod tests {
     use reth_exex_types::ExExNotification;
     use reth_provider::Chain;
     use reth_testing_utils::generators::{self, random_block};
-    use std::{fs::File, sync::Arc};
+    use std::{collections::BTreeMap, fs::File, sync::Arc};
 
     // wal with 1 block and tx
     // <https://github.com/paradigmxyz/reth/issues/15012>
@@ -213,8 +214,8 @@ mod tests {
         let new_block = random_block(&mut rng, 0, Default::default()).try_recover()?;
 
         let notification = ExExNotification::ChainReorged {
-            new: Arc::new(Chain::new(vec![new_block], Default::default(), None)),
-            old: Arc::new(Chain::new(vec![old_block], Default::default(), None)),
+            new: Arc::new(Chain::new(vec![new_block], Default::default(), BTreeMap::new())),
+            old: Arc::new(Chain::new(vec![old_block], Default::default(), BTreeMap::new())),
         };
 
         // Do a round trip serialization and deserialization
