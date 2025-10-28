@@ -1,8 +1,6 @@
 //! Functionality related to tree state.
 
 use crate::engine::EngineApiKind;
-#[cfg(test)]
-use alloy_eips::eip1898::BlockWithParent;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -322,7 +320,11 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Determines if the second block is a descendant of the first block.
     ///
     /// If the two blocks are the same, this returns `false`.
-    pub(crate) fn is_descendant(&self, first: BlockNumHash, second: BlockWithParent) -> bool {
+    pub(crate) fn is_descendant(
+        &self,
+        first: BlockNumHash,
+        second: alloy_eips::eip1898::BlockWithParent,
+    ) -> bool {
         // If the second block's parent is the first block's hash, then it is a direct child
         // and we can return early.
         if second.parent == first.hash {
