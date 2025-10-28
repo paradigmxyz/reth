@@ -1148,7 +1148,7 @@ where
     /// Currently supported:
     /// - Contract bytecode associated with a code hash.
     ///   The code hash must be provided as a hex string prefixed with 0x.
-    ///   See Geth impl: https://github.com/ethereum/go-ethereum/blob/737ffd1bf0cbee378d0111a5b17ae4724fb2216c/core/rawdb/schema.go#L120
+    ///   See Geth impl: <https://github.com/ethereum/go-ethereum/blob/737ffd1bf0cbee378d0111a5b17ae4724fb2216c/core/rawdb/schema.go#L120>
     async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>> {
         let key_bytes =
             decode(&key).map_err(|_| EthApiError::InvalidParams("Invalid hex key".to_string()))?;
