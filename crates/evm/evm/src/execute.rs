@@ -646,11 +646,11 @@ pub struct WithTxEnv<TxEnv, T> {
 
 impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
     fn tx(&self) -> &Tx {
-        self.tx.as_ref().tx()
+        self.tx.tx()
     }
 
     fn signer(&self) -> &Address {
-        self.tx.as_ref().signer()
+        self.tx.signer()
     }
 }
 
