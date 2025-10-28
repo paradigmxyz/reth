@@ -382,7 +382,7 @@ impl MultiproofManager {
     }
 
     /// Dispatches a single storage proof calculation to worker pool.
-    fn dispatch_storage_proof(&mut self, storage_multiproof_input: StorageMultiproofInput) {
+    fn dispatch_storage_proof(&self, storage_multiproof_input: StorageMultiproofInput) {
         let StorageMultiproofInput {
             hashed_state_update,
             hashed_address,
@@ -448,7 +448,7 @@ impl MultiproofManager {
     }
 
     /// Signals that a multiproof calculation has finished.
-    fn on_calculation_complete(&mut self) {
+    fn on_calculation_complete(&self) {
         self.metrics
             .active_storage_workers_histogram
             .record(self.proof_worker_handle.active_storage_workers() as f64);
@@ -464,7 +464,7 @@ impl MultiproofManager {
     }
 
     /// Dispatches a single multiproof calculation to worker pool.
-    fn dispatch_multiproof(&mut self, multiproof_input: MultiproofInput) {
+    fn dispatch_multiproof(&self, multiproof_input: MultiproofInput) {
         let MultiproofInput {
             source,
             hashed_state_update,
