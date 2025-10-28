@@ -1017,6 +1017,10 @@ pub struct ProofWorkerHandle {
     /// Counter tracking available account workers. Workers decrement when starting work,
     /// increment when finishing. Used to determine whether to chunk multiproofs.
     account_available_workers: Arc<AtomicUsize>,
+    /// Total number of storage workers spawned
+    storage_worker_count: usize,
+    /// Total number of account workers spawned
+    account_worker_count: usize,
 }
 
 impl ProofWorkerHandle {
@@ -1118,6 +1122,8 @@ impl ProofWorkerHandle {
             account_work_tx,
             storage_available_workers,
             account_available_workers,
+            storage_worker_count,
+            account_worker_count,
         }
     }
 
@@ -1139,6 +1145,32 @@ impl ProofWorkerHandle {
     /// Returns the number of pending account tasks in the queue.
     pub fn pending_account_tasks(&self) -> usize {
         self.account_work_tx.len()
+    }
+
+    /// Returns the total number of storage workers in the pool.
+    pub const fn total_storage_workers(&self) -> usize {
+        self.storage_worker_count
+    }
+
+    /// Returns the total number of account workers in the pool.
+    pub const fn total_account_workers(&self) -> usize {
+        self.account_worker_count
+    }
+
+    /// Returns the number of storage workers currently processing tasks.
+    ///
+    /// This is calculated as total workers minus available workers.
+    pub fn active_storage_workers(&self) -> usize {
+        self.storage_worker_count
+            .saturating_sub(self.storage_available_workers.load(Ordering::Relaxed))
+    }
+
+    /// Returns the number of account workers currently processing tasks.
+    ///
+    /// This is calculated as total workers minus available workers.
+    pub fn active_account_workers(&self) -> usize {
+        self.account_worker_count
+            .saturating_sub(self.account_available_workers.load(Ordering::Relaxed))
     }
 
     /// Dispatch a storage proof computation to storage worker pool

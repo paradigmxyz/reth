@@ -9,7 +9,7 @@ use alloy_primitives::{
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use derive_more::derive::Deref;
-use metrics::Histogram;
+use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -349,6 +349,10 @@ impl MultiproofManager {
         proof_worker_handle: ProofWorkerHandle,
         proof_result_tx: CrossbeamSender<ProofResultMessage>,
     ) -> Self {
+        // Initialize the max worker gauges with the worker pool sizes
+        metrics.max_storage_workers.set(proof_worker_handle.total_storage_workers() as f64);
+        metrics.max_account_workers.set(proof_worker_handle.total_account_workers() as f64);
+
         Self {
             inflight: 0,
             metrics,
@@ -433,7 +437,12 @@ impl MultiproofManager {
         }
 
         self.inflight += 1;
-        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        self.metrics
+            .active_storage_workers_histogram
+            .record(self.proof_worker_handle.active_storage_workers() as f64);
+        self.metrics
+            .active_account_workers_histogram
+            .record(self.proof_worker_handle.active_account_workers() as f64);
         self.metrics
             .pending_storage_multiproofs_histogram
             .record(self.proof_worker_handle.pending_storage_tasks() as f64);
@@ -445,7 +454,12 @@ impl MultiproofManager {
     /// Signals that a multiproof calculation has finished.
     fn on_calculation_complete(&mut self) {
         self.inflight = self.inflight.saturating_sub(1);
-        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        self.metrics
+            .active_storage_workers_histogram
+            .record(self.proof_worker_handle.active_storage_workers() as f64);
+        self.metrics
+            .active_account_workers_histogram
+            .record(self.proof_worker_handle.active_account_workers() as f64);
         self.metrics
             .pending_storage_multiproofs_histogram
             .record(self.proof_worker_handle.pending_storage_tasks() as f64);
@@ -507,7 +521,12 @@ impl MultiproofManager {
         }
 
         self.inflight += 1;
-        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        self.metrics
+            .active_storage_workers_histogram
+            .record(self.proof_worker_handle.active_storage_workers() as f64);
+        self.metrics
+            .active_account_workers_histogram
+            .record(self.proof_worker_handle.active_account_workers() as f64);
         self.metrics
             .pending_storage_multiproofs_histogram
             .record(self.proof_worker_handle.pending_storage_tasks() as f64);
@@ -520,8 +539,14 @@ impl MultiproofManager {
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
 pub(crate) struct MultiProofTaskMetrics {
-    /// Histogram of inflight multiproofs.
-    pub inflight_multiproofs_histogram: Histogram,
+    /// Histogram of active storage workers processing proofs.
+    pub active_storage_workers_histogram: Histogram,
+    /// Histogram of active account workers processing proofs.
+    pub active_account_workers_histogram: Histogram,
+    /// Gauge for the maximum number of storage workers in the pool.
+    pub max_storage_workers: Gauge,
+    /// Gauge for the maximum number of account workers in the pool.
+    pub max_account_workers: Gauge,
     /// Histogram of pending storage multiproofs in the queue.
     pub pending_storage_multiproofs_histogram: Histogram,
     /// Histogram of pending account multiproofs in the queue.
