@@ -329,7 +329,12 @@ where
                 let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
                 // only send Ok(_) variants to prewarming task
                 if let Ok(tx) = &tx {
-                    let _ = prewarm_tx.send(tx.clone());
+                    // Avoid deep cloning by creating a new WithTxEnv with Arc::clone for efficient sharing
+                    let prewarm_tx_env = WithTxEnv {
+                        tx_env: tx.tx_env.clone(),  // Clone tx_env only when necessary
+                        tx: Arc::clone(&tx.tx),     // Efficient Arc shallow clone
+                    };
+                    let _ = prewarm_tx.send(prewarm_tx_env);
                 }
                 let _ = execute_tx.send(tx);
             }
