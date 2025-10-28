@@ -72,6 +72,8 @@ where
         } = prune_modes;
 
         Self::default()
+            // Bodies - run first since file deletion is fast
+            .segment_opt(bodies_history.map(Bodies::new))
             // Merkle changesets
             .segment(MerkleChangeSets::new(merkle_changesets))
             // Account history
@@ -84,8 +86,6 @@ where
             .segment_opt(transaction_lookup.map(TransactionLookup::new))
             // Sender recovery
             .segment_opt(sender_recovery.map(SenderRecovery::new))
-            // Bodies
-            .segment_opt(bodies_history.map(Bodies::new))
     }
 }
 
