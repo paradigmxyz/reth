@@ -31,73 +31,31 @@ The `"node"` CLI command, used to run the node itself, does the following at a h
 
 Steps 5-6 are of interest to us as they consume items from the `network` crate:
 
-[File: bin/reth/src/node/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/bin/reth/src/node/mod.rs)
+[File: crates/net/network/src/config.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/config.rs)
 ```rust,ignore
-let network = start_network(network_config(db.clone(), chain_id, genesis_hash)).await?;
+use reth_network::{NetworkConfig, rng_secret_key};
 
-let fetch_client = Arc::new(network.fetch_client().await?);
-let mut pipeline = reth_stages::Pipeline::new()
-    .push(HeaderStage {
-        downloader: headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
-            .batch_size(config.stages.headers.downloader_batch_size)
-            .retries(config.stages.headers.downloader_retries)
-            .build(consensus.clone(), fetch_client.clone()),
-        consensus: consensus.clone(),
-        client: fetch_client.clone(),
-        network_handle: network.clone(),
-        commit_threshold: config.stages.headers.commit_threshold,
-        metrics: HeaderMetrics::default(),
-    })
-    .push(BodyStage {
-        downloader: Arc::new(
-            bodies::bodies::BodiesDownloader::new(
-                fetch_client.clone(),
-                consensus.clone(),
-            )
-            .with_batch_size(config.stages.bodies.downloader_batch_size)
-            .with_retries(config.stages.bodies.downloader_retries)
-            .with_concurrency(config.stages.bodies.downloader_concurrency),
-        ),
-        consensus: consensus.clone(),
-        commit_threshold: config.stages.bodies.commit_threshold,
-    })
-    .push(SenderRecoveryStage {
-        commit_threshold: config.stages.sender_recovery.commit_threshold,
-    })
-    .push(ExecutionStage { config: ExecutorConfig::new_ethereum() });
+// Build network configuration (client implements the necessary storage traits)
+let secret = rng_secret_key();
+let config = NetworkConfig::builder(secret)
+    .set_listener_addr("0.0.0.0:30303".parse().unwrap())
+    .build(client.clone());
 
-if let Some(tip) = self.tip {
-    debug!("Tip manually set: {}", tip);
-    consensus.notify_fork_choice_state(ForkchoiceState {
-        head_block_hash: tip,
-        safe_block_hash: tip,
-        finalized_block_hash: tip,
-    })?;
-}
+// Start the networking stack. This spawns the network and ETH request tasks.
+let network = config.start_network().await?;
 
-// Run pipeline
-info!("Starting pipeline");
-pipeline.run(db.clone()).await?;
+// Obtain a FetchClient to download headers/bodies from peers.
+let fetch_client = network.fetch_client().await?;
+
+// The pipeline stages consume trait-based downloaders from reth_network_p2p/reth_downloaders.
+// See crates/stages/stages/src/stages for the current stage implementations.
 ```
 
 Let's begin by taking a look at the line where the network is started, with the call, unsurprisingly, to `start_network`. Sounds important, doesn't it?
 
-[File: bin/reth/src/node/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/bin/reth/src/node/mod.rs)
-```rust,ignore
-async fn start_network<C>(config: NetworkConfig<C>) -> Result<NetworkHandle, NetworkError>
-where
-    C: BlockReader + HeaderProvider + 'static,
-{
-    let client = config.client.clone();
-    let (handle, network, _txpool, eth) =
-        NetworkManager::builder(config).await?.request_handler(client).split_with_handle();
-
-    tokio::task::spawn(network);
-    // TODO: tokio::task::spawn(txpool);
-    tokio::task::spawn(eth);
-    Ok(handle)
-}
-```
+In practice, you use `NetworkConfig::start_network(self)` which starts the network services and
+returns a `NetworkHandle`. Advanced users can still use `NetworkManager::builder(...)` to customize
+components before spawning tasks.
 
 At a high level, this function is responsible for starting the tasks listed at the start of this chapter.
 
@@ -105,46 +63,55 @@ It gets the handles for the network management, transactions, and ETH requests t
 
 The `NetworkManager::builder` constructor requires a `NetworkConfig` struct to be passed in as a parameter, which can be used as the main entrypoint for setting up the entire network layer:
 
-[File: crates/net/network/src/config.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/config.rs)
+[File: crates/net/network/src/config.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/config.rs)
 ```rust,ignore
-pub struct NetworkConfig<C> {
+pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
-    pub client: Arc<C>,
+    pub client: C,
     /// The node's secret key, from which the node's identity is derived.
     pub secret_key: SecretKey,
     /// All boot nodes to start network discovery with.
-    pub boot_nodes: Vec<NodeRecord>,
-    /// How to set up discovery.
-    pub discovery_v4_config: Discv4Config,
-    /// Address to use for discovery
-    pub discovery_addr: SocketAddr,
+    pub boot_nodes: HashSet<TrustedPeer>,
+    /// How to set up discovery over DNS.
+    pub dns_discovery_config: Option<DnsDiscoveryConfig>,
+    /// Address to use for discovery v4.
+    pub discovery_v4_addr: SocketAddr,
+    /// How to set up discovery version 4.
+    pub discovery_v4_config: Option<Discv4Config>,
+    /// How to set up discovery version 5.
+    pub discovery_v5_config: Option<reth_discv5::Config>,
     /// Address to listen for incoming connections
     pub listener_addr: SocketAddr,
     /// How to instantiate peer manager.
     pub peers_config: PeersConfig,
-    /// How to configure the [SessionManager](crate::session::SessionManager).
+    /// How to configure the [`SessionManager`](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
-    /// The id of the network
-    pub chain: Chain,
-    /// Genesis hash of the network
-    pub genesis_hash: B256,
+    /// The chain id
+    pub chain_id: u64,
     /// The [`ForkFilter`] to use at launch for authenticating sessions.
-    ///
-    /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
-    ///
-    /// For sync from block `0`, this should be the default chain [`ForkFilter`] beginning at the
-    /// first hardfork, `Frontier` for mainnet.
     pub fork_filter: ForkFilter,
     /// The block importer type.
-    pub block_import: Box<dyn BlockImport>,
+    pub block_import: Box<dyn BlockImport<N::NewBlockPayload>>,
     /// The default mode of the network.
     pub network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
-    pub executor: Option<TaskExecutor>,
+    pub executor: Box<dyn TaskSpawner>,
     /// The `Status` message to send to peers at the beginning.
-    pub status: Status,
-    /// Sets the hello message for the p2p handshake in ``RLPx``
-    pub hello_message: HelloMessage,
+    pub status: UnifiedStatus,
+    /// Sets the hello message for the p2p handshake in `RLPx`
+    pub hello_message: HelloMessageWithProtocols,
+    /// Additional protocols to announce and handle in `RLPx`
+    pub extra_protocols: RlpxSubProtocols,
+    /// Whether to disable transaction gossip
+    pub tx_gossip_disabled: bool,
+    /// How to instantiate transactions manager.
+    pub transactions_manager_config: TransactionsManagerConfig,
+    /// The NAT resolver for external IP
+    pub nat: Option<NatResolver>,
+    /// The Ethereum P2P handshake
+    pub handshake: Arc<dyn EthRlpxHandshake>,
+    /// List of block hashes to check for required blocks.
+    pub required_block_hashes: Vec<B256>,
 }
 ```
 
@@ -152,13 +119,13 @@ The discovery task progresses as the network management task is polled, handling
 
 [File: crates/net/network/src/swarm.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/swarm.rs)
 ```rust,ignore
-pub(crate) struct Swarm<C> {
+pub(crate) struct Swarm<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
-    sessions: SessionManager,
+    sessions: SessionManager<N>,
     /// Tracks the entire state of the network and handles events received from the sessions.
-    state: NetworkState<C>,
+    state: NetworkState<N>,
 }
 ```
 
@@ -176,50 +143,67 @@ Let's walk through how each is implemented, and then apply that knowledge to und
 
 The `NetworkHandle` struct is a client for the network management task that can be shared across threads. It wraps an `Arc` around the `NetworkInner` struct, defined as follows:
 
-[File: crates/net/network/src/network.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/network.rs)
+[File: crates/net/network/src/network.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/network.rs)
 ```rust,ignore
-struct NetworkInner {
+struct NetworkInner<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
-    /// Sender half of the message channel to the [`NetworkManager`].
-    to_manager_tx: UnboundedSender<NetworkHandleMessage>,
+    /// Sender half of the message channel to the [`crate::NetworkManager`].
+    to_manager_tx: UnboundedSender<NetworkHandleMessage<N>>,
     /// The local address that accepts incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
+    /// The secret key used for authenticating sessions.
+    secret_key: SecretKey,
     /// The identifier used by this node.
     local_peer_id: PeerId,
-    /// Access to all the nodes
+    /// Access to all the nodes.
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
+    /// Represents if the network is currently syncing.
+    is_syncing: Arc<AtomicBool>,
+    /// Used to differentiate between an initial pipeline sync or a live sync
+    initial_sync_done: Arc<AtomicBool>,
+    /// The chain id
+    chain_id: Arc<AtomicU64>,
+    /// Whether to disable transaction gossip
+    tx_gossip_disabled: bool,
+    /// The instance of the discv4 service
+    discv4: Option<Discv4>,
+    /// The instance of the discv5 service
+    discv5: Option<Discv5>,
+    /// Sender for high level network events.
+    event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
+    /// The NAT resolver
+    nat: Option<NatResolver>,
 }
 ```
 
 The field of note here is `to_manager_tx`, which is a handle that can be used to send messages in a channel to an instance of the `NetworkManager` struct.
 
-[File: crates/net/network/src/manager.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/manager.rs)
+[File: crates/net/network/src/manager.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/manager.rs)
 ```rust,ignore
-pub struct NetworkManager<C> {
+pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The type that manages the actual network part, which includes connections.
-    swarm: Swarm<C>,
+    swarm: Swarm<N>,
     /// Underlying network handle that can be shared.
-    handle: NetworkHandle,
+    handle: NetworkHandle<N>,
     /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
-    from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage>,
+    from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage<N>>,
     /// Handles block imports according to the `eth` protocol.
-    block_import: Box<dyn BlockImport>,
-    /// All listeners for high level network events.
-    event_listeners: NetworkEventListeners,
-    /// Sender half to send events to the
-    /// [`TransactionsManager`](crate::transactions::TransactionsManager) task, if configured.
-    to_transactions_manager: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
-    /// Sender half to send events to the
-    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) task, if configured.
-    to_eth_request_handler: Option<mpsc::UnboundedSender<IncomingEthRequest>>,
-    /// Tracks the number of active sessions (connected peers).
-    ///
-    /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
-    /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
+    block_import: Box<dyn BlockImport<N::NewBlockPayload>>,
+    /// Sender for high level network events.
+    event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
+    /// Sender half to send events to the transactions task, if configured.
+    to_transactions_manager: Option<UnboundedMeteredSender<NetworkTransactionEvent<N>>>,
+    /// Sender half to send events to the ETH request handler task, if configured.
+    to_eth_request_handler: Option<mpsc::Sender<IncomingEthRequest<N>>>,
+    /// Tracks the number of active session (connected peers).
     num_active_peers: Arc<AtomicUsize>,
+    /// Metrics for the Network
+    metrics: NetworkMetrics,
+    /// Disconnect metrics for the Network
+    disconnect_metrics: DisconnectMetrics,
 }
 ```
 
@@ -231,17 +215,14 @@ While the `NetworkManager` is meant to be spawned as a standalone [`tokio::task`
 
 In the pipeline, the `NetworkHandle` is used to instantiate the `FetchClient` - which we'll get into next - and is used in the `HeaderStage` to update the node's ["status"](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#status-0x00) (record the total difficulty, hash, and height of the last processed block).
 
-[File: crates/stages/src/stages/headers.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/stages/src/stages/headers.rs)
+[File: crates/net/network/src/network.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/network.rs)
 ```rust,ignore
-async fn update_head<DB: Database>(
-    &self,
-    tx: &Transaction<'_, DB>,
-    height: BlockNumber,
-) -> Result<(), StageError> {
-    // --snip--
-    self.network_handle.update_status(height, block_key.hash(), td);
-    // --snip--
+use reth_network_p2p::sync::NetworkSyncUpdater;
+use reth_ethereum_forks::Head;
 
+fn on_new_head(network: &impl NetworkSyncUpdater, head: Head) {
+    // Update advertised status for peers (chain head, fork info, etc.)
+    network.update_status(head);
 }
 ```
 
@@ -251,13 +232,15 @@ Now that we have some understanding about the internals of the network managemen
 
 The `FetchClient` struct, similar to `NetworkHandle`, can be shared across threads, and is a client for fetching data from the network. It's a fairly lightweight struct:
 
-[File: crates/net/network/src/fetch/client.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/fetch/client.rs)
+[File: crates/net/network/src/fetch/client.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/fetch/client.rs)
 ```rust,ignore
-pub struct FetchClient {
+pub struct FetchClient<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Sender half of the request channel.
-    pub(crate) request_tx: UnboundedSender<DownloadRequest>,
+    pub(crate) request_tx: UnboundedSender<DownloadRequest<N>>,
     /// The handle to the peers
     pub(crate) peers_handle: PeersHandle,
+    /// Number of active peer sessions the node's currently handling.
+    pub(crate) num_active_peers: Arc<AtomicUsize>,
 }
 ```
 
@@ -267,25 +250,25 @@ The `request_tx` field is a handle to a channel that can be used to send request
 
 The fields `request_tx` and `peers_handle` are cloned off of the `StateFetcher` struct when instantiating the `FetchClient`, which is the lower-level struct responsible for managing data fetching operations over the network:
 
-[File: crates/net/network/src/fetch/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/fetch/mod.rs)
+[File: crates/net/network/src/fetch/mod.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/fetch/mod.rs)
 ```rust,ignore
-pub struct StateFetcher {
-    /// Currently active [`GetBlockHeaders`] requests
-    inflight_headers_requests:
-        HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<Header>>>>,
-    /// Currently active [`GetBlockBodies`] requests
-    inflight_bodies_requests:
-        HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<BlockBody>>>>,
+pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
+    /// Currently active `GetBlockHeaders` requests
+    inflight_headers_requests: HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<N::BlockHeader>>>>,
+    /// Currently active `GetBlockBodies` requests
+    inflight_bodies_requests: HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<N::BlockBody>>>>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
     peers_handle: PeersHandle,
+    /// Number of active peer sessions the node's currently handling.
+    num_active_peers: Arc<AtomicUsize>,
     /// Requests queued for processing
-    queued_requests: VecDeque<DownloadRequest>,
+    queued_requests: VecDeque<DownloadRequest<N>>,
     /// Receiver for new incoming download requests
-    download_requests_rx: UnboundedReceiverStream<DownloadRequest>,
+    download_requests_rx: UnboundedReceiverStream<DownloadRequest<N>>,
     /// Sender for download requests, used to detach a [`FetchClient`]
-    download_requests_tx: UnboundedSender<DownloadRequest>,
+    download_requests_tx: UnboundedSender<DownloadRequest<N>>,
 }
 ```
 
@@ -421,20 +404,15 @@ When `FetchClient.get_headers` or `FetchClient.get_block_bodies` is called, thos
 
 Every time the `StateFetcher` is polled, it finds the next idle peer available to service the current request (for either a block header, or a block body). In this context, "idle" means any peer that is not currently handling a request from the node:
 
-[File: crates/net/network/src/fetch/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/fetch/mod.rs)
+[File: crates/net/network/src/fetch/mod.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/fetch/mod.rs)
 ```rust,ignore
 /// Returns the next action to return
 fn poll_action(&mut self) -> PollAction {
-    // we only check and not pop here since we don't know yet whether a peer is available.
     if self.queued_requests.is_empty() {
         return PollAction::NoRequests
     }
 
-    let peer_id = if let Some(peer_id) = self.next_peer() {
-        peer_id
-    } else {
-        return PollAction::NoPeersAvailable
-    };
+    let Some(peer_id) = self.next_best_peer() else { return PollAction::NoPeersAvailable };
 
     let request = self.queued_requests.pop_front().expect("not empty");
     let request = self.prepare_block_request(peer_id, request);
@@ -525,9 +503,9 @@ pub struct GetBlockHeaders {
 
 In handling this request, the ETH requests task attempts, starting with `start_block`, to fetch the associated header from the database, increment/decrement the block number to fetch by `skip` depending on the `direction` while checking for overflow/underflow, and checks that bounds specifying the maximum numbers of headers or bytes to send have not been breached.
 
-[File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/eth_requests.rs)
+[File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/eth_requests.rs)
 ```rust,ignore
-fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
+fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
     let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
     let mut headers = Vec::new();
@@ -535,58 +513,41 @@ fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
     let mut block: BlockHashOrNumber = match start_block {
         BlockHashOrNumber::Hash(start) => start.into(),
         BlockHashOrNumber::Number(num) => {
-            if let Some(hash) = self.client.block_hash(num.into()).unwrap_or_default() {
-                hash.into()
-            } else {
-                return headers
-            }
+            let Some(hash) = self.client.block_hash(num).unwrap_or_default() else { return headers };
+            hash.into()
         }
     };
 
     let skip = skip as u64;
-    let mut total_bytes = APPROX_HEADER_SIZE;
+    let mut total_bytes = 0usize;
 
     for _ in 0..limit {
         if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
+            let number = header.number();
+            let parent_hash = header.parent_hash();
+
+            total_bytes += header.length();
+            headers.push(header);
+
+            if headers.len() >= MAX_HEADERS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT { break }
+
             match direction {
                 HeadersDirection::Rising => {
-                    if let Some(next) = (header.number + 1).checked_add(skip) {
+                    if let Some(next) = number.checked_add(1).and_then(|n| n.checked_add(skip)) {
                         block = next.into()
-                    } else {
-                        break
-                    }
+                    } else { break }
                 }
                 HeadersDirection::Falling => {
                     if skip > 0 {
-                        // prevent under flows for block.number == 0 and `block.number - skip <
-                        // 0`
-                        if let Some(next) =
-                            header.number.checked_sub(1).and_then(|num| num.checked_sub(skip))
-                        {
+                        if let Some(next) = number.checked_sub(1).and_then(|n| n.checked_sub(skip)) {
                             block = next.into()
-                        } else {
-                            break
-                        }
+                        } else { break }
                     } else {
-                        block = header.parent_hash.into()
+                        block = parent_hash.into()
                     }
                 }
             }
-
-            headers.push(header);
-
-            if headers.len() >= MAX_HEADERS_SERVE {
-                break
-            }
-
-            total_bytes += APPROX_HEADER_SIZE;
-
-            if total_bytes > SOFT_RESPONSE_LIMIT {
-                break
-            }
-        } else {
-            break
-        }
+        } else { break }
     }
 
     headers
@@ -605,36 +566,26 @@ pub struct GetBlockBodies(
 
 In handling this request, similarly, the ETH requests task attempts, for each hash in the requested order, to fetch the block body (transactions & ommers), while checking that bounds specifying the maximum numbers of bodies or bytes to send have not been breached.
 
-[File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/eth_requests.rs)
+[File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/eth_requests.rs)
 ```rust,ignore
 fn on_bodies_request(
-    &mut self,
+    &self,
     _peer_id: PeerId,
     request: GetBlockBodies,
-    response: oneshot::Sender<RequestResult<BlockBodies>>,
+    response: oneshot::Sender<RequestResult<BlockBodies<<C::Block as Block>::Body>>>,
 ) {
     let mut bodies = Vec::new();
 
-    let mut total_bytes = APPROX_BODY_SIZE;
+    let mut total_bytes = 0usize;
 
     for hash in request.0 {
-        if let Some(block) = self.client.block(hash.into()).unwrap_or_default() {
-            let body = BlockBody { transactions: block.body, ommers: block.ommers };
-
+        if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
+            let body = block.into_body();
+            total_bytes += body.length();
             bodies.push(body);
 
-            total_bytes += APPROX_BODY_SIZE;
-
-            if total_bytes > SOFT_RESPONSE_LIMIT {
-                break
-            }
-
-            if bodies.len() >= MAX_BODIES_SERVE {
-                break
-            }
-        } else {
-            break
-        }
+            if bodies.len() >= MAX_BODIES_SERVE || total_bytes > SOFT_RESPONSE_LIMIT { break }
+        } else { break }
     }
 
     let _ = response.send(Ok(BlockBodies(bodies)));
@@ -650,36 +601,22 @@ in the [transaction-pool](https://reth.rs/docs/reth_transaction_pool/index.html)
 
 Again, like the network management and ETH requests tasks, the transactions task is implemented as an endless future that runs as a background task on a standalone `tokio::task`. It's represented by the `TransactionsManager` struct:
 
-[File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
+[File: crates/net/network/src/transactions/mod.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/transactions/mod.rs)
 ```rust,ignore
-pub struct TransactionsManager<Pool> {
+pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives, PBundle = NetworkPolicies<_, _>> {
     /// Access to the transaction pool.
     pool: Pool,
     /// Network access.
-    network: NetworkHandle,
+    network: NetworkHandle<N>,
     /// Subscriptions to all network-related events.
-    ///
-    /// From which we get all new incoming transaction-related messages.
-    network_events: UnboundedReceiverStream<NetworkEvent>,
-    /// All currently active requests for pooled transactions.
-    inflight_requests: Vec<GetPooledTxRequest>,
-    /// All currently pending transactions grouped by peers.
-    ///
-    /// This way we can track incoming transactions and prevent multiple pool imports for the same
-    /// transaction
-    transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
-    /// Transactions that are currently imported into the `Pool`
-    pool_imports: FuturesUnordered<PoolImportFuture>,
-    /// All the connected peers.
-    peers: HashMap<PeerId, Peer>,
-    /// Send half for the command channel.
-    command_tx: mpsc::UnboundedSender<TransactionsCommand>,
-    /// Incoming commands from [`TransactionsHandle`].
-    command_rx: UnboundedReceiverStream<TransactionsCommand>,
-    /// Incoming commands from [`TransactionsHandle`].
-    pending_transactions: ReceiverStream<TxHash>,
-    /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
-    transaction_events: UnboundedReceiverStream<NetworkTransactionEvent>,
+    network_events: EventStream<NetworkEvent<PeerRequest<N>>>,
+    /// Transaction fetcher to handle inflight and missing transaction requests.
+    transaction_fetcher: TransactionFetcher<N>,
+    /// Tracks peers that announced/sent transactions.
+    transactions_by_peers: HashMap<TxHash, HashSet<PeerId>>,
+    /// Incoming events from the `NetworkManager`.
+    transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent<N>>,
+    // ... (policies, metrics, pending imports, peers, commands)
 }
 ```
 
