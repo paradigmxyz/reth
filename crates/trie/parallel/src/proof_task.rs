@@ -155,12 +155,13 @@ impl ProofWorkerHandle {
                 let _guard = span.enter();
                 let worker = StorageProofWorker::new(
                     task_ctx_clone,
+                    work_rx_clone,
                     worker_id,
                     storage_available_workers_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
                 );
-                worker.run(work_rx_clone)
+                worker.run()
             });
         }
         drop(parent_span);
@@ -183,13 +184,14 @@ impl ProofWorkerHandle {
                 let _guard = span.enter();
                 let worker = AccountProofWorker::new(
                     task_ctx_clone,
+                    work_rx_clone,
                     worker_id,
                     storage_work_tx_clone,
                     account_available_workers_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
                 );
-                worker.run(work_rx_clone)
+                worker.run()
             });
         }
         drop(parent_span);
@@ -612,6 +614,8 @@ enum StorageWorkerJob {
 struct StorageProofWorker<Factory> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
+    /// Channel for receiving work
+    work_rx: CrossbeamReceiver<StorageWorkerJob>,
     /// Unique identifier for this worker (used for tracing)
     worker_id: usize,
     /// Counter tracking worker availability
@@ -628,12 +632,14 @@ where
     /// Creates a new storage proof worker.
     const fn new(
         task_ctx: ProofTaskCtx<Factory>,
+        work_rx: CrossbeamReceiver<StorageWorkerJob>,
         worker_id: usize,
         available_workers: Arc<AtomicUsize>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
     ) -> Self {
         Self {
             task_ctx,
+            work_rx,
             worker_id,
             available_workers,
             #[cfg(feature = "metrics")]
@@ -658,19 +664,26 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
-    fn run(self, work_rx: CrossbeamReceiver<StorageWorkerJob>) {
+    fn run(self) {
+        let Self {
+            task_ctx,
+            work_rx,
+            worker_id,
+            available_workers,
+            #[cfg(feature = "metrics")]
+            metrics,
+        } = self;
+
         // Create provider from factory
-        let provider = self
-            .task_ctx
+        let provider = task_ctx
             .factory
             .database_provider_ro()
             .expect("Storage worker failed to initialize: unable to create provider");
-        let proof_tx =
-            ProofTaskTx::new(provider, self.task_ctx.prefix_sets.clone(), self.worker_id);
+        let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
 
         trace!(
             target: "trie::proof_task",
-            worker_id = self.worker_id,
+            worker_id,
             "Storage worker started"
         );
 
@@ -678,15 +691,16 @@ where
         let mut storage_nodes_processed = 0u64;
 
         // Initially mark this worker as available.
-        self.available_workers.fetch_add(1, Ordering::Relaxed);
+        available_workers.fetch_add(1, Ordering::Relaxed);
 
         while let Ok(job) = work_rx.recv() {
             // Mark worker as busy.
-            self.available_workers.fetch_sub(1, Ordering::Relaxed);
+            available_workers.fetch_sub(1, Ordering::Relaxed);
 
             match job {
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
-                    self.process_storage_proof(
+                    Self::process_storage_proof(
+                        worker_id,
                         &proof_tx,
                         input,
                         proof_result_sender,
@@ -695,7 +709,8 @@ where
                 }
 
                 StorageWorkerJob::BlindedStorageNode { account, path, result_sender } => {
-                    self.process_blinded_node(
+                    Self::process_blinded_node(
+                        worker_id,
                         &proof_tx,
                         account,
                         path,
@@ -706,24 +721,24 @@ where
             }
 
             // Mark worker as available again.
-            self.available_workers.fetch_add(1, Ordering::Relaxed);
+            available_workers.fetch_add(1, Ordering::Relaxed);
         }
 
         trace!(
             target: "trie::proof_task",
-            worker_id = self.worker_id,
+            worker_id,
             storage_proofs_processed,
             storage_nodes_processed,
             "Storage worker shutting down"
         );
 
         #[cfg(feature = "metrics")]
-        self.metrics.record_storage_nodes(storage_nodes_processed as usize);
+        metrics.record_storage_nodes(storage_nodes_processed as usize);
     }
 
     /// Processes a storage proof request.
     fn process_storage_proof<Provider>(
-        &self,
+        worker_id: usize,
         proof_tx: &ProofTaskTx<Provider>,
         input: StorageProofInput,
         proof_result_sender: ProofResultContext,
@@ -737,7 +752,7 @@ where
 
         trace!(
             target: "trie::proof_task",
-            worker_id = self.worker_id,
+            worker_id,
             hashed_address = ?hashed_address,
             prefix_set_len = input.prefix_set.len(),
             target_slots_len = input.target_slots.len(),
@@ -766,7 +781,7 @@ where
         {
             trace!(
                 target: "trie::proof_task",
-                worker_id = self.worker_id,
+                worker_id,
                 hashed_address = ?hashed_address,
                 storage_proofs_processed,
                 "Proof result receiver dropped, discarding result"
@@ -775,7 +790,7 @@ where
 
         trace!(
             target: "trie::proof_task",
-            worker_id = self.worker_id,
+            worker_id,
             hashed_address = ?hashed_address,
             proof_time_us = proof_elapsed.as_micros(),
             total_processed = storage_proofs_processed,
@@ -785,7 +800,7 @@ where
 
     /// Processes a blinded storage node lookup request.
     fn process_blinded_node<Provider>(
-        &self,
+        worker_id: usize,
         proof_tx: &ProofTaskTx<Provider>,
         account: B256,
         path: Nibbles,
@@ -796,21 +811,20 @@ where
     {
         trace!(
             target: "trie::proof_task",
-            worker_id = self.worker_id,
+            worker_id,
             ?account,
             ?path,
             "Processing blinded storage node"
         );
 
-        let storage_node_provider = ProofBlindedStorageProvider::new(
+        let start = Instant::now();
+        let blinded_provider = ProofBlindedStorageProvider::new(
             &proof_tx.provider,
             &proof_tx.provider,
             proof_tx.prefix_sets.clone(),
             account,
         );
-
-        let start = Instant::now();
-        let result = storage_node_provider.trie_node(&path);
+        let result = blinded_provider.trie_node(&path);
         let elapsed = start.elapsed();
 
         *storage_nodes_processed += 1;
@@ -818,7 +832,7 @@ where
         if result_sender.send(result).is_err() {
             trace!(
                 target: "trie::proof_task",
-                worker_id = self.worker_id,
+                worker_id,
                 ?account,
                 ?path,
                 storage_nodes_processed,
@@ -828,7 +842,7 @@ where
 
         trace!(
             target: "trie::proof_task",
-            worker_id = self.worker_id,
+            worker_id,
             ?account,
             ?path,
             elapsed_us = elapsed.as_micros(),
@@ -845,6 +859,8 @@ where
 struct AccountProofWorker<Factory> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
+    /// Channel for receiving work
+    work_rx: CrossbeamReceiver<AccountWorkerJob>,
     /// Unique identifier for this worker (used for tracing)
     worker_id: usize,
     /// Channel for dispatching storage proof work
@@ -863,6 +879,7 @@ where
     /// Creates a new account proof worker.
     const fn new(
         task_ctx: ProofTaskCtx<Factory>,
+        work_rx: CrossbeamReceiver<AccountWorkerJob>,
         worker_id: usize,
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         available_workers: Arc<AtomicUsize>,
@@ -870,6 +887,7 @@ where
     ) -> Self {
         Self {
             task_ctx,
+            work_rx,
             worker_id,
             storage_work_tx,
             available_workers,
@@ -895,19 +913,27 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
-    fn run(self, work_rx: CrossbeamReceiver<AccountWorkerJob>) {
+    fn run(self) {
+        let Self {
+            task_ctx,
+            work_rx,
+            worker_id,
+            storage_work_tx,
+            available_workers,
+            #[cfg(feature = "metrics")]
+            metrics,
+        } = self;
+
         // Create provider from factory
-        let provider = self
-            .task_ctx
+        let provider = task_ctx
             .factory
             .database_provider_ro()
             .expect("Account worker failed to initialize: unable to create provider");
-        let proof_tx =
-            ProofTaskTx::new(provider, self.task_ctx.prefix_sets.clone(), self.worker_id);
+        let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
 
         trace!(
             target: "trie::proof_task",
-            worker_id = self.worker_id,
+            worker_id,
             "Account worker started"
         );
 
@@ -915,23 +941,26 @@ where
         let mut account_nodes_processed = 0u64;
 
         // Count this worker as available only after successful initialization.
-        self.available_workers.fetch_add(1, Ordering::Relaxed);
+        available_workers.fetch_add(1, Ordering::Relaxed);
 
         while let Ok(job) = work_rx.recv() {
             // Mark worker as busy.
-            self.available_workers.fetch_sub(1, Ordering::Relaxed);
+            available_workers.fetch_sub(1, Ordering::Relaxed);
 
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
-                    self.process_account_multiproof(
+                    Self::process_account_multiproof(
+                        worker_id,
                         &proof_tx,
+                        storage_work_tx.clone(),
                         *input,
                         &mut account_proofs_processed,
                     );
                 }
 
                 AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
-                    self.process_blinded_node(
+                    Self::process_blinded_node(
+                        worker_id,
                         &proof_tx,
                         path,
                         result_sender,
@@ -941,25 +970,26 @@ where
             }
 
             // Mark worker as available again.
-            self.available_workers.fetch_add(1, Ordering::Relaxed);
+            available_workers.fetch_add(1, Ordering::Relaxed);
         }
 
         trace!(
             target: "trie::proof_task",
-            worker_id = self.worker_id,
+            worker_id,
             account_proofs_processed,
             account_nodes_processed,
             "Account worker shutting down"
         );
 
         #[cfg(feature = "metrics")]
-        self.metrics.record_account_nodes(account_nodes_processed as usize);
+        metrics.record_account_nodes(account_nodes_processed as usize);
     }
 
     /// Processes an account multiproof request.
     fn process_account_multiproof<Provider>(
-        &self,
+        worker_id: usize,
         proof_tx: &ProofTaskTx<Provider>,
+        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
     ) where
@@ -979,7 +1009,7 @@ where
             target: "trie::proof_task",
             "Account multiproof calculation",
             targets = targets.len(),
-            worker_id = self.worker_id,
+            worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1000,7 +1030,7 @@ where
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
         let storage_proof_receivers = match dispatch_storage_proofs(
-            &self.storage_work_tx,
+            &storage_work_tx,
             &targets,
             &mut storage_prefix_sets,
             collect_branch_node_masks,
@@ -1053,7 +1083,7 @@ where
         {
             trace!(
                 target: "trie::proof_task",
-                worker_id = self.worker_id,
+                worker_id,
                 account_proofs_processed,
                 "Account multiproof receiver dropped, discarding result"
             );
@@ -1070,7 +1100,7 @@ where
 
     /// Processes a blinded account node lookup request.
     fn process_blinded_node<Provider>(
-        &self,
+        worker_id: usize,
         proof_tx: &ProofTaskTx<Provider>,
         path: Nibbles,
         result_sender: Sender<TrieNodeProviderResult>,
@@ -1082,7 +1112,7 @@ where
             target: "trie::proof_task",
             "Blinded account node calculation",
             ?path,
-            worker_id = self.worker_id,
+            worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1091,14 +1121,13 @@ where
             "Processing blinded account node"
         );
 
-        let account_node_provider = ProofBlindedAccountProvider::new(
+        let start = Instant::now();
+        let blinded_provider = ProofBlindedAccountProvider::new(
             &proof_tx.provider,
             &proof_tx.provider,
             proof_tx.prefix_sets.clone(),
         );
-
-        let start = Instant::now();
-        let result = account_node_provider.trie_node(&path);
+        let result = blinded_provider.trie_node(&path);
         let elapsed = start.elapsed();
 
         *account_nodes_processed += 1;
@@ -1106,7 +1135,7 @@ where
         if result_sender.send(result).is_err() {
             trace!(
                 target: "trie::proof_task",
-                worker_id = self.worker_id,
+                worker_id,
                 ?path,
                 account_nodes_processed,
                 "Blinded account node receiver dropped, discarding result"
