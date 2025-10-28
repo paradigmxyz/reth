@@ -317,8 +317,6 @@ where
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
         usize,
     )
-    where
-        I::Tx: Sync,
     {
         // Get the transaction count for prewarming task
         // Use upper bound if available (more accurate), otherwise use lower bound

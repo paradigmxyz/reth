@@ -457,6 +457,7 @@ where
     ///
     /// Note: There are no ordering guarantees; this does not reflect the state produced by
     /// sequential execution.
+    /// @karl_todo : remove Clone trait here once we have done the transition 
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn transact_batch<Tx>(
         self,
