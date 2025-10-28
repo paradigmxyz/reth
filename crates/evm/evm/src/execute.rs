@@ -465,38 +465,6 @@ where
     }
 }
 
-impl<T, Executor> ExecutorTx<Executor>
-    for Arc<WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>>
-where
-    T: ExecutorTx<Executor> + Clone,
-    Executor: BlockExecutor,
-    <<Executor as BlockExecutor>::Evm as Evm>::Tx: Clone,
-    WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>: RecoveredTx<Executor::Transaction>,
-{
-    fn as_executable(&self) -> impl ExecutableTx<Executor> {
-        self.as_ref()
-    }
-
-    fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        match Self::try_unwrap(self) {
-            Ok(with_tx_env) => {
-                // Extract the Arc<T> and try to unwrap it
-                match Arc::try_unwrap(with_tx_env.tx) {
-                    Ok(tx) => tx.into_recovered(),
-                    Err(arc_tx) => {
-                        // If there are multiple references to the tx, clone it
-                        (*arc_tx).clone().into_recovered()
-                    }
-                }
-            }
-            Err(arc) => {
-                // If there are multiple references to WithTxEnv, clone the inner transaction
-                (*arc.tx).clone().into_recovered()
-            }
-        }
-    }
-}
-
 impl<'a, F, DB, Executor, Builder, N> BlockBuilder
     for BasicBlockBuilder<'a, F, Executor, Builder, N>
 where

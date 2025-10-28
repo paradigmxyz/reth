@@ -218,7 +218,6 @@ where
             + StateReader
             + Clone
             + 'static,
-        I::Tx: Sync,
     {
         let span = tracing::Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
@@ -296,7 +295,6 @@ where
     ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-        I::Tx: Sync,
     {
         let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
         let prewarm_handle =
