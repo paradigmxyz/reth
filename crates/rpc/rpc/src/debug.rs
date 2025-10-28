@@ -1156,10 +1156,7 @@ where
             .into());
         }
         if key_bytes[0] != 0x63 {
-            return Err(EthApiError::InvalidParams(
-                "Key prefix must be 0x63 for bytecode".to_string(),
-            )
-            .into());
+            return Err(EthApiError::InvalidParams("Key prefix must be 0x63".to_string()).into());
         }
 
         let code_hash = B256::from_slice(&key_bytes[1..33]);
