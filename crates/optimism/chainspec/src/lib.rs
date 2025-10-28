@@ -626,7 +626,7 @@ mod tests {
                         timestamp: BASE_MAINNET_JOVIAN_TIMESTAMP,
                         ..Default::default()
                     },
-                    ForkId { hash: ForkHash([0x36, 0xe5, 0x8a, 0x5f]), next: 0 },
+                    BASE_MAINNET.hardfork_fork_id(OpHardfork::Jovian).unwrap(),
                 ),
             ],
         );
@@ -692,7 +692,7 @@ mod tests {
                         timestamp: OP_SEPOLIA_JOVIAN_TIMESTAMP,
                         ..Default::default()
                     },
-                    ForkId { hash: ForkHash([0xdb, 0xdb, 0x04, 0x4d]), next: 0 },
+                    OP_SEPOLIA.hardfork_fork_id(OpHardfork::Jovian).unwrap(),
                 ),
             ],
         );
@@ -768,7 +768,7 @@ mod tests {
                         timestamp: OP_MAINNET_JOVIAN_TIMESTAMP,
                         ..Default::default()
                     },
-                    ForkId { hash: ForkHash([0xff, 0x25, 0x73, 0x19]), next: 0 },
+                    OP_MAINNET.hardfork_fork_id(OpHardfork::Jovian).unwrap(),
                 ),
             ],
         );
@@ -834,7 +834,7 @@ mod tests {
                         timestamp: OP_SEPOLIA_JOVIAN_TIMESTAMP,
                         ..Default::default()
                     },
-                    ForkId { hash: ForkHash([0x12, 0x0c, 0x61, 0xc0]), next: 0 },
+                    BASE_SEPOLIA.hardfork_fork_id(OpHardfork::Jovian).unwrap(),
                 ),
             ],
         );
@@ -879,7 +879,7 @@ mod tests {
     #[test]
     fn latest_base_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0x36, 0xe5, 0x8a, 0x5f]), next: 0 },
+            ForkId { hash: ForkHash([0xfa, 0x71, 0x70, 0xef]), next: 0 },
             BASE_MAINNET.latest_fork_id()
         )
     }
@@ -888,7 +888,7 @@ mod tests {
     fn latest_base_mainnet_fork_id_with_builder() {
         let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
         assert_eq!(
-            ForkId { hash: ForkHash([0x36, 0xe5, 0x8a, 0x5f]), next: 0 },
+            ForkId { hash: ForkHash([0xfa, 0x71, 0x70, 0xef]), next: 0 },
             base_mainnet.latest_fork_id()
         )
     }
