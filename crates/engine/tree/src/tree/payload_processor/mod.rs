@@ -318,7 +318,7 @@ where
         let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
             for tx in transactions {
-                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx });
+                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
                 // only send Ok(_) variants to prewarming task
                 if let Ok(tx) = &tx {
                     let _ = prewarm_tx.send(tx.clone());

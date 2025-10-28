@@ -521,7 +521,7 @@ where
         done_tx: Sender<()>,
     ) -> mpsc::Sender<IndexedTransaction<Tx>>
     where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
         let (tx, rx) = mpsc::channel();
         let ctx = self.clone();
