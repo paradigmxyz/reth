@@ -44,7 +44,7 @@ pub(crate) enum BlockSource {
 /// closed, open, or file-based range of blocks.
 pub(crate) struct BenchContext {
     /// The auth provider is used for engine API queries.
-    pub(crate) auth_provider: RootProvider<AnyNetwork>,
+    pub(crate) auth_provider: Option<RootProvider<AnyNetwork>>,
     /// The source of blocks for the benchmark.
     pub(crate) block_source: BlockSource,
     /// Whether the chain is an OP rollup.
@@ -70,24 +70,19 @@ impl BenchContext {
             }
         }
 
-        // Construct the authenticated provider first (needed for --advance)
-        let auth_jwt = bench_args
-            .auth_jwtsecret
-            .clone()
-            .ok_or_else(|| eyre::eyre!("--jwt-secret must be provided for authenticated RPC"))?;
+        // Construct the authenticated provider if it is provided
+        let auth_provider = if let Some(auth_jwt) = bench_args.auth_jwtsecret.clone() {
+            let jwt = std::fs::read_to_string(auth_jwt)?;
+            let jwt = JwtSecret::from_hex(jwt)?;
+            let auth_url = Url::parse(&bench_args.engine_rpc_url)?;
 
-        // Fetch jwt from file (the jwt is hex encoded so we will decode it after)
-        let jwt = std::fs::read_to_string(auth_jwt)?;
-        let jwt = JwtSecret::from_hex(jwt)?;
-
-        // Get engine url
-        let auth_url = Url::parse(&bench_args.engine_rpc_url)?;
-
-        // Construct the authed transport
-        info!("Connecting to Engine RPC at {} for replay", auth_url);
-        let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
-        let client = ClientBuilder::default().connect_with(auth_transport).await?;
-        let auth_provider = RootProvider::<AnyNetwork>::new(client);
+            info!("Connecting to Engine RPC at {} for replay", auth_url);
+            let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
+            let client = ClientBuilder::default().connect_with(auth_transport).await?;
+            Some(RootProvider::<AnyNetwork>::new(client))
+        } else {
+            None
+        };
 
         // Determine block source, benchmark mode, and whether it's optimism - all in one place
         let (block_source, is_optimism) = if let Some(file_path) = &bench_args.from_file {
@@ -103,8 +98,7 @@ impl BenchContext {
             (block_source, is_optimism)
         } else {
             // RPC-based loading
-            let rpc_url = rpc_url
-                .ok_or_else(|| eyre::eyre!("Either --rpc-url or --from-file must be provided"))?;
+            let rpc_url = rpc_url.ok_or_eyre("Either --rpc-url or --from-file must be provided")?;
 
             info!("Running benchmark using data from RPC URL: {}", rpc_url);
 
@@ -126,9 +120,11 @@ impl BenchContext {
                 }
 
                 let head_block = auth_provider
+                    .as_ref()
+                    .ok_or_eyre("--jwt-secret must be provided for authenticated RPC")?
                     .get_block_by_number(BlockNumberOrTag::Latest)
                     .await?
-                    .ok_or_else(|| eyre::eyre!("Failed to fetch latest block for --advance"))?;
+                    .ok_or_eyre("Failed to fetch latest block for --advance")?;
                 let head_number = head_block.header.number;
                 (Some(head_number), Some(head_number + advance))
             } else {

@@ -60,6 +60,9 @@ impl Command {
 
         let buffer_size = self.rpc_block_buffer_size;
 
+        let auth_provider =
+            auth_provider.ok_or_eyre("--jwt-secret must be provided for authenticated RPC")?;
+
         // Use a oneshot channel to propagate errors from the spawned task
         let (error_sender, mut error_receiver) = tokio::sync::oneshot::channel();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer_size);
