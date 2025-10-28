@@ -20,219 +20,6 @@ use reth_trie_parallel::{
 use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
-/// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
-/// state.
-#[derive(Default, Debug)]
-pub struct SparseTrieUpdate {
-    /// The state update that was used to calculate the proof
-    pub(crate) state: HashedPostState,
-    /// The calculated multiproof
-    pub(crate) multiproof: DecodedMultiProof,
-}
-
-impl SparseTrieUpdate {
-    /// Returns true if the update is empty.
-    pub(super) fn is_empty(&self) -> bool {
-        self.state.is_empty() && self.multiproof.is_empty()
-    }
-
-    /// Construct update from multiproof.
-    #[cfg(test)]
-    pub(super) fn from_multiproof(multiproof: reth_trie::MultiProof) -> alloy_rlp::Result<Self> {
-        Ok(Self { multiproof: multiproof.try_into()?, ..Default::default() })
-    }
-
-    /// Extend update with contents of the other.
-    pub(super) fn extend(&mut self, other: Self) {
-        self.state.extend(other.state);
-        self.multiproof.extend(other.multiproof);
-    }
-}
-
-/// Common configuration for multi proof tasks
-#[derive(Debug, Clone)]
-pub(super) struct MultiProofConfig {
-    /// The sorted collection of cached in-memory intermediate trie nodes that
-    /// can be reused for computation.
-    pub nodes_sorted: Arc<TrieUpdatesSorted>,
-    /// The sorted in-memory overlay hashed state.
-    pub state_sorted: Arc<HashedPostStateSorted>,
-    /// The collection of prefix sets for the computation. Since the prefix sets _always_
-    /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
-    /// if we have cached nodes for them.
-    pub prefix_sets: Arc<TriePrefixSetsMut>,
-}
-
-impl MultiProofConfig {
-    /// Creates a new state root config from the trie input.
-    ///
-    /// This returns a cleared [`TrieInput`] so that we can reuse any allocated space in the
-    /// [`TrieInput`].
-    pub(super) fn from_input(mut input: TrieInput) -> (TrieInput, Self) {
-        let config = Self {
-            nodes_sorted: Arc::new(input.nodes.drain_into_sorted()),
-            state_sorted: Arc::new(input.state.drain_into_sorted()),
-            prefix_sets: Arc::new(input.prefix_sets.clone()),
-        };
-        (input.cleared(), config)
-    }
-}
-
-/// Messages used internally by the multi proof task.
-#[derive(Debug)]
-pub(super) enum MultiProofMessage {
-    /// Prefetch proof targets
-    PrefetchProofs(MultiProofTargets),
-    /// New state update from transaction execution with its source
-    StateUpdate(StateChangeSource, EvmState),
-    /// State update that can be applied to the sparse trie without any new proofs.
-    ///
-    /// It can be the case when all accounts and storage slots from the state update were already
-    /// fetched and revealed.
-    EmptyProof {
-        /// The index of this proof in the sequence of state updates
-        sequence_number: u64,
-        /// The state update that was used to calculate the proof
-        state: HashedPostState,
-    },
-    /// Signals state update stream end.
-    ///
-    /// This is triggered by block execution, indicating that no additional state updates are
-    /// expected.
-    FinishedStateUpdates,
-}
-
-/// Handle to track proof calculation ordering.
-#[derive(Debug, Default)]
-struct ProofSequencer {
-    /// The next proof sequence number to be produced.
-    next_sequence: u64,
-    /// The next sequence number expected to be delivered.
-    next_to_deliver: u64,
-    /// Buffer for out-of-order proofs and corresponding state updates
-    pending_proofs: BTreeMap<u64, SparseTrieUpdate>,
-}
-
-impl ProofSequencer {
-    /// Gets the next sequence number and increments the counter
-    const fn next_sequence(&mut self) -> u64 {
-        let seq = self.next_sequence;
-        self.next_sequence += 1;
-        seq
-    }
-
-    /// Adds a proof with the corresponding state update and returns all sequential proofs and state
-    /// updates if we have a continuous sequence
-    fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
-        if sequence >= self.next_to_deliver {
-            self.pending_proofs.insert(sequence, update);
-        }
-
-        // return early if we don't have the next expected proof
-        if !self.pending_proofs.contains_key(&self.next_to_deliver) {
-            return Vec::new()
-        }
-
-        let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
-        let mut current_sequence = self.next_to_deliver;
-
-        // keep collecting proofs and state updates as long as we have consecutive sequence numbers
-        while let Some(pending) = self.pending_proofs.remove(&current_sequence) {
-            consecutive_proofs.push(pending);
-            current_sequence += 1;
-
-            // if we don't have the next number, stop collecting
-            if !self.pending_proofs.contains_key(&current_sequence) {
-                break;
-            }
-        }
-
-        self.next_to_deliver += consecutive_proofs.len() as u64;
-
-        consecutive_proofs
-    }
-
-    /// Returns true if we still have pending proofs
-    pub(crate) fn has_pending(&self) -> bool {
-        !self.pending_proofs.is_empty()
-    }
-}
-
-/// A wrapper for the sender that signals completion when dropped.
-///
-/// This type is intended to be used in combination with the evm executor statehook.
-/// This should trigger once the block has been executed (after) the last state update has been
-/// sent. This triggers the exit condition of the multi proof task.
-#[derive(Deref, Debug)]
-pub(super) struct StateHookSender(CrossbeamSender<MultiProofMessage>);
-
-impl StateHookSender {
-    pub(crate) const fn new(inner: CrossbeamSender<MultiProofMessage>) -> Self {
-        Self(inner)
-    }
-}
-
-impl Drop for StateHookSender {
-    fn drop(&mut self) {
-        // Send completion signal when the sender is dropped
-        let _ = self.0.send(MultiProofMessage::FinishedStateUpdates);
-    }
-}
-
-pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::with_capacity(update.len());
-
-    for (address, account) in update {
-        if account.is_touched() {
-            let hashed_address = keccak256(address);
-            trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
-
-            let destroyed = account.is_selfdestructed();
-            let info = if destroyed { None } else { Some(account.info.into()) };
-            hashed_state.accounts.insert(hashed_address, info);
-
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
-
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
-            }
-        }
-    }
-
-    hashed_state
-}
-
-/// Input parameters for dispatching a multiproof calculation.
-#[derive(Debug)]
-struct MultiproofInput {
-    config: MultiProofConfig,
-    source: Option<StateChangeSource>,
-    hashed_state_update: HashedPostState,
-    proof_targets: MultiProofTargets,
-    proof_sequence_number: u64,
-    state_root_message_sender: CrossbeamSender<MultiProofMessage>,
-    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
-}
-
-impl MultiproofInput {
-    /// Destroys the input and sends a [`MultiProofMessage::EmptyProof`] message to the sender.
-    fn send_empty_proof(self) {
-        let _ = self.state_root_message_sender.send(MultiProofMessage::EmptyProof {
-            sequence_number: self.proof_sequence_number,
-            state: self.hashed_state_update,
-        });
-    }
-}
-
 /// Coordinates multiproof dispatch between `MultiProofTask` and the parallel trie workers.
 ///
 /// # Flow
@@ -373,52 +160,6 @@ impl MultiproofManager {
             .pending_account_multiproofs_histogram
             .record(self.proof_worker_handle.pending_account_tasks() as f64);
     }
-}
-
-#[derive(Metrics, Clone)]
-#[metrics(scope = "tree.root")]
-pub(crate) struct MultiProofTaskMetrics {
-    /// Histogram of inflight multiproofs.
-    pub inflight_multiproofs_histogram: Histogram,
-    /// Histogram of pending storage multiproofs in the queue.
-    pub pending_storage_multiproofs_histogram: Histogram,
-    /// Histogram of pending account multiproofs in the queue.
-    pub pending_account_multiproofs_histogram: Histogram,
-
-    /// Histogram of the number of prefetch proof target accounts.
-    pub prefetch_proof_targets_accounts_histogram: Histogram,
-    /// Histogram of the number of prefetch proof target storages.
-    pub prefetch_proof_targets_storages_histogram: Histogram,
-    /// Histogram of the number of prefetch proof target chunks.
-    pub prefetch_proof_chunks_histogram: Histogram,
-
-    /// Histogram of the number of state update proof target accounts.
-    pub state_update_proof_targets_accounts_histogram: Histogram,
-    /// Histogram of the number of state update proof target storages.
-    pub state_update_proof_targets_storages_histogram: Histogram,
-    /// Histogram of the number of state update proof target chunks.
-    pub state_update_proof_chunks_histogram: Histogram,
-
-    /// Histogram of proof calculation durations.
-    pub proof_calculation_duration_histogram: Histogram,
-
-    /// Histogram of sparse trie update durations.
-    pub sparse_trie_update_duration_histogram: Histogram,
-    /// Histogram of sparse trie final update durations.
-    pub sparse_trie_final_update_duration_histogram: Histogram,
-    /// Histogram of sparse trie total durations.
-    pub sparse_trie_total_duration_histogram: Histogram,
-
-    /// Histogram of state updates received.
-    pub state_updates_received_histogram: Histogram,
-    /// Histogram of proofs processed.
-    pub proofs_processed_histogram: Histogram,
-    /// Histogram of total time spent in the multiproof task.
-    pub multiproof_task_total_duration_histogram: Histogram,
-    /// Total time spent waiting for the first state update or prefetch request.
-    pub first_update_wait_time_histogram: Histogram,
-    /// Total time spent waiting for the last proof result.
-    pub last_proof_wait_time_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -640,7 +381,7 @@ impl MultiProofTask {
         chunks
     }
 
-    // Returns true if all state updates finished and all proofs processed.
+    /// Returns true if all state updates finished and all proofs processed.
     fn is_done(
         &self,
         proofs_processed: u64,
@@ -992,9 +733,12 @@ impl MultiProofTask {
                                         "Processing calculated proof from worker"
                                     );
 
+                                    // Convert ProofResult to DecodedMultiProof
+                                    let multiproof = proof_result_data.into_multiproof();
+
                                     let update = SparseTrieUpdate {
                                         state: proof_result.state,
-                                        multiproof: proof_result_data.into_multiproof(),
+                                        multiproof,
                                     };
 
                                     if let Some(combined_update) =
@@ -1052,6 +796,265 @@ impl MultiProofTask {
                 .last_proof_wait_time_histogram
                 .record(updates_finished_time.elapsed().as_secs_f64());
         }
+    }
+}
+
+#[derive(Metrics, Clone)]
+#[metrics(scope = "tree.root")]
+pub(crate) struct MultiProofTaskMetrics {
+    /// Histogram of inflight multiproofs.
+    pub inflight_multiproofs_histogram: Histogram,
+    /// Histogram of pending storage multiproofs in the queue.
+    pub pending_storage_multiproofs_histogram: Histogram,
+    /// Histogram of pending account multiproofs in the queue.
+    pub pending_account_multiproofs_histogram: Histogram,
+
+    /// Histogram of the number of prefetch proof target accounts.
+    pub prefetch_proof_targets_accounts_histogram: Histogram,
+    /// Histogram of the number of prefetch proof target storages.
+    pub prefetch_proof_targets_storages_histogram: Histogram,
+    /// Histogram of the number of prefetch proof target chunks.
+    pub prefetch_proof_chunks_histogram: Histogram,
+
+    /// Histogram of the number of state update proof target accounts.
+    pub state_update_proof_targets_accounts_histogram: Histogram,
+    /// Histogram of the number of state update proof target storages.
+    pub state_update_proof_targets_storages_histogram: Histogram,
+    /// Histogram of the number of state update proof target chunks.
+    pub state_update_proof_chunks_histogram: Histogram,
+
+    /// Histogram of proof calculation durations.
+    pub proof_calculation_duration_histogram: Histogram,
+
+    /// Histogram of sparse trie update durations.
+    pub sparse_trie_update_duration_histogram: Histogram,
+    /// Histogram of sparse trie final update durations.
+    pub sparse_trie_final_update_duration_histogram: Histogram,
+    /// Histogram of sparse trie total durations.
+    pub sparse_trie_total_duration_histogram: Histogram,
+
+    /// Histogram of state updates received.
+    pub state_updates_received_histogram: Histogram,
+    /// Histogram of proofs processed.
+    pub proofs_processed_histogram: Histogram,
+    /// Histogram of total time spent in the multiproof task.
+    pub multiproof_task_total_duration_histogram: Histogram,
+    /// Total time spent waiting for the first state update or prefetch request.
+    pub first_update_wait_time_histogram: Histogram,
+    /// Total time spent waiting for the last proof result.
+    pub last_proof_wait_time_histogram: Histogram,
+}
+
+/// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
+/// state.
+#[derive(Default, Debug)]
+pub struct SparseTrieUpdate {
+    /// The state update that was used to calculate the proof
+    pub(crate) state: HashedPostState,
+    /// The calculated multiproof
+    pub(crate) multiproof: DecodedMultiProof,
+}
+
+impl SparseTrieUpdate {
+    /// Returns true if the update is empty.
+    pub(super) fn is_empty(&self) -> bool {
+        self.state.is_empty() && self.multiproof.is_empty()
+    }
+
+    /// Construct update from multiproof.
+    #[cfg(test)]
+    pub(super) fn from_multiproof(multiproof: reth_trie::MultiProof) -> alloy_rlp::Result<Self> {
+        Ok(Self { multiproof: multiproof.try_into()?, ..Default::default() })
+    }
+
+    /// Extend update with contents of the other.
+    pub(super) fn extend(&mut self, other: Self) {
+        self.state.extend(other.state);
+        self.multiproof.extend(other.multiproof);
+    }
+}
+
+/// Common configuration for multi proof tasks
+#[derive(Debug, Clone)]
+pub(super) struct MultiProofConfig {
+    /// The sorted collection of cached in-memory intermediate trie nodes that
+    /// can be reused for computation.
+    pub nodes_sorted: Arc<TrieUpdatesSorted>,
+    /// The sorted in-memory overlay hashed state.
+    pub state_sorted: Arc<HashedPostStateSorted>,
+    /// The collection of prefix sets for the computation. Since the prefix sets _always_
+    /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
+    /// if we have cached nodes for them.
+    pub prefix_sets: Arc<TriePrefixSetsMut>,
+}
+
+impl MultiProofConfig {
+    /// Creates a new state root config from the trie input.
+    ///
+    /// This returns a cleared [`TrieInput`] so that we can reuse any allocated space in the
+    /// [`TrieInput`].
+    pub(super) fn from_input(mut input: TrieInput) -> (TrieInput, Self) {
+        let config = Self {
+            nodes_sorted: Arc::new(input.nodes.drain_into_sorted()),
+            state_sorted: Arc::new(input.state.drain_into_sorted()),
+            prefix_sets: Arc::new(input.prefix_sets.clone()),
+        };
+        (input.cleared(), config)
+    }
+}
+
+/// Messages used internally by the multi proof task.
+#[derive(Debug)]
+pub(super) enum MultiProofMessage {
+    /// Prefetch proof targets
+    PrefetchProofs(MultiProofTargets),
+    /// New state update from transaction execution with its source
+    StateUpdate(StateChangeSource, EvmState),
+    /// State update that can be applied to the sparse trie without any new proofs.
+    ///
+    /// It can be the case when all accounts and storage slots from the state update were already
+    /// fetched and revealed.
+    EmptyProof {
+        /// The index of this proof in the sequence of state updates
+        sequence_number: u64,
+        /// The state update that was used to calculate the proof
+        state: HashedPostState,
+    },
+    /// Signals state update stream end.
+    ///
+    /// This is triggered by block execution, indicating that no additional state updates are
+    /// expected.
+    FinishedStateUpdates,
+}
+
+/// A wrapper for the sender that signals completion when dropped.
+///
+/// This type is intended to be used in combination with the evm executor statehook.
+/// This should trigger once the block has been executed (after) the last state update has been
+/// sent. This triggers the exit condition of the multi proof task.
+#[derive(Deref, Debug)]
+pub(super) struct StateHookSender(CrossbeamSender<MultiProofMessage>);
+
+impl StateHookSender {
+    pub(crate) const fn new(inner: CrossbeamSender<MultiProofMessage>) -> Self {
+        Self(inner)
+    }
+}
+
+impl Drop for StateHookSender {
+    fn drop(&mut self) {
+        // Send completion signal when the sender is dropped
+        let _ = self.0.send(MultiProofMessage::FinishedStateUpdates);
+    }
+}
+
+/// Handle to track proof calculation ordering.
+#[derive(Debug, Default)]
+struct ProofSequencer {
+    /// The next proof sequence number to be produced.
+    next_sequence: u64,
+    /// The next sequence number expected to be delivered.
+    next_to_deliver: u64,
+    /// Buffer for out-of-order proofs and corresponding state updates
+    pending_proofs: BTreeMap<u64, SparseTrieUpdate>,
+}
+
+impl ProofSequencer {
+    /// Gets the next sequence number and increments the counter
+    const fn next_sequence(&mut self) -> u64 {
+        let seq = self.next_sequence;
+        self.next_sequence += 1;
+        seq
+    }
+
+    /// Adds a proof with the corresponding state update and returns all sequential proofs and state
+    /// updates if we have a continuous sequence
+    fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
+        if sequence >= self.next_to_deliver {
+            self.pending_proofs.insert(sequence, update);
+        }
+
+        // return early if we don't have the next expected proof
+        if !self.pending_proofs.contains_key(&self.next_to_deliver) {
+            return Vec::new()
+        }
+
+        let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
+        let mut current_sequence = self.next_to_deliver;
+
+        // keep collecting proofs and state updates as long as we have consecutive sequence numbers
+        while let Some(pending) = self.pending_proofs.remove(&current_sequence) {
+            consecutive_proofs.push(pending);
+            current_sequence += 1;
+
+            // if we don't have the next number, stop collecting
+            if !self.pending_proofs.contains_key(&current_sequence) {
+                break;
+            }
+        }
+
+        self.next_to_deliver += consecutive_proofs.len() as u64;
+
+        consecutive_proofs
+    }
+
+    /// Returns true if we still have pending proofs
+    pub(crate) fn has_pending(&self) -> bool {
+        !self.pending_proofs.is_empty()
+    }
+}
+
+pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
+
+    for (address, account) in update {
+        if account.is_touched() {
+            let hashed_address = keccak256(address);
+            trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
+
+            let destroyed = account.is_selfdestructed();
+            let info = if destroyed { None } else { Some(account.info.into()) };
+            hashed_state.accounts.insert(hashed_address, info);
+
+            let mut changed_storage_iter = account
+                .storage
+                .into_iter()
+                .filter(|(_slot, value)| value.is_changed())
+                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                .peekable();
+
+            if destroyed {
+                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+            } else if changed_storage_iter.peek().is_some() {
+                hashed_state
+                    .storages
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+            }
+        }
+    }
+
+    hashed_state
+}
+
+/// Input parameters for dispatching a multiproof calculation.
+#[derive(Debug)]
+struct MultiproofInput {
+    config: MultiProofConfig,
+    source: Option<StateChangeSource>,
+    hashed_state_update: HashedPostState,
+    proof_targets: MultiProofTargets,
+    proof_sequence_number: u64,
+    state_root_message_sender: CrossbeamSender<MultiProofMessage>,
+    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+}
+
+impl MultiproofInput {
+    /// Destroys the input and sends a [`MultiProofMessage::EmptyProof`] message to the sender.
+    fn send_empty_proof(self) {
+        let _ = self.state_root_message_sender.send(MultiProofMessage::EmptyProof {
+            sequence_number: self.proof_sequence_number,
+            state: self.hashed_state_update,
+        });
     }
 }
 
