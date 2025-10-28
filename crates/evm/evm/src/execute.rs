@@ -1,5 +1,4 @@
 //! Traits for execution.
-
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
@@ -457,11 +456,7 @@ where
     }
 
     fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        // Avoid deep cloning when Arc has only one reference
-        match Arc::try_unwrap(self.tx) {
-            Ok(tx) => tx.into_recovered(), // No cloning needed - direct ownership transfer
-            Err(arc_tx) => (*arc_tx).clone().into_recovered(), // Clone only when necessary
-        }
+        Arc::unwrap_or_clone(self.tx).into_recovered()
     }
 }
 
