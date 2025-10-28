@@ -210,7 +210,12 @@ where
             (EngineApiMessageVersion::V2, serde_json::to_value((input,))?)
         }
         ExecutionPayload::V1(payload) => {
-            (EngineApiMessageVersion::V1, serde_json::to_value((payload,))?)
+            // Optimism doesn't support EngineApiMessageVersion::V1, so we use V2 instead
+            if is_optimism {
+                (EngineApiMessageVersion::V2, serde_json::to_value((payload,))?)
+            } else {
+                (EngineApiMessageVersion::V1, serde_json::to_value((payload,))?)
+            }
         }
     };
 
