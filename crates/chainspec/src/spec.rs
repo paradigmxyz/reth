@@ -440,7 +440,33 @@ impl<H: BlockHeader> ChainSpec<H> {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(self.hardforks.forks_iter())
+        // Create an iterator with hardfork, condition, and optional blob metadata
+        let hardforks_with_meta = self.hardforks.forks_iter().map(|(fork, condition)| {
+            // Generate blob metadata for supported hardforks
+            let metadata = match condition {
+                ForkCondition::Timestamp(timestamp) => {
+                    // Check if this hardfork has blob parameters
+                    let fork_name = fork.name();
+                    if fork_name == "Cancun" || fork_name == "Prague" || fork_name == "Osaka" {
+                        // Get blob params for this timestamp
+                        self.blob_params_at_timestamp(timestamp).map(|params| {
+                            format!(
+                                "blob: (target: {}, max: {}, fraction: {})",
+                                params.target_blob_count,
+                                params.max_blob_count,
+                                params.update_fraction
+                            )
+                        })
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            (fork, condition, metadata)
+        });
+
+        DisplayHardforks::with_meta(hardforks_with_meta)
     }
 
     /// Get the fork id for the given hardfork.
