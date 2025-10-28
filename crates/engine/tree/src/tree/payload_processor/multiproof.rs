@@ -319,8 +319,6 @@ impl MultiproofInput {
 ///    `ProofSequencer`.
 #[derive(Debug)]
 pub struct MultiproofManager {
-    /// Currently running calculations.
-    inflight: usize,
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,
     /// Cached storage proof roots for missed leaves; this maps
@@ -354,7 +352,6 @@ impl MultiproofManager {
         metrics.max_account_workers.set(proof_worker_handle.total_account_workers() as f64);
 
         Self {
-            inflight: 0,
             metrics,
             proof_worker_handle,
             missed_leaves_storage_roots: Default::default(),
@@ -436,7 +433,6 @@ impl MultiproofManager {
             return;
         }
 
-        self.inflight += 1;
         self.metrics
             .active_storage_workers_histogram
             .record(self.proof_worker_handle.active_storage_workers() as f64);
@@ -453,7 +449,6 @@ impl MultiproofManager {
 
     /// Signals that a multiproof calculation has finished.
     fn on_calculation_complete(&mut self) {
-        self.inflight = self.inflight.saturating_sub(1);
         self.metrics
             .active_storage_workers_histogram
             .record(self.proof_worker_handle.active_storage_workers() as f64);
@@ -520,7 +515,6 @@ impl MultiproofManager {
             return;
         }
 
-        self.inflight += 1;
         self.metrics
             .active_storage_workers_histogram
             .record(self.proof_worker_handle.active_storage_workers() as f64);
@@ -608,7 +602,6 @@ pub(crate) struct MultiProofTaskMetrics {
 ///    ▼                                                           │
 /// ┌──────────────────────────────────────────────────────────────┐ │
 /// │             MultiproofManager                                │ │
-/// │  - Tracks inflight calculations                              │ │
 /// │  - Deduplicates against fetched_proof_targets                │ │
 /// │  - Routes to appropriate worker pool                         │ │
 /// └──┬───────────────────────────────────────────────────────────┘ │
@@ -649,7 +642,6 @@ pub(crate) struct MultiProofTaskMetrics {
 ///
 /// - **[`MultiproofManager`]**: Calculation orchestrator
 ///   - Decides between fast path ([`EmptyProof`]) and worker dispatch
-///   - Tracks inflight calculations
 ///   - Routes storage-only vs full multiproofs to appropriate workers
 ///   - Records metrics for monitoring
 ///
