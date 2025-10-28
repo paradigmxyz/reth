@@ -38,26 +38,48 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 4 * DEFAULT_BUDGE
 /// Polls the given stream. Breaks with `true` if there maybe is more work.
 #[macro_export]
 macro_rules! poll_nested_stream_with_budget {
-    ($target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(, $on_ready_none:expr;)? $(,)?) => {{
+    ($target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr, $on_ready_none:expr; $(,)?) => {{
         let mut budget: u32 = $budget;
 
-            loop {
-                match $poll_stream {
-                    Poll::Ready(Some(item)) => {
-                        $on_ready_some(item);
+        loop {
+            match $poll_stream {
+                Poll::Ready(Some(item)) => {
+                    $on_ready_some(item);
 
-                        budget -= 1;
-                        if budget == 0 {
-                            break true
-                        }
+                    budget -= 1;
+                    if budget == 0 {
+                        break true
                     }
-                    Poll::Ready(None) => {
-                        $($on_ready_none;)? // todo: handle error case with $target and $label
-                        break false
-                    }
-                    Poll::Pending => break false,
                 }
+                Poll::Ready(None) => {
+                    $on_ready_none;
+                    break false
+                }
+                Poll::Pending => break false,
             }
+        }
+    }};
+
+    ($target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(,)?) => {{
+        let mut budget: u32 = $budget;
+
+        loop {
+            match $poll_stream {
+                Poll::Ready(Some(item)) => {
+                    $on_ready_some(item);
+
+                    budget -= 1;
+                    if budget == 0 {
+                        break true
+                    }
+                }
+                Poll::Ready(None) => {
+                    ::tracing::warn!(target: $target, "{} closed", $label);
+                    break false
+                }
+                Poll::Pending => break false,
+            }
+        }
     }};
 }
 
