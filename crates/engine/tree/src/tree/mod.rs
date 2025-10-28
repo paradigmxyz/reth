@@ -88,6 +88,8 @@ pub mod state;
 pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// A builder for creating state providers that can be used across threads.
+///
+/// TODO: can this be unified with OverlayStateProviderFactory
 #[derive(Clone, Debug)]
 pub struct StateProviderBuilder<N: NodePrimitives, P> {
     /// The provider factory used to create providers.
@@ -117,7 +119,9 @@ where
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
         let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
+        // provider == MemoryOverlayStateProvider(in memory canonical +  database)
         if let Some(overlay) = self.overlay.clone() {
+            // overlay with in memory not canonical
             provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
         }
         Ok(provider)
@@ -238,7 +242,7 @@ where
     T: PayloadTypes,
     C: ConfigureEvm<Primitives = N> + 'static,
 {
-    provider: P,
+    provider: P, //BlockchainProvider(canonicalInmemorystate)
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -422,6 +426,7 @@ where
     /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
         loop {
+            // TODO: could select over both incoming engine requests and persistence responses
             match self.try_recv_engine_message() {
                 Ok(Some(msg)) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
@@ -1361,6 +1366,7 @@ where
             FromEngine::Request(request) => {
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
+                        // TODO: add some docs here: opstack chain derivation
                         let block_num_hash = block.recovered_block().num_hash();
                         if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
                             // outdated block that can be skipped
@@ -2422,6 +2428,7 @@ where
         };
 
         // Ensure that the parent state is available.
+        // TODO: why are we using this method, this def has redundant overhead
         match self.state_provider_builder(block_id.parent) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
@@ -2450,6 +2457,7 @@ where
         }
 
         // determine whether we are on a fork chain
+        // TODO: do we still need this?
         let is_fork = match self.is_fork(block_id) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
@@ -2458,6 +2466,7 @@ where
             Ok(is_fork) => is_fork,
         };
 
+        // TODO: can remove persistence_state borrow here
         let ctx =
             TreeCtx::new(&mut self.state, &self.persistence_state, &self.canonical_in_memory_state);
 
@@ -2472,6 +2481,7 @@ where
             self.canonical_in_memory_state.set_pending_block(executed.clone());
         }
 
+        // TODO: we could get is_fork info from here?
         self.state.tree_state.insert_executed(executed.clone());
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
@@ -2743,6 +2753,8 @@ where
     ///
     /// This is an optimization for parallel execution contexts where we want to avoid
     /// creating state providers in the critical path.
+    // TODO: can we get rid of this or move to TreeState so this can be accessed/reused, see
+    // BasicPayloadValidator::state_provider_builder
     pub fn state_provider_builder(
         &self,
         hash: B256,

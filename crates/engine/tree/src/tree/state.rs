@@ -25,6 +25,8 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// __All__ unique executed blocks by block hash that are connected to the canonical chain.
     ///
     /// This includes blocks of all forks.
+    // TODO: can we store the flattened state snapshot at per block level? instead of traversing
+    // the in memory overlay
     pub(crate) blocks_by_hash: HashMap<B256, ExecutedBlock<N>>,
     /// Executed blocks grouped by their respective block number.
     ///

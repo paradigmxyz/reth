@@ -216,6 +216,7 @@ impl EngineNodeLauncher {
             Box::pin(consensus_engine_stream),
             pipeline,
             Box::new(ctx.task_executor().clone()),
+            // TODO: do we need both here?
             ctx.provider_factory().clone(),
             ctx.blockchain_db().clone(),
             pruner,

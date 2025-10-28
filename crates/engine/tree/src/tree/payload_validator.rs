@@ -52,6 +52,7 @@ pub struct TreeCtx<'a, N: NodePrimitives> {
     /// The engine API tree state
     state: &'a mut EngineApiTreeState<N>,
     /// Information about the current persistence state
+    // TODO: do we still need this?
     persistence: &'a PersistenceState,
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
@@ -103,6 +104,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     /// currently in progress.
     ///
     /// This is adapted from the `persisting_kind_for` method in `EngineApiTreeHandler`.
+    // TODO: this is no longer used
     pub fn persisting_kind_for(&self, block: BlockWithParent) -> PersistingKind {
         // Check that we're currently persisting.
         let Some(action) = self.persistence().current_action() else {
@@ -317,6 +319,7 @@ where
         Err(InsertBlockError::new(block.into_sealed_block(), execution_err).into())
     }
 
+    /// // TODO: update docs
     /// Validates a block that has already been converted from a payload.
     ///
     /// This method performs:
@@ -409,6 +412,7 @@ where
 
         // Plan the strategy used for state root computation.
         let state_root_plan = self.plan_state_root_computation();
+        // TODO: rm tmp
         let strategy = state_root_plan.strategy;
 
         debug!(
@@ -586,6 +590,7 @@ where
         if header.is_some() {
             Ok(header)
         } else {
+            // potential mdbx db lookup
             self.provider.sealed_header_by_hash(hash)
         }
     }
@@ -807,6 +812,7 @@ where
                 // Compute trie input
                 let trie_input_start = Instant::now();
                 let (trie_input, block_number) = self.compute_trie_input(
+                    // TODO: do we need this or can this be reused from regular execution path
                     self.provider.database_provider_ro()?,
                     parent_hash,
                     state,
@@ -999,6 +1005,7 @@ where
 
         // Convert the historical block to the block number
         let block_number = provider
+            // TODO: potential mdbx lookup?
             .convert_hash_or_number(historical)?
             .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
 

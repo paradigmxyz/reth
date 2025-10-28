@@ -55,7 +55,7 @@ pub use chain::*;
 /// This provider implements most provider or provider factory traits.
 pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// Database instance
-    db: N::DB,
+    db: N::DB, // Arc<DatabaseEnv>
     /// Chain spec
     chain_spec: Arc<N::ChainSpec>,
     /// Static File Provider

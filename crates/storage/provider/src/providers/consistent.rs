@@ -39,6 +39,7 @@ use tracing::trace;
 /// Type that interacts with a snapshot view of the blockchain (storage and in-memory) at time of
 /// instantiation, EXCEPT for pending, safe and finalized block which might change while holding
 /// this provider.
+/// // TODO: elaborate on this
 ///
 /// CAUTION: Avoid holding this provider for too long or the inner database transaction will
 /// time-out.
@@ -70,6 +71,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // mean that our database provider would not have access to the flushed blocks (since it's
         // working under an older view), while the in-memory state may have deleted them
         // entirely. Resulting in gaps on the range.
+        // TODO: is the order correct?
         let head_block = state.head_state();
         let storage_provider = storage_provider_factory.database_provider_ro()?;
         Ok(Self { storage_provider, head_block, canonical_in_memory_state: state })
