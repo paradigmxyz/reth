@@ -1,3 +1,6 @@
+//! Contains functionality for generating a file of blocks from an RPC endpoint.
+//! The file can then be used as input for replaying benchmarks from a file.
+
 use crate::bench::{
     context::{BenchContext, BlockSource},
     output::BLOCK_STORAGE_OUTPUT_SUFFIX,
@@ -21,7 +24,7 @@ use std::{
 };
 use tracing::{debug, info};
 
-//type alias for the consensus block
+/// Type alias for the consensus block
 type ConsensusBlock = Block<Either<EthereumTxEnvelope<TxEip4844Variant>, OpTxEnvelope>, Header>;
 
 /// File format version for future compatibility
@@ -30,7 +33,7 @@ const FILE_FORMAT_VERSION: u8 = 1;
 /// Magic bytes to identify the file format
 const MAGIC_BYTES: &[u8] = b"RETH";
 
-/// `reth benchmark generate-file` command
+/// `reth benchmark block-storage` command
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The RPC url to use for getting data.
@@ -41,6 +44,14 @@ pub struct Command {
     benchmark: BenchmarkArgs,
 }
 
+// The type of block that is stored in the file
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[repr(u8)]
+pub(crate) enum BlockType {
+    Ethereum = 0,
+    Optimism = 1,
+}
+
 /// Block file header
 #[derive(Debug)]
 pub(crate) struct BlockFileHeader {
@@ -48,13 +59,6 @@ pub(crate) struct BlockFileHeader {
     block_type: BlockType,
     from_block: u64,
     to_block: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub(crate) enum BlockType {
-    Ethereum = 0,
-    Optimism = 1,
 }
 
 impl BlockFileHeader {
@@ -344,5 +348,96 @@ impl Command {
         };
 
         Ok(rlp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_header_roundtrip_ethereum() {
+        let header = BlockFileHeader::new(false, 100, 200);
+        let mut buffer = Vec::new();
+
+        header.write_to(&mut buffer).unwrap();
+
+        let mut cursor = Cursor::new(buffer);
+        let read_header = BlockFileHeader::read_from(&mut cursor).unwrap();
+
+        assert_eq!(read_header.version, FILE_FORMAT_VERSION);
+        assert_eq!(read_header.block_type, BlockType::Ethereum);
+        assert_eq!(read_header.from_block, 100);
+        assert_eq!(read_header.to_block, 200);
+    }
+
+    #[test]
+    fn test_header_roundtrip_optimism() {
+        let header = BlockFileHeader::new(true, 500, 1000);
+        let mut buffer = Vec::new();
+
+        header.write_to(&mut buffer).unwrap();
+
+        let mut cursor = Cursor::new(buffer);
+        let read_header = BlockFileHeader::read_from(&mut cursor).unwrap();
+
+        assert_eq!(read_header.version, FILE_FORMAT_VERSION);
+        assert_eq!(read_header.block_type, BlockType::Optimism);
+        assert_eq!(read_header.from_block, 500);
+        assert_eq!(read_header.to_block, 1000);
+    }
+
+    #[test]
+    fn test_invalid_magic_bytes() {
+        let mut buffer = vec![0xFF, 0xFF, 0xFF, 0xFF]; // Wrong magic
+        buffer.push(FILE_FORMAT_VERSION);
+        buffer.push(0); // BlockType::Ethereum
+        buffer.extend_from_slice(&100u64.to_le_bytes());
+        buffer.extend_from_slice(&200u64.to_le_bytes());
+
+        let mut cursor = Cursor::new(buffer);
+        let result = BlockFileHeader::read_from(&mut cursor);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid file format"));
+    }
+
+    #[test]
+    fn test_unsupported_version() {
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(MAGIC_BYTES);
+        buffer.push(99); // Invalid version
+        buffer.push(0);
+        buffer.extend_from_slice(&100u64.to_le_bytes());
+        buffer.extend_from_slice(&200u64.to_le_bytes());
+
+        let mut cursor = Cursor::new(buffer);
+        let result = BlockFileHeader::read_from(&mut cursor);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unsupported file version"));
+    }
+
+    #[test]
+    fn test_unknown_block_type() {
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(MAGIC_BYTES);
+        buffer.push(FILE_FORMAT_VERSION);
+        buffer.push(99); // Invalid block type
+        buffer.extend_from_slice(&100u64.to_le_bytes());
+        buffer.extend_from_slice(&200u64.to_le_bytes());
+
+        let mut cursor = Cursor::new(buffer);
+        let result = BlockFileHeader::read_from(&mut cursor);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unknown block type"));
+    }
+
+    #[test]
+    fn test_block_type_values() {
+        assert_eq!(BlockType::Ethereum as u8, 0);
+        assert_eq!(BlockType::Optimism as u8, 1);
     }
 }
