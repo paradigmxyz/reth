@@ -4312,160 +4312,30 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Storage utilization 0 percentile"
+              "options": "Max storage workers"
             },
             "properties": [
               {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "percent"
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [10, 10],
+                  "fill": "dash"
+                }
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Storage utilization 0.5 percentile"
+              "options": "Max account workers"
             },
             "properties": [
               {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "percent"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Storage utilization 0.9 percentile"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "percent"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Storage utilization 0.95 percentile"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "percent"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Storage utilization 1 percentile"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "percent"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Account utilization 0 percentile"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "percent"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Account utilization 0.5 percentile"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "percent"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Account utilization 0.9 percentile"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "percent"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Account utilization 0.95 percentile"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "percent"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Account utilization 1 percentile"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "percent"
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [10, 10],
+                  "fill": "dash"
+                }
               }
             ]
           }
@@ -4523,9 +4393,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(reth_tree_root_active_storage_workers_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"} / reth_tree_root_max_storage_workers{$instance_label=\"$instance\"}) * 100",
+          "expr": "reth_tree_root_max_storage_workers{$instance_label=\"$instance\"}",
           "instant": false,
-          "legendFormat": "Storage utilization {{quantile}} percentile",
+          "legendFormat": "Max storage workers",
           "range": true,
           "refId": "C"
         },
@@ -4535,9 +4405,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(reth_tree_root_active_account_workers_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"} / reth_tree_root_max_account_workers{$instance_label=\"$instance\"}) * 100",
+          "expr": "reth_tree_root_max_account_workers{$instance_label=\"$instance\"}",
           "instant": false,
-          "legendFormat": "Account utilization {{quantile}} percentile",
+          "legendFormat": "Max account workers",
           "range": true,
           "refId": "D"
         }
