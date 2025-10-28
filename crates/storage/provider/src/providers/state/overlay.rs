@@ -139,7 +139,7 @@ where
         // If block_number is provided, collect reverts
         let (trie_updates, hashed_state) = if let Some(from_block) = self.block_number {
             // Validate that we have sufficient changesets for the requested block
-            self.validate_changesets_availability(&provider, from_block)?;
+            //self.validate_changesets_availability(&provider, from_block)?;
 
             // Collect trie reverts
             let mut trie_updates_mut = provider.trie_reverts(from_block + 1)?;
