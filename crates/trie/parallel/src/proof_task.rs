@@ -1282,6 +1282,7 @@ pub struct AccountMultiproofInput {
     pub proof_result_sender: ProofResultContext,
 }
 
+/// Parameters for building an account multiproof with pre-computed storage roots.
 struct AccountMultiproofParams<'a> {
     /// The targets for which to compute the multiproof.
     targets: &'a MultiProofTargets,
@@ -1297,6 +1298,7 @@ struct AccountMultiproofParams<'a> {
     missed_leaves_storage_roots: &'a DashMap<B256, B256>,
 }
 
+/// Internal message for account workers.
 #[derive(Debug)]
 enum AccountWorkerJob {
     /// Account multiproof computation request
