@@ -823,9 +823,9 @@ where
                 let (mut cleared_sorted_input, multiproof_config) =
                     MultiProofConfig::from_input(trie_input);
 
-                // Rescue the prefix_sets from the cleared sorted input and attach to reusable builder
-                reusable_input.prefix_sets =
-                    core::mem::take(&mut cleared_sorted_input.prefix_sets);
+                // Rescue the prefix_sets from the cleared sorted input and attach to reusable
+                // builder
+                reusable_input.prefix_sets = core::mem::take(&mut cleared_sorted_input.prefix_sets);
                 self.trie_input.replace(reusable_input);
 
                 // Create OverlayStateProviderFactory with the multiproof config, for use with
