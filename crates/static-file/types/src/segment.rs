@@ -331,6 +331,7 @@ impl SegmentRangeInclusive {
     }
 
     /// Returns the length of the inclusive range.
+    #[allow(clippy::len_without_is_empty)]
     pub const fn len(&self) -> u64 {
         self.end.saturating_sub(self.start).saturating_add(1)
     }
