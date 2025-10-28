@@ -12,7 +12,6 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
-COPY . .
 
 ARG BUILD_PROFILE=release
 ENV BUILD_PROFILE=$BUILD_PROFILE
@@ -23,10 +22,12 @@ ENV RUSTFLAGS="$RUSTFLAGS"
 RUN cargo chef cook --profile $BUILD_PROFILE --recipe-path recipe.json --manifest-path /app/crates/optimism/bin/Cargo.toml
 
 COPY . .
+
 RUN cargo build --profile $BUILD_PROFILE --bin op-reth --manifest-path /app/crates/optimism/bin/Cargo.toml
 
-RUN ls -la /app/target/$BUILD_PROFILE/op-reth
-RUN cp /app/target/$BUILD_PROFILE/op-reth /app/op-reth
+# Copy binary to a fixed location
+RUN OUTPUT_DIR=$(if [ "$BUILD_PROFILE" = "dev" ] || [ "$BUILD_PROFILE" = "test" ]; then echo debug; else echo "$BUILD_PROFILE"; fi) && \
+    cp /app/target/$OUTPUT_DIR/op-reth /app/op-reth
 
 FROM ubuntu:24.04 AS runtime
 
