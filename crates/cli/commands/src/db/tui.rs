@@ -5,7 +5,7 @@ use crossterm::{
 };
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame, Terminal,
@@ -126,6 +126,7 @@ where
     list_state: ListState,
     /// Entries to show in the TUI.
     entries: Entries<T>,
+    key_list_area: Option<Rect>,
 }
 
 impl<F, T: Table> DbListTUI<F, T>
@@ -149,6 +150,7 @@ where
             input: String::new(),
             list_state: ListState::default(),
             entries: Entries::new_with_raw_values(raw),
+            key_list_area: None,
         }
     }
 
@@ -313,11 +315,20 @@ where
         Event::Mouse(e) => match e.kind {
             MouseEventKind::ScrollDown => app.next(),
             MouseEventKind::ScrollUp => app.previous(),
-            // TODO: This click event can be triggered outside of the list widget.
             MouseEventKind::Down(_) => {
-                let new_idx = (e.row as usize + app.list_state.offset()).saturating_sub(1);
-                if new_idx < app.entries.len() {
-                    app.list_state.select(Some(new_idx));
+                if let Some(area) = app.key_list_area {
+                    let left = area.x.saturating_add(1);
+                    let right = area.x.saturating_add(area.width.saturating_sub(1));
+                    let top = area.y.saturating_add(1);
+                    let bottom = area.y.saturating_add(area.height.saturating_sub(1));
+
+                    if (e.column >= left && e.column < right) && (e.row >= top && e.row < bottom) {
+                        let content_row = (e.row.saturating_sub(top)) as usize;
+                        let new_idx = app.list_state.offset().saturating_add(content_row);
+                        if new_idx < app.entries.len() {
+                            app.list_state.select(Some(new_idx));
+                        }
+                    }
                 }
             }
             _ => {}
@@ -344,6 +355,8 @@ where
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(outer_chunks[0]);
+
+        app.key_list_area = Some(inner_chunks[0]);
 
         let key_length = format!("{}", (app.skip + app.count).saturating_sub(1)).len();
 
