@@ -682,7 +682,7 @@ where
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let provider = self.provider.database_provider_ro()?;
 
-        let (mut input, block_number) =
+        let (mut input, _reusable_input, block_number) =
             self.compute_trie_input(provider, parent_hash, state, None)?;
 
         // Extend with block we are validating root for.
