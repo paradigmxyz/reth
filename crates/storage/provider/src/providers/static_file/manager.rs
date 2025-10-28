@@ -452,6 +452,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// This will not delete the file that contains the block itself, because files can only be
     /// removed entirely.
     ///
+    /// # Safety
+    ///
+    /// This method will never delete the highest static file for the segment, even if the
+    /// requested block is higher than the highest block in static files. This ensures we always
+    /// maintain at least one static file if any exist.
+    ///
     /// Returns a list of `SegmentHeader`s from the deleted jars.
     pub fn delete_segment_below_block(
         &self,
@@ -463,6 +469,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             return Ok(Vec::new())
         }
 
+        let highest_block = self.get_highest_static_file_block(segment);
         let mut deleted_headers = Vec::new();
 
         loop {
@@ -470,7 +477,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 return Ok(deleted_headers)
             };
 
-            if block_height >= block {
+            // Stop if we've reached the target block or the highest static file
+            if block_height >= block || Some(block_height) == highest_block {
                 return Ok(deleted_headers)
             }
 
