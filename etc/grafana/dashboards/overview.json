@@ -4347,6 +4347,7 @@
         "x": 12,
         "y": 104
       },
+      "description": "The max metrics (Max storage workers and Max account workers) are displayed as dotted lines to highlight the configured upper limits.",
       "id": 256,
       "options": {
         "legend": {
