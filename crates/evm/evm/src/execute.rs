@@ -457,12 +457,9 @@ where
     }
 
     fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        // Try to unwrap the Arc, or clone if there are multiple references
-        match Arc::try_unwrap(self.tx) {
-            Ok(tx) => tx.into_recovered(),
-            Err(arc_tx) => (*arc_tx).clone().into_recovered(),
-        }
+        (*self.tx).clone().into_recovered()
     }
+   
 }
 
 impl<'a, F, DB, Executor, Builder, N> BlockBuilder
