@@ -1,7 +1,9 @@
 //! Functionality related to tree state.
 
 use crate::engine::EngineApiKind;
-use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
+#[cfg(test)]
+use alloy_eips::eip1898::BlockWithParent;
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256,
@@ -294,6 +296,29 @@ impl<N: NodePrimitives> TreeState<N> {
         }
     }
 
+    /// Updates the canonical head to the given block.
+    pub(crate) const fn set_canonical_head(&mut self, new_head: BlockNumHash) {
+        self.current_canonical_head = new_head;
+    }
+
+    /// Returns the tracked canonical head.
+    pub(crate) const fn canonical_head(&self) -> &BlockNumHash {
+        &self.current_canonical_head
+    }
+
+    /// Returns the block hash of the canonical head.
+    pub(crate) const fn canonical_block_hash(&self) -> B256 {
+        self.canonical_head().hash
+    }
+
+    /// Returns the block number of the canonical head.
+    pub(crate) const fn canonical_block_number(&self) -> BlockNumber {
+        self.canonical_head().number
+    }
+}
+
+#[cfg(test)]
+impl<N: NodePrimitives> TreeState<N> {
     /// Determines if the second block is a descendant of the first block.
     ///
     /// If the two blocks are the same, this returns `false`.
@@ -329,26 +354,6 @@ impl<N: NodePrimitives> TreeState<N> {
 
         // Now the block numbers should be equal, so we compare hashes.
         current_block.recovered_block().parent_hash() == first.hash
-    }
-
-    /// Updates the canonical head to the given block.
-    pub(crate) const fn set_canonical_head(&mut self, new_head: BlockNumHash) {
-        self.current_canonical_head = new_head;
-    }
-
-    /// Returns the tracked canonical head.
-    pub(crate) const fn canonical_head(&self) -> &BlockNumHash {
-        &self.current_canonical_head
-    }
-
-    /// Returns the block hash of the canonical head.
-    pub(crate) const fn canonical_block_hash(&self) -> B256 {
-        self.canonical_head().hash
-    }
-
-    /// Returns the block number of the canonical head.
-    pub(crate) const fn canonical_block_number(&self) -> BlockNumber {
-        self.canonical_head().number
     }
 }
 
