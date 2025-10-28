@@ -217,12 +217,12 @@ impl SegmentHeader {
 
     /// Number of transactions.
     pub fn tx_len(&self) -> Option<u64> {
-        self.tx_range.as_ref().map(|r| (r.end() + 1) - r.start())
+        self.tx_range.as_ref().map(|r| r.len())
     }
 
     /// Number of blocks.
     pub fn block_len(&self) -> Option<u64> {
-        self.block_range.as_ref().map(|r| (r.end() + 1) - r.start())
+        self.block_range.as_ref().map(|r| r.len())
     }
 
     /// Increments block end range depending on segment
@@ -328,6 +328,11 @@ impl SegmentRangeInclusive {
     /// End of the inclusive range
     pub const fn end(&self) -> u64 {
         self.end
+    }
+
+    /// Returns the length of the inclusive range.
+    pub const fn len(&self) -> u64 {
+        self.end.saturating_sub(self.start).saturating_add(1)
     }
 }
 

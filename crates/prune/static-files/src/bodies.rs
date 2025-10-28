@@ -58,10 +58,7 @@ impl Bodies {
 
         let tx_ranges = deleted_headers.iter().filter_map(|header| header.tx_range());
 
-        let pruned = tx_ranges
-            .clone()
-            .map(|range| range.end().saturating_sub(range.start()).saturating_add(1))
-            .sum::<u64>() as usize;
+        let pruned = tx_ranges.clone().map(|range| range.len()).sum::<u64>() as usize;
 
         Ok(SegmentOutput {
             progress: PruneProgress::Finished,
