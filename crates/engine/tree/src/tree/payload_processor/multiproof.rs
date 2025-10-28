@@ -360,7 +360,7 @@ impl MultiproofManager {
     }
 
     /// Dispatches a new multiproof calculation to worker pools.
-    fn dispatch(&mut self, input: PendingMultiproofTask) {
+    fn dispatch(&self, input: PendingMultiproofTask) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets_is_empty() {
             debug!(
