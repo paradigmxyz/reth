@@ -457,7 +457,11 @@ where
     }
 
     fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        (*self.tx).clone().into_recovered()
+        // Avoid deep cloning when Arc has only one reference
+        match Arc::try_unwrap(self.tx) {
+            Ok(tx) => tx.into_recovered(), // No cloning needed - direct ownership transfer
+            Err(arc_tx) => (*arc_tx).clone().into_recovered(), // Clone only when necessary
+        }
     }
 }
 
