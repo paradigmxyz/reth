@@ -455,6 +455,35 @@ where
 
         decoded_result
     }
+
+    /// Process a blinded storage node request.
+    ///
+    /// Used by storage workers to retrieve blinded storage trie nodes for proof construction.
+    fn process_blinded_storage_node(
+        &self,
+        account: B256,
+        path: &Nibbles,
+    ) -> TrieNodeProviderResult {
+        let storage_node_provider = ProofBlindedStorageProvider::new(
+            &self.provider,
+            &self.provider,
+            self.prefix_sets.clone(),
+            account,
+        );
+        storage_node_provider.trie_node(path)
+    }
+
+    /// Process a blinded account node request.
+    ///
+    /// Used by account workers to retrieve blinded account trie nodes for proof construction.
+    fn process_blinded_account_node(&self, path: &Nibbles) -> TrieNodeProviderResult {
+        let account_node_provider = ProofBlindedAccountProvider::new(
+            &self.provider,
+            &self.provider,
+            self.prefix_sets.clone(),
+        );
+        account_node_provider.trie_node(path)
+    }
 }
 impl TrieNodeProviderFactory for ProofWorkerHandle {
     type AccountNodeProvider = ProofTaskTrieNodeProvider;
@@ -818,13 +847,7 @@ where
         );
 
         let start = Instant::now();
-        let blinded_provider = ProofBlindedStorageProvider::new(
-            &proof_tx.provider,
-            &proof_tx.provider,
-            proof_tx.prefix_sets.clone(),
-            account,
-        );
-        let result = blinded_provider.trie_node(&path);
+        let result = proof_tx.process_blinded_storage_node(account, &path);
         let elapsed = start.elapsed();
 
         *storage_nodes_processed += 1;
@@ -1122,12 +1145,7 @@ where
         );
 
         let start = Instant::now();
-        let blinded_provider = ProofBlindedAccountProvider::new(
-            &proof_tx.provider,
-            &proof_tx.provider,
-            proof_tx.prefix_sets.clone(),
-        );
-        let result = blinded_provider.trie_node(&path);
+        let result = proof_tx.process_blinded_account_node(&path);
         let elapsed = start.elapsed();
 
         *account_nodes_processed += 1;
