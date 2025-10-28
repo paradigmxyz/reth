@@ -115,7 +115,57 @@ impl ChainHardforks {
         self.fork(fork).active_at_block(block_number)
     }
 
+    /// Inserts a [`ForkCondition::Timestamp`] while maintaining timestamp-based forks in
+    /// ascending order by timestamp value.
+    ///
+    /// If the fork already exists (regardless of its current condition type), it will move to the
+    /// appropriate position.
+    ///
+    /// # Ordering Behavior
+    ///
+    /// - Timestamp-based forks are inserted after all other fork condition types
+    ///   ([`ForkCondition::Block`], [`ForkCondition::TTD`], etc.)
+    /// - Among timestamp-based forks, they are ordered by timestamp in ascending order
+    /// - If no timestamp-based forks exist, the fork is appended to the end
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut forks = ChainHardforks::default();
+    /// forks.insert(Fork::A, ForkCondition::Block(100));
+    /// forks.insert_at_timestamp(Fork::B, 2000);
+    /// forks.insert_at_timestamp(Fork::C, 1000);
+    ///
+    /// // Order: Fork::A (Block), Fork::C (Timestamp 1000), Fork::B (Timestamp 2000)
+    /// ```
+    pub fn insert_at_timestamp<H: Hardfork>(&mut self, fork: H, timestamp: u64) {
+        // first remove existing hardfork
+        if self.map.remove(&fork.name()).is_some() {
+            self.forks.retain(|(inner_fork, _)| inner_fork.name() != fork.name());
+        }
+
+        // find the correct position
+        let new_condition = ForkCondition::Timestamp(timestamp);
+
+        // Find the position: among Timestamp conditions, insert before the first one with a higher
+        // timestamp
+        let pos = self
+            .forks
+            .iter()
+            .position(|(_, condition)| match condition {
+                ForkCondition::Timestamp(ts) => *ts > timestamp,
+                _ => false,
+            })
+            .unwrap_or(self.forks.len());
+
+        self.map.insert(fork.name(), new_condition);
+        self.forks.insert(pos, (Box::new(fork), new_condition));
+    }
+
     /// Inserts `fork` into list, updating with a new [`ForkCondition`] if it already exists.
+    ///
+    /// Note: This only appends the the given condition without re-ordering, see also
+    /// [`Self::insert_at_timestamp`].
     pub fn insert<H: Hardfork>(&mut self, fork: H, condition: ForkCondition) {
         match self.map.entry(fork.name()) {
             Entry::Occupied(mut entry) => {
@@ -135,6 +185,9 @@ impl ChainHardforks {
 
     /// Extends the list with multiple forks, updating existing entries with new
     /// [`ForkCondition`]s if they already exist.
+    ///
+    /// Note: This only appends the the given condition without re-ordering, see also
+    /// [`Self::insert_at_timestamp`].
     pub fn extend<H: Hardfork>(&mut self, forks: impl IntoIterator<Item = (H, ForkCondition)>) {
         for (fork, condition) in forks {
             self.insert(fork, condition);
@@ -171,8 +224,8 @@ mod tests {
     use super::*;
     use alloy_hardforks::hardfork;
 
-    hardfork!(AHardfork { A1 });
-    hardfork!(BHardfork { B1 });
+    hardfork!(AHardfork { A1, A2, A3 });
+    hardfork!(BHardfork { B1, B2 });
 
     #[test]
     fn add_hardforks() {
@@ -182,5 +235,84 @@ mod tests {
         assert_eq!(forks.len(), 2);
         forks.is_fork_active_at_block(AHardfork::A1, 1);
         forks.is_fork_active_at_block(BHardfork::B1, 1);
+    }
+
+    #[test]
+    fn insert_at_timestamp_maintains_order() {
+        let mut forks = ChainHardforks::default();
+
+        // Insert forks at different timestamps
+        forks.insert_at_timestamp(BHardfork::B1, 2000);
+        forks.insert_at_timestamp(AHardfork::A1, 1000);
+
+        assert_eq!(forks.len(), 2);
+
+        // Verify they are ordered by timestamp
+        let fork_list: Vec<_> = forks.forks_iter().collect();
+        assert_eq!(fork_list[0].0.name(), "A1");
+        assert_eq!(fork_list[0].1, ForkCondition::Timestamp(1000));
+        assert_eq!(fork_list[1].0.name(), "B1");
+        assert_eq!(fork_list[1].1, ForkCondition::Timestamp(2000));
+
+        // Verify fork conditions
+        assert_eq!(forks.fork(AHardfork::A1), ForkCondition::Timestamp(1000));
+        assert_eq!(forks.fork(BHardfork::B1), ForkCondition::Timestamp(2000));
+
+        // Update existing fork with new timestamp
+        forks.insert_at_timestamp(AHardfork::A1, 3000);
+        assert_eq!(forks.len(), 2);
+
+        // Verify updated order
+        let fork_list: Vec<_> = forks.forks_iter().collect();
+        assert_eq!(fork_list[0].0.name(), "B1");
+        assert_eq!(fork_list[0].1, ForkCondition::Timestamp(2000));
+        assert_eq!(fork_list[1].0.name(), "A1");
+        assert_eq!(fork_list[1].1, ForkCondition::Timestamp(3000));
+    }
+
+    #[test]
+    fn insert_at_timestamp_with_mixed_conditions() {
+        let mut forks = ChainHardforks::default();
+
+        // Insert block-based forks first
+        forks.insert(AHardfork::A1, ForkCondition::Block(100));
+        forks.insert(BHardfork::B1, ForkCondition::Block(200));
+
+        // Insert timestamp-based forks - should come after block-based ones
+        forks.insert_at_timestamp(AHardfork::A2, 2000);
+        forks.insert_at_timestamp(BHardfork::B2, 1000);
+        forks.insert_at_timestamp(AHardfork::A3, 1500);
+
+        assert_eq!(forks.len(), 5);
+
+        let fork_list: Vec<_> = forks.forks_iter().collect();
+
+        // Block-based forks come first
+        assert_eq!(fork_list[0].0.name(), "A1");
+        assert_eq!(fork_list[0].1, ForkCondition::Block(100));
+        assert_eq!(fork_list[1].0.name(), "B1");
+        assert_eq!(fork_list[1].1, ForkCondition::Block(200));
+
+        // Timestamp-based forks are ordered by timestamp
+        assert_eq!(fork_list[2].0.name(), "B2");
+        assert_eq!(fork_list[2].1, ForkCondition::Timestamp(1000));
+        assert_eq!(fork_list[3].0.name(), "A3");
+        assert_eq!(fork_list[3].1, ForkCondition::Timestamp(1500));
+        assert_eq!(fork_list[4].0.name(), "A2");
+        assert_eq!(fork_list[4].1, ForkCondition::Timestamp(2000));
+
+        // Test updating a timestamp fork
+        forks.insert_at_timestamp(AHardfork::A3, 500);
+        assert_eq!(forks.len(), 5);
+
+        let fork_list: Vec<_> = forks.forks_iter().collect();
+
+        // A3 should now be first among timestamp forks
+        assert_eq!(fork_list[2].0.name(), "A3");
+        assert_eq!(fork_list[2].1, ForkCondition::Timestamp(500));
+        assert_eq!(fork_list[3].0.name(), "B2");
+        assert_eq!(fork_list[3].1, ForkCondition::Timestamp(1000));
+        assert_eq!(fork_list[4].0.name(), "A2");
+        assert_eq!(fork_list[4].1, ForkCondition::Timestamp(2000));
     }
 }
