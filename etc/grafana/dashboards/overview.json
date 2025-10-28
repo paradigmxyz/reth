@@ -4239,11 +4239,23 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_pending_multiproofs_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_tree_root_pending_storage_multiproofs_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
-          "legendFormat": "{{quantile}} percentile",
+          "legendFormat": "storage {{quantile}} percentile",
           "range": true,
-          "refId": "Branch Nodes"
+          "refId": "Storage"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_pending_account_multiproofs_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "account {{quantile}} percentile",
+          "range": true,
+          "refId": "Account"
         }
       ],
       "title": "Pending MultiProof requests",
@@ -4308,7 +4320,38 @@
           },
           "unit": "none"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Max storage workers"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [10, 10],
+                  "fill": "dash"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Max account workers"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [10, 10],
+                  "fill": "dash"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -4316,6 +4359,7 @@
         "x": 12,
         "y": 104
       },
+      "description": "The max metrics (Max storage workers and Max account workers) are displayed as dotted lines to highlight the configured upper limits.",
       "id": 256,
       "options": {
         "legend": {
@@ -4338,14 +4382,50 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_inflight_multiproofs_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_tree_root_active_storage_workers_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
-          "legendFormat": "{{quantile}} percentile",
+          "legendFormat": "Storage workers {{quantile}} percentile",
           "range": true,
-          "refId": "Branch Nodes"
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_active_account_workers_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "Account workers {{quantile}} percentile",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_max_storage_workers{$instance_label=\"$instance\"}",
+          "instant": false,
+          "legendFormat": "Max storage workers",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_max_account_workers{$instance_label=\"$instance\"}",
+          "instant": false,
+          "legendFormat": "Max account workers",
+          "range": true,
+          "refId": "D"
         }
       ],
-      "title": "In-flight MultiProof requests",
+      "title": "Active MultiProof Workers",
       "type": "timeseries"
     },
     {

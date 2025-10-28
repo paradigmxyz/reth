@@ -1,3 +1,5 @@
+#![allow(deprecated)] // necessary to all defining deprecated `PruneSegment` variants
+
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
 use thiserror::Error;
@@ -25,13 +27,11 @@ pub enum PruneSegment {
     AccountHistory,
     /// Prune segment responsible for the `StorageChangeSets` and `StoragesHistory` tables.
     StorageHistory,
+    #[deprecated = "Variant indexes cannot be changed"]
     /// Prune segment responsible for the `CanonicalHeaders`, `Headers` tables.
-    ///
-    /// No longer used.
     Headers,
+    #[deprecated = "Variant indexes cannot be changed"]
     /// Prune segment responsible for the `Transactions` table.
-    ///
-    /// No longer used.
     Transactions,
     /// Prune segment responsible for all rows in `AccountsTrieChangeSets` and
     /// `StoragesTrieChangeSets` table.
@@ -59,6 +59,9 @@ impl PruneSegment {
             Self::StorageHistory |
             Self::MerkleChangeSets |
             Self::Receipts => MINIMUM_PRUNING_DISTANCE,
+            #[expect(deprecated)]
+            #[expect(clippy::match_same_arms)]
+            Self::Headers | Self::Transactions => 0,
         }
     }
 

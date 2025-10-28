@@ -611,17 +611,9 @@ where
         &mut self,
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<B256> {
-        // record revealed node metrics and capacity metrics
+        // record revealed node metrics
         #[cfg(feature = "metrics")]
-        {
-            self.metrics.record();
-            self.metrics.set_node_capacity(self.node_capacity());
-            self.metrics.set_value_capacity(self.value_capacity());
-            self.metrics.set_storage_trie_metrics(
-                self.storage.cleared_tries.len(),
-                self.storage.tries.len(),
-            );
-        }
+        self.metrics.record();
 
         Ok(self.revealed_trie_mut(provider_factory)?.root())
     }
@@ -632,17 +624,9 @@ where
         &mut self,
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<(B256, TrieUpdates)> {
-        // record revealed node metrics and capacity metrics
+        // record revealed node metrics
         #[cfg(feature = "metrics")]
-        {
-            self.metrics.record();
-            //self.metrics.set_node_capacity(self.node_capacity());
-            //self.metrics.set_value_capacity(self.value_capacity());
-            //self.metrics.set_storage_trie_metrics(
-            //    self.storage.cleared_tries.len(),
-            //    self.storage.tries.len(),
-            //);
-        }
+        self.metrics.record();
 
         let storage_tries = self.storage_trie_updates();
         let revealed = self.revealed_trie_mut(provider_factory)?;
@@ -731,7 +715,7 @@ where
     ///
     /// Returns false if the new account info and storage trie are empty, indicating the account
     /// leaf should be removed.
-    #[instrument(target = "trie::sparse", skip_all)]
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
     pub fn update_account(
         &mut self,
         address: B256,
@@ -847,16 +831,6 @@ where
         storage_trie.remove_leaf(slot, provider)?;
         Ok(())
     }
-
-    /// The sum of the account trie's node capacity and the storage tries' node capacity
-    pub fn node_capacity(&self) -> usize {
-        self.state.node_capacity() + self.storage.total_node_capacity()
-    }
-
-    /// The sum of the account trie's value capacity and the storage tries' value capacity
-    pub fn value_capacity(&self) -> usize {
-        self.state.value_capacity() + self.storage.total_value_capacity()
-    }
 }
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
@@ -956,46 +930,6 @@ impl<S: SparseTrieInterface + Clone> StorageTries<S> {
         self.revealed_paths
             .remove(account)
             .unwrap_or_else(|| self.cleared_revealed_paths.pop().unwrap_or_default())
-    }
-
-    /// Sums the total node capacity in `cleared_tries`
-    fn total_cleared_tries_node_capacity(&self) -> usize {
-        self.cleared_tries.iter().map(|trie| trie.node_capacity()).sum()
-    }
-
-    /// Sums the total value capacity in `cleared_tries`
-    fn total_cleared_tries_value_capacity(&self) -> usize {
-        self.cleared_tries.iter().map(|trie| trie.value_capacity()).sum()
-    }
-
-    /// Calculates the sum of the active storage trie node capacity, ie the tries in `tries`
-    fn total_active_tries_node_capacity(&self) -> usize {
-        self.tries.values().map(|trie| trie.node_capacity()).sum()
-    }
-
-    /// Calculates the sum of the active storage trie value capacity, ie the tries in `tries`
-    fn total_active_tries_value_capacity(&self) -> usize {
-        self.tries.values().map(|trie| trie.value_capacity()).sum()
-    }
-
-    /// Calculates the sum of active and cleared storage trie node capacity, i.e. the sum of
-    /// * [`StorageTries::total_active_tries_node_capacity`], and
-    /// * [`StorageTries::total_cleared_tries_node_capacity`]
-    /// * the default trie's node capacity
-    fn total_node_capacity(&self) -> usize {
-        self.total_active_tries_node_capacity() +
-            self.total_cleared_tries_node_capacity() +
-            self.default_trie.node_capacity()
-    }
-
-    /// Calculates the sum of active and cleared storage trie value capacity, i.e. the sum of
-    /// * [`StorageTries::total_active_tries_value_capacity`], and
-    /// * [`StorageTries::total_cleared_tries_value_capacity`], and
-    /// * the default trie's value capacity
-    fn total_value_capacity(&self) -> usize {
-        self.total_active_tries_value_capacity() +
-            self.total_cleared_tries_value_capacity() +
-            self.default_trie.value_capacity()
     }
 }
 
