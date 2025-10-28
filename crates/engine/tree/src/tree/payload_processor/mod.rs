@@ -316,8 +316,7 @@ where
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Tx>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
         usize,
-    )
-    {
+    ) {
         // Get the transaction count for prewarming task
         // Use upper bound if available (more accurate), otherwise use lower bound
         let (lower, upper) = transactions.size_hint();

@@ -459,7 +459,6 @@ where
     fn into_recovered(self) -> Recovered<Executor::Transaction> {
         (*self.tx).clone().into_recovered()
     }
-   
 }
 
 impl<'a, F, DB, Executor, Builder, N> BlockBuilder

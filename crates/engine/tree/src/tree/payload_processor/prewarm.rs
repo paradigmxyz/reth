@@ -42,11 +42,7 @@ use std::{
 use tracing::{debug, debug_span, instrument, trace, warn};
 
 /// A wrapper for transactions that includes their index in the block.
-#[derive(Clone)]
-struct IndexedTransaction<Tx>
-where
-    Tx: Clone,
-{
+struct IndexedTransaction<Tx> {
     /// The transaction index in the block.
     index: usize,
     /// The wrapped transaction.
@@ -186,7 +182,13 @@ where
                     // critical state. This is particularly important for L2s like Optimism
                     // where the first deposit transaction contains essential block metadata.
                     for handle in &handles {
-                        if let Err(err) = handle.send(indexed_tx.clone()) {
+                        // Create a new IndexedTransaction with the same index and a cloned tx
+                        // Since Tx is WithTxEnv<TxEnvFor<Evm>, Arc<I::Tx>>, cloning is efficient
+                        let tx_for_worker = IndexedTransaction {
+                            index: indexed_tx.index,
+                            tx: indexed_tx.tx.clone(),
+                        };
+                        if let Err(err) = handle.send(tx_for_worker) {
                             warn!(
                                 target: "engine::tree::payload_processor::prewarm",
                                 tx_hash = %first_tx_hash,
@@ -457,7 +459,7 @@ where
     ///
     /// Note: There are no ordering guarantees; this does not reflect the state produced by
     /// sequential execution.
-    /// @karl_todo : remove Clone trait here once we have done the transition 
+    /// @`karl_todo` : remove Clone trait here once we have done the transition
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn transact_batch<Tx>(
         self,
@@ -465,7 +467,7 @@ where
         sender: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
     ) where
-        Tx: ExecutableTxFor<Evm> + Clone,
+        Tx: ExecutableTxFor<Evm>,
     {
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
@@ -543,7 +545,7 @@ where
         done_tx: Sender<()>,
     ) -> mpsc::Sender<IndexedTransaction<Tx>>
     where
-        Tx: ExecutableTxFor<Evm> + Send + Clone + 'static,
+        Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
         let (tx, rx) = mpsc::channel();
         let ctx = self.clone();
