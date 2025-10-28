@@ -133,6 +133,14 @@ impl ChainHardforks {
         }
     }
 
+    /// Extends the list with multiple forks, updating existing entries with new
+    /// [`ForkCondition`]s if they already exist.
+    pub fn extend<H: Hardfork>(&mut self, forks: impl IntoIterator<Item = (H, ForkCondition)>) {
+        for (fork, condition) in forks {
+            self.insert(fork, condition);
+        }
+    }
+
     /// Removes `fork` from list.
     pub fn remove<H: Hardfork>(&mut self, fork: H) {
         self.forks.retain(|(inner_fork, _)| inner_fork.name() != fork.name());
@@ -155,5 +163,24 @@ impl<T: Hardfork, const N: usize> From<[(T, ForkCondition); N]> for ChainHardfor
                 .map(|(fork, cond)| (Box::new(fork) as Box<dyn Hardfork>, cond))
                 .collect(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_hardforks::hardfork;
+
+    hardfork!(AHardfork { A1 });
+    hardfork!(BHardfork { B1 });
+
+    #[test]
+    fn add_hardforks() {
+        let mut forks = ChainHardforks::default();
+        forks.insert(AHardfork::A1, ForkCondition::Block(1));
+        forks.insert(BHardfork::B1, ForkCondition::Block(1));
+        assert_eq!(forks.len(), 2);
+        forks.is_fork_active_at_block(AHardfork::A1, 1);
+        forks.is_fork_active_at_block(BHardfork::B1, 1);
     }
 }
