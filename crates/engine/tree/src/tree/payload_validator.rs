@@ -160,7 +160,7 @@ where
     /// Validator for the payload.
     validator: V,
     /// A cleared trie input, kept around to be reused so allocations can be minimized.
-    trie_input: Option<TrieInputSorted>,
+    trie_input: Option<TrieInput>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -802,15 +802,15 @@ where
         match strategy {
             StateRootStrategy::StateRootTask => {
                 // get allocated trie input if it exists
-                let allocated_trie_input = self.trie_input.take();
+                let allocated = self.trie_input.take();
 
                 // Compute trie input
                 let trie_input_start = Instant::now();
-                let (trie_input, block_number) = self.compute_trie_input(
+                let (trie_input, mut reusable_input, block_number) = self.compute_trie_input(
                     self.provider.database_provider_ro()?,
                     parent_hash,
                     state,
-                    allocated_trie_input,
+                    allocated,
                 )?;
 
                 self.metrics
@@ -820,8 +820,13 @@ where
 
                 // Convert the TrieInput into a MultProofConfig, since everything uses the sorted
                 // forms of the state/trie fields.
-                let (trie_input, multiproof_config) = MultiProofConfig::from_input(trie_input);
-                self.trie_input.replace(trie_input);
+                let (mut cleared_sorted_input, multiproof_config) =
+                    MultiProofConfig::from_input(trie_input);
+
+                // Rescue the prefix_sets from the cleared sorted input and attach to reusable builder
+                reusable_input.prefix_sets =
+                    core::mem::take(&mut cleared_sorted_input.prefix_sets);
+                self.trie_input.replace(reusable_input);
 
                 // Create OverlayStateProviderFactory with the multiproof config, for use with
                 // multiproofs.
@@ -981,14 +986,11 @@ where
         provider: TP,
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-        allocated_trie_input: Option<TrieInputSorted>,
-    ) -> ProviderResult<(TrieInputSorted, BlockNumber)> {
-        // Build with unsorted structures for fast append operations.
-        // Note: We always use a fresh TrieInput here rather than reusing the allocated sorted
-        // input, since we need HashMap-based structures for efficient building. The main
-        // performance win comes from eliminating redundant sorting, not from allocation reuse.
-        let _ = allocated_trie_input; // Explicitly acknowledge we're not using it
-        let mut input = TrieInput::default();
+        allocated_trie_input: Option<TrieInput>,
+    ) -> ProviderResult<(TrieInputSorted, TrieInput, BlockNumber)> {
+        // Build with unsorted structures for fast append operations, reusing allocated capacity.
+        let mut input = allocated_trie_input.unwrap_or_default();
+        input.clear(); // Keep HashMap capacity, drop contents
 
         let (historical, blocks) = state
             .tree_state
@@ -1011,9 +1013,9 @@ where
             blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())),
         );
 
-        // Sort once at the end before returning
-        let sorted_input = TrieInputSorted::from_unsorted(input);
-        Ok((sorted_input, block_number))
+        // Drain into sorted form, keeping HashMap capacity for reuse
+        let sorted_input = input.drain_into_sorted();
+        Ok((sorted_input, input, block_number))
     }
 }
 

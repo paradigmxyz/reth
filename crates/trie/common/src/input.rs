@@ -122,6 +122,23 @@ impl TrieInput {
         self.clear();
         self
     }
+
+    /// Converts trie input into [`TrieInputSorted`], draining the internal maps while keeping
+    /// their allocated capacity.
+    ///
+    /// This effectively clears all the fields in the [`TrieInput`] while preserving the
+    /// `HashMap` capacity for reuse. This allows us to reuse the allocated space for subsequent
+    /// block validations, avoiding repeated allocations and rehashing in hot paths.
+    ///
+    /// The sorted output allocates new `Vec` space, but the original `HashMap` capacity is
+    /// retained for the next cycle.
+    pub fn drain_into_sorted(&mut self) -> TrieInputSorted {
+        TrieInputSorted {
+            nodes: self.nodes.drain_into_sorted(),
+            state: self.state.drain_into_sorted(),
+            prefix_sets: core::mem::take(&mut self.prefix_sets),
+        }
+    }
 }
 
 /// Sorted variant of [`TrieInput`] for efficient proof generation.
