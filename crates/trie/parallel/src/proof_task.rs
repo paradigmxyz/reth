@@ -665,7 +665,8 @@ where
             .factory
             .database_provider_ro()
             .expect("Storage worker failed to initialize: unable to create provider");
-        let proof_tx = ProofTaskTx::new(provider, self.task_ctx.prefix_sets.clone(), self.worker_id);
+        let proof_tx =
+            ProofTaskTx::new(provider, self.task_ctx.prefix_sets.clone(), self.worker_id);
 
         trace!(
             target: "trie::proof_task",
@@ -901,7 +902,8 @@ where
             .factory
             .database_provider_ro()
             .expect("Account worker failed to initialize: unable to create provider");
-        let proof_tx = ProofTaskTx::new(provider, self.task_ctx.prefix_sets.clone(), self.worker_id);
+        let proof_tx =
+            ProofTaskTx::new(provider, self.task_ctx.prefix_sets.clone(), self.worker_id);
 
         trace!(
             target: "trie::proof_task",
