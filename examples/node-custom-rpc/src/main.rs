@@ -96,18 +96,31 @@ pub struct TxpoolExt<Pool> {
     pool: Pool,
 }
 
+impl<Pool> TxpoolExt<Pool>
+where
+    Pool: TransactionPool + Clone + 'static,
+{
+    fn transaction_count_inner(&self) -> usize {
+        self.pool.pool_size().total
+    }
+
+    fn clear_txpool_inner(&self) {
+        let all_tx_hashes = self.pool.all_transaction_hashes();
+        self.pool.remove_transactions(all_tx_hashes);
+    }
+}
+
 #[cfg(not(test))]
 impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
 where
     Pool: TransactionPool + Clone + 'static,
 {
     fn transaction_count(&self) -> RpcResult<usize> {
-        Ok(self.pool.pool_size().total)
+        Ok(self.transaction_count_inner())
     }
 
     fn clear_txpool(&self) -> RpcResult<()> {
-        let all_tx_hashes = self.pool.all_transaction_hashes();
-        self.pool.remove_transactions(all_tx_hashes);
+        self.clear_txpool_inner();
         Ok(())
     }
 
@@ -155,12 +168,11 @@ mod tests {
         Pool: TransactionPool + Clone + 'static,
     {
         fn transaction_count(&self) -> RpcResult<usize> {
-            Ok(self.pool.pool_size().total)
+            Ok(self.transaction_count_inner())
         }
 
         fn clear_txpool(&self) -> RpcResult<()> {
-            let all_tx_hashes = self.pool.all_transaction_hashes();
-            self.pool.remove_transactions(all_tx_hashes);
+            self.clear_txpool_inner();
             Ok(())
         }
 
