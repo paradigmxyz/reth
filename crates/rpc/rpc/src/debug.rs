@@ -5,7 +5,7 @@ use alloy_consensus::{
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{uint, Address, Bytes, B256};
+use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
@@ -1143,8 +1143,29 @@ where
         Ok(())
     }
 
-    async fn debug_db_get(&self, _key: String) -> RpcResult<()> {
-        Ok(())
+    async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>> {
+        // According to Geth impl, bytecode keys are: 0x63 (prefix) + 32 bytes (code_hash)
+        // https://github.com/ethereum/go-ethereum/blob/737ffd1bf0cbee378d0111a5b17ae4724fb2216c/core/rawdb/schema.go#L120
+        let key_bytes =
+            decode(&key).map_err(|_| EthApiError::InvalidParams("Invalid hex key".to_string()))?;
+        if key_bytes.len() != 33 {
+            return Err(EthApiError::InvalidParams(format!(
+                "Key must be 33 bytes, got {}",
+                key_bytes.len()
+            ))
+            .into());
+        }
+        if key_bytes[0] != 0x63 {
+            return Err(EthApiError::InvalidParams(
+                "Key prefix must be 0x63 for bytecode".to_string(),
+            )
+            .into());
+        }
+
+        let code_hash = B256::from_slice(&key_bytes[1..33]);
+
+        // No block ID is provided, so it defaults to the latest block
+        self.debug_code_by_hash(code_hash, None).await.map_err(Into::into)
     }
 
     async fn debug_dump_block(&self, _number: BlockId) -> RpcResult<()> {
