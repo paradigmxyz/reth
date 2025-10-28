@@ -39,7 +39,7 @@ use reth_provider::{
     StateRootProvider, TrieReader,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
@@ -160,7 +160,7 @@ where
     /// Validator for the payload.
     validator: V,
     /// A cleared trie input, kept around to be reused so allocations can be minimized.
-    trie_input: Option<TrieInput>,
+    trie_input: Option<TrieInputSorted>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -981,10 +981,14 @@ where
         provider: TP,
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-        allocated_trie_input: Option<TrieInput>,
-    ) -> ProviderResult<(TrieInput, BlockNumber)> {
-        // get allocated trie input or use a default trie input
-        let mut input = allocated_trie_input.unwrap_or_default();
+        allocated_trie_input: Option<TrieInputSorted>,
+    ) -> ProviderResult<(TrieInputSorted, BlockNumber)> {
+        // Build with unsorted structures for fast append operations.
+        // Note: We always use a fresh TrieInput here rather than reusing the allocated sorted
+        // input, since we need HashMap-based structures for efficient building. The main
+        // performance win comes from eliminating redundant sorting, not from allocation reuse.
+        let _ = allocated_trie_input; // Explicitly acknowledge we're not using it
+        let mut input = TrieInput::default();
 
         let (historical, blocks) = state
             .tree_state
@@ -1007,7 +1011,9 @@ where
             blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())),
         );
 
-        Ok((input, block_number))
+        // Sort once at the end before returning
+        let sorted_input = TrieInputSorted::from_unsorted(input);
+        Ok((sorted_input, block_number))
     }
 }
 

@@ -507,6 +507,13 @@ impl HashedPostStateSorted {
                 .or_insert_with(|| other_storage.clone());
         }
     }
+
+    /// Clears all accounts and storage data.
+    pub fn clear(&mut self) {
+        self.accounts.accounts.clear();
+        self.accounts.destroyed_accounts.clear();
+        self.storages.clear();
+    }
 }
 
 impl AsRef<Self> for HashedPostStateSorted {

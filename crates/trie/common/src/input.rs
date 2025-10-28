@@ -1,4 +1,8 @@
-use crate::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
+use crate::{
+    prefix_set::TriePrefixSetsMut,
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, HashedPostStateSorted,
+};
 
 /// Inputs for trie-related computations.
 #[derive(Default, Debug, Clone)]
@@ -114,6 +118,60 @@ impl TrieInput {
     }
 
     /// This method returns a cleared version of this trie input.
+    pub fn cleared(mut self) -> Self {
+        self.clear();
+        self
+    }
+}
+
+/// Sorted variant of [`TrieInput`] for efficient proof generation.
+///
+/// This type holds sorted versions of trie data structures, which eliminates the need
+/// for expensive sorting operations during multiproof generation.
+#[derive(Default, Debug, Clone)]
+pub struct TrieInputSorted {
+    /// Sorted cached in-memory intermediate trie nodes.
+    pub nodes: TrieUpdatesSorted,
+    /// Sorted in-memory overlay hashed state.
+    pub state: HashedPostStateSorted,
+    /// Prefix sets for computation.
+    pub prefix_sets: TriePrefixSetsMut,
+}
+
+impl TrieInputSorted {
+    /// Create new sorted trie input.
+    pub const fn new(
+        nodes: TrieUpdatesSorted,
+        state: HashedPostStateSorted,
+        prefix_sets: TriePrefixSetsMut,
+    ) -> Self {
+        Self { nodes, state, prefix_sets }
+    }
+
+    /// Create from unsorted [`TrieInput`] by sorting.
+    pub fn from_unsorted(input: TrieInput) -> Self {
+        Self {
+            nodes: input.nodes.into_sorted(),
+            state: input.state.into_sorted(),
+            prefix_sets: input.prefix_sets,
+        }
+    }
+
+    /// Append state to the input by reference and extend the prefix sets.
+    pub fn append_ref(&mut self, state: &HashedPostState) {
+        self.prefix_sets.extend(state.construct_prefix_sets());
+        let sorted_state = state.clone().into_sorted();
+        self.state.extend_ref(&sorted_state);
+    }
+
+    /// Clear all data.
+    pub fn clear(&mut self) {
+        self.nodes.clear();
+        self.state.clear();
+        self.prefix_sets.clear();
+    }
+
+    /// Return a cleared version of this sorted trie input.
     pub fn cleared(mut self) -> Self {
         self.clear();
         self

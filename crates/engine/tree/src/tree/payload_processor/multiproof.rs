@@ -15,7 +15,7 @@ use reth_revm::state::EvmState;
 use reth_trie::{
     added_removed_keys::MultiAddedRemovedKeys, prefix_set::TriePrefixSetsMut,
     updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState, HashedPostStateSorted,
-    HashedStorage, MultiProofTargets, TrieInput,
+    HashedStorage, MultiProofTargets, TrieInputSorted,
 };
 use reth_trie_parallel::{
     proof::ParallelProof,
@@ -73,12 +73,11 @@ pub(crate) struct MultiProofConfig {
 impl MultiProofConfig {
     /// Creates a new state root config from the trie input.
     ///
-    /// This returns a cleared [`TrieInput`] so that we can reuse any allocated space in the
-    /// [`TrieInput`].
-    pub(crate) fn from_input(mut input: TrieInput) -> (TrieInput, Self) {
+    /// This returns a cleared [`TrieInputSorted`] so that we can reuse any allocated space.
+    pub(crate) fn from_input(mut input: TrieInputSorted) -> (TrieInputSorted, Self) {
         let config = Self {
-            nodes_sorted: Arc::new(input.nodes.drain_into_sorted()),
-            state_sorted: Arc::new(input.state.drain_into_sorted()),
+            nodes_sorted: Arc::new(core::mem::take(&mut input.nodes)),
+            state_sorted: Arc::new(core::mem::take(&mut input.state)),
             prefix_sets: Arc::new(input.prefix_sets.clone()),
         };
         (input.cleared(), config)
