@@ -10,7 +10,7 @@ pub use set::SegmentSet;
 use std::{fmt::Debug, ops::RangeInclusive};
 use tracing::error;
 pub use user::{
-    AccountHistory, BodiesAdapter, MerkleChangeSets, Receipts as UserReceipts, SenderRecovery,
+    AccountHistory, Bodies, MerkleChangeSets, Receipts as UserReceipts, SenderRecovery,
     StorageHistory, TransactionLookup,
 };
 

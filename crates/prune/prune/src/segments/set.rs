@@ -1,5 +1,5 @@
 use crate::segments::{
-    AccountHistory, BodiesAdapter, MerkleChangeSets, Segment, SenderRecovery, StorageHistory,
+    AccountHistory, Bodies, MerkleChangeSets, Segment, SenderRecovery, StorageHistory,
     TransactionLookup, UserReceipts,
 };
 use alloy_eips::eip2718::Encodable2718;
@@ -85,7 +85,7 @@ where
             // Sender recovery
             .segment_opt(sender_recovery.map(SenderRecovery::new))
             // Bodies
-            .segment_opt(bodies_history.map(BodiesAdapter::new))
+            .segment_opt(bodies_history.map(Bodies::new))
     }
 }
 

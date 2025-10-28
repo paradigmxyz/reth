@@ -9822,7 +9822,6 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
- "reth-prune-static-files",
  "reth-prune-types",
  "reth-stages",
  "reth-static-file-types",

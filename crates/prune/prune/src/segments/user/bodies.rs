@@ -3,43 +3,63 @@ use crate::{
     PrunerError,
 };
 use reth_provider::{BlockReader, StaticFileProviderFactory};
-use reth_prune_static_files::Bodies;
-use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
+use reth_prune_types::{
+    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+};
+use reth_static_file_types::StaticFileSegment;
 
-/// Segment adapter for pruning transactions in static files.
+/// Segment responsible for pruning transactions in static files.
 ///
-/// This wraps the implementation from `reth_prune_static_files` and implements
-/// the `Segment` trait required by the pruner.
+/// This segment is controlled by the `bodies_history` configuration.
 #[derive(Debug)]
-pub struct BodiesAdapter {
-    inner: Bodies,
+pub struct Bodies {
+    mode: PruneMode,
 }
 
-impl BodiesAdapter {
-    /// Creates a new [`BodiesAdapter`] segment with the given prune mode.
+impl Bodies {
+    /// Creates a new [`Bodies`] segment with the given prune mode.
     pub const fn new(mode: PruneMode) -> Self {
-        Self { inner: Bodies::new(mode) }
+        Self { mode }
     }
 }
 
-impl<Provider> Segment<Provider> for BodiesAdapter
+impl<Provider> Segment<Provider> for Bodies
 where
     Provider: StaticFileProviderFactory + BlockReader,
 {
     fn segment(&self) -> PruneSegment {
-        self.inner.segment()
+        PruneSegment::Bodies
     }
 
     fn mode(&self) -> Option<PruneMode> {
-        self.inner.mode()
+        Some(self.mode)
     }
 
     fn purpose(&self) -> PrunePurpose {
-        self.inner.purpose()
+        PrunePurpose::User
     }
 
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
-        Ok(self.inner.prune(provider, input.to_block)?)
+        let deleted_headers = provider
+            .static_file_provider()
+            .delete_segment_below_block(StaticFileSegment::Transactions, input.to_block + 1)?;
+
+        if deleted_headers.is_empty() {
+            return Ok(SegmentOutput::done())
+        }
+
+        let tx_ranges = deleted_headers.iter().filter_map(|header| header.tx_range());
+
+        let pruned = tx_ranges.clone().map(|range| range.len()).sum::<u64>() as usize;
+
+        Ok(SegmentOutput {
+            progress: PruneProgress::Finished,
+            pruned,
+            checkpoint: Some(SegmentOutputCheckpoint {
+                block_number: Some(input.to_block),
+                tx_number: tx_ranges.map(|range| range.end()).max(),
+            }),
+        })
     }
 }
 
@@ -106,8 +126,8 @@ mod tests {
         test_case: PruneTestCase,
         tip: BlockNumber,
     ) {
-        let bodies_adapter = BodiesAdapter::new(test_case.prune_mode);
-        let segments: Vec<Box<dyn Segment<_>>> = vec![Box::new(bodies_adapter)];
+        let bodies = Bodies::new(test_case.prune_mode);
+        let segments: Vec<Box<dyn Segment<_>>> = vec![Box::new(bodies)];
 
         let mut pruner = Pruner::new_with_factory(
             factory.clone(),
