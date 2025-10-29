@@ -3427,6 +3427,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-index"
+version = "0.0.0"
+dependencies = [
+ "reth-ethereum",
+ "serde",
+]
+
+[[package]]
 name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
@@ -9584,9 +9592,7 @@ dependencies = [
 name = "reth-optimism-storage"
 version = "1.8.3"
 dependencies = [
- "alloy-consensus",
  "reth-codecs",
- "reth-optimism-primitives",
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-api",
