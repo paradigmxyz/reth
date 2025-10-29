@@ -321,9 +321,6 @@ impl OpReceiptBuilder {
         chain_spec.is_jovian_active_at_timestamp(timestamp).then(|| {
             // Estimate the size of the transaction in bytes and multiply by the DA
             // footprint gas scalar.
-            // a new field to the `TxReceipt` type to compute the cumulated
-            // `blob_gas_used`, a bit like `cumulative_gas_used` is
-            // computed.
             // Jovian specs: `https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/jovian/exec-engine.md#da-footprint-block-limit`
             let da_size = estimate_tx_compressed_size(tx_signed.encoded_2718().as_slice())
                 .saturating_div(1_000_000)
