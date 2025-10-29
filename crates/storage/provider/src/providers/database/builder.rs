@@ -52,10 +52,9 @@ impl<N> ProviderFactoryBuilder<N> {
     ///
     /// ```no_run
     /// use reth_chainspec::MAINNET;
-    /// use reth_node_types::NodeTypes;
-    /// use reth_provider::providers::ProviderFactoryBuilder;
+    /// use reth_provider::providers::{NodeTypesForProvider, ProviderFactoryBuilder};
     ///
-    /// fn demo<N: NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>() {
+    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>() {
     ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
     ///         .open_read_only(MAINNET.clone(), "datadir")
     ///         .unwrap();
@@ -68,11 +67,9 @@ impl<N> ProviderFactoryBuilder<N> {
     ///
     /// ```no_run
     /// use reth_chainspec::MAINNET;
-    /// use reth_node_types::NodeTypes;
+    /// use reth_provider::providers::{NodeTypesForProvider, ProviderFactoryBuilder, ReadOnlyConfig};
     ///
-    /// use reth_provider::providers::{ProviderFactoryBuilder, ReadOnlyConfig};
-    ///
-    /// fn demo<N: NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>() {
+    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>() {
     ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
     ///         .open_read_only(MAINNET.clone(), ReadOnlyConfig::from_datadir("datadir").no_watch())
     ///         .unwrap();
@@ -88,11 +85,9 @@ impl<N> ProviderFactoryBuilder<N> {
     ///
     /// ```no_run
     /// use reth_chainspec::MAINNET;
-    /// use reth_node_types::NodeTypes;
+    /// use reth_provider::providers::{NodeTypesForProvider, ProviderFactoryBuilder, ReadOnlyConfig};
     ///
-    /// use reth_provider::providers::{ProviderFactoryBuilder, ReadOnlyConfig};
-    ///
-    /// fn demo<N: NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>() {
+    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>() {
     ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
     ///         .open_read_only(
     ///             MAINNET.clone(),
