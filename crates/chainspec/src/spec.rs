@@ -883,7 +883,7 @@ impl ChainSpecBuilder {
 
     /// Remove the given fork from the spec.
     pub fn without_fork<H: Hardfork>(mut self, fork: H) -> Self {
-        self.hardforks.remove(fork);
+        self.hardforks.remove(&fork);
         self
     }
 

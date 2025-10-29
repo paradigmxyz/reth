@@ -30,7 +30,7 @@ engine-withdrawals:
   - Corrupted Block Hash Payload (INVALID) (Paris) (reth)
   - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org (Paris) (reth)
 
-engine-api: []
+engine-api: [ ]
 
 # no fix due to https://github.com/paradigmxyz/reth/issues/8732
 engine-cancun:
@@ -39,9 +39,9 @@ engine-cancun:
   # in hive or its dependencies
   - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
 
-sync: []
+sync: [ ]
 
-engine-auth: []
+engine-auth: [ ]
 
 # tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage
 #   no fix: it's too expensive to check whether the storage is empty on each creation (? - need more context on WHY)
@@ -55,10 +55,6 @@ engine-auth: []
 #
 # tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment
 #   post-fork test contract deployment, should fix for spec compliance but not realistic on mainnet (? - need more context)
-#
-# tests/osaka/eip7594_peerdas/test_max_blob_per_tx.py::test_max_blobs_per_tx_fork_transition
-#   reth enforces 6 blob limit from EIP-7594, but EIP-7892 raises it to 9.
-#   Needs constant update in alloy. https://github.com/paradigmxyz/reth/issues/18975
 #
 # tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_*
 #   status (27th June 2024): was discussed in ACDT meeting, need to be raised in ACDE.
@@ -146,6 +142,11 @@ eels/consume-engine:
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Prague-tx_type_1-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Prague-tx_type_2-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Shanghai-tx_type_0-blockchain_test_engine_from_state_test-non-empty-balance-correct-initcode]-reth
+
+# tests/osaka/eip7594_peerdas/test_max_blob_per_tx.py::test_max_blobs_per_tx_fork_transition[fork_PragueToOsakaAtTime15k-blob_count_7-blockchain_test]
+#  this test inserts a chain via chain.rlp where the last block is invalid, but expects import to stop there, this doesn't work properly with our pipeline import approach hence the import fails when the invalid block is detected.
+#. In other words, if this test fails, this means we're correctly rejecting the block.
+#. The same test exists in the consume-engine simulator where it is passing as expected
 eels/consume-rlp:
   - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test-zero_nonce]-reth
   - tests/prague/eip7251_consolidations/test_modified_consolidation_contract.py::test_system_contract_errors[fork_Prague-blockchain_test_engine-system_contract_reaches_gas_limit-system_contract_0x0000bbddc7ce488642fb579f8b00f3a590007251]-reth
