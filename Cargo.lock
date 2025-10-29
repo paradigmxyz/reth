@@ -9525,6 +9525,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-json-rpc",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rpc-client",
  "alloy-rpc-types-debug",
