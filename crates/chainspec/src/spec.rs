@@ -1183,8 +1183,8 @@ Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-- Cancun                           @1710338135
-- Prague                           @1746612311"
+- Cancun                           @1710338135          blob: (target: 3, max: 6, fraction: 3338477)
+- Prague                           @1746612311          blob: (target: 6, max: 9, fraction: 5007716)"
         );
     }
 
