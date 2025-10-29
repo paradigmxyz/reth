@@ -10485,6 +10485,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "auto_impl",
  "reth-chainspec",
+ "reth-codecs",
  "reth-db-api",
  "reth-db-models",
  "reth-ethereum-primitives",
