@@ -2720,8 +2720,11 @@ dependencies = [
  "reth-chainspec",
  "reth-ethereum",
  "reth-network-peers",
+ "reth-node-builder",
+ "reth-tracing",
  "revm-primitives",
  "serde",
+ "tokio",
 ]
 
 [[package]]
