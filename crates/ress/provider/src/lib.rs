@@ -156,11 +156,12 @@ where
         // NOTE: there might be a race condition where target ancestor hash gets evicted from the
         // database.
         let witness_state_provider = self.provider.state_by_block_hash(ancestor_hash)?;
-        let mut trie_input = TrieInput::default();
-        for block in executed_ancestors.into_iter().rev() {
-            let trie_updates = block.trie_updates.as_ref();
-            trie_input.append_cached_ref(trie_updates, &block.hashed_state);
-        }
+        let trie_input = TrieInput::from_blocks_sorted(
+            executed_ancestors
+                .iter()
+                .rev()
+                .map(|block| (block.hashed_state.as_ref(), block.trie_updates.as_ref())),
+        );
         let mut hashed_state = db.into_state();
         hashed_state.extend(record.hashed_state);
 

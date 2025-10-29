@@ -45,6 +45,20 @@ impl TrieInput {
         input
     }
 
+    /// Create new trie input from the provided sorted blocks, from oldest to newest.
+    /// Converts sorted types to unsorted for aggregation.
+    pub fn from_blocks_sorted<'a>(
+        blocks: impl IntoIterator<Item = (&'a HashedPostStateSorted, &'a TrieUpdatesSorted)>,
+    ) -> Self {
+        let mut input = Self::default();
+        for (hashed_state, trie_updates) in blocks {
+            // Extend directly from sorted types, avoiding intermediate HashMap allocations
+            input.nodes.extend_from_sorted(trie_updates);
+            input.state.extend_from_sorted(hashed_state);
+        }
+        input
+    }
+
     /// Extend the trie input with the provided blocks, from oldest to newest.
     ///
     /// For blocks with missing trie updates, the trie input will be extended with prefix sets
