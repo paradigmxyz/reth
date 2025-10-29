@@ -369,7 +369,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // iterate over block body and remove receipts
         self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
 
-        if !self.prune_modes.has_receipts_pruning() {
+        if !self.prune_modes.has_receipts_pruning() ||
+            self.cached_storage_settings().receipts_on_static_files
+        {
             let static_file_receipt_num =
                 self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
 
@@ -1611,7 +1613,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
-        let has_receipts_pruning = self.prune_modes.has_receipts_pruning();
+        let write_to_db = self.prune_modes.has_receipts_pruning() &&
+            !self.cached_storage_settings().receipts_on_static_files;
 
         // Prepare receipts cursor if we are going to write receipts to the database
         //
@@ -1622,14 +1625,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // Prepare receipts static writer if we are going to write receipts to static files
         //
         // We are writing to static files if requested and if there's no receipt pruning configured
-        let mut receipts_static_writer = has_receipts_pruning
+        let mut receipts_static_writer = write_to_db
             .not()
             .then(|| self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts))
             .transpose()?;
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
         // [`PruneSegment::ContractLogs`].
-        let prunable_receipts =
+        //
+        // Receipts can only be skipped if we're dealing with legacy nodes that write them to
+        // Database. On newer nodes pruning will occur separately either by the PruneStage or the
+        // Pruner.
+        let prunable_receipts = !self.cached_storage_settings().receipts_on_static_files &&
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
 
         for (idx, (receipts, first_tx_index)) in

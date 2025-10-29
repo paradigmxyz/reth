@@ -164,7 +164,7 @@ where
     static_file_provider.latest_writer(StaticFileSegment::Transactions)?.increment_block(0)?;
 
     // Behaviour reserved only for new nodes should be set here.
-    let storage_settings = StorageSettings::new();
+    let storage_settings = StorageSettings::new().with_receipts_on_static_files();
     provider_rw.write_storage_settings(storage_settings)?;
 
     // `commit_unwind`` will first commit the DB and then the static file provider, which is

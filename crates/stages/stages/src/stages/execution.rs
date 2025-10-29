@@ -13,7 +13,7 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
-    StaticFileProviderFactory, StatsReader, TransactionVariant,
+    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -185,11 +185,17 @@ where
         unwind_to: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
+        Provider: StaticFileProviderFactory
+            + DBProvider
+            + BlockReader
+            + HeaderProvider
+            + StorageSettingsCache,
     {
-        // If there's any receipts pruning configured, receipts are written directly to database and
-        // inconsistencies are expected.
-        if provider.prune_modes_ref().has_receipts_pruning() {
+        // On old nodes, if there's any receipts pruning configured, receipts are written directly
+        // to database and inconsistencies are expected.
+        if provider.prune_modes_ref().has_receipts_pruning() &&
+            !provider.cached_storage_settings().receipts_on_static_files
+        {
             return Ok(())
         }
 
@@ -259,7 +265,8 @@ where
             Primitives: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
         > + StatsReader
         + BlockHashReader
-        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>,
+        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
+        + StorageSettingsCache,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
