@@ -21,8 +21,8 @@ use reth_provider::{
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::{
-    trie::StatelessSparseTrie, validation::stateless_validation_with_trie, ExecutionWitness,
-    UncompressedPublicKey,
+    trie::StatelessSparseTrie, validation::stateless_validation_with_trie, build_execution_witness,
+    ExecutionWitness, UncompressedPublicKey,
 };
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
@@ -281,11 +281,9 @@ fn run_case(
             .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         // Generate the stateless witness
-        // TODO: Most of this code is copy-pasted from debug_executionWitness
-        let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
-            witness_record;
+        let hashed_state = witness_record.hashed_state.clone();
+        let lowest_block_number = witness_record.lowest_block_number;
         let state = state_provider.witness(Default::default(), hashed_state)?;
-        let mut exec_witness = ExecutionWitness { state, codes, keys, headers: Default::default() };
 
         let smallest = lowest_block_number.unwrap_or_else(|| {
             // Return only the parent header, if there were no calls to the
@@ -294,8 +292,7 @@ fn run_case(
         });
 
         let range = smallest..block_number;
-
-        exec_witness.headers = provider
+        let headers = provider
             .headers_range(range)?
             .into_iter()
             .map(|header| {
@@ -304,6 +301,8 @@ fn run_case(
                 serialized_header.into()
             })
             .collect();
+
+        let exec_witness = build_execution_witness(witness_record, state, headers);
 
         program_inputs.push((block.clone(), exec_witness));
 
