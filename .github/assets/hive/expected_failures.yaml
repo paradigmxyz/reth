@@ -46,10 +46,11 @@ engine-auth: [ ]
 # EIP-7610 related tests (Revert creation in case of non-empty storage):
 #
 # tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage
-#   The test artificially creates an account with the same properties as those legacy mainnet accounts,
-#   then tests EIP-7610's behavior. On real mainnet, this scenario is impossible because you'd need the private
-#   key of one of those 20-30 legacy accounts or unlikely for one of ~25 accounts on mainnet that have non-empty storage
-#   (accounts from 2016 DoS attacks, keys likely lost) to trigger this scenario.
+# The test artificially creates an empty account with the storage, then tests EIP-7610's behavior.
+# On mainnet, this scenario is impossible because you'd need the private
+# key of one of ~25 left empty accounts with storage to make delegation.
+# Addresses of those accounts are derived from kecccak of prefix, caller address, nonce (or salt),
+# becase of this it is impossible (by current means) to trigger it. 
 #
 # tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_*
 #   Requires hash collision on create2 address to target already deployed accounts with storage.
