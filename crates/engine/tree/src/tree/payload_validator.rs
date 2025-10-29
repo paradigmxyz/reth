@@ -960,13 +960,6 @@ where
     /// 2. Extend the `TrieInput` with the contents of these in-memory blocks (from oldest to
     ///    newest) to build the overlay state and trie updates that sit on top of the database view
     ///    anchored at `block_hash`.
-    ///
-    /// Note:
-    /// - This function does not perform filtering of in-memory blocks during an in-progress
-    ///   persistence operation. The current architecture relies on consistent database snapshots
-    ///   and on clearing in-memory canonical blocks after persistence completes. If filtering based
-    ///   on the highest persisted block during an active save is required in the future, additional
-    ///   persistence context will need to be threaded into this function.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",
