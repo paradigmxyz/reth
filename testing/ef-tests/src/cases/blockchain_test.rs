@@ -21,7 +21,7 @@ use reth_provider::{
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::{
-    trie::StatelessSparseTrie, validation::stateless_validation_with_trie, build_execution_witness,
+    build_execution_witness, trie::StatelessSparseTrie, validation::stateless_validation_with_trie,
     ExecutionWitness, UncompressedPublicKey,
 };
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
