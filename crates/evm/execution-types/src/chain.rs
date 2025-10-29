@@ -73,8 +73,7 @@ impl<N: NodePrimitives> Chain<N> {
         trie_updates: Arc<TrieUpdates>,
     ) -> Self {
         let block_number = block.header().number();
-        let mut trie_updates_map = BTreeMap::new();
-        trie_updates_map.insert(block_number, trie_updates);
+        let trie_updates_map = BTreeMap::from([(block_number, trie_updates)]);
         Self::new([block], execution_outcome, trie_updates_map)
     }
 
@@ -578,7 +577,7 @@ pub(super) mod serde_bincode_compat {
 
         #[test]
         fn test_chain_bincode_roundtrip() {
-            use alloc::{collections::BTreeMap, sync::Arc};
+            use alloc::collections::BTreeMap;
 
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
