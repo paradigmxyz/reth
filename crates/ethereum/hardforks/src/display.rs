@@ -154,38 +154,8 @@ impl DisplayHardforks {
     where
         I: IntoIterator<Item = (&'a dyn Hardfork, ForkCondition)>,
     {
-        let mut pre_merge = Vec::new();
-        let mut with_merge = Vec::new();
-        let mut post_merge = Vec::new();
-
-        for (fork, condition) in hardforks {
-            let mut display_fork = DisplayFork {
-                name: fork.name().to_string(),
-                activated_at: condition,
-                eip: None,
-                metadata: None,
-            };
-
-            match condition {
-                ForkCondition::Block(_) => {
-                    pre_merge.push(display_fork);
-                }
-                ForkCondition::TTD { activation_block_number, total_difficulty, fork_block } => {
-                    display_fork.activated_at = ForkCondition::TTD {
-                        activation_block_number,
-                        fork_block,
-                        total_difficulty,
-                    };
-                    with_merge.push(display_fork);
-                }
-                ForkCondition::Timestamp(_) => {
-                    post_merge.push(display_fork);
-                }
-                ForkCondition::Never => {}
-            }
-        }
-
-        Self { pre_merge, with_merge, post_merge }
+        // Delegate to with_meta by mapping the iterator to include None for metadata
+        Self::with_meta(hardforks.into_iter().map(|(fork, condition)| (fork, condition, None)))
     }
 
     /// Creates a new [`DisplayHardforks`] from an iterator of hardforks with optional metadata.

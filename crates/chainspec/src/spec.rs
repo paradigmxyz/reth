@@ -442,24 +442,17 @@ impl<H: BlockHeader> ChainSpec<H> {
     pub fn display_hardforks(&self) -> DisplayHardforks {
         // Create an iterator with hardfork, condition, and optional blob metadata
         let hardforks_with_meta = self.hardforks.forks_iter().map(|(fork, condition)| {
-            // Generate blob metadata for supported hardforks
+            // Generate blob metadata for timestamp-based hardforks that have blob params
             let metadata = match condition {
                 ForkCondition::Timestamp(timestamp) => {
-                    // Check if this hardfork has blob parameters
-                    let fork_name = fork.name();
-                    if fork_name == "Cancun" || fork_name == "Prague" || fork_name == "Osaka" {
-                        // Get blob params for this timestamp via EthChainSpec trait
-                        EthChainSpec::blob_params_at_timestamp(self, timestamp).map(|params| {
-                            format!(
-                                "blob: (target: {}, max: {}, fraction: {})",
-                                params.target_blob_count,
-                                params.max_blob_count,
-                                params.update_fraction
-                            )
-                        })
-                    } else {
-                        None
-                    }
+                    // Try to get blob params for this timestamp
+                    // This automatically handles all hardforks with blob support
+                    EthChainSpec::blob_params_at_timestamp(self, timestamp).map(|params| {
+                        format!(
+                            "blob: (target: {}, max: {}, fraction: {})",
+                            params.target_blob_count, params.max_blob_count, params.update_fraction
+                        )
+                    })
                 }
                 _ => None,
             };
