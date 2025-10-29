@@ -49,8 +49,7 @@ engine-auth: [ ]
 #   The test artificially creates an empty account with storage, then tests EIP-7610's behavior.
 #   On mainnet, ~25 such accounts exist as contract addresses (derived from keccak(prefix, caller,
 #   nonce/salt), not from public keys). No private key exists for contract addresses. To trigger
-#   this with EIP-7702, you'd need a hash collision where keccak(public_key) equals one of these
-#   contract addresses - mathematically impossible. 
+#   this with EIP-7702, you'd need to recover a private key from one of the already deployed contract addresses - mathematically impossible. 
 #
 # tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_*
 #   Requires hash collision on create2 address to target already deployed accounts with storage.
