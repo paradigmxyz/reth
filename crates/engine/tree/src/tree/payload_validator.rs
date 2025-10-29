@@ -15,7 +15,7 @@ use crate::tree::{
 use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::B256;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
@@ -33,8 +33,8 @@ use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
-    DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
+    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
     PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
     StateRootProvider, TrieReader,
 };
@@ -680,10 +680,7 @@ where
         hashed_state: &HashedPostState,
         state: &EngineApiTreeState<N>,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        let provider = self.provider.database_provider_ro()?;
-
-        let (mut input, block_number) =
-            self.compute_trie_input(provider, parent_hash, state, None)?;
+        let (mut input, block_hash) = self.compute_trie_input(parent_hash, state, None)?;
 
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
@@ -693,7 +690,7 @@ where
         let (_, multiproof_config) = MultiProofConfig::from_input(input);
 
         let factory = OverlayStateProviderFactory::new(self.provider.clone())
-            .with_block_number(Some(block_number))
+            .with_block_hash(Some(block_hash))
             .with_trie_overlay(Some(multiproof_config.nodes_sorted))
             .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
 
@@ -806,12 +803,8 @@ where
 
                 // Compute trie input
                 let trie_input_start = Instant::now();
-                let (trie_input, block_number) = self.compute_trie_input(
-                    self.provider.database_provider_ro()?,
-                    parent_hash,
-                    state,
-                    allocated_trie_input,
-                )?;
+                let (trie_input, block_hash) =
+                    self.compute_trie_input(parent_hash, state, allocated_trie_input)?;
 
                 self.metrics
                     .block_validation
@@ -827,7 +820,7 @@ where
                 // multiproofs.
                 let multiproof_provider_factory =
                     OverlayStateProviderFactory::new(self.provider.clone())
-                        .with_block_number(Some(block_number))
+                        .with_block_hash(Some(block_hash))
                         .with_trie_overlay(Some(multiproof_config.nodes_sorted))
                         .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
 
@@ -976,38 +969,30 @@ where
         skip_all,
         fields(parent_hash)
     )]
-    fn compute_trie_input<TP: DBProvider + BlockNumReader + TrieReader>(
+    fn compute_trie_input(
         &self,
-        provider: TP,
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
         allocated_trie_input: Option<TrieInput>,
-    ) -> ProviderResult<(TrieInput, BlockNumber)> {
+    ) -> ProviderResult<(TrieInput, B256)> {
         // get allocated trie input or use a default trie input
         let mut input = allocated_trie_input.unwrap_or_default();
 
-        let (historical, blocks) = state
-            .tree_state
-            .blocks_by_hash(parent_hash)
-            .map_or_else(|| (parent_hash.into(), vec![]), |(hash, blocks)| (hash.into(), blocks));
+        let (block_hash, blocks) =
+            state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
         if blocks.is_empty() {
             debug!(target: "engine::tree::payload_validator", "Parent found on disk");
         } else {
-            debug!(target: "engine::tree::payload_validator", %historical, blocks = blocks.len(), "Parent found in memory");
+            debug!(target: "engine::tree::payload_validator", historical = ?block_hash, blocks = blocks.len(), "Parent found in memory");
         }
-
-        // Convert the historical block to the block number
-        let block_number = provider
-            .convert_hash_or_number(historical)?
-            .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
 
         // Extend with contents of parent in-memory blocks.
         input.extend_with_blocks(
             blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())),
         );
 
-        Ok((input, block_number))
+        Ok((input, block_hash))
     }
 }
 
