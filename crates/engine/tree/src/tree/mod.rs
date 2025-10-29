@@ -926,48 +926,6 @@ where
         Ok(())
     }
 
-    /// Determines if the given block is part of a fork by checking that these
-    /// conditions are true:
-    /// * walking back from the target hash to verify that the target hash is not part of an
-    ///   extension of the canonical chain.
-    /// * walking back from the current head to verify that the target hash is not already part of
-    ///   the canonical chain.
-    ///
-    /// The header is required as an arg, because we might be checking that the header is a fork
-    /// block before it's in the tree state and before it's in the database.
-    fn is_fork(&self, target: BlockWithParent) -> ProviderResult<bool> {
-        let target_hash = target.block.hash;
-        // verify that the given hash is not part of an extension of the canon chain.
-        let canonical_head = self.state.tree_state.canonical_head();
-        let mut current_hash;
-        let mut current_block = target;
-        loop {
-            if current_block.block.hash == canonical_head.hash {
-                return Ok(false)
-            }
-            // We already passed the canonical head
-            if current_block.block.number <= canonical_head.number {
-                break
-            }
-            current_hash = current_block.parent;
-
-            let Some(next_block) = self.sealed_header_by_hash(current_hash)? else { break };
-            current_block = next_block.block_with_parent();
-        }
-
-        // verify that the given hash is not already part of canonical chain stored in memory
-        if self.canonical_in_memory_state.header_by_hash(target_hash).is_some() {
-            return Ok(false)
-        }
-
-        // verify that the given hash is not already part of persisted canonical chain
-        if self.provider.block_number(target_hash)?.is_some() {
-            return Ok(false)
-        }
-
-        Ok(true)
-    }
-
     /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
     /// to resolve chain forks and ensure that the Execution Layer is working with the latest valid
     /// chain.
@@ -2450,15 +2408,6 @@ where
             Ok(Some(_)) => {}
         }
 
-        // determine whether we are on a fork chain
-        let is_fork = match self.is_fork(block_id) {
-            Err(err) => {
-                let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
-            }
-            Ok(is_fork) => is_fork,
-        };
-
         let ctx =
             TreeCtx::new(&mut self.state, &self.persistence_state, &self.canonical_in_memory_state);
 
@@ -2476,6 +2425,11 @@ where
         self.state.tree_state.insert_executed(executed.clone());
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
+        let is_fork = {
+            let executed_number = executed.recovered_block().number();
+            let canonical_number = self.state.tree_state.current_canonical_head.number;
+            executed_number <= canonical_number
+        };
         // emit insert event
         let elapsed = start.elapsed();
         let engine_event = if is_fork {
