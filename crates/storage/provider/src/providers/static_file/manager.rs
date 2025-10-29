@@ -362,11 +362,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let Some(metrics) = &self.metrics else { return Ok(()) };
 
         let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
-        for (segment, ranges) in static_files {
+        for (segment, headers) in static_files {
             let mut entries = 0;
             let mut size = 0;
 
-            for (block_range, _) in &ranges {
+            for (block_range, _) in &headers {
                 let fixed_block_range = self.find_fixed_range(segment, block_range.start());
                 let jar_provider = self
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
@@ -392,7 +392,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 size += data_size + index_size + offsets_size + config_size;
             }
 
-            metrics.record_segment(segment, size, ranges.len(), entries);
+            metrics.record_segment(segment, size, headers.len(), entries);
         }
 
         Ok(())
@@ -657,7 +657,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 if let Some(tx_range) = jar.user_header().tx_range() {
                     // Current block range has the same block start as `fixed_range``, but block end
                     // might be different if we are still filling this static file.
-                    if let Some(current_block_range) = jar.user_header().block_range().copied() {
+                    if let Some(current_block_range) = jar.user_header().block_range() {
                         let tx_end = tx_range.end();
 
                         // Considering that `update_index` is called when we either append/truncate,
@@ -719,27 +719,31 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         max_block.clear();
         tx_index.clear();
 
-        for (segment, ranges) in iter_static_files(&self.path).map_err(ProviderError::other)? {
+        for (segment, headers) in iter_static_files(&self.path).map_err(ProviderError::other)? {
             // Update first and last block for each segment
-            if let Some((first_block_range, _)) = ranges.first() {
-                min_block.insert(segment, *first_block_range);
+            if let Some((block_range, _)) = headers.first() {
+                min_block.insert(segment, *block_range);
             }
-            if let Some((last_block_range, _)) = ranges.last() {
-                max_block.insert(segment, last_block_range.end());
+            if let Some((block_range, _)) = headers.last() {
+                max_block.insert(segment, block_range.end());
             }
 
-            for (block_range, tx_range) in ranges {
-                // Update max block -> block_range index
-                let block_end = block_range.end();
+            for (block_range, header) in headers {
+                // Update max expected block -> expected_block_range index
                 block_index
                     .entry(segment)
                     .and_modify(|index| {
-                        index.insert(block_end, block_range);
+                        index.insert(header.expected_block_end(), header.expected_block_range());
                     })
-                    .or_insert_with(|| BTreeMap::from([(block_end, block_range)]));
+                    .or_insert_with(|| {
+                        BTreeMap::from([(
+                            header.expected_block_end(),
+                            header.expected_block_range(),
+                        )])
+                    });
 
                 // Update max tx -> block_range index
-                if let Some(tx_range) = tx_range {
+                if let Some(tx_range) = header.tx_range() {
                     let tx_end = tx_range.end();
 
                     tx_index
@@ -1370,6 +1374,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
         &self.static_files_tx_index
+    }
+
+    /// Returns `static_files` block index
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn block_index(&self) -> &RwLock<SegmentRanges> {
+        &self.static_files_block_index
     }
 }
 

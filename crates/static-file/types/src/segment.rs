@@ -175,14 +175,19 @@ impl SegmentHeader {
         self.segment
     }
 
+    /// Returns the expected block range.
+    pub const fn expected_block_range(&self) -> SegmentRangeInclusive {
+        self.expected_block_range
+    }
+
     /// Returns the block range.
-    pub const fn block_range(&self) -> Option<&SegmentRangeInclusive> {
-        self.block_range.as_ref()
+    pub const fn block_range(&self) -> Option<SegmentRangeInclusive> {
+        self.block_range
     }
 
     /// Returns the transaction range.
-    pub const fn tx_range(&self) -> Option<&SegmentRangeInclusive> {
-        self.tx_range.as_ref()
+    pub const fn tx_range(&self) -> Option<SegmentRangeInclusive> {
+        self.tx_range
     }
 
     /// The expected block start of the segment.

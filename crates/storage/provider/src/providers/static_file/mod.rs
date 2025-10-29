@@ -58,7 +58,7 @@ mod tests {
         test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
-    use alloy_primitives::{BlockHash, Signature, TxNumber, B256};
+    use alloy_primitives::{map::HashMap, BlockHash, Signature, TxNumber, B256};
     use rand::seq::SliceRandom;
     use reth_db::test_utils::create_test_static_files_dir;
     use reth_db_api::{transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};
@@ -68,7 +68,7 @@ mod tests {
     };
     use reth_storage_api::{ReceiptProvider, TransactionsProvider};
     use reth_testing_utils::generators::{self, random_header_range};
-    use std::{fmt::Debug, fs, ops::Range, path::Path};
+    use std::{collections::BTreeMap, fmt::Debug, fs, ops::Range, path::Path};
 
     fn assert_eyre<T: PartialEq + Debug>(got: T, expected: T, msg: &str) -> eyre::Result<()> {
         if got != expected {
@@ -78,7 +78,7 @@ mod tests {
     }
 
     #[test]
-    fn test_snap() {
+    fn test_static_files() {
         // Ranges
         let row_count = 100u64;
         let range = 0..=(row_count - 1);
@@ -149,8 +149,6 @@ mod tests {
 
     #[test]
     fn test_header_truncation() {
-        reth_tracing::init_test_tracing();
-
         let (static_dir, _) = create_test_static_files_dir();
 
         let blocks_per_file = 10; // Number of headers per file
@@ -379,7 +377,7 @@ mod tests {
                     .unwrap()
                     .user_header()
                     .tx_range(),
-                expected_tx_range.as_ref()
+                expected_tx_range
             );
         });
 
@@ -550,5 +548,91 @@ mod tests {
             .count();
 
         Ok(count)
+    }
+
+    #[test]
+    fn test_dynamic_size() -> eyre::Result<()> {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        {
+            let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)?
+                .with_custom_blocks_per_file(10);
+            let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
+
+            let mut header = Header::default();
+            for num in 0..=15 {
+                header.number = num;
+                header_writer.append_header(&header, &BlockHash::default()).unwrap();
+            }
+            header_writer.commit().unwrap();
+
+            assert_eq!(sf_rw.headers_range(0..=15)?.len(), 16);
+            assert_eq!(
+                sf_rw.block_index().read().deref(),
+                &HashMap::from([(
+                    StaticFileSegment::Headers,
+                    BTreeMap::from([
+                        (9, SegmentRangeInclusive::new(0, 9)),
+                        (19, SegmentRangeInclusive::new(10, 19))
+                    ])
+                )])
+            )
+        }
+
+        {
+            let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)?
+                .with_custom_blocks_per_file(5);
+            let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
+
+            let mut header = Header::default();
+            for num in 16..=22 {
+                header.number = num;
+                header_writer.append_header(&header, &BlockHash::default()).unwrap();
+            }
+            header_writer.commit().unwrap();
+
+            assert_eq!(sf_rw.headers_range(0..=22)?.len(), 23);
+            assert_eq!(
+                sf_rw.block_index().read().deref(),
+                &HashMap::from([(
+                    StaticFileSegment::Headers,
+                    BTreeMap::from([
+                        (9, SegmentRangeInclusive::new(0, 9)),
+                        (19, SegmentRangeInclusive::new(10, 19)),
+                        (24, SegmentRangeInclusive::new(20, 24))
+                    ])
+                )])
+            )
+        }
+
+        {
+            let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)?
+                .with_custom_blocks_per_file(15);
+            let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
+
+            let mut header = Header::default();
+            for num in 23..=40 {
+                header.number = num;
+                header_writer.append_header(&header, &BlockHash::default()).unwrap();
+            }
+            header_writer.commit().unwrap();
+
+            assert_eq!(sf_rw.headers_range(0..=40)?.len(), 41);
+            assert_eq!(
+                sf_rw.block_index().read().deref(),
+                &HashMap::from([(
+                    StaticFileSegment::Headers,
+                    BTreeMap::from([
+                        (9, SegmentRangeInclusive::new(0, 9)),
+                        (19, SegmentRangeInclusive::new(10, 19)),
+                        (24, SegmentRangeInclusive::new(20, 24)),
+                        (39, SegmentRangeInclusive::new(25, 39)),
+                        (54, SegmentRangeInclusive::new(40, 54))
+                    ])
+                )])
+            )
+        }
+
+        Ok(())
     }
 }

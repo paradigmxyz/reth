@@ -191,7 +191,7 @@ impl Command {
                 mut segment_config_size,
             ) = (0, 0, 0, 0, 0, 0);
 
-            for (block_range, tx_range) in &ranges {
+            for (block_range, header) in &ranges {
                 let fixed_block_range =
                     static_file_provider.find_fixed_range(segment, block_range.start());
                 let jar_provider = static_file_provider
@@ -221,7 +221,7 @@ impl Command {
                     row.add_cell(Cell::new(segment))
                         .add_cell(Cell::new(format!("{block_range}")))
                         .add_cell(Cell::new(
-                            tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range}")),
+                            header.tx_range().map_or("N/A".to_string(), |range| format!("{range}")),
                         ))
                         .add_cell(Cell::new(format!("{columns} x {rows}")));
                     if self.detailed_sizes {
@@ -271,10 +271,12 @@ impl Command {
                 let tx_range = {
                     let start = ranges
                         .iter()
-                        .find_map(|(_, tx_range)| tx_range.map(|r| r.start()))
+                        .find_map(|(_, header)| header.tx_range().map(|range| range.start()))
                         .unwrap_or_default();
-                    let end =
-                        ranges.iter().rev().find_map(|(_, tx_range)| tx_range.map(|r| r.end()));
+                    let end = ranges
+                        .iter()
+                        .rev()
+                        .find_map(|(_, header)| header.tx_range().map(|range| range.end()));
                     end.map(|end| SegmentRangeInclusive::new(start, end))
                 };
 
