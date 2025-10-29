@@ -216,8 +216,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 block_number,
                 vec![Requests::default()],
             )),
-            hashed_state: Arc::new(HashedPostState::default()),
-            trie_updates: Arc::new(TrieUpdates::default()),
+            hashed_state: Arc::new(HashedPostStateSorted::default()),
+            trie_updates: Arc::new(TrieUpdatesSorted::default()),
         }
     }
 
