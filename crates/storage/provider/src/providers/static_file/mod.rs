@@ -5,6 +5,7 @@ mod jar;
 pub use jar::StaticFileJarProvider;
 
 mod writer;
+use strum::EnumCount;
 pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 
 mod metrics;
@@ -54,34 +55,24 @@ impl Deref for LoadedJar {
 /// Collection of (segments)[`StaticFileSegment`] with a generic value associated with each segment.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StaticFileSegments<T> {
-    headers: Option<T>,
-    transactions: Option<T>,
-    receipts: Option<T>,
+    segments: [Option<T>; StaticFileSegment::COUNT],
 }
 
 impl<T> Default for StaticFileSegments<T> {
     fn default() -> Self {
-        Self { headers: None, transactions: None, receipts: None }
+        Self { segments: [const { None }; StaticFileSegment::COUNT] }
     }
 }
 
 impl<T> StaticFileSegments<T> {
     /// Returns a reference to the value corresponding to the segment.
     const fn get(&self, segment: StaticFileSegment) -> Option<&T> {
-        match segment {
-            StaticFileSegment::Headers => self.headers.as_ref(),
-            StaticFileSegment::Transactions => self.transactions.as_ref(),
-            StaticFileSegment::Receipts => self.receipts.as_ref(),
-        }
+        self.segments[segment as usize].as_ref()
     }
 
     /// Returns a mutable reference to the value corresponding to the segment.
     const fn get_mut(&mut self, segment: StaticFileSegment) -> Option<&mut T> {
-        match segment {
-            StaticFileSegment::Headers => self.headers.as_mut(),
-            StaticFileSegment::Transactions => self.transactions.as_mut(),
-            StaticFileSegment::Receipts => self.receipts.as_mut(),
-        }
+        self.segments[segment as usize].as_mut()
     }
 
     /// Inserts a segment-value pair into the collection.
@@ -91,28 +82,18 @@ impl<T> StaticFileSegments<T> {
     /// If the collection did have this segment present, the value is updated, and the old
     /// value is returned.
     const fn insert(&mut self, segment: StaticFileSegment, value: T) -> Option<T> {
-        match segment {
-            StaticFileSegment::Headers => self.headers.replace(value),
-            StaticFileSegment::Transactions => self.transactions.replace(value),
-            StaticFileSegment::Receipts => self.receipts.replace(value),
-        }
+        self.segments[segment as usize].replace(value)
     }
 
     /// Removes a segment from the collection, returning the value at the segment if the segment
     /// was previously in the collection.
     const fn remove(&mut self, segment: StaticFileSegment) -> Option<T> {
-        match segment {
-            StaticFileSegment::Headers => self.headers.take(),
-            StaticFileSegment::Transactions => self.transactions.take(),
-            StaticFileSegment::Receipts => self.receipts.take(),
-        }
+        self.segments[segment as usize].take()
     }
 
     /// Clears the collection, removing all segment-value pairs.
     fn clear(&mut self) {
-        self.headers = None;
-        self.transactions = None;
-        self.receipts = None;
+        self.segments = [const { None }; StaticFileSegment::COUNT];
     }
 }
 

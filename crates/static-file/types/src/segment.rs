@@ -7,7 +7,7 @@ use alloy_primitives::TxNumber;
 use core::{ops::RangeInclusive, str::FromStr};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use strum::{AsRefStr, EnumString};
+use strum::{AsRefStr, EnumCount, EnumString};
 
 #[derive(
     Debug,
@@ -21,10 +21,12 @@ use strum::{AsRefStr, EnumString};
     Deserialize,
     Serialize,
     EnumString,
+    EnumCount,
     AsRefStr,
     Display,
 )]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+#[repr(C)]
 /// Segment of the data that can be moved to static files.
 pub enum StaticFileSegment {
     #[strum(serialize = "headers")]
