@@ -18,7 +18,7 @@ type SortedStaticFiles = HashMap<StaticFileSegment, Vec<(SegmentRangeInclusive, 
 
 /// Given the `static_files` directory path, it returns a list over the existing `static_files`
 /// organized by [`StaticFileSegment`]. Each segment has a sorted list of block ranges and
-/// transaction ranges as presented in the file configuration.
+/// segment headers as presented in the file configuration.
 pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError> {
     if !path.exists() {
         reth_fs_util::create_dir_all(path).map_err(|err| NippyJarError::Custom(err.to_string()))?;
