@@ -107,22 +107,6 @@ impl LowerSparseSubtrie {
         }
     }
 
-    /// Returns the capacity of any maps containing trie nodes
-    pub(crate) fn node_capacity(&self) -> usize {
-        match self {
-            Self::Revealed(trie) | Self::Blind(Some(trie)) => trie.node_capacity(),
-            Self::Blind(None) => 0,
-        }
-    }
-
-    /// Returns the capacity of any maps containing trie values
-    pub(crate) fn value_capacity(&self) -> usize {
-        match self {
-            Self::Revealed(trie) | Self::Blind(Some(trie)) => trie.value_capacity(),
-            Self::Blind(None) => 0,
-        }
-    }
-
     /// Shrinks the capacity of the subtrie's node storage.
     /// Works for both revealed and blind tries with allocated storage.
     pub(crate) fn shrink_nodes_to(&mut self, size: usize) {

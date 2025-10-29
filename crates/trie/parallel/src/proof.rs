@@ -14,9 +14,7 @@ use reth_execution_errors::StorageRootError;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
-    updates::TrieUpdatesSorted,
-    DecodedMultiProof, DecodedStorageMultiProof, HashedPostState, HashedPostStateSorted,
-    MultiProofTargets, Nibbles,
+    DecodedMultiProof, DecodedStorageMultiProof, HashedPostState, MultiProofTargets, Nibbles,
 };
 use reth_trie_common::added_removed_keys::MultiAddedRemovedKeys;
 use std::{sync::Arc, time::Instant};
@@ -28,14 +26,7 @@ use tracing::trace;
 /// that has proof targets.
 #[derive(Debug)]
 pub struct ParallelProof {
-    /// The sorted collection of cached in-memory intermediate trie nodes that
-    /// can be reused for computation.
-    pub nodes_sorted: Arc<TrieUpdatesSorted>,
-    /// The sorted in-memory overlay hashed state.
-    pub state_sorted: Arc<HashedPostStateSorted>,
-    /// The collection of prefix sets for the computation. Since the prefix sets _always_
-    /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
-    /// if we have cached nodes for them.
+    /// The collection of prefix sets for the computation.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
@@ -53,15 +44,11 @@ pub struct ParallelProof {
 impl ParallelProof {
     /// Create new state proof generator.
     pub fn new(
-        nodes_sorted: Arc<TrieUpdatesSorted>,
-        state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
         missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
         proof_worker_handle: ProofWorkerHandle,
     ) -> Self {
         Self {
-            nodes_sorted,
-            state_sorted,
             prefix_sets,
             missed_leaves_storage_roots,
             collect_branch_node_masks: false,
@@ -272,9 +259,7 @@ mod tests {
     };
     use rand::Rng;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::{
-        providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
-    };
+    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::proof::Proof;
     use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
     use tokio::runtime::Runtime;
@@ -282,7 +267,6 @@ mod tests {
     #[test]
     fn random_parallel_proof() {
         let factory = create_test_provider_factory();
-        let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
         let mut rng = rand::rng();
         let state = (0..100)
@@ -344,20 +328,14 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
 
-        let task_ctx =
-            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_worker_handle =
-            ProofWorkerHandle::new(rt.handle().clone(), consistent_view, task_ctx, 1, 1);
+        let factory = reth_provider::providers::OverlayStateProviderFactory::new(factory);
+        let task_ctx = ProofTaskCtx::new(factory, Default::default());
+        let proof_worker_handle = ProofWorkerHandle::new(rt.handle().clone(), task_ctx, 1, 1);
 
-        let parallel_result = ParallelProof::new(
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            proof_worker_handle.clone(),
-        )
-        .decoded_multiproof(targets.clone())
-        .unwrap();
+        let parallel_result =
+            ParallelProof::new(Default::default(), Default::default(), proof_worker_handle.clone())
+                .decoded_multiproof(targets.clone())
+                .unwrap();
 
         let sequential_result_raw = Proof::new(trie_cursor_factory, hashed_cursor_factory)
             .multiproof(targets.clone())

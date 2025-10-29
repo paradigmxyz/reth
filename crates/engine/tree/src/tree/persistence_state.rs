@@ -67,6 +67,7 @@ impl PersistenceState {
 
     /// Returns the current persistence action. If there is no persistence task in progress, then
     /// this returns `None`.
+    #[cfg(test)]
     pub(crate) fn current_action(&self) -> Option<&CurrentPersistenceAction> {
         self.rx.as_ref().map(|rx| &rx.2)
     }
