@@ -4,8 +4,8 @@ use super::{
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt,
+    ReceiptProvider, StageCheckpointReader, StatsReader, StorageSettingsCache, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -40,7 +40,7 @@ use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
     DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
-use reth_storage_api::{BlockBodyIndicesProvider, DBProvider, StorageSettingsCache};
+use reth_storage_api::{BlockBodyIndicesProvider, DBProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{BTreeMap, HashMap},
