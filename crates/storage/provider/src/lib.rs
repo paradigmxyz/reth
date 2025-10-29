@@ -51,6 +51,7 @@ pub use reth_chain_state::{
 // reexport traits to avoid breaking changes
 pub use reth_storage_api::{
     HistoryWriter, MetadataProvider, MetadataWriter, StatsReader, StorageSettings,
+    StorageSettingsCache,
 };
 
 pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {

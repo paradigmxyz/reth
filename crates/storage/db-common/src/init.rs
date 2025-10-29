@@ -17,7 +17,7 @@ use reth_provider::{
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
     HashingWriter, HeaderProvider, HistoryWriter, MetadataWriter, OriginalValuesKnown,
     ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriter,
-    StaticFileProviderFactory, StorageSettings, TrieWriter,
+    StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -90,7 +90,8 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
         + ChainSpecProvider
         + StageCheckpointReader
-        + BlockHashReader,
+        + BlockHashReader
+        + StorageSettingsCache,
     PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
         + HistoryWriter
@@ -162,12 +163,14 @@ where
     static_file_provider.latest_writer(StaticFileSegment::Receipts)?.increment_block(0)?;
     static_file_provider.latest_writer(StaticFileSegment::Transactions)?.increment_block(0)?;
 
-    // Behaviour only for new nodes should be set here.
-    provider_rw.write_storage_settings(StorageSettings::new())?;
+    // Behaviour reserved only for new nodes should be set here.
+    let storage_settings = StorageSettings::new();
+    provider_rw.write_storage_settings(storage_settings)?;
 
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
     provider_rw.commit()?;
+    factory.set_storage_settings_cache(storage_settings);
 
     Ok(hash)
 }
@@ -730,11 +733,14 @@ mod tests {
         init_genesis(&factory).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(&ProviderFactory::<MockNodeTypesWithDB>::new(
-            factory.into_db(),
-            MAINNET.clone(),
-            static_file_provider,
-        )?);
+        let genesis_hash = init_genesis(
+            &ProviderFactory::<MockNodeTypesWithDB>::new(
+                factory.into_db(),
+                MAINNET.clone(),
+                static_file_provider,
+            )
+            .unwrap(),
+        );
 
         assert!(matches!(
             genesis_hash.unwrap_err(),

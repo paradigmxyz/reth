@@ -30,9 +30,22 @@ pub trait MetadataWriter: Send + Sync {
     fn write_metadata(&self, key: &str, value: Vec<u8>) -> ProviderResult<()>;
 
     /// Write storage settings for this node
+    ///
+    /// Be sure to update provider factory cache with
+    /// [`StorageSettingsCache::set_storage_settings_cache`].
     fn write_storage_settings(&self, settings: StorageSettings) -> ProviderResult<()> {
+        use reth_codecs::Compact;
         let mut buf = Vec::new();
         settings.to_compact(&mut buf);
         self.write_metadata(keys::STORAGE_SETTINGS, buf)
     }
+}
+
+/// Trait for caching storage settings on a provider factory.
+pub trait StorageSettingsCache: Send + Sync {
+    /// Sets the storage settings of this `ProviderFactory`.
+    ///
+    /// IMPORTANT: It does not save settings in storage, that should be done by
+    /// [`MetadataWriter::write_storage_settings`]
+    fn set_storage_settings_cache(&self, settings: StorageSettings);
 }
