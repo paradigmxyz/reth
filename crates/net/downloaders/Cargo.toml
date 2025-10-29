@@ -51,7 +51,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 tempfile = { workspace = true, optional = true }
-itertools.workspace = true
+itertools = { workspace = true, optional = true }
 
 [dev-dependencies]
 async-compression = { workspace = true, features = ["gzip", "tokio"] }
@@ -70,9 +70,8 @@ tempfile.workspace = true
 
 [features]
 default = []
-file-client = ["dep:async-compression", "dep:alloy-rlp"]
+file-client = ["dep:async-compression", "dep:alloy-rlp", "dep:itertools"]
 test-utils = [
-    "tempfile",
     "reth-consensus/test-utils",
     "reth-network-p2p/test-utils",
     "reth-testing-utils",
