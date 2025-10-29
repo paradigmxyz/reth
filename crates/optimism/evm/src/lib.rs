@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::Decodable2718;
 use alloy_evm::{EvmFactory, FromRecoveredTx, FromTxWithEncoded};
@@ -277,6 +277,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::collections::BTreeMap;
     use alloy_consensus::{Header, Receipt};
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;

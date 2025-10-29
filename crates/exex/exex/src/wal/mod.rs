@@ -12,7 +12,6 @@ mod error;
 pub use error::{WalError, WalResult};
 
 use std::{
-    collections::BTreeMap,
     path::Path,
     sync::{
         atomic::{AtomicU32, Ordering},

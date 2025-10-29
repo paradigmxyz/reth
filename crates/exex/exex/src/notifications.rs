@@ -9,7 +9,6 @@ use reth_node_api::NodePrimitives;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_tracing::tracing::debug;
 use std::{
-    collections::BTreeMap,
     fmt::Debug,
     pin::Pin,
     sync::Arc,
@@ -461,6 +460,7 @@ mod tests {
         Chain, DBProvider, DatabaseProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
+    use std::collections::BTreeMap;
     use tokio::sync::mpsc;
 
     #[tokio::test]
