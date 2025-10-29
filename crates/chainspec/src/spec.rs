@@ -10,7 +10,7 @@ use crate::{
     sepolia::SEPOLIA_PARIS_BLOCK,
     EthChainSpec,
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
@@ -448,8 +448,8 @@ impl<H: BlockHeader> ChainSpec<H> {
                     // Check if this hardfork has blob parameters
                     let fork_name = fork.name();
                     if fork_name == "Cancun" || fork_name == "Prague" || fork_name == "Osaka" {
-                        // Get blob params for this timestamp
-                        self.blob_params_at_timestamp(timestamp).map(|params| {
+                        // Get blob params for this timestamp via EthChainSpec trait
+                        EthChainSpec::blob_params_at_timestamp(self, timestamp).map(|params| {
                             format!(
                                 "blob: (target: {}, max: {}, fraction: {})",
                                 params.target_blob_count,
