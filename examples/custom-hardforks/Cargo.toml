@@ -9,9 +9,9 @@ publish = false
 reth-chainspec.workspace = true
 reth-ethereum.workspace = true
 reth-network-peers.workspace = true
-alloy-hardforks = "0.1"  # For Hardfork trait and macro
+alloy-hardforks = "0.1" # For Hardfork trait and macro
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 revm-primitives.workspace = true
-serde = { version = "1.0", features = ["derive"] }  # For serializable config
+serde = { version = "1.0", features = ["derive"] } # For serializable config
