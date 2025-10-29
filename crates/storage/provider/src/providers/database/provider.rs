@@ -57,8 +57,8 @@ use reth_prune_types::{
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, NodePrimitivesProvider, StateProvider,
-    StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
+    NodePrimitivesProvider, StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -3127,6 +3127,18 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         }
 
         Ok(true)
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> MetadataProvider for DatabaseProvider<TX, N> {
+    fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>> {
+        self.tx.get::<tables::Metadata>(key.to_string()).map_err(Into::into)
+    }
+}
+
+impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
+    fn write_metadata(&self, key: &str, value: Vec<u8>) -> ProviderResult<()> {
+        self.tx.put::<tables::Metadata>(key.to_string(), value).map_err(Into::into)
     }
 }
 
