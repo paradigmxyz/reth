@@ -353,7 +353,7 @@ impl OpReceiptBuilder {
 #[cfg(test)]
 mod test {
     use super::*;
-    use alloy_consensus::{Block, BlockBody, Eip658Value, TxEip7702};
+    use alloy_consensus::{transaction::TransactionMeta, Block, BlockBody, Eip658Value, TxEip7702};
     use alloy_op_hardforks::{
         OpChainHardforks, OP_MAINNET_ISTHMUS_TIMESTAMP, OP_MAINNET_JOVIAN_TIMESTAMP,
     };
