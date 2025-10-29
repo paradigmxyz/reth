@@ -22,6 +22,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock};
+use reth_stateless::build_execution_witness;
 use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
@@ -642,7 +643,7 @@ where
         let this = self.clone();
         let block_number = block.header().number();
 
-        let (mut exec_witness, lowest_block_number) = self
+        let (witness_record, state, lowest_block_number) = self
             .eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
@@ -656,16 +657,13 @@ where
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
-                    witness_record;
+                let hashed_state = witness_record.hashed_state.clone();
+                let lowest_block_number = witness_record.lowest_block_number;
 
                 let state = state_provider
                     .witness(Default::default(), hashed_state)
                     .map_err(EthApiError::from)?;
-                Ok((
-                    ExecutionWitness { state, codes, keys, ..Default::default() },
-                    lowest_block_number,
-                ))
+                Ok((witness_record, state, lowest_block_number))
             })
             .await?;
 
@@ -679,7 +677,7 @@ where
         };
 
         let range = smallest..block_number;
-        exec_witness.headers = self
+        let headers = self
             .provider()
             .headers_range(range)
             .map_err(EthApiError::from)?
@@ -690,6 +688,8 @@ where
                 serialized_header.into()
             })
             .collect();
+
+        let exec_witness = build_execution_witness(witness_record, state, headers);
 
         Ok(exec_witness)
     }
