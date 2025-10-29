@@ -623,8 +623,8 @@ tower = "0.5"
 tower-http = "0.6"
 
 # p2p
-discv5 = "0.9"
-if-addrs = "0.13"
+discv5 = "0.10"
+if-addrs = "0.14"
 
 # rpc
 jsonrpsee = "0.26.0"
