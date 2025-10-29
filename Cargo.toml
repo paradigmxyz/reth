@@ -525,7 +525,7 @@ alloy-transport-ws = { version = "1.0.41", default-features = false }
 
 # op
 alloy-op-evm = { version = "0.22.6", default-features = false }
-alloy-op-hardforks = "0.4.0"
+alloy-op-hardforks = "0.4.2"
 op-alloy-rpc-types = { version = "0.22.0", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.22.0", default-features = false }
 op-alloy-network = { version = "0.22.0", default-features = false }
