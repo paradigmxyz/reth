@@ -11,6 +11,7 @@ use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
+use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -32,7 +33,7 @@ use revm_database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use tracing::trace;
@@ -66,7 +67,7 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// The node storage handler.
     storage: Arc<N::Storage>,
     /// Storage configuration settings for this node
-    storage_settings: Arc<Mutex<StorageSettings>>,
+    storage_settings: Arc<RwLock<StorageSettings>>,
 }
 
 impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
@@ -89,6 +90,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             static_file_provider.clone(),
             Default::default(),
             Default::default(),
+            Arc::new(RwLock::new(StorageSettings::default())),
         )
         .storage_settings()?
         .unwrap_or_default();
@@ -99,7 +101,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             static_file_provider,
             prune_modes: PruneModes::default(),
             storage: Default::default(),
-            storage_settings: Arc::new(Mutex::new(storage_settings)),
+            storage_settings: Arc::new(RwLock::new(storage_settings)),
         })
     }
 }
@@ -130,13 +132,13 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
 
     /// Gets the current storage settings.
     pub fn cached_storage_settings(&self) -> StorageSettings {
-        *self.storage_settings.lock().unwrap()
+        *self.storage_settings.read()
     }
 }
 
 impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
     fn set_storage_settings_cache(&self, settings: StorageSettings) {
-        *self.storage_settings.lock().unwrap() = settings;
+        *self.storage_settings.write() = settings;
     }
 }
 
@@ -155,7 +157,7 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
             static_file_provider,
             prune_modes: PruneModes::default(),
             storage: Default::default(),
-            storage_settings: Arc::new(Mutex::new(StorageSettings::default())),
+            storage_settings: Arc::new(RwLock::new(StorageSettings::default())),
         })
     }
 }
@@ -175,6 +177,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.static_file_provider.clone(),
             self.prune_modes.clone(),
             self.storage.clone(),
+            self.storage_settings.clone(),
         ))
     }
 
@@ -190,6 +193,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.static_file_provider.clone(),
             self.prune_modes.clone(),
             self.storage.clone(),
+            self.storage_settings.clone(),
         )))
     }
 
@@ -575,14 +579,13 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { db, chain_spec, static_file_provider, prune_modes, storage, storage_settings } =
             self;
-        let settings = storage_settings.lock().expect("storage settings lock poisoned");
         f.debug_struct("ProviderFactory")
             .field("db", &db)
             .field("chain_spec", &chain_spec)
             .field("static_file_provider", &static_file_provider)
             .field("prune_modes", &prune_modes)
             .field("storage", &storage)
-            .field("storage_settings", &*settings)
+            .field("storage_settings", &*storage_settings.read())
             .finish()
     }
 }
