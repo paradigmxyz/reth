@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use reth_chain_state::CanonStateNotification;
 use reth_execution_types::Chain;
