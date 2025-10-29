@@ -1008,13 +1008,18 @@ where
             .convert_hash_or_number(historical)?
             .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
 
-        // Extend with contents of parent in-memory blocks.
-        input.extend_with_blocks(
-            blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())),
-        );
+        // Rebuild the overlay directly in sorted form, reusing the prefix-set allocation we already
+        // paid for on previous iterations.
+        let mut sorted_input = TrieInputSorted {
+            prefix_sets: core::mem::take(&mut input.prefix_sets),
+            ..Default::default()
+        };
 
-        // Drain into sorted form, keeping HashMap capacity for reuse
-        let sorted_input = input.drain_into_sorted();
+        for block in blocks.iter().rev() {
+            sorted_input.state.extend_ref(block.hashed_state());
+            sorted_input.nodes.extend_ref(block.trie_updates());
+        }
+
         Ok((sorted_input, input, block_number))
     }
 }
