@@ -249,8 +249,8 @@ pub struct StaticFileProviderInner<N> {
     earliest_history_height: AtomicU64,
     /// Max static file block for each segment
     static_files_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
-    /// Available static file block ranges on disk indexed by max blocks.
-    static_files_block_index: RwLock<SegmentRanges>,
+    /// Available static file expected block ranges on disk indexed by max expected blocks.
+    static_files_expected_block_index: RwLock<SegmentRanges>,
     /// Available static file block ranges on disk indexed by max transactions.
     static_files_tx_index: RwLock<SegmentRanges>,
     /// Directory where `static_files` are located
@@ -284,7 +284,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             static_files_min_block: Default::default(),
             earliest_history_height: Default::default(),
             static_files_max_block: Default::default(),
-            static_files_block_index: Default::default(),
+            static_files_expected_block_index: Default::default(),
             static_files_tx_index: Default::default(),
             path: path.as_ref().to_path_buf(),
             metrics: None,
@@ -333,7 +333,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
         block: BlockNumber,
     ) -> SegmentRangeInclusive {
         self.find_fixed_range_with_block_index(
-            self.static_files_block_index.read().get(&segment),
+            self.static_files_expected_block_index.read().get(&segment),
             block,
         )
     }
@@ -626,7 +626,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment_max_block: Option<BlockNumber>,
     ) -> ProviderResult<()> {
         let mut max_block = self.static_files_max_block.write();
-        let mut block_index = self.static_files_block_index.write();
+        let mut expected_block_index = self.static_files_expected_block_index.write();
         let mut tx_index = self.static_files_tx_index.write();
 
         match segment_max_block {
@@ -634,7 +634,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 // Update the max block for the segment
                 max_block.insert(segment, segment_max_block);
                 let fixed_range = self.find_fixed_range_with_block_index(
-                    block_index.get(&segment),
+                    expected_block_index.get(&segment),
                     segment_max_block,
                 );
 
@@ -643,7 +643,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 )
                 .map_err(ProviderError::other)?;
 
-                block_index
+                // Update the expected block index
+                expected_block_index
                     .entry(segment)
                     .and_modify(|index| {
                         index.retain(|_, block_range| block_range.start() < fixed_range.start());
@@ -652,7 +653,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     })
                     .or_insert_with(|| BTreeMap::from([(fixed_range.end(), fixed_range)]));
 
-                // Updates the tx index by first removing all entries which have a higher
+                // Update the tx index by first removing all entries which have a higher
                 // block_start than our current static file.
                 if let Some(tx_range) = jar.user_header().tx_range() {
                     // Current block range has the same block start as `fixed_range``, but block end
@@ -700,7 +701,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
             None => {
                 max_block.remove(&segment);
-                block_index.remove(&segment);
+                expected_block_index.remove(&segment);
                 tx_index.remove(&segment);
             }
         };
@@ -712,7 +713,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn initialize_index(&self) -> ProviderResult<()> {
         let mut min_block = self.static_files_min_block.write();
         let mut max_block = self.static_files_max_block.write();
-        let mut block_index = self.static_files_block_index.write();
+        let mut expected_block_index = self.static_files_expected_block_index.write();
         let mut tx_index = self.static_files_tx_index.write();
 
         min_block.clear();
@@ -730,7 +731,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
             for (block_range, header) in headers {
                 // Update max expected block -> expected_block_range index
-                block_index
+                expected_block_index
                     .entry(segment)
                     .and_modify(|index| {
                         index.insert(header.expected_block_end(), header.expected_block_range());
@@ -1376,10 +1377,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         &self.static_files_tx_index
     }
 
-    /// Returns `static_files` block index
+    /// Returns `static_files` expected block index
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn block_index(&self) -> &RwLock<SegmentRanges> {
-        &self.static_files_block_index
+    pub fn expected_block_index(&self) -> &RwLock<SegmentRanges> {
+        &self.static_files_expected_block_index
     }
 }
 

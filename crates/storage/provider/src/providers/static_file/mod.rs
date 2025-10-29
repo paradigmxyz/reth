@@ -568,7 +568,7 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=15)?.len(), 16);
             assert_eq!(
-                sf_rw.block_index().read().deref(),
+                sf_rw.expected_block_index().read().deref(),
                 &HashMap::from([(
                     StaticFileSegment::Headers,
                     BTreeMap::from([
@@ -593,7 +593,7 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=22)?.len(), 23);
             assert_eq!(
-                sf_rw.block_index().read().deref(),
+                sf_rw.expected_block_index().read().deref(),
                 &HashMap::from([(
                     StaticFileSegment::Headers,
                     BTreeMap::from([
@@ -619,7 +619,7 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=40)?.len(), 41);
             assert_eq!(
-                sf_rw.block_index().read().deref(),
+                sf_rw.expected_block_index().read().deref(),
                 &HashMap::from([(
                     StaticFileSegment::Headers,
                     BTreeMap::from([
