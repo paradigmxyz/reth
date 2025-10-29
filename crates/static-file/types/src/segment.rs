@@ -329,6 +329,11 @@ impl SegmentRangeInclusive {
     pub const fn end(&self) -> u64 {
         self.end
     }
+
+    /// Checks if the value is within the inclusive range.
+    pub const fn contains(&self, value: u64) -> bool {
+        value >= self.start && value <= self.end
+    }
 }
 
 impl core::fmt::Display for SegmentRangeInclusive {
