@@ -1146,12 +1146,20 @@ where
     /// `debug_db_get` - database key lookup
     ///
     /// Currently supported:
-    /// - Contract bytecode associated with a code hash.
-    ///   The code hash must be provided as a hex string prefixed with 0x.
+    /// * Contract bytecode associated with a code hash. The key format is: `<0x63><code_hash>`
+    ///     * Prefix byte: 0x63 (required)
+    ///     * Code hash: 32 bytes
+    ///   Must be provided as either:
+    ///     * Hex string: "0x63..." (66 hex characters after 0x)
+    ///     * Raw byte string: raw byte string (33 bytes)
     ///   See Geth impl: <https://github.com/ethereum/go-ethereum/blob/737ffd1bf0cbee378d0111a5b17ae4724fb2216c/core/rawdb/schema.go#L120>
     async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>> {
-        let key_bytes =
-            decode(&key).map_err(|_| EthApiError::InvalidParams("Invalid hex key".to_string()))?;
+        let key_bytes = if key.starts_with("0x") {
+            decode(&key).map_err(|_| EthApiError::InvalidParams("Invalid hex key".to_string()))?
+        } else {
+            key.into_bytes()
+        };
+
         if key_bytes.len() != 33 {
             return Err(EthApiError::InvalidParams(format!(
                 "Key must be 33 bytes, got {}",

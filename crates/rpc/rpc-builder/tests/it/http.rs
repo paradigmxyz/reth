@@ -1702,10 +1702,9 @@ async fn test_debug_db_get() {
     let handle = launch_http(vec![RethRpcModule::Debug]).await;
     let client = handle.http_client().unwrap();
 
-    // Valid test cases
     let valid_test_cases = [
-        ("0x630000000000000000000000000000000000000000000000000000000000000000"),
-        ("630000000000000000000000000000000000000000000000000000000000000000"),
+        "0x630000000000000000000000000000000000000000000000000000000000000000",
+        "c00000000000000000000000000000000",
     ];
 
     for key in valid_test_cases {
@@ -1715,17 +1714,13 @@ async fn test_debug_db_get() {
     // Invalid test cases
     let test_cases = [
         ("0x0000", "Key must be 33 bytes, got 2"),
-        ("0000", "Key must be 33 bytes, got 2"),
+        ("00", "Key must be 33 bytes, got 2"),
         (
             "0x000000000000000000000000000000000000000000000000000000000000000000",
             "Key prefix must be 0x63",
         ),
-        (
-            "000000000000000000000000000000000000000000000000000000000000000000",
-            "Key prefix must be 0x63",
-        ),
+        ("000000000000000000000000000000000", "Key prefix must be 0x63"),
         ("0xc0000000000000000000000000000000000000000000000000000000000000000", "Invalid hex key"),
-        ("c0000000000000000000000000000000000000000000000000000000000000000", "Invalid hex key"),
     ];
 
     let match_error_msg = |err: jsonrpsee::core::client::Error, expected: String| -> bool {
