@@ -4,7 +4,8 @@ use reth_errors::ProviderError;
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    DBProvider, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader, TrieReader,
+    BlockNumReader, DBProvider, DatabaseProviderFactory, DatabaseProviderROFactory,
+    PruneCheckpointReader, StageCheckpointReader, TrieReader,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -26,34 +27,30 @@ use tracing::debug;
 pub struct OverlayStateProviderFactory<F> {
     /// The underlying database provider factory
     factory: F,
-    /// Optional block number for collecting reverts
-    block_number: Option<BlockNumber>,
+    /// Optional block hash for collecting reverts
+    block_hash: Option<B256>,
     /// Optional trie overlay
     trie_overlay: Option<Arc<TrieUpdatesSorted>>,
     /// Optional hashed state overlay
     hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
 }
 
-impl<F> OverlayStateProviderFactory<F>
-where
-    F: DatabaseProviderFactory,
-    F::Provider: Clone + TrieReader + StageCheckpointReader + PruneCheckpointReader,
-{
+impl<F> OverlayStateProviderFactory<F> {
     /// Create a new overlay state provider factory
     pub const fn new(factory: F) -> Self {
-        Self { factory, block_number: None, trie_overlay: None, hashed_state_overlay: None }
+        Self { factory, block_hash: None, trie_overlay: None, hashed_state_overlay: None }
     }
 
-    /// Set the block number for collecting reverts. All state will be reverted to the point
+    /// Set the block hash for collecting reverts. All state will be reverted to the point
     /// _after_ this block has been processed.
-    pub const fn with_block_number(mut self, block_number: Option<BlockNumber>) -> Self {
-        self.block_number = block_number;
+    pub const fn with_block_hash(mut self, block_hash: Option<B256>) -> Self {
+        self.block_hash = block_hash;
         self
     }
 
     /// Set the trie overlay.
     ///
-    /// This overlay will be applied on top of any reverts applied via `with_block_number`.
+    /// This overlay will be applied on top of any reverts applied via `with_block_hash`.
     pub fn with_trie_overlay(mut self, trie_overlay: Option<Arc<TrieUpdatesSorted>>) -> Self {
         self.trie_overlay = trie_overlay;
         self
@@ -61,7 +58,7 @@ where
 
     /// Set the hashed state overlay
     ///
-    /// This overlay will be applied on top of any reverts applied via `with_block_number`.
+    /// This overlay will be applied on top of any reverts applied via `with_block_hash`.
     pub fn with_hashed_state_overlay(
         mut self,
         hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
@@ -69,7 +66,13 @@ where
         self.hashed_state_overlay = hashed_state_overlay;
         self
     }
+}
 
+impl<F> OverlayStateProviderFactory<F>
+where
+    F: DatabaseProviderFactory,
+    F::Provider: TrieReader + StageCheckpointReader + PruneCheckpointReader,
+{
     /// Validates that there are sufficient changesets to revert to the requested block number.
     ///
     /// Returns an error if the `MerkleChangeSets` checkpoint doesn't cover the requested block.
@@ -104,13 +107,8 @@ where
         let prune_lower_bound =
             prune_checkpoint.and_then(|chk| chk.block_number.map(|block| block + 1));
 
-        // Use the higher of the two lower bounds (or error if neither is available)
-        let Some(lower_bound) = stage_lower_bound.max(prune_lower_bound) else {
-            return Err(ProviderError::InsufficientChangesets {
-                requested: requested_block,
-                available: 0..=upper_bound,
-            })
-        };
+        // Use the higher of the two lower bounds. If neither is available assume unbounded.
+        let lower_bound = stage_lower_bound.max(prune_lower_bound).unwrap_or(0);
 
         let available_range = lower_bound..=upper_bound;
 
@@ -124,14 +122,27 @@ where
 
         Ok(())
     }
+}
+
+impl<F> DatabaseProviderROFactory for OverlayStateProviderFactory<F>
+where
+    F: DatabaseProviderFactory,
+    F::Provider: TrieReader + StageCheckpointReader + PruneCheckpointReader + BlockNumReader,
+{
+    type Provider = OverlayStateProvider<F::Provider>;
 
     /// Create a read-only [`OverlayStateProvider`].
-    pub fn provider_ro(&self) -> Result<OverlayStateProvider<F::Provider>, ProviderError> {
+    fn database_provider_ro(&self) -> Result<OverlayStateProvider<F::Provider>, ProviderError> {
         // Get a read-only provider
         let provider = self.factory.database_provider_ro()?;
 
-        // If block_number is provided, collect reverts
-        let (trie_updates, hashed_state) = if let Some(from_block) = self.block_number {
+        // If block_hash is provided, collect reverts
+        let (trie_updates, hashed_state) = if let Some(block_hash) = self.block_hash {
+            // Convert block hash to block number
+            let from_block = provider
+                .convert_hash_or_number(block_hash.into())?
+                .ok_or_else(|| ProviderError::BlockHashNotFound(block_hash))?;
+
             // Validate that we have sufficient changesets for the requested block
             self.validate_changesets_availability(&provider, from_block)?;
 
@@ -156,6 +167,7 @@ where
 
             debug!(
                 target: "providers::state::overlay",
+                ?block_hash,
                 ?from_block,
                 num_trie_updates = ?trie_updates_mut.total_len(),
                 num_state_updates = ?hashed_state_mut.total_len(),
@@ -164,7 +176,7 @@ where
 
             (Arc::new(trie_updates_mut), Arc::new(hashed_state_mut))
         } else {
-            // If no block_number, use overlays directly or defaults
+            // If no block_hash, use overlays directly or defaults
             let trie_updates =
                 self.trie_overlay.clone().unwrap_or_else(|| Arc::new(TrieUpdatesSorted::default()));
             let hashed_state = self
@@ -184,7 +196,7 @@ where
 /// This provider uses in-memory trie updates and hashed post state as an overlay
 /// on top of a database provider, implementing [`TrieCursorFactory`] and [`HashedCursorFactory`]
 /// using the in-memory overlay factories.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct OverlayStateProvider<Provider: DBProvider> {
     provider: Provider,
     trie_updates: Arc<TrieUpdatesSorted>,

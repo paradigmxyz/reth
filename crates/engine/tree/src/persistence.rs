@@ -142,7 +142,10 @@ where
         &self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
-        debug!(target: "engine::persistence", first=?blocks.first().map(|b| b.recovered_block.num_hash()), last=?blocks.last().map(|b| b.recovered_block.num_hash()), "Saving range of blocks");
+        let first_block_hash = blocks.first().map(|b| b.recovered_block.num_hash());
+        let last_block_hash = blocks.last().map(|b| b.recovered_block.num_hash());
+        debug!(target: "engine::persistence", first=?first_block_hash, last=?last_block_hash, "Saving range of blocks");
+
         let start_time = Instant::now();
         let last_block_hash_num = blocks.last().map(|block| BlockNumHash {
             hash: block.recovered_block().hash(),
@@ -155,6 +158,9 @@ where
             provider_rw.save_blocks(blocks)?;
             provider_rw.commit()?;
         }
+
+        debug!(target: "engine::persistence", first=?first_block_hash, last=?last_block_hash, "Saved range of blocks");
+
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
         Ok(last_block_hash_num)
     }

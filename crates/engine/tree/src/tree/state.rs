@@ -76,7 +76,8 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns all available blocks for the given hash that lead back to the canonical chain, from
-    /// newest to oldest. And the parent hash of the oldest block that is missing from the buffer.
+    /// newest to oldest, and the parent hash of the oldest returned block. This parent hash is the
+    /// highest persisted block connected to this chain.
     ///
     /// Returns `None` if the block for the given hash is not found.
     pub(crate) fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock<N>>)> {
