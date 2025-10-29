@@ -43,25 +43,30 @@ sync: [ ]
 
 engine-auth: [ ]
 
-# tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage
-#   no fix: it's too expensive to check whether the storage is empty on each creation (? - need more context on WHY)
+# EIP-7610 related tests (Revert creation in case of non-empty storage):
 #
-# tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment
-#   modified consolidation contract, not necessarily practical on mainnet (? - need more context)
+# tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage
+#   The test artificially creates an empty account with storage, then tests EIP-7610's behavior.
+#   On mainnet, ~25 such accounts exist as contract addresses (derived from keccak(prefix, caller,
+#   nonce/salt), not from public keys). No private key exists for contract addresses. To trigger
+#   this with EIP-7702, you'd need to recover a private key from one of the already deployed contract addresses - mathematically impossible. 
+#
+# tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_*
+#   Requires hash collision on create2 address to target already deployed accounts with storage.
+#   ~20-30 such accounts exist from before the state-clear EIP. Creating new accounts targeting
+#   these requires hash collision - mathematically impossible to trigger on mainnet.
+#   ref: https://github.com/ethereum/go-ethereum/pull/28666#issuecomment-1891997143
+#
+# System contract tests (already fixed and deployed):
 #
 # tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout and test_invalid_log_length
-#   system contract is already fixed and deployed; tests cover scenarios where contract is
+#   System contract is already fixed and deployed; tests cover scenarios where contract is
 #   malformed which can't happen retroactively. No point in adding checks.
 #
 # tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment
-#   post-fork test contract deployment, should fix for spec compliance but not realistic on mainnet (? - need more context)
-#
-# tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_*
-#   status (27th June 2024): was discussed in ACDT meeting, need to be raised in ACDE.
-#   tests require hash collision on already deployed accounts with storage - mathematically
-#   impossible to trigger on mainnet. ~20-30 such accounts exist from before the state-clear
-#   EIP, but creating new accounts targeting these requires hash collision.
-#   ref: https://github.com/ethereum/go-ethereum/pull/28666#issuecomment-1891997143
+# tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment
+#   Post-fork system contract deployment tests. Should fix for spec compliance but not realistic
+#   on mainnet as these contracts are already deployed at the correct addresses.
 eels/consume-engine:
   - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test_engine-zero_nonce]-reth
   - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine-deploy_after_fork-nonzero_balance]-reth
@@ -143,6 +148,8 @@ eels/consume-engine:
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Prague-tx_type_2-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Shanghai-tx_type_0-blockchain_test_engine_from_state_test-non-empty-balance-correct-initcode]-reth
 
+# Blob limit tests:
+#
 # tests/osaka/eip7594_peerdas/test_max_blob_per_tx.py::test_max_blobs_per_tx_fork_transition[fork_PragueToOsakaAtTime15k-blob_count_7-blockchain_test]
 #  this test inserts a chain via chain.rlp where the last block is invalid, but expects import to stop there, this doesn't work properly with our pipeline import approach hence the import fails when the invalid block is detected.
 #. In other words, if this test fails, this means we're correctly rejecting the block.
