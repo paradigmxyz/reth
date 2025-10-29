@@ -11,7 +11,6 @@ use reth_primitives_traits::{
     SealedHeader,
 };
 use reth_trie_common::updates::TrieUpdates;
-use revm::database::BundleState;
 
 /// A chain of blocks and their final state.
 ///
@@ -155,6 +154,7 @@ impl<N: NodePrimitives> Chain<N> {
     /// 1. The blocks contained in the chain.
     /// 2. The execution outcome representing the final state.
     /// 3. The trie updates map.
+    #[allow(clippy::type_complexity)]
     pub fn into_inner(
         self,
     ) -> (
