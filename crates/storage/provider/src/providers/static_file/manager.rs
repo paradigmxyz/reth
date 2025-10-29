@@ -249,9 +249,9 @@ pub struct StaticFileProviderInner<N> {
     earliest_history_height: AtomicU64,
     /// Max static file block for each segment
     static_files_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
-    /// Available static file expected block ranges on disk indexed by max expected blocks.
+    /// Expected on disk static file block ranges indexed by max expected blocks.
     static_files_expected_block_index: RwLock<SegmentRanges>,
-    /// Available static file block ranges on disk indexed by max transactions.
+    /// Available on disk static file block ranges indexed by max transactions.
     static_files_tx_index: RwLock<SegmentRanges>,
     /// Directory where `static_files` are located
     path: PathBuf,
@@ -303,6 +303,11 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
 
     /// Each static file has a fixed number of blocks. This gives out the range where the requested
     /// block is positioned.
+    ///
+    /// For already initialized static files, this function will use their existing ranges, instead
+    /// of the current fixed number of blocks.
+    ///
+    /// See `[Self::find_fixed_range]` documentation for more information.
     pub fn find_fixed_range_with_block_index(
         &self,
         block_index: Option<&BTreeMap<u64, SegmentRangeInclusive>>,
@@ -325,8 +330,12 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     /// Each static file has a fixed number of blocks. This gives out the range where the requested
     /// block is positioned.
     ///
-    /// This function will block indefinitely if a write lock for [`Self::static_files_block_index`]
-    /// is acquired. In that case, use [`Self::find_fixed_range_with_block_index`].
+    /// For already initialized static files, this function will use their existing ranges, instead
+    /// of the current fixed number of blocks.
+    ///
+    /// This function will block indefinitely if a write lock for
+    /// [`Self::static_files_expected_block_index`] is acquired. In that case, use
+    /// [`Self::find_fixed_range_with_block_index`].
     pub fn find_fixed_range(
         &self,
         segment: StaticFileSegment,
