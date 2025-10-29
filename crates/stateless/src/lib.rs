@@ -53,7 +53,9 @@ pub(crate) mod witness_db;
 #[doc(inline)]
 pub use alloy_rpc_types_debug::ExecutionWitness;
 
+use alloy_primitives::Bytes;
 use reth_ethereum_primitives::Block;
+use reth_revm::witness::ExecutionWitnessRecord;
 
 /// `StatelessInput` is a convenience structure for serializing the input needed
 /// for the stateless validation function.
@@ -67,4 +69,31 @@ pub struct StatelessInput {
     pub block: Block,
     /// `ExecutionWitness` for the stateless validation function
     pub witness: ExecutionWitness,
+}
+
+/// Builds an `ExecutionWitness` from an `ExecutionWitnessRecord`, state witness, and headers.
+///
+/// This helper function consolidates the common logic for creating an `ExecutionWitness`
+/// from execution data, avoiding code duplication.
+///
+/// # Arguments
+///
+/// * `witness_record` - The execution witness record containing execution state
+/// * `state_witness` - The state witness created from the state provider (`Vec<Bytes>`)
+/// * `headers` - Serialized headers for the ancestor blocks
+///
+/// # Returns
+///
+/// An `ExecutionWitness` ready for stateless validation
+pub fn build_execution_witness(
+    witness_record: ExecutionWitnessRecord,
+    state_witness: alloc::vec::Vec<Bytes>,
+    headers: alloc::vec::Vec<Bytes>,
+) -> ExecutionWitness {
+    ExecutionWitness {
+        state: state_witness,
+        codes: witness_record.codes,
+        keys: witness_record.keys,
+        headers,
+    }
 }
