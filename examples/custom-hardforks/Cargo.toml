@@ -1,6 +1,6 @@
 [package]
 name = "custom-hardforks"
-version = "0.1.0"
+license.workspace = trueversion = "0.1.0"
 edition = "2021"
 publish = false
 
