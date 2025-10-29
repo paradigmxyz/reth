@@ -23,6 +23,14 @@ impl StorageSettings {
         Self { receipts_on_static_files: false }
     }
 
+    /// Creates `StorageSettings` for legacy nodes.
+    ///
+    /// This explicitly sets `receipts_on_static_files` to `false`, ensuring older nodes
+    /// continue writing receipts to the database when receipt pruning is enabled.
+    pub const fn legacy() -> Self {
+        Self { receipts_on_static_files: false }
+    }
+
     /// Sets the `receipts_static_files` flag to true.
     pub const fn with_receipts_on_static_files(mut self) -> Self {
         self.receipts_on_static_files = true;

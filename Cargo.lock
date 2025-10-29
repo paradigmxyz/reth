@@ -10485,7 +10485,6 @@ dependencies = [
  "alloy-rpc-types-engine",
  "auto_impl",
  "reth-chainspec",
- "reth-codecs",
  "reth-db-api",
  "reth-db-models",
  "reth-ethereum-primitives",
@@ -10496,6 +10495,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "revm-database",
+ "serde_json",
 ]
 
 [[package]]

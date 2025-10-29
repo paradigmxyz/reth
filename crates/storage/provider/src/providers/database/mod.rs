@@ -84,16 +84,17 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> ProviderResult<Self> {
+        let legacy_settings = StorageSettings::legacy();
         let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
             static_file_provider.clone(),
             Default::default(),
             Default::default(),
-            Arc::new(RwLock::new(StorageSettings::default())),
+            Arc::new(RwLock::new(legacy_settings)),
         )
         .storage_settings()?
-        .unwrap_or_default();
+        .unwrap_or(legacy_settings);
 
         Ok(Self {
             db,
@@ -129,7 +130,6 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub fn into_db(self) -> N::DB {
         self.db
     }
-
 }
 
 impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
@@ -142,7 +142,7 @@ impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
+impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
     pub fn new_with_database_path<P: AsRef<Path>>(
@@ -151,14 +151,12 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> RethResult<Self> {
-        Ok(Self {
-            db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
+        Self::new(
+            Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
-            prune_modes: PruneModes::default(),
-            storage: Default::default(),
-            storage_settings: Arc::new(RwLock::new(StorageSettings::default())),
-        })
+        )
+        .map_err(RethError::Provider)
     }
 }
 

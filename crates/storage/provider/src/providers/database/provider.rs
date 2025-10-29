@@ -58,7 +58,9 @@ use reth_prune_types::{
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter, NodePrimitivesProvider, StateProvider, StorageChangeSetReader, StorageSettingsCache, TryIntoHistoricalStateProvider
+    BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
+    NodePrimitivesProvider, StateProvider, StorageChangeSetReader, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -497,8 +499,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
+        storage_settings: Arc<RwLock<StorageSettings>>,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage }
+        Self { tx, chain_spec, static_file_provider, prune_modes, storage, storage_settings }
     }
 
     /// Consume `DbTx` or `DbTxMut`.

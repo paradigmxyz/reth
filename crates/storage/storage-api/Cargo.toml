@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-codecs = { workspace = true, optional = true }
 reth-db-models.workspace = true
 reth-chainspec.workspace = true
 reth-db-api = { workspace = true, optional = true }
@@ -33,6 +32,7 @@ alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 auto_impl.workspace = true
+serde_json = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
@@ -51,15 +51,15 @@ std = [
     "reth-storage-errors/std",
     "reth-db-models/std",
     "reth-trie-common/std",
+    "serde_json?/std",
 ]
 
 db-api = [
-    "dep:reth-codecs",
     "dep:reth-db-api",
+    "dep:serde_json",
 ]
 
 serde = [
-    "reth-codecs/serde",
     "reth-ethereum-primitives/serde",
     "reth-db-models/serde",
     "reth-execution-types/serde",

@@ -1,8 +1,7 @@
 //! Metadata provider trait for reading and writing node metadata.
 
-use reth_codecs::Compact;
 use reth_db_api::models::StorageSettings;
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Metadata keys.
 pub mod keys {
@@ -18,9 +17,9 @@ pub trait MetadataProvider: Send + Sync {
 
     /// Get storage settings for this node
     fn storage_settings(&self) -> ProviderResult<Option<StorageSettings>> {
-        Ok(self
-            .get_metadata(keys::STORAGE_SETTINGS)?
-            .map(|bytes| StorageSettings::from_compact(&bytes, bytes.len()).0))
+        self.get_metadata(keys::STORAGE_SETTINGS)?
+            .map(|bytes| serde_json::from_slice(&bytes).map_err(ProviderError::other))
+            .transpose()
     }
 }
 
@@ -34,10 +33,10 @@ pub trait MetadataWriter: Send + Sync {
     /// Be sure to update provider factory cache with
     /// [`StorageSettingsCache::set_storage_settings_cache`].
     fn write_storage_settings(&self, settings: StorageSettings) -> ProviderResult<()> {
-        use reth_codecs::Compact;
-        let mut buf = Vec::new();
-        settings.to_compact(&mut buf);
-        self.write_metadata(keys::STORAGE_SETTINGS, buf)
+        self.write_metadata(
+            keys::STORAGE_SETTINGS,
+            serde_json::to_vec(&settings).map_err(ProviderError::other)?,
+        )
     }
 }
 
