@@ -1694,3 +1694,47 @@ async fn test_eth_fee_history_raw() {
     )
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_debug_db_get() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_http(vec![RethRpcModule::Debug]).await;
+    let client = handle.http_client().unwrap();
+
+    let valid_test_cases = [
+        "0x630000000000000000000000000000000000000000000000000000000000000000",
+        "c00000000000000000000000000000000",
+    ];
+
+    for key in valid_test_cases {
+        DebugApiClient::<()>::debug_db_get(&client, key.into()).await.unwrap();
+    }
+
+    // Invalid test cases
+    let test_cases = [
+        ("0x0000", "Key must be 33 bytes, got 2"),
+        ("00", "Key must be 33 bytes, got 2"),
+        (
+            "0x000000000000000000000000000000000000000000000000000000000000000000",
+            "Key prefix must be 0x63",
+        ),
+        ("000000000000000000000000000000000", "Key prefix must be 0x63"),
+        ("0xc0000000000000000000000000000000000000000000000000000000000000000", "Invalid hex key"),
+    ];
+
+    let match_error_msg = |err: jsonrpsee::core::client::Error, expected: String| -> bool {
+        match err {
+            jsonrpsee::core::client::Error::Call(error_obj) => {
+                error_obj.code() == ErrorCode::InvalidParams.code() &&
+                    error_obj.message() == expected
+            }
+            _ => false,
+        }
+    };
+
+    for (key, expected) in test_cases {
+        let err = DebugApiClient::<()>::debug_db_get(&client, key.into()).await.unwrap_err();
+        assert!(match_error_msg(err, expected.into()));
+    }
+}
