@@ -16,3 +16,7 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 revm-primitives.workspace = true
 serde = { version = "1.0", features = ["derive"] }
+
+reth-node-builder.workspace = true
+reth-tracing.workspace = true
+tokio = { version = "1.0", features = ["full"] }
