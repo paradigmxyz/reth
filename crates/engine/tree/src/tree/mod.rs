@@ -2407,9 +2407,7 @@ where
             Ok(Some(_)) => {}
         }
 
-        let ctx =
-            TreeCtx::new(&mut self.state, &self.persistence_state, &self.canonical_in_memory_state);
-
+        let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
         let start = Instant::now();
 
         let executed = execute(&mut self.payload_validator, input, ctx)?;
