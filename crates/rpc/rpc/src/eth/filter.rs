@@ -3,7 +3,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
-    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
+    BlockNumHash, BlockNumberOrTag, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
@@ -487,32 +487,108 @@ where
                 Ok(all_logs)
             }
             FilterBlockOption::Range { from_block, to_block } => {
-                // compute the range
-                let info = self.provider().chain_info()?;
+                // Check if either from_block or to_block is pending
+                let has_pending = from_block
+                    .is_some_and(|b| matches!(b, BlockNumberOrTag::Pending)) ||
+                    to_block.is_some_and(|b| matches!(b, BlockNumberOrTag::Pending));
 
-                // we start at the most recent block if unset in filter
-                let start_block = info.best_number;
-                let from = from_block
-                    .map(|num| self.provider().convert_block_number(num))
-                    .transpose()?
-                    .flatten();
-                let to = to_block
-                    .map(|num| self.provider().convert_block_number(num))
-                    .transpose()?
-                    .flatten();
+                if has_pending {
+                    // Handle pending blocks separately
+                    let mut all_logs = Vec::new();
 
-                if let Some(f) = from &&
-                    f > info.best_number
-                {
-                    // start block higher than local head, can return empty
-                    return Ok(Vec::new());
+                    // If pending block is requested, try to get it from provider
+                    if let Ok(Some((block, receipts))) =
+                        self.provider().pending_block_and_receipts()
+                    {
+                        let block_num_hash = BlockNumHash::new(block.number(), block.hash());
+                        let block_timestamp = block.timestamp();
+                        let block_arc = Arc::new(block);
+                        let receipts_arc = Arc::new(receipts);
+
+                        // Use existing append_matching_block_logs function to process pending logs
+                        append_matching_block_logs(
+                            &mut all_logs,
+                            ProviderOrBlock::<Eth::Provider>::Block(block_arc),
+                            &filter,
+                            block_num_hash,
+                            &receipts_arc,
+                            false, // removed = false for pending blocks
+                            block_timestamp,
+                        )?;
+                    }
+
+                    // If the range includes both pending and non-pending blocks, handle the
+                    // non-pending part
+                    let non_pending_from = if matches!(from_block, Some(BlockNumberOrTag::Pending))
+                    {
+                        None
+                    } else {
+                        from_block
+                    };
+                    let non_pending_to = if matches!(to_block, Some(BlockNumberOrTag::Pending)) {
+                        None
+                    } else {
+                        to_block
+                    };
+
+                    if non_pending_from.is_some() || non_pending_to.is_some() {
+                        // Process non-pending range using the original logic
+                        let info = self.provider().chain_info()?;
+                        let start_block = info.best_number;
+                        let from = non_pending_from
+                            .map(|num| self.provider().convert_block_number(num))
+                            .transpose()?
+                            .flatten();
+                        let to = non_pending_to
+                            .map(|num| self.provider().convert_block_number(num))
+                            .transpose()?
+                            .flatten();
+
+                        if let Some(f) = from &&
+                            f <= info.best_number
+                        {
+                            let (from_block_number, to_block_number) =
+                                logs_utils::get_filter_block_range(from, to, start_block, info);
+
+                            let mut non_pending_logs = self
+                                .get_logs_in_block_range(
+                                    filter,
+                                    from_block_number,
+                                    to_block_number,
+                                    limits,
+                                )
+                                .await?;
+                            all_logs.append(&mut non_pending_logs);
+                        }
+                    }
+
+                    Ok(all_logs)
+                } else {
+                    // Original logic for non-pending blocks
+                    let info = self.provider().chain_info()?;
+                    let start_block = info.best_number;
+                    let from = from_block
+                        .map(|num| self.provider().convert_block_number(num))
+                        .transpose()?
+                        .flatten();
+                    let to = to_block
+                        .map(|num| self.provider().convert_block_number(num))
+                        .transpose()?
+                        .flatten();
+
+                    if let Some(f) = from &&
+                        f > info.best_number
+                    {
+                        // start block higher than local head, can return empty
+                        return Ok(Vec::new());
+                    }
+
+                    let (from_block_number, to_block_number) =
+                        logs_utils::get_filter_block_range(from, to, start_block, info);
+
+                    self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
+                        .await
                 }
-
-                let (from_block_number, to_block_number) =
-                    logs_utils::get_filter_block_range(from, to, start_block, info);
-
-                self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
-                    .await
             }
         }
     }
