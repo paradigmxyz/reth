@@ -43,6 +43,9 @@ pub trait MetadataWriter: Send + Sync {
 
 /// Trait for caching storage settings on a provider factory.
 pub trait StorageSettingsCache: Send + Sync {
+    /// Gets the cached storage settings.
+    fn cached_storage_settings(&self) -> StorageSettings;
+
     /// Sets the storage settings of this `ProviderFactory`.
     ///
     /// IMPORTANT: It does not save settings in storage, that should be done by

@@ -130,13 +130,13 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         self.db
     }
 
-    /// Gets the current storage settings.
-    pub fn cached_storage_settings(&self) -> StorageSettings {
-        *self.storage_settings.read()
-    }
 }
 
 impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
+    fn cached_storage_settings(&self) -> StorageSettings {
+        *self.storage_settings.read()
+    }
+
     fn set_storage_settings_cache(&self, settings: StorageSettings) {
         *self.storage_settings.write() = settings;
     }

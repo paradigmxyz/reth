@@ -58,8 +58,7 @@ use reth_prune_types::{
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter, NodePrimitivesProvider, StateProvider, StorageChangeSetReader, StorageSettingsCache, TryIntoHistoricalStateProvider
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -162,11 +161,6 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Returns reference to prune modes.
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
-    }
-
-    /// Gets the cached storage settings from the factory.
-    pub fn cached_storage_settings(&self) -> StorageSettings {
-        *self.storage_settings.read()
     }
 }
 
@@ -3148,6 +3142,16 @@ impl<TX: DbTx, N: NodeTypes> MetadataProvider for DatabaseProvider<TX, N> {
 impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
     fn write_metadata(&self, key: &str, value: Vec<u8>) -> ProviderResult<()> {
         self.tx.put::<tables::Metadata>(key.to_string(), value).map_err(Into::into)
+    }
+}
+
+impl<TX: Send + Sync, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
+    fn cached_storage_settings(&self) -> StorageSettings {
+        *self.storage_settings.read()
+    }
+
+    fn set_storage_settings_cache(&self, settings: StorageSettings) {
+        *self.storage_settings.write() = settings;
     }
 }
 
