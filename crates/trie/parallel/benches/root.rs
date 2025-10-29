@@ -5,8 +5,7 @@ use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
 use reth_primitives_traits::Account;
 use reth_provider::{
-    providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory, StateWriter,
-    TrieWriter,
+    providers::ConsistentDbView, test_utils::create_test_provider_factory, StateWriter, TrieWriter,
 };
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
@@ -38,7 +37,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             provider_rw.commit().unwrap();
         }
 
-        let factory = OverlayStateProviderFactory::new(provider_factory.clone());
+        let view = ConsistentDbView::new(provider_factory.clone(), None);
 
         // state root
         group.bench_function(BenchmarkId::new("sync root", size), |b| {
@@ -66,8 +65,10 @@ pub fn calculate_state_root(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("parallel root", size), |b| {
             b.iter_with_setup(
                 || {
-                    let trie_input = TrieInput::from_state(updated_state.clone());
-                    ParallelStateRoot::new(factory.clone(), trie_input.prefix_sets.freeze())
+                    ParallelStateRoot::new(
+                        view.clone(),
+                        TrieInput::from_state(updated_state.clone()),
+                    )
                 },
                 |calculator| calculator.incremental_root(),
             );

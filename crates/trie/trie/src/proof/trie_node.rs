@@ -81,18 +81,19 @@ impl<T, H> ProofBlindedAccountProvider<T, H> {
 
 impl<T, H> TrieNodeProvider for ProofBlindedAccountProvider<T, H>
 where
-    T: TrieCursorFactory,
-    H: HashedCursorFactory,
+    T: TrieCursorFactory + Clone + Send + Sync,
+    H: HashedCursorFactory + Clone + Send + Sync,
 {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
 
         let targets = MultiProofTargets::from_iter([(pad_path_to_key(path), HashSet::default())]);
-        let mut proof = Proof::new(&self.trie_cursor_factory, &self.hashed_cursor_factory)
-            .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())
-            .with_branch_node_masks(true)
-            .multiproof(targets)
-            .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
+        let mut proof =
+            Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
+                .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())
+                .with_branch_node_masks(true)
+                .multiproof(targets)
+                .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         let node = proof.account_subtree.into_inner().remove(path);
         let tree_mask = proof.branch_node_tree_masks.remove(path);
         let hash_mask = proof.branch_node_hash_masks.remove(path);
@@ -137,8 +138,8 @@ impl<T, H> ProofBlindedStorageProvider<T, H> {
 
 impl<T, H> TrieNodeProvider for ProofBlindedStorageProvider<T, H>
 where
-    T: TrieCursorFactory,
-    H: HashedCursorFactory,
+    T: TrieCursorFactory + Clone + Send + Sync,
+    H: HashedCursorFactory + Clone + Send + Sync,
 {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
@@ -147,8 +148,8 @@ where
         let storage_prefix_set =
             self.prefix_sets.storage_prefix_sets.get(&self.account).cloned().unwrap_or_default();
         let mut proof = StorageProof::new_hashed(
-            &self.trie_cursor_factory,
-            &self.hashed_cursor_factory,
+            self.trie_cursor_factory.clone(),
+            self.hashed_cursor_factory.clone(),
             self.account,
         )
         .with_prefix_set_mut(storage_prefix_set)
