@@ -1,11 +1,9 @@
 use crate::{
-    segments::{PruneInput, Segment},
+    segments::{self, PruneInput, Segment},
     PrunerError,
 };
 use reth_provider::{BlockReader, StaticFileProviderFactory};
-use reth_prune_types::{
-    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
-};
+use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 use reth_static_file_types::StaticFileSegment;
 
 /// Segment responsible for pruning transactions in static files.
@@ -40,26 +38,7 @@ where
     }
 
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
-        let deleted_headers = provider
-            .static_file_provider()
-            .delete_segment_below_block(StaticFileSegment::Transactions, input.to_block + 1)?;
-
-        if deleted_headers.is_empty() {
-            return Ok(SegmentOutput::done())
-        }
-
-        let tx_ranges = deleted_headers.iter().filter_map(|header| header.tx_range());
-
-        let pruned = tx_ranges.clone().map(|range| range.len()).sum::<u64>() as usize;
-
-        Ok(SegmentOutput {
-            progress: PruneProgress::Finished,
-            pruned,
-            checkpoint: Some(SegmentOutputCheckpoint {
-                block_number: Some(input.to_block),
-                tx_number: tx_ranges.map(|range| range.end()).max(),
-            }),
-        })
+        segments::prune_static_files(provider, input, StaticFileSegment::Transactions)
     }
 }
 
