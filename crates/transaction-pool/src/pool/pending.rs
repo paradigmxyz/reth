@@ -334,22 +334,23 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let tx = self.by_id.remove(id)?;
         self.size_of -= tx.transaction.size();
 
-        let removed_was_highest = match self.highest_nonces.get(&id.sender) {
-            Some(highest) => highest.transaction.nonce() == id.nonce,
-            None => false,
-        };
-        if removed_was_highest {
-            if let Some((_, new_highest)) = self
-                .by_id
-                .range((id.sender.start_bound(), Unbounded))
-                .take_while(|(other, _)| other.sender == id.sender)
-                .last()
-            {
-                self.highest_nonces.insert(id.sender, new_highest.clone());
-            } else {
-                self.highest_nonces.remove(&id.sender);
+        if let Some(highest) = self.highest_nonces.get(&id.sender) {
+            if highest.transaction.nonce() == id.nonce {
+                if let Some((_, new_highest)) = self
+                    .by_id
+                    .range((
+                        id.sender.start_bound(),
+                        std::ops::Bound::Included(TransactionId::new(id.sender, u64::MAX)),
+                    ))
+                    .last()
+                {
+                    self.highest_nonces.insert(id.sender, new_highest.clone());
+                } else {
+                    self.highest_nonces.remove(&id.sender);
+                }
             }
         }
+
         Some(tx.transaction)
     }
 
