@@ -51,6 +51,71 @@ impl Deref for LoadedJar {
     }
 }
 
+/// Collection of (segments)[`StaticFileSegment`] with a generic value associated with each segment.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StaticFileSegments<T> {
+    headers: Option<T>,
+    transactions: Option<T>,
+    receipts: Option<T>,
+}
+
+impl<T> Default for StaticFileSegments<T> {
+    fn default() -> Self {
+        Self { headers: None, transactions: None, receipts: None }
+    }
+}
+
+impl<T> StaticFileSegments<T> {
+    /// Returns a reference to the value corresponding to the segment.
+    const fn get(&self, segment: StaticFileSegment) -> Option<&T> {
+        match segment {
+            StaticFileSegment::Headers => self.headers.as_ref(),
+            StaticFileSegment::Transactions => self.transactions.as_ref(),
+            StaticFileSegment::Receipts => self.receipts.as_ref(),
+        }
+    }
+
+    /// Returns a mutable reference to the value corresponding to the segment.
+    const fn get_mut(&mut self, segment: StaticFileSegment) -> Option<&mut T> {
+        match segment {
+            StaticFileSegment::Headers => self.headers.as_mut(),
+            StaticFileSegment::Transactions => self.transactions.as_mut(),
+            StaticFileSegment::Receipts => self.receipts.as_mut(),
+        }
+    }
+
+    /// Inserts a segment-value pair into the collection.
+    ///
+    /// If the collection did not have this segment present, [`None`] is returned.
+    ///
+    /// If the collection did have this segment present, the value is updated, and the old
+    /// value is returned.
+    const fn insert(&mut self, segment: StaticFileSegment, value: T) -> Option<T> {
+        match segment {
+            StaticFileSegment::Headers => self.headers.replace(value),
+            StaticFileSegment::Transactions => self.transactions.replace(value),
+            StaticFileSegment::Receipts => self.receipts.replace(value),
+        }
+    }
+
+    /// Removes a segment from the collection, returning the value at the segment if the segment
+    /// was previously in the collection.
+    const fn remove(&mut self, segment: StaticFileSegment) -> Option<T> {
+        match segment {
+            StaticFileSegment::Headers => self.headers.take(),
+            StaticFileSegment::Transactions => self.transactions.take(),
+            StaticFileSegment::Receipts => self.receipts.take(),
+        }
+    }
+
+    /// Clears the collection, removing all segment-value pairs.
+    fn clear(&mut self) {
+        self.headers = None;
+        self.transactions = None;
+        self.receipts = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,7 +224,7 @@ mod tests {
         {
             let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
                 .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+                .with_custom_blocks_per_file(StaticFileSegment::Headers, blocks_per_file);
 
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers).unwrap();
 
@@ -253,7 +318,7 @@ mod tests {
         {
             let sf_rw = StaticFileProvider::read_write(&static_dir)
                 .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+                .with_custom_blocks_per_file(StaticFileSegment::Headers, blocks_per_file);
 
             assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), Some(tip));
             assert_eq!(
@@ -384,7 +449,7 @@ mod tests {
         let expected_tx_index =
             vec![(8, SegmentRangeInclusive::new(0, 9)), (9, SegmentRangeInclusive::new(20, 29))];
         assert_eq!(
-            tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+            tx_index.get(segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
             (!expected_tx_index.is_empty()).then_some(expected_tx_index),
             "tx index mismatch",
         );
@@ -455,7 +520,7 @@ mod tests {
             // Ensure that the inner tx index (max_tx -> block range) is as expected
             let tx_index = sf_rw.tx_index().read();
             assert_eyre(
-                tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+                tx_index.get(segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
                 (!expected_tx_index.is_empty()).then_some(expected_tx_index),
                 "tx index mismatch",
             )?;
@@ -468,13 +533,13 @@ mod tests {
 
             let sf_rw = StaticFileProvider::read_write(&static_dir)
                 .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+                .with_custom_blocks_per_file(segment, blocks_per_file);
 
             setup_tx_based_scenario(&sf_rw, segment, blocks_per_file);
 
             let sf_rw = StaticFileProvider::read_write(&static_dir)
                 .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+                .with_custom_blocks_per_file(segment, blocks_per_file);
             let highest_tx = sf_rw.get_highest_static_file_tx(segment).unwrap();
 
             // Test cases
