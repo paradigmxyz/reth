@@ -1427,13 +1427,18 @@ mod tests {
         // Test commit notification
         let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
 
+        // Build expected trie updates map
+        let mut expected_trie_updates = BTreeMap::new();
+        expected_trie_updates.insert(0, block0.trie_updates.clone());
+        expected_trie_updates.insert(1, block1.trie_updates.clone());
+
         assert_eq!(
             chain_commit.to_chain_notification(),
             CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
                     vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
                     sample_execution_outcome.clone(),
-                    BTreeMap::new()
+                    expected_trie_updates
                 ))
             }
         );
@@ -1444,18 +1449,28 @@ mod tests {
             old: vec![block1.clone(), block2.clone()],
         };
 
+        // Build expected trie updates for old chain
+        let mut old_trie_updates = BTreeMap::new();
+        old_trie_updates.insert(1, block1.trie_updates.clone());
+        old_trie_updates.insert(2, block2.trie_updates.clone());
+
+        // Build expected trie updates for new chain
+        let mut new_trie_updates = BTreeMap::new();
+        new_trie_updates.insert(1, block1a.trie_updates.clone());
+        new_trie_updates.insert(2, block2a.trie_updates.clone());
+
         assert_eq!(
             chain_reorg.to_chain_notification(),
             CanonStateNotification::Reorg {
                 old: Arc::new(Chain::new(
                     vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
                     sample_execution_outcome.clone(),
-                    BTreeMap::new()
+                    old_trie_updates
                 )),
                 new: Arc::new(Chain::new(
                     vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
                     sample_execution_outcome,
-                    BTreeMap::new()
+                    new_trie_updates
                 ))
             }
         );
