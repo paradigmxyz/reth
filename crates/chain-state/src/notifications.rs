@@ -6,7 +6,6 @@ use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_storage_api::NodePrimitivesProvider;
 use std::{
-    collections::BTreeMap,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -243,6 +242,7 @@ mod tests {
     use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives_traits::SealedBlock;
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_commit_notification() {
