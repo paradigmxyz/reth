@@ -5,7 +5,9 @@
 
 use crate::hardforks::CustomHardforkConfig;
 use alloy_genesis::Genesis;
-use reth_chainspec::{Chain, ChainSpec, EthChainSpec, EthereumHardforks, ForkCondition, Hardfork, Hardforks};
+use reth_chainspec::{
+    Chain, ChainSpec, EthChainSpec, EthereumHardforks, ForkCondition, Hardfork, Hardforks,
+};
 use reth_ethereum::chainspec::EthereumHardfork;
 use reth_network_peers::NodeRecord;
 
@@ -66,7 +68,10 @@ impl EthChainSpec for CustomChainSpec {
         self.inner.chain()
     }
 
-    fn base_fee_params_at_timestamp(&self, timestamp: u64) -> reth_ethereum::chainspec::BaseFeeParams {
+    fn base_fee_params_at_timestamp(
+        &self,
+        timestamp: u64,
+    ) -> reth_ethereum::chainspec::BaseFeeParams {
         self.inner.base_fee_params_at_timestamp(timestamp)
     }
 

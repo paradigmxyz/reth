@@ -38,7 +38,7 @@ pub struct CustomHardforkConfig {
 impl Default for CustomHardforkConfig {
     fn default() -> Self {
         Self {
-            basic_upgrade_block: Some(10),  // Activate at block 10 for demo
+            basic_upgrade_block: Some(10), // Activate at block 10 for demo
             advanced_upgrade_block: Some(20),
         }
     }
@@ -50,10 +50,14 @@ impl CustomHardforkConfig {
     pub fn into_hardforks(self) -> reth_chainspec::ChainHardforks {
         let mut hardforks = reth_chainspec::ChainHardforks::default();
         if let Some(block) = self.basic_upgrade_block {
-            hardforks.insert(CustomHardfork::BasicUpgrade, reth_chainspec::ForkCondition::Block(block));
+            hardforks
+                .insert(CustomHardfork::BasicUpgrade, reth_chainspec::ForkCondition::Block(block));
         }
         if let Some(block) = self.advanced_upgrade_block {
-            hardforks.insert(CustomHardfork::AdvancedUpgrade, reth_chainspec::ForkCondition::Block(block));
+            hardforks.insert(
+                CustomHardfork::AdvancedUpgrade,
+                reth_chainspec::ForkCondition::Block(block),
+            );
         }
         hardforks
     }
@@ -72,10 +76,8 @@ mod tests {
 
     #[test]
     fn config_to_hardforks() {
-        let config = CustomHardforkConfig {
-            basic_upgrade_block: Some(5),
-            advanced_upgrade_block: Some(15),
-        };
+        let config =
+            CustomHardforkConfig { basic_upgrade_block: Some(5), advanced_upgrade_block: Some(15) };
         let hardforks = config.into_hardforks();
         assert_eq!(hardforks.fork(CustomHardfork::BasicUpgrade), ForkCondition::Block(5));
         assert_eq!(hardforks.fork(CustomHardfork::AdvancedUpgrade), ForkCondition::Block(15));
