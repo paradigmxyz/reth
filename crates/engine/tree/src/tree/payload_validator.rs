@@ -955,14 +955,18 @@ where
     ///
     /// It works as follows:
     /// 1. Collect in-memory blocks that are descendants of the provided parent hash using
-    ///    [`crate::tree::TreeState::blocks_by_hash`].
-    /// 2. If the persistence is in progress, and the block that we're computing the trie input for
-    ///    is a descendant of the currently persisting blocks, we need to be sure that in-memory
-    ///    blocks are not overlapping with the database blocks that may have been already persisted.
-    ///    To do that, we're filtering out in-memory blocks that are lower than the highest database
-    ///    block.
-    /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
-    ///    [`HashedPostState`] from them.
+    ///    [`crate::tree::TreeState::blocks_by_hash`]. This returns the highest persisted ancestor
+    ///    hash (`block_hash`) and the list of in-memory descendant blocks.
+    /// 2. Extend the `TrieInput` with the contents of these in-memory blocks (from oldest to
+    ///    newest) to build the overlay state and trie updates that sit on top of the database view
+    ///    anchored at `block_hash`.
+    ///
+    /// Note:
+    /// - This function does not perform filtering of in-memory blocks during an in-progress
+    ///   persistence operation. The current architecture relies on consistent database snapshots
+    ///   and on clearing in-memory canonical blocks after persistence completes. If filtering based
+    ///   on the highest persisted block during an active save is required in the future, additional
+    ///   persistence context will need to be threaded into this function.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",
