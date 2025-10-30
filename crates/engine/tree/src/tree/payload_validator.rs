@@ -644,15 +644,17 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
+        let TrieInputSorted { nodes, state, prefix_sets: prefix_sets_mut } = input;
+
         let factory = OverlayStateProviderFactory::new(self.provider.clone())
             .with_block_hash(Some(block_hash))
-            .with_trie_overlay(Some(multiproof_config.nodes_sorted))
-            .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
+            .with_trie_overlay(Some(nodes))
+            .with_hashed_state_overlay(Some(state));
 
         // The `hashed_state` argument is already taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
-        let prefix_sets = input.prefix_sets.freeze();
+        let prefix_sets = prefix_sets_mut.freeze();
 
         ParallelStateRoot::new(factory, prefix_sets).incremental_root_with_updates()
     }
