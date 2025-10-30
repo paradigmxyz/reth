@@ -322,6 +322,40 @@ impl HashedPostState {
         }
     }
 
+    /// Extend this hashed post state with sorted data, converting directly into the unsorted
+    /// `HashMap` representation. This is more efficient than first converting to `HashedPostState`
+    /// and then extending, as it avoids creating intermediate `HashMap` allocations.
+    pub fn extend_from_sorted(&mut self, sorted: &HashedPostStateSorted) {
+        // Reserve capacity for accounts
+        self.accounts
+            .reserve(sorted.accounts.accounts.len() + sorted.accounts.destroyed_accounts.len());
+
+        // Insert updated accounts
+        for (address, account) in &sorted.accounts.accounts {
+            self.accounts.insert(*address, Some(*account));
+        }
+
+        // Insert destroyed accounts
+        for address in &sorted.accounts.destroyed_accounts {
+            self.accounts.insert(*address, None);
+        }
+
+        // Reserve capacity for storages
+        self.storages.reserve(sorted.storages.len());
+
+        // Extend storages
+        for (hashed_address, sorted_storage) in &sorted.storages {
+            match self.storages.entry(*hashed_address) {
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(sorted_storage.into());
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend_from_sorted(sorted_storage);
+                }
+            }
+        }
+    }
+
     /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
         let mut updated_accounts = Vec::new();
