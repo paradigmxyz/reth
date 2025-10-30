@@ -103,10 +103,16 @@ where
         // We cannot recover the data that was pruned in `execute`, so we just update the
         // checkpoints.
         let prune_checkpoints = provider.get_prune_checkpoints()?;
+        let unwind_to_last_tx =
+            provider.block_body_indices(input.unwind_to)?.map(|i| i.last_tx_num());
+
         for (segment, mut checkpoint) in prune_checkpoints {
             // Only update the checkpoint if unwind_to is lower than the existing checkpoint.
-            if checkpoint.block_number.is_none_or(|block| input.unwind_to < block) {
+            if let Some(block) = checkpoint.block_number &&
+                input.unwind_to < block
+            {
                 checkpoint.block_number = Some(input.unwind_to);
+                checkpoint.tx_number = unwind_to_last_tx;
                 provider.save_prune_checkpoint(segment, checkpoint)?;
             }
         }
