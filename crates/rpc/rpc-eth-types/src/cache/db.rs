@@ -14,7 +14,7 @@ use revm::{
     Database, DatabaseCommit,
 };
 
-/// Helper alias type for the state's [`CacheDB`]
+/// Helper alias type for the state's [`State`]
 pub type StateCacheDb<'a> = State<StateProviderDatabase<StateProviderTraitObjWrapper<'a>>>;
 
 /// Hack to get around 'higher-ranked lifetime error', see
