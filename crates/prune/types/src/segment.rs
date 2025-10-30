@@ -41,7 +41,7 @@ pub enum PruneSegment {
 }
 
 /// Array of [`PruneSegment`]s actively in use.
-pub const PRUNE_SEGMENTS: [PruneSegment; 7] = [
+pub const PRUNE_SEGMENTS: [PruneSegment; 8] = [
     PruneSegment::SenderRecovery,
     PruneSegment::TransactionLookup,
     PruneSegment::Receipts,
@@ -49,6 +49,7 @@ pub const PRUNE_SEGMENTS: [PruneSegment; 7] = [
     PruneSegment::AccountHistory,
     PruneSegment::StorageHistory,
     PruneSegment::MerkleChangeSets,
+    PruneSegment::Bodies,
 ];
 
 #[cfg(test)]
