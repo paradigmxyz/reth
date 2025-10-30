@@ -475,6 +475,29 @@ impl HashedStorage {
         self.storage.extend(other.storage.iter().map(|(&k, &v)| (k, v)));
     }
 
+    /// Extend hashed storage with sorted data, converting directly into the unsorted `HashMap`
+    /// representation. This is more efficient than first converting to `HashedStorage` and
+    /// then extending, as it avoids creating intermediate `HashMap` allocations.
+    pub fn extend_from_sorted(&mut self, sorted: &HashedStorageSorted) {
+        if sorted.wiped {
+            self.wiped = true;
+            self.storage.clear();
+        }
+
+        // Reserve capacity for all slots
+        self.storage.reserve(sorted.non_zero_valued_slots.len() + sorted.zero_valued_slots.len());
+
+        // Insert non-zero valued slots
+        for (slot, value) in &sorted.non_zero_valued_slots {
+            self.storage.insert(*slot, *value);
+        }
+
+        // Insert zero-valued slots
+        for slot in &sorted.zero_valued_slots {
+            self.storage.insert(*slot, U256::ZERO);
+        }
+    }
+
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
         let mut non_zero_valued_slots = Vec::new();
