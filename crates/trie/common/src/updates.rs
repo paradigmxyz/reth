@@ -566,6 +566,12 @@ impl TrieUpdatesSorted {
                 .or_insert_with(|| storage_trie.clone());
         }
     }
+
+    /// Clears all account nodes and storage tries.
+    pub fn clear(&mut self) {
+        self.account_nodes.clear();
+        self.storage_tries.clear();
+    }
 }
 
 impl AsRef<Self> for TrieUpdatesSorted {
