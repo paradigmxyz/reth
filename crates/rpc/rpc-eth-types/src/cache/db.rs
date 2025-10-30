@@ -4,18 +4,18 @@
 
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
-use reth_revm::{database::StateProviderDatabase, DatabaseRef};
+use reth_revm::{database::StateProviderDatabase, db::bal::BalDatabaseError, DatabaseRef, State};
 use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::{
-    database::{BundleState, CacheDB},
+    database::BundleState,
     primitives::HashMap,
     state::{AccountInfo, Bytecode},
     Database, DatabaseCommit,
 };
 
 /// Helper alias type for the state's [`CacheDB`]
-pub type StateCacheDb<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'a>>>;
+pub type StateCacheDb<'a> = State<StateProviderDatabase<StateProviderTraitObjWrapper<'a>>>;
 
 /// Hack to get around 'higher-ranked lifetime error', see
 /// <https://github.com/rust-lang/rust/issues/100013>
@@ -213,19 +213,19 @@ impl<'a> DatabaseRef for StateCacheDbRefMutWrapper<'a, '_> {
     type Error = <StateCacheDb<'a> as Database>::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.0.basic_ref(address)
+        self.0.basic_ref(address).map_err(|e| BalDatabaseError::Database(e))
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.0.code_by_hash_ref(code_hash)
+        self.0.code_by_hash_ref(code_hash).map_err(|e| BalDatabaseError::Database(e))
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.0.storage_ref(address, index)
+        self.0.storage_ref(address, index).map_err(|e| BalDatabaseError::Database(e))
     }
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        self.0.block_hash_ref(number)
+        self.0.block_hash_ref(number).map_err(|e| BalDatabaseError::Database(e))
     }
 }
 

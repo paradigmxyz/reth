@@ -13,7 +13,10 @@ use reth_evm::{
     Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::{bal::BalDatabaseError, State},
+};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     EthApiError,
@@ -35,7 +38,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
         inspector: I,
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error = BalDatabaseError<ProviderError>>,
         I: InspectorFor<Self::Evm, DB>,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);

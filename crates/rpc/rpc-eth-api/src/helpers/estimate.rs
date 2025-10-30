@@ -21,6 +21,7 @@ use reth_storage_api::StateProvider;
 use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Transaction},
+    database::bal::BalDatabaseError,
 };
 use tracing::trace;
 
@@ -303,7 +304,7 @@ pub trait EstimateCall: Call {
         max_gas_limit: u64,
     ) -> Result<U256, Self::Error>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error = BalDatabaseError<ProviderError>>,
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();
