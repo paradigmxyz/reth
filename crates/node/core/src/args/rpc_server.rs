@@ -188,8 +188,8 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
-     /// Maximum memory the EVM can allocate per RPC request.
-     #[arg(
+    /// Maximum memory the EVM can allocate per RPC request.
+    #[arg(
         long = "rpc.evm-memory-limit",
         alias = "rpc-evm-memory-limit",
         value_name = "MEMORY_LIMIT",
