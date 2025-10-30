@@ -247,7 +247,9 @@ where
                 let coinbase = evm_env.block_env.beneficiary();
                 let basefee = evm_env.block_env.basefee();
                 let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
+                    State::builder().with_database(StateProviderDatabase::new(state)).with_bal_builder().build();
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 // apply overrides
                 apply_block_overrides(block_overrides, &mut db, evm_env.block_env.inner_mut());
