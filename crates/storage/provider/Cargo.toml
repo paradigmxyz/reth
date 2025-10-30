@@ -44,8 +44,8 @@ revm-state = { workspace = true, optional = true }
 tracing.workspace = true
 
 # metrics
-reth-metrics.workspace = true
-metrics.workspace = true
+reth-metrics = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
 
 # misc
 itertools.workspace = true
@@ -81,6 +81,8 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
+default = ["metrics"]
+metrics = ["reth-metrics", "dep:metrics"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
