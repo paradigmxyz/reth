@@ -765,10 +765,11 @@ where
                 // Create OverlayStateProviderFactory with sorted trie data for multiproofs
                 let TrieInputSorted { nodes, state, .. } = trie_input;
 
-                let multiproof_provider_factory = OverlayStateProviderFactory::new(self.provider.clone())
-                    .with_block_hash(Some(block_hash))
-                    .with_trie_overlay(Some(nodes))
-                    .with_hashed_state_overlay(Some(state));
+                let multiproof_provider_factory =
+                    OverlayStateProviderFactory::new(self.provider.clone())
+                        .with_block_hash(Some(block_hash))
+                        .with_trie_overlay(Some(nodes))
+                        .with_hashed_state_overlay(Some(state));
 
                 // Use state root task only if prefix sets are empty, otherwise proof generation is
                 // too expensive because it requires walking all paths in every proof.
@@ -920,10 +921,8 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<(TrieInputSorted, B256)> {
-        let (block_hash, blocks) = state
-            .tree_state
-            .blocks_by_hash(parent_hash)
-            .unwrap_or_else(|| (parent_hash, vec![]));
+        let (block_hash, blocks) =
+            state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
         if blocks.is_empty() {
             debug!(target: "engine::tree::payload_validator", "Parent found on disk");
