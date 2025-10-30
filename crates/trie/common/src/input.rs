@@ -212,10 +212,10 @@ mod tests {
 
         // Prefix sets should include the address and the slot
         let mut acct_ps = input.prefix_sets.account_prefix_set.clone().freeze();
-        assert!(acct_ps.contains(&Nibbles::unpack(&hashed_addr)));
+        assert!(acct_ps.contains(&Nibbles::unpack(hashed_addr)));
         let mut storage_ps =
             input.prefix_sets.storage_prefix_sets.get(&hashed_addr).unwrap().clone().freeze();
-        assert!(storage_ps.contains(&Nibbles::unpack(&slot)));
+        assert!(storage_ps.contains(&Nibbles::unpack(slot)));
 
         // Sorted state should contain exactly one account and one storage entry
         assert_eq!(input.state.accounts.accounts.len(), 1);

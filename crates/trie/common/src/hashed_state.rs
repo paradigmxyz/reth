@@ -1284,7 +1284,7 @@ mod tests {
         assert!(storage3.zero_valued_slots.contains(&B256::from([4; 32])));
     }
 
-    /// Test extending with sorted accounts merges correctly into HashMap
+    /// Test extending with sorted accounts merges correctly into `HashMap`
     #[test]
     fn test_hashed_post_state_extend_from_sorted_with_accounts() {
         let addr1 = B256::random();
