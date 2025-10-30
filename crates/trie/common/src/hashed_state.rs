@@ -347,7 +347,9 @@ impl HashedPostState {
         for (hashed_address, sorted_storage) in &sorted.storages {
             match self.storages.entry(*hashed_address) {
                 hash_map::Entry::Vacant(entry) => {
-                    entry.insert(sorted_storage.into());
+                    let mut new_storage = HashedStorage::new(false);
+                    new_storage.extend_from_sorted(sorted_storage);
+                    entry.insert(new_storage);
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     entry.get_mut().extend_from_sorted(sorted_storage);
