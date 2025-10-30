@@ -381,7 +381,25 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
-        self.pool.validator().validate_transactions_with_origin(origin, transactions).await
+        // Collect transactions to allow reuse if internal validation fails
+        let transactions: Vec<_> = transactions.into_iter().collect();
+
+        // Try to use internal batch validation first for better performance
+        if let Some(outcomes) = self
+            .pool
+            .validator()
+            .validate_transactions_with_origin_internal(origin, transactions.clone())
+            .await
+        {
+            return outcomes;
+        }
+
+        // Fallback: Validate transactions one by one if internal batch validation not available
+        let mut outcomes = Vec::new();
+        for tx in transactions {
+            outcomes.push(self.pool.validator().validate_transaction(origin, tx).await);
+        }
+        outcomes
     }
 
     /// Validates all transactions with their individual origins.
@@ -396,9 +414,24 @@ where
             let res = self.pool.validator().validate_transaction(origin, tx).await;
             return vec![(origin, res)]
         }
+
+        // Save origins for later
         let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
-        let tx_outcomes = self.pool.validator().validate_transactions(transactions).await;
-        origins.into_iter().zip(tx_outcomes).collect()
+
+        // Try to use internal batch validation first for better performance
+        if let Some(outcomes) =
+            self.pool.validator().validate_transactions_internal(transactions.clone()).await
+        {
+            return origins.into_iter().zip(outcomes).collect();
+        }
+
+        // Fallback: Validate transactions one by one if internal batch validation not available
+        let mut results = Vec::new();
+        for (origin, tx) in transactions {
+            let res = self.pool.validator().validate_transaction(origin, tx).await;
+            results.push((origin, res));
+        }
+        results
     }
 
     /// Number of transactions in the entire pool

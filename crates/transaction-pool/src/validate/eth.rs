@@ -30,7 +30,9 @@ use reth_primitives_traits::{
     constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Account, Block,
     GotExpected, SealedBlock,
 };
-use reth_storage_api::{AccountInfoReader, BytecodeReader, StateProviderFactory};
+use reth_storage_api::{
+    AccountInfoReader, BytecodeReader, StateProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_tasks::TaskSpawner;
 use revm_primitives::U256;
 use std::{
@@ -194,7 +196,8 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        self.validate_one_with_provider(origin, transaction, &mut None)
+        let mut provider: Option<StateProviderBox> = None;
+        self.validate_one_with_state(origin, transaction, &mut provider)
     }
 
     /// Validates a single transaction with the provided state provider.
@@ -207,29 +210,13 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader>>,
-    ) -> TransactionValidationOutcome<Tx> {
-        self.validate_one_with_provider(origin, transaction, state)
-    }
-
-    /// Validates a single transaction using an optional cached state provider.
-    /// If no provider is passed, a new one will be created. This allows reusing
-    /// the same provider across multiple txs.
-    fn validate_one_with_provider(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-        maybe_state: &mut Option<Box<dyn AccountInfoReader>>,
+        state: &mut Option<StateProviderBox>,
     ) -> TransactionValidationOutcome<Tx> {
         match self.validate_one_no_state(origin, transaction) {
             Ok(transaction) => {
-                // stateless checks passed, pass transaction down stateful validation pipeline
-                // If we don't have a state provider yet, fetch the latest state
-                if maybe_state.is_none() {
+                if state.is_none() {
                     match self.client.latest() {
-                        Ok(new_state) => {
-                            *maybe_state = Some(Box::new(new_state));
-                        }
+                        Ok(provider) => *state = Some(provider),
                         Err(err) => {
                             return TransactionValidationOutcome::Error(
                                 *transaction.hash(),
@@ -239,9 +226,8 @@ where
                     }
                 }
 
-                let state = maybe_state.as_deref().expect("provider is set");
-
-                self.validate_one_against_state(origin, transaction, state)
+                let provider = state.as_ref().expect("provider is set");
+                self.validate_one_against_state(origin, transaction, provider.as_ref())
             }
             Err(invalid_outcome) => invalid_outcome,
         }
@@ -705,31 +691,6 @@ where
             .map(|auths| auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>())
     }
 
-    /// Validates all given transactions.
-    fn validate_batch(
-        &self,
-        transactions: Vec<(TransactionOrigin, Tx)>,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let mut provider = None;
-        transactions
-            .into_iter()
-            .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, &mut provider))
-            .collect()
-    }
-
-    /// Validates all given transactions with origin.
-    fn validate_batch_with_origin(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Tx> + Send,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let mut provider = None;
-        transactions
-            .into_iter()
-            .map(|tx| self.validate_one_with_provider(origin, tx, &mut provider))
-            .collect()
-    }
-
     fn on_new_head_block<T: BlockHeader>(&self, new_tip_block: &T) {
         // update all forks
         if self.chain_spec().is_shanghai_active_at_timestamp(new_tip_block.timestamp()) {
@@ -793,6 +754,25 @@ where
 {
     type Transaction = Tx;
 
+    /// Performs validations not requiring state access
+    async fn validate_transaction_stateless(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> Result<Self::Transaction, TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_one_no_state(origin, transaction)
+    }
+
+    /// Performs validation against the latest state
+    async fn validate_transaction_stateful(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+        state: &dyn StateProvider,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        self.validate_one_against_state(origin, transaction, state)
+    }
+
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
@@ -804,16 +784,63 @@ where
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        provider: &dyn StateProvider,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_batch(transactions)
+        let mut outcomes = Vec::with_capacity(transactions.len());
+        for (origin, transaction) in transactions {
+            match self.validate_one_no_state(origin, transaction) {
+                Ok(transaction) => {
+                    outcomes.push(self.validate_one_against_state(origin, transaction, provider));
+                }
+                Err(invalid_outcome) => outcomes.push(invalid_outcome),
+            }
+        }
+        outcomes
     }
 
-    async fn validate_transactions_with_origin(
+    async fn validate_transactions_with_origin<I>(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_batch_with_origin(origin, transactions)
+        transactions: I,
+        provider: &dyn StateProvider,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>>
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
+        let mut outcomes = Vec::new();
+        for transaction in transactions {
+            match self.validate_one_no_state(origin, transaction) {
+                Ok(transaction) => {
+                    outcomes.push(self.validate_one_against_state(origin, transaction, provider));
+                }
+                Err(invalid_outcome) => outcomes.push(invalid_outcome),
+            }
+        }
+        outcomes
+    }
+
+    async fn validate_transactions_internal(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Option<Vec<TransactionValidationOutcome<Self::Transaction>>> {
+        // Create provider once for the entire batch
+        let provider = self.client.latest().ok()?;
+        Some(self.validate_transactions(transactions, provider.as_ref()).await)
+    }
+
+    async fn validate_transactions_with_origin_internal<I>(
+        &self,
+        origin: TransactionOrigin,
+        transactions: I,
+    ) -> Option<Vec<TransactionValidationOutcome<Self::Transaction>>>
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
+        // Create provider once for the entire batch
+        let provider = self.client.latest().ok()?;
+        Some(self.validate_transactions_with_origin(origin, transactions, provider.as_ref()).await)
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
@@ -1736,5 +1763,76 @@ mod tests {
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid()); // Should be valid because balance check is disabled
+    }
+
+    // Test that the batch validation methods work correctly
+    #[tokio::test]
+    async fn test_batch_validation_works() {
+        // Verify that batch validation produces correct outcomes
+        let provider = MockEthProvider::default();
+
+        // Add account for valid transactions
+        let tx = get_transaction();
+        provider.add_account(
+            tx.sender(),
+            ExtendedAccount::new(0, U256::from(1_000_000_000_000_000_000u64)),
+        );
+
+        let validator =
+            EthTransactionValidatorBuilder::new(provider).build(InMemoryBlobStore::default());
+
+        // Create a mix of transactions
+        let transactions: Vec<_> = (0..5)
+            .map(|_| {
+                let tx = get_transaction();
+                (TransactionOrigin::External, tx)
+            })
+            .collect();
+
+        // Validate the batch using our optimized method
+        let state_provider = validator.client.latest().unwrap();
+        let outcomes = validator.validate_transactions(transactions, state_provider.as_ref()).await;
+
+        // Verify we got all outcomes in the correct order
+        assert_eq!(outcomes.len(), 5, "Should have outcome for each transaction");
+
+        // All should be valid since we added the account with sufficient balance
+        for outcome in &outcomes {
+            assert!(outcome.is_valid(), "Transaction should be valid");
+        }
+    }
+
+    // Test that transactions failing stateless validation don't go to stateful
+    #[tokio::test]
+    async fn test_stateless_failures_handled_correctly() {
+        use std::sync::atomic::Ordering;
+
+        let provider = MockEthProvider::default();
+        let validator =
+            EthTransactionValidatorBuilder::new(provider).build(InMemoryBlobStore::default());
+
+        // Create transactions that will fail stateless validation
+        let transactions: Vec<_> = (0..3)
+            .map(|_| {
+                let tx = get_transaction();
+                (TransactionOrigin::External, tx)
+            })
+            .collect();
+
+        // Set a very low block gas limit to make transactions fail stateless
+        validator.block_gas_limit.store(1000, Ordering::Relaxed);
+
+        // Validate the batch
+        let state_provider = validator.client.latest().unwrap();
+        let outcomes = validator.validate_transactions(transactions, state_provider.as_ref()).await;
+
+        // Verify all are invalid due to gas limit
+        assert_eq!(outcomes.len(), 3);
+        for outcome in &outcomes {
+            assert!(outcome.is_invalid(), "Should be invalid due to gas limit");
+            if let TransactionValidationOutcome::Invalid(_, err) = outcome {
+                assert!(matches!(err, InvalidPoolTransactionError::ExceedsGasLimit(_, _)));
+            }
+        }
     }
 }
