@@ -304,34 +304,47 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     /// Each static file has a fixed number of blocks. This gives out the range where the requested
     /// block is positioned.
     ///
-    /// For already initialized static files, this function will use their existing ranges, instead
-    /// of the current fixed number of blocks.
+    /// If the specified block falls into one of the ranges of already initialized static files,
+    /// this function will return that range.
     ///
-    /// See `[Self::find_fixed_range]` documentation for more information.
+    /// If no matching file exists, this function will derive a new range from the end of the last
+    /// existing file, if any.
     pub fn find_fixed_range_with_block_index(
         &self,
         block_index: Option<&BTreeMap<u64, SegmentRangeInclusive>>,
         block: BlockNumber,
     ) -> SegmentRangeInclusive {
         if let Some(block_index) = block_index {
+            // Find first block range that contains the requested block
             if let Some((_, range)) = block_index
                 .iter()
                 .find(|(max_block, _)| block <= **max_block)
                 .filter(|(_, range)| range.contains(block))
             {
+                // Found matching range for an existing file using block index
                 return *range
             } else if let Some((_, range)) = block_index.last_key_value() {
-                return find_fixed_range(Some(range.end() + 1), block, self.blocks_per_file)
+                // Didn't find matching range for an existing file, derive a new range from the end
+                // of the last existing file range.
+                let blocks_after_last_range = block - range.end();
+                let segments_to_skip = (blocks_after_last_range - 1) / self.blocks_per_file;
+                let start = range.end() + 1 + segments_to_skip * self.blocks_per_file;
+                return SegmentRangeInclusive::new(start, start + self.blocks_per_file - 1)
             }
         }
-        find_fixed_range(None, block, self.blocks_per_file)
+        // No block index is available, derive a new range using the fixed number of blocks,
+        // starting from the beginning.
+        find_fixed_range(block, self.blocks_per_file)
     }
 
     /// Each static file has a fixed number of blocks. This gives out the range where the requested
     /// block is positioned.
     ///
-    /// For already initialized static files, this function will use their existing ranges, instead
-    /// of the current fixed number of blocks.
+    /// If the specified block falls into one of the ranges of already initialized static files,
+    /// this function will return that range.
+    ///
+    /// If no matching file exists, this function will derive a new range from the end of the last
+    /// existing file, if any.
     ///
     /// This function will block indefinitely if a write lock for
     /// [`Self::static_files_expected_block_index`] is acquired. In that case, use

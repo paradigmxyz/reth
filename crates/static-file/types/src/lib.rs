@@ -78,13 +78,12 @@ impl StaticFileTargets {
 }
 
 /// Each static file has a fixed number of blocks. This gives out the range where the requested
-/// block is positioned. Used for segment filename.
-pub fn find_fixed_range(
-    start: Option<BlockNumber>,
+/// block is positioned, according to the specified number of blocks per static file.
+pub const fn find_fixed_range(
     block: BlockNumber,
     blocks_per_static_file: u64,
 ) -> SegmentRangeInclusive {
-    let start = start.unwrap_or_else(|| (block / blocks_per_static_file) * blocks_per_static_file);
+    let start = (block / blocks_per_static_file) * blocks_per_static_file;
     SegmentRangeInclusive::new(start, start + blocks_per_static_file - 1)
 }
 
@@ -120,13 +119,13 @@ mod tests {
     fn test_find_fixed_range() {
         // Test with default block size
         let block: BlockNumber = 600_000;
-        let range = find_fixed_range(None, block, DEFAULT_BLOCKS_PER_STATIC_FILE);
+        let range = find_fixed_range(block, DEFAULT_BLOCKS_PER_STATIC_FILE);
         assert_eq!(range.start(), 500_000);
         assert_eq!(range.end(), 999_999);
 
         // Test with a custom block size
         let block: BlockNumber = 1_200_000;
-        let range = find_fixed_range(None, block, 1_000_000);
+        let range = find_fixed_range(block, 1_000_000);
         assert_eq!(range.start(), 1_000_000);
         assert_eq!(range.end(), 1_999_999);
     }

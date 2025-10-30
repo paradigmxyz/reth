@@ -86,12 +86,10 @@ mod tests {
         // Data sources
         let factory = create_test_provider_factory();
         let static_files_path = tempfile::tempdir().unwrap();
-        let static_file =
-            static_files_path.path().join(StaticFileSegment::Headers.filename(&find_fixed_range(
-                None,
-                *range.end(),
-                DEFAULT_BLOCKS_PER_STATIC_FILE,
-            )));
+        let static_file = static_files_path.path().join(
+            StaticFileSegment::Headers
+                .filename(&find_fixed_range(*range.end(), DEFAULT_BLOCKS_PER_STATIC_FILE)),
+        );
 
         // Setup data
         let mut headers = random_header_range(
