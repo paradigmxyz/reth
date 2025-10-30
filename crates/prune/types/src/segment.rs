@@ -38,6 +38,17 @@ pub enum PruneSegment {
     MerkleChangeSets,
 }
 
+/// Array of [`PruneSegment`]s actively in use.
+pub const PRUNE_SEGMENTS: [PruneSegment; 7] = [
+    PruneSegment::SenderRecovery,
+    PruneSegment::TransactionLookup,
+    PruneSegment::Receipts,
+    PruneSegment::ContractLogs,
+    PruneSegment::AccountHistory,
+    PruneSegment::StorageHistory,
+    PruneSegment::MerkleChangeSets,
+];
+
 #[cfg(test)]
 #[allow(clippy::derivable_impls)]
 impl Default for PruneSegment {

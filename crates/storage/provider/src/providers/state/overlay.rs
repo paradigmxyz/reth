@@ -96,19 +96,16 @@ where
                 }
             })?;
 
-        // Extract a possible lower bound from stage checkpoint if available
-        let stage_lower_bound = stage_checkpoint.as_ref().and_then(|chk| {
-            chk.merkle_changesets_stage_checkpoint().map(|stage_chk| stage_chk.block_range.from)
-        });
-
-        // Extract a possible lower bound from prune checkpoint if available
+        // Extract the lower bound from prune checkpoint if available
         // The prune checkpoint's block_number is the highest pruned block, so data is available
         // starting from the next block
-        let prune_lower_bound =
-            prune_checkpoint.and_then(|chk| chk.block_number.map(|block| block + 1));
-
-        // Use the higher of the two lower bounds. If neither is available assume unbounded.
-        let lower_bound = stage_lower_bound.max(prune_lower_bound).unwrap_or(0);
+        let lower_bound = prune_checkpoint
+            .and_then(|chk| chk.block_number)
+            .map(|block_number| block_number + 1)
+            .ok_or_else(|| ProviderError::InsufficientChangesets {
+                requested: requested_block,
+                available: 0..=upper_bound,
+            })?;
 
         let available_range = lower_bound..=upper_bound;
 
