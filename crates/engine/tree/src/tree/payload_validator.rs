@@ -755,8 +755,7 @@ where
             StateRootStrategy::StateRootTask => {
                 // Compute trie input
                 let trie_input_start = Instant::now();
-                let (trie_input, block_hash) =
-                    self.compute_trie_input(parent_hash, state, allocated_trie_input)?;
+                let (trie_input, block_hash) = self.compute_trie_input(parent_hash, state)?;
 
                 self.metrics
                     .block_validation
@@ -764,11 +763,12 @@ where
                     .record(trie_input_start.elapsed().as_secs_f64());
 
                 // Create OverlayStateProviderFactory with sorted trie data for multiproofs
-                let multiproof_provider_factory =
-                    OverlayStateProviderFactory::new(self.provider.clone())
-                        .with_block_hash(Some(block_hash))
-                        .with_trie_overlay(Some(multiproof_config.nodes_sorted))
-                        .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
+                let TrieInputSorted { nodes, state, .. } = trie_input;
+
+                let multiproof_provider_factory = OverlayStateProviderFactory::new(self.provider.clone())
+                    .with_block_hash(Some(block_hash))
+                    .with_trie_overlay(Some(nodes))
+                    .with_hashed_state_overlay(Some(state));
 
                 // Use state root task only if prefix sets are empty, otherwise proof generation is
                 // too expensive because it requires walking all paths in every proof.
