@@ -24,7 +24,7 @@ pub fn kbuckets_metrics(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let name = input.ident;
 
     const COUNT: usize = 256;
-    const FIELD: &str = "kbucket";
+    const FIELD_PREFIX: &str = "kbucket";
 
     let index_arg = format_ident!("kbucket_index");
     let peers_arg = format_ident!("num_peers");
@@ -33,7 +33,7 @@ pub fn kbuckets_metrics(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let fields: TokenStream2 = (0..COUNT)
         .map(|i| {
             let docs = format!("Total peers in KBucket at index {i}");
-            let field = format_ident!("{FIELD}_{i}");
+            let field = format_ident!("{FIELD_PREFIX}_{i}");
             quote! {
                 #[doc = #docs]
                 pub #field: Gauge
@@ -44,7 +44,7 @@ pub fn kbuckets_metrics(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let set_peer_count = (0..COUNT)
         .rev() // more likely to find peers at further log2distance
         .map(|i| {
-            let field = format_ident!("{FIELD}_{i}");
+            let field = format_ident!("{FIELD_PREFIX}_{i}");
             quote! {
                 if #index_arg == #i {
                     self.#field.set(#peers_arg as f64);
