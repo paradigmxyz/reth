@@ -1575,9 +1575,11 @@ where
         };
 
         // Check if there are more blocks to sync between current head and FCU target
-        if let Some(head_block) = self.state.buffer.block(&sync_target_state.head_block_hash) {
+        if let Some(lowest_buffered) =
+            self.state.buffer.lowest_ancestor(&sync_target_state.head_block_hash)
+        {
             let current_head_num = self.state.tree_state.current_canonical_head.number;
-            let target_head_num = head_block.number();
+            let target_head_num = lowest_buffered.number();
 
             if let Some(distance) = self.distance_from_local_tip(current_head_num, target_head_num)
             {
