@@ -19,5 +19,5 @@ pub mod witness;
 pub use engine::OpEngineApiClient;
 pub use engine::{OpEngineApi, OpEngineApiServer, OP_ENGINE_CAPABILITIES};
 pub use error::{OpEthApiError, OpInvalidTransactionError, SequencerClientError};
-pub use eth::{mantle_ext::MantleEthExtApi, OpEthApi, OpReceiptBuilder};
+pub use eth::{mantle_ext::MantleEthApiExt, OpEthApi, OpReceiptBuilder};
 pub use sequencer::SequencerClient;

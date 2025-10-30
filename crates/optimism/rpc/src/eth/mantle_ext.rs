@@ -4,7 +4,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::Bytes;
 use jsonrpsee::types::ErrorObject;
 use jsonrpsee_core::RpcResult;
-use reth_rpc_eth_api::{EthApiServer, EthApiTypes, MantleEthApiServer, PreconfTxEvent, RpcBlock};
+use reth_rpc_eth_api::{EthApiServer, EthApiTypes, MantleEthApiExtServer, PreconfTxEvent, RpcBlock};
 use reth_rpc_server_types::result::invalid_params_rpc_err;
 use reth_storage_api::{BlockNumReader, BlockReaderIdExt, StateProviderFactory};
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use crate::SequencerClient;
 /// This provides Mantle-specific RPC methods such as `getBlockRange` and
 /// `sendRawTransactionWithPreconf`.
 #[derive(Clone, Debug)]
-pub struct MantleEthExtApi<Provider, EthApi> {
+pub struct MantleEthApiExt<Provider, EthApi> {
     /// The provider type used to interact with the node.
     provider: Provider,
     /// The Eth API used to fetch blocks.
@@ -25,11 +25,11 @@ pub struct MantleEthExtApi<Provider, EthApi> {
     sequencer_client: Option<SequencerClient>,
 }
 
-impl<Provider, EthApi> MantleEthExtApi<Provider, EthApi>
+impl<Provider, EthApi> MantleEthApiExt<Provider, EthApi>
 where
     Provider: BlockReaderIdExt + StateProviderFactory + Clone + 'static,
 {
-    /// Creates a new [`MantleEthExtApi`].
+    /// Creates a new [`MantleEthApiExt`].
     #[allow(clippy::missing_const_for_fn)] // Provider type is generic and cannot be const
     pub fn new(
         provider: Provider,
@@ -52,8 +52,8 @@ where
 }
 
 #[async_trait::async_trait]
-impl<Provider, EthApi> MantleEthApiServer<RpcBlock<EthApi::NetworkTypes>>
-    for MantleEthExtApi<Provider, EthApi>
+impl<Provider, EthApi> MantleEthApiExtServer<RpcBlock<EthApi::NetworkTypes>>
+    for MantleEthApiExt<Provider, EthApi>
 where
     Provider: BlockReaderIdExt + BlockNumReader + StateProviderFactory + Clone + 'static,
     EthApi: EthApiTypes

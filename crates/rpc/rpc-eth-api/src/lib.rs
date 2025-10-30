@@ -23,7 +23,7 @@ pub mod types;
 
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
-pub use ext::{L2EthApiExtServer, MantleEthApiServer, PreconfTxEvent, PreconfStatus, PreconfTxReceipt, PreconfLog};
+pub use ext::{L2EthApiExtServer, MantleEthApiExtServer, PreconfTxEvent, PreconfStatus, PreconfTxReceipt, PreconfLog};
 pub use filter::{EngineEthFilter, EthFilterApiServer, QueryLimits};
 pub use node::{RpcNodeCore, RpcNodeCoreExt};
 pub use pubsub::EthPubSubApiServer;
@@ -38,7 +38,7 @@ pub use bundle::{EthBundleApiClient, EthCallBundleApiClient};
 #[cfg(feature = "client")]
 pub use core::EthApiClient;
 #[cfg(feature = "client")]
-pub use ext::{L2EthApiExtClient, MantleEthApiClient};
+pub use ext::{L2EthApiExtClient, MantleEthApiExtClient};
 #[cfg(feature = "client")]
 pub use filter::EthFilterApiClient;
 

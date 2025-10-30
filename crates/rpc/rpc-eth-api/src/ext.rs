@@ -79,7 +79,7 @@ pub struct PreconfLog {
 /// This trait provides Mantle-specific RPC methods that extend the standard Ethereum RPC API.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait MantleEthApi<B: RpcObject> {
+pub trait MantleEthApiExt<B: RpcObject> {
     /// Returns a list of blocks in the specified range.
     /// 
     /// # Parameters
