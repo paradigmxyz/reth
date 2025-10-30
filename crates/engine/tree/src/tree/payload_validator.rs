@@ -895,16 +895,19 @@ where
     /// Computes the trie input at the provided parent hash, as well as the block number of the
     /// highest persisted ancestor.
     ///
-    /// The goal of this function is to take in-memory blocks and generate a [`TrieInput`] that
-    /// serves as an overlay to the database blocks.
+    /// The goal of this function is to take in-memory blocks and generate a [`TrieInputSorted`]
+    /// that serves as an overlay to the database blocks.
     ///
     /// It works as follows:
     /// 1. Collect in-memory blocks that are descendants of the provided parent hash using
     ///    [`crate::tree::TreeState::blocks_by_hash`]. This returns the highest persisted ancestor
     ///    hash (`block_hash`) and the list of in-memory descendant blocks.
-    /// 2. Extend the `TrieInput` with the contents of these in-memory blocks (from oldest to
+    /// 2. Extend the `TrieInputSorted` with the contents of these in-memory blocks (from oldest to
     ///    newest) to build the overlay state and trie updates that sit on top of the database view
     ///    anchored at `block_hash`.
+    ///
+    /// The in-memory blocks are already sorted, so we can directly append them without expensive
+    /// sorting operations.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",
