@@ -504,7 +504,7 @@ pub(super) mod serde_bincode_compat {
         blocks: RecoveredBlocks<'a, N::Block>,
         execution_outcome: serde_bincode_compat::ExecutionOutcome<'a, N::Receipt>,
         trie_updates_legacy: Option<TrieUpdates<'a>>,
-        trie_updates: BTreeMap<BlockNumber, TrieUpdates<'a>>,
+        trie_updates: BTreeMap<BlockNumber, Arc<super::TrieUpdates>>,
         hashed_state: BTreeMap<BlockNumber, Arc<super::HashedPostState>>,
     }
 
@@ -560,11 +560,7 @@ pub(super) mod serde_bincode_compat {
                 execution_outcome: value.execution_outcome.as_repr(),
                 #[allow(deprecated)]
                 trie_updates_legacy: None,
-                trie_updates: value
-                    .trie_updates
-                    .iter()
-                    .map(|(k, v)| (*k, v.as_ref().into()))
-                    .collect(),
+                trie_updates: value.trie_updates.clone(),
                 hashed_state: value.hashed_state.clone(),
             }
         }
@@ -582,11 +578,7 @@ pub(super) mod serde_bincode_compat {
                 execution_outcome: ExecutionOutcome::from_repr(value.execution_outcome),
                 #[allow(deprecated)]
                 trie_updates_legacy: None,
-                trie_updates: value
-                    .trie_updates
-                    .into_iter()
-                    .map(|(k, v)| (k, Arc::new(v.into())))
-                    .collect(),
+                trie_updates: value.trie_updates,
                 hashed_state: value.hashed_state,
             }
         }
