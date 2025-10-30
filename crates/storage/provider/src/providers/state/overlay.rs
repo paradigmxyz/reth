@@ -78,6 +78,7 @@ where
     /// Returns an error if the `MerkleChangeSets` checkpoint doesn't cover the requested block.
     /// Takes into account both the stage checkpoint and the prune checkpoint to determine the
     /// available data range.
+    #[instrument(level = "debug", target = "providers::state::overlay", skip(self, provider))]
     fn validate_changesets_availability(
         &self,
         provider: &F::Provider,
@@ -138,10 +139,8 @@ where
     #[instrument(level = "debug", target = "providers::state::overlay", skip(self))]
     fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
         // Get a read-only provider
-        let _enter =
-            debug_span!(target: "providers::state::overlay", "database_provider_ro").entered();
-        let provider = self.factory.database_provider_ro()?;
-        drop(_enter);
+        let provider = debug_span!(target: "providers::state::overlay", "database_provider_ro")
+            .in_scope(|| self.factory.database_provider_ro())?;
 
         // If block_hash is provided, collect reverts
         let (trie_updates, hashed_state) = if let Some(block_hash) = self.block_hash {
@@ -151,54 +150,46 @@ where
                 .ok_or_else(|| ProviderError::BlockHashNotFound(block_hash))?;
 
             // Validate that we have sufficient changesets for the requested block
-            let _enter = debug_span!(target: "providers::state::overlay", "trie_reverts").entered();
             self.validate_changesets_availability(&provider, from_block)?;
-            drop(_enter);
 
             // Collect trie reverts
-            let _enter = debug_span!(target: "providers::state::overlay", "trie_reverts").entered();
             let mut trie_reverts = provider.trie_reverts(from_block + 1)?;
-            drop(_enter);
 
             // Collect state reverts
             //
             // TODO(mediocregopher) make from_reverts return sorted
             // https://github.com/paradigmxyz/reth/issues/19382
-            let _enter =
-                debug_span!(target: "providers::state::overlay", "state_reverts").entered();
             let mut hashed_state_reverts = HashedPostState::from_reverts::<KeccakKeyHasher>(
                 provider.tx_ref(),
                 from_block + 1..,
             )?
             .into_sorted();
-            drop(_enter);
 
             // Extend with overlays if provided. If the reverts are empty we should just use the
             // overlays directly, because `extend_ref` will actually clone the overlay.
-            let _enter = debug_span!(target: "providers::state::overlay", "trie_updates").entered();
-            let trie_updates = match self.trie_overlay.as_ref() {
-                Some(trie_overlay) if trie_reverts.is_empty() => Arc::clone(trie_overlay),
-                Some(trie_overlay) => {
-                    trie_reverts.extend_ref(trie_overlay);
-                    Arc::new(trie_reverts)
-                }
-                None => Arc::new(trie_reverts),
-            };
-            drop(_enter);
+            let trie_updates = debug_span!(target: "providers::state::overlay", "trie_updates")
+                .in_scope(|| match self.trie_overlay.as_ref() {
+                    Some(trie_overlay) if trie_reverts.is_empty() => Arc::clone(trie_overlay),
+                    Some(trie_overlay) => {
+                        trie_reverts.extend_ref(trie_overlay);
+                        Arc::new(trie_reverts)
+                    }
+                    None => Arc::new(trie_reverts),
+                });
 
-            let _enter =
-                debug_span!(target: "providers::state::overlay", "hashed_state_updates").entered();
-            let hashed_state_updates = match self.hashed_state_overlay.as_ref() {
-                Some(hashed_state_overlay) if hashed_state_reverts.is_empty() => {
-                    Arc::clone(hashed_state_overlay)
-                }
-                Some(hashed_state_overlay) => {
-                    hashed_state_reverts.extend_ref(hashed_state_overlay);
-                    Arc::new(hashed_state_reverts)
-                }
-                None => Arc::new(hashed_state_reverts),
-            };
-            drop(_enter);
+            let hashed_state_updates =
+                debug_span!(target: "providers::state::overlay", "hashed_state_updates").in_scope(
+                    || match self.hashed_state_overlay.as_ref() {
+                        Some(hashed_state_overlay) if hashed_state_reverts.is_empty() => {
+                            Arc::clone(hashed_state_overlay)
+                        }
+                        Some(hashed_state_overlay) => {
+                            hashed_state_reverts.extend_ref(hashed_state_overlay);
+                            Arc::new(hashed_state_reverts)
+                        }
+                        None => Arc::new(hashed_state_reverts),
+                    },
+                );
 
             debug!(
                 target: "providers::state::overlay",

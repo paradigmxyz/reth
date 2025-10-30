@@ -83,7 +83,7 @@ use std::{
     ops::{Deref, DerefMut, Not, Range, RangeBounds, RangeFrom, RangeInclusive},
     sync::Arc,
 };
-use tracing::{debug, trace};
+use tracing::{debug, instrument, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
@@ -2190,6 +2190,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
+    #[instrument(level = "debug", target = "providers::database", skip(self))]
     fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
         let tx = self.tx_ref();
 

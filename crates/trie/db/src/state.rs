@@ -226,7 +226,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
 }
 
 impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
-    #[instrument(target = "trie::db", skip(tx), fields(range))]
+    #[instrument(level = "debug", target = "trie::db", skip(tx), fields(range))]
     fn from_reverts<KH: KeyHasher>(
         tx: &TX,
         range: impl RangeBounds<BlockNumber>,
