@@ -19,6 +19,12 @@ use reth_trie_db::{
 use std::sync::Arc;
 use tracing::debug;
 
+#[cfg(feature = "metrics")]
+#[path = "overlay_metrics.rs"]
+mod overlay_metrics;
+#[cfg(feature = "metrics")]
+use overlay_metrics::OverlayStateProviderMetrics;
+
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
 /// This factory allows building an `OverlayStateProvider` whose DB state has been reverted to a
@@ -33,17 +39,33 @@ pub struct OverlayStateProviderFactory<F> {
     trie_overlay: Option<Arc<TrieUpdatesSorted>>,
     /// Optional hashed state overlay
     hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
+    /// Metrics for overlay state provider operations
+    #[cfg(feature = "metrics")]
+    metrics: OverlayStateProviderMetrics,
 }
 
 impl<F> OverlayStateProviderFactory<F> {
     /// Create a new overlay state provider factory
+    #[cfg(not(feature = "metrics"))]
     pub const fn new(factory: F) -> Self {
         Self { factory, block_hash: None, trie_overlay: None, hashed_state_overlay: None }
     }
 
+    /// Create a new overlay state provider factory
+    #[cfg(feature = "metrics")]
+    pub fn new(factory: F) -> Self {
+        Self {
+            factory,
+            block_hash: None,
+            trie_overlay: None,
+            hashed_state_overlay: None,
+            metrics: OverlayStateProviderMetrics::default(),
+        }
+    }
+
     /// Set the block hash for collecting reverts. All state will be reverted to the point
     /// _after_ this block has been processed.
-    pub const fn with_block_hash(mut self, block_hash: Option<B256>) -> Self {
+    pub fn with_block_hash(mut self, block_hash: Option<B256>) -> Self {
         self.block_hash = block_hash;
         self
     }
@@ -133,31 +155,58 @@ where
 
     /// Create a read-only [`OverlayStateProvider`].
     fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
+        #[cfg(feature = "metrics")]
+        let total_start = std::time::Instant::now();
+
         // Get a read-only provider
+        #[cfg(feature = "metrics")]
+        let base_start = std::time::Instant::now();
+
         let provider = self.factory.database_provider_ro()?;
+
+        #[cfg(feature = "metrics")]
+        self.metrics.base_provider_creation_duration.record(base_start.elapsed().as_secs_f64());
 
         // If block_hash is provided, collect reverts
         let (trie_updates, hashed_state) = if let Some(block_hash) = self.block_hash {
             // Convert block hash to block number
+            #[cfg(feature = "metrics")]
+            let lookup_start = std::time::Instant::now();
+
             let from_block = provider
                 .convert_hash_or_number(block_hash.into())?
                 .ok_or_else(|| ProviderError::BlockHashNotFound(block_hash))?;
+
+            #[cfg(feature = "metrics")]
+            self.metrics.block_hash_lookup_duration.record(lookup_start.elapsed().as_secs_f64());
 
             // Validate that we have sufficient changesets for the requested block
             //self.validate_changesets_availability(&provider, from_block)?;
 
             // Collect trie reverts
+            #[cfg(feature = "metrics")]
+            let trie_start = std::time::Instant::now();
+
             let mut trie_reverts = provider.trie_reverts(from_block + 1)?;
+
+            #[cfg(feature = "metrics")]
+            self.metrics.trie_reverts_duration.record(trie_start.elapsed().as_secs_f64());
 
             // Collect state reverts
             //
             // TODO(mediocregopher) make from_reverts return sorted
             // https://github.com/paradigmxyz/reth/issues/19382
+            #[cfg(feature = "metrics")]
+            let state_start = std::time::Instant::now();
+
             let mut hashed_state_reverts = HashedPostState::from_reverts::<KeccakKeyHasher>(
                 provider.tx_ref(),
                 from_block + 1..,
             )?
             .into_sorted();
+
+            #[cfg(feature = "metrics")]
+            self.metrics.state_reverts_duration.record(state_start.elapsed().as_secs_f64());
 
             // Extend with overlays if provided. If the reverts are empty we should just use the
             // overlays directly, because `extend_ref` will actually clone the overlay.
@@ -202,6 +251,11 @@ where
 
             (trie_updates, hashed_state)
         };
+
+        #[cfg(feature = "metrics")]
+        self.metrics
+            .total_database_provider_ro_duration
+            .record(total_start.elapsed().as_secs_f64());
 
         Ok(OverlayStateProvider::new(provider, trie_updates, hashed_state))
     }
