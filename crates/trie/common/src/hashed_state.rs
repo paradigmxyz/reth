@@ -530,34 +530,6 @@ impl HashedPostStateSorted {
             self.storages.values().map(|storage| storage.len()).sum::<usize>()
     }
 
-    /// Construct [`TriePrefixSetsMut`] from this sorted hashed state.
-    pub fn construct_prefix_sets(&self) -> TriePrefixSetsMut {
-        let mut account_prefix_set = PrefixSetMut::with_capacity(
-            self.accounts.accounts.len() +
-                self.accounts.destroyed_accounts.len() +
-                self.storages.len(),
-        );
-        for (hashed_address, _) in &self.accounts.accounts {
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
-        }
-        for hashed_address in &self.accounts.destroyed_accounts {
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
-        }
-
-        let mut storage_prefix_sets =
-            B256Map::with_capacity_and_hasher(self.storages.len(), Default::default());
-        for (hashed_address, storage) in &self.storages {
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
-            storage_prefix_sets.insert(*hashed_address, storage.construct_prefix_set());
-        }
-
-        TriePrefixSetsMut {
-            account_prefix_set,
-            storage_prefix_sets,
-            destroyed_accounts: self.accounts.destroyed_accounts.clone(),
-        }
-    }
-
     /// Extends this state with contents of another sorted state.
     /// Entries in `other` take precedence for duplicate keys.
     pub fn extend_ref(&mut self, other: &Self) {
@@ -655,24 +627,6 @@ impl HashedStorageSorted {
     /// Returns `true` if there are no storage slot updates.
     pub fn is_empty(&self) -> bool {
         self.non_zero_valued_slots.is_empty() && self.zero_valued_slots.is_empty()
-    }
-
-    /// Construct [`PrefixSetMut`] from this storage trie.
-    pub fn construct_prefix_set(&self) -> PrefixSetMut {
-        if self.wiped {
-            PrefixSetMut::all()
-        } else {
-            let mut prefix_set = PrefixSetMut::with_capacity(
-                self.non_zero_valued_slots.len() + self.zero_valued_slots.len(),
-            );
-            prefix_set.extend_keys(
-                self.non_zero_valued_slots
-                    .iter()
-                    .map(|(slot, _)| Nibbles::unpack(slot))
-                    .chain(self.zero_valued_slots.iter().map(|slot| Nibbles::unpack(slot))),
-            );
-            prefix_set
-        }
     }
 
     /// Extends this storage with contents of another sorted storage.

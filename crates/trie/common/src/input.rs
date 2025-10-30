@@ -172,27 +172,6 @@ impl TrieInputSorted {
         }
     }
 
-    /// Append sorted trie updates by reference, reusing the backing `Arc` when possible.
-    pub fn append_sorted_trie_updates_ref(&mut self, updates: &Arc<TrieUpdatesSorted>) {
-        if self.nodes.is_empty() {
-            self.nodes = Arc::clone(updates);
-        } else {
-            Arc::make_mut(&mut self.nodes).extend_ref(updates.as_ref());
-        }
-    }
-
-    /// Append sorted hashed state by reference and extend the prefix sets.
-    pub fn append_sorted_ref(&mut self, state: &Arc<HashedPostStateSorted>) {
-        let prefix_sets = state.construct_prefix_sets();
-        if self.state.is_empty() {
-            self.state = Arc::clone(state);
-            self.prefix_sets = prefix_sets;
-        } else {
-            Arc::make_mut(&mut self.state).extend_ref(state.as_ref());
-            self.prefix_sets.extend(prefix_sets);
-        }
-    }
-
     /// Append state to the input by reference and extend the prefix sets.
     pub fn append_ref(&mut self, state: &HashedPostState) {
         self.prefix_sets.extend(state.construct_prefix_sets());
