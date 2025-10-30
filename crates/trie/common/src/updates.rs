@@ -299,6 +299,8 @@ impl StorageTrieUpdates {
     /// `HashMap` representation. This is more efficient than first converting to
     /// `StorageTrieUpdates` and then extending, as it avoids creating intermediate `HashMap`
     /// allocations.
+    ///
+    /// This is invoked from [`TrieUpdates::extend_from_sorted`] for each account.
     pub fn extend_from_sorted(&mut self, sorted: &StorageTrieUpdatesSorted) {
         if sorted.is_deleted {
             self.storage_nodes.clear();
