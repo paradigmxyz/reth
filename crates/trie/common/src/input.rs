@@ -193,13 +193,13 @@ impl TrieInputSorted {
     pub fn append_ref(&mut self, state: &HashedPostState) {
         self.prefix_sets.extend(state.construct_prefix_sets());
         let sorted_state = state.clone().into_sorted();
-        self.state.extend_ref(&sorted_state);
+        Arc::make_mut(&mut self.state).extend_ref(&sorted_state);
     }
 
-    /// Clear all data.
+    /// Clears all data, reusing allocations if possible via `Arc::make_mut`.
     pub fn clear(&mut self) {
-        self.nodes.clear();
-        self.state.clear();
+        Arc::make_mut(&mut self.nodes).clear();
+        Arc::make_mut(&mut self.state).clear();
         self.prefix_sets.clear();
     }
 
