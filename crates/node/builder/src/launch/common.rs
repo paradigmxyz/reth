@@ -290,11 +290,10 @@ impl<ChainSpec> LaunchContextWith<WithConfigs<ChainSpec>> {
         if !self.attachment.config.network.trusted_peers.is_empty() {
             info!(target: "reth::cli", "Adding trusted nodes");
 
-            self.attachment
-                .toml_config
-                .peers
-                .trusted_nodes
-                .extend(self.attachment.config.network.trusted_peers.clone());
+            {
+                let mut peers = std::mem::take(&mut self.attachment.config.network.trusted_peers);
+                self.attachment.toml_config.peers.trusted_nodes.append(&mut peers);
+            }
         }
         Ok(self)
     }
