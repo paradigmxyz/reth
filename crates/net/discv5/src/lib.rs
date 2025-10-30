@@ -48,7 +48,7 @@ pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
 pub use network_stack_id::NetworkStackId;
 
-use metrics::{DiscoveredPeersMetrics, Discv5Metrics};
+use metrics::Discv5Metrics;
 
 /// Max kbucket index is 255.
 ///
@@ -561,7 +561,6 @@ pub fn spawn_populate_kbuckets_bg(
 ) {
     let local_node_id = discv5.local_enr().node_id();
     let lookup_interval = Duration::from_secs(lookup_interval);
-    let metrics = metrics.discovered_peers;
     let mut kbucket_index = MAX_KBUCKET_INDEX;
     let pulse_lookup_interval = Duration::from_secs(bootstrap_lookup_interval);
     task::spawn(Box::pin(async move {
@@ -641,18 +640,14 @@ pub fn get_lookup_target(
 }
 
 /// Runs a [`discv5::Discv5`] lookup query.
-pub async fn lookup(
-    target: discv5::enr::NodeId,
-    discv5: &discv5::Discv5,
-    metrics: &DiscoveredPeersMetrics,
-) {
+pub async fn lookup(target: discv5::enr::NodeId, discv5: &discv5::Discv5, metrics: &Discv5Metrics) {
     metrics.set_total_sessions(discv5.metrics().active_sessions);
     metrics.set_total_kbucket_peers(
         discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
     );
-
-    // metrics.set_total_peers_per_bucket(discv5.with_kbuckets(|kbucket|
-    // kbucket.read().buckets_iter()))
+    metrics.set_total_peers_by_kbucket(discv5.with_kbuckets(|kbucket| {
+        kbucket.read().buckets_iter().map(|bucket| bucket.num_entries()).collect()
+    }));
 
     match discv5.find_node(target).await {
         Err(err) => trace!(target: "net::discv5",

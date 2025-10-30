@@ -12,7 +12,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, ItemStruct};
+use syn::{parse_macro_input, parse_quote, token::Brace, ImplItemFn, ItemImpl, ItemStruct};
 
 // Awesome
 #[proc_macro_attribute]
@@ -23,14 +23,13 @@ pub fn kbuckets_metrics(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let vis = input.vis;
     let name = input.ident;
 
-    const COUNT: usize = 256;
+    const MAX_KBUCKET_INDEX: usize = 255;
     const FIELD_PREFIX: &str = "kbucket";
 
-    let index_arg = format_ident!("kbucket_index");
-    let peers_arg = format_ident!("num_peers");
+    let peer_counts_arg = format_ident!("peer_counts");
 
-    // Generate 255 fields
-    let fields: TokenStream2 = (0..COUNT)
+    // Generate 256 fields
+    let fields: TokenStream2 = (0..=MAX_KBUCKET_INDEX)
         .map(|i| {
             let docs = format!("Total peers in KBucket at index {i}");
             let field = format_ident!("{FIELD_PREFIX}_{i}");
@@ -41,20 +40,17 @@ pub fn kbuckets_metrics(_attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .fold(TokenStream2::new(), |acc, ts| quote! { #acc #ts, });
 
-    let set_peer_count = (0..COUNT)
-        .rev() // more likely to find peers at further log2distance
-        .map(|i| {
-            let field = format_ident!("{FIELD_PREFIX}_{i}");
-            quote! {
-                if #index_arg == #i {
-                    self.#field.set(#peers_arg as f64);
-                    return
-                }
+    let set_peer_count = (0..=MAX_KBUCKET_INDEX).map(|i| {
+        let field = format_ident!("{FIELD_PREFIX}_{i}");
+        quote! {
+            if let Some(count) = #peer_counts_arg.next() {
+                self.#field.set(count as f64)
             }
-        });
+        }
+    });
 
     let ty_def = quote! {
-        /// Tracks peers per `KBucket`.
+        /// Tracks peers per kbucket.
         #[derive(Clone, Metrics)]
         #[metrics(scope = "discv5")]
         #vis #struct_token #name {
@@ -62,18 +58,33 @@ pub fn kbuckets_metrics(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    let impl_body = quote! {
-        impl #name {
-            /// Sets current total number of peers in KBucket of given index.
-            pub fn set_total_peers_in(&mut self, #index_arg: usize, #peers_arg: usize) {
+    let method: ImplItemFn = parse_quote! {
+        /// Sets current total number of connected peers in each kbucket. Takes an iterator
+        /// over peer count in kbuckets starting from index bucket at index 0 to
+        /// [`MAX_KBUCKET_INDEX`].
+        pub fn set_total_peers_by_kbucket(&self, peer_counts: Vec<usize>) {
+            let mut peer_counts = peer_counts.into_iter();
                 #(#set_peer_count)*
-            }
         }
     };
 
+    let impl_block: ItemImpl = ItemImpl {
+        self_ty: Box::new(parse_quote!(#name)),
+        items: vec![syn::ImplItem::Fn(method)],
+        impl_token: parse_quote!(impl),
+        generics: parse_quote!(<>),
+        trait_: None,
+        brace_token: Brace::default(),
+        attrs: vec![],
+        defaultness: None,
+        unsafety: None,
+    };
+
+    let impl_block: TokenStream2 = quote!(#impl_block);
+
     let stream = quote! {
         #ty_def
-        #impl_body
+        #impl_block
     };
 
     TokenStream::from(stream)
