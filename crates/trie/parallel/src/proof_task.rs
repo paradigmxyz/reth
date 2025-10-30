@@ -142,9 +142,6 @@ impl ProofWorkerHandle {
             debug_span!(target: "trie::proof_task", "storage proof workers", ?storage_worker_count)
                 .entered();
 
-        // Capture timestamp before spawning storage workers
-        let storage_spawn_start = Instant::now();
-
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
             let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
@@ -153,20 +150,31 @@ impl ProofWorkerHandle {
             let storage_available_workers_clone = storage_available_workers.clone();
 
             executor.spawn_blocking(move || {
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-
                 let _guard = span.enter();
+
+                #[cfg(feature = "metrics")]
+                let worker = {
+                    // Capture timestamp when this worker spawns
+                    let spawn_start = Instant::now();
+                    let metrics = ProofTaskTrieMetrics::default();
+                    StorageProofWorker::new(
+                        task_ctx_clone,
+                        work_rx_clone,
+                        worker_id,
+                        storage_available_workers_clone,
+                        spawn_start,
+                        metrics,
+                    )
+                };
+
+                #[cfg(not(feature = "metrics"))]
                 let worker = StorageProofWorker::new(
                     task_ctx_clone,
                     work_rx_clone,
                     worker_id,
                     storage_available_workers_clone,
-                    #[cfg(feature = "metrics")]
-                    storage_spawn_start,
-                    #[cfg(feature = "metrics")]
-                    metrics,
                 );
+
                 worker.run()
             });
         }
@@ -175,9 +183,6 @@ impl ProofWorkerHandle {
         let parent_span =
             debug_span!(target: "trie::proof_task", "account proof workers", ?storage_worker_count)
                 .entered();
-
-        // Capture timestamp before spawning account workers
-        let account_spawn_start = Instant::now();
 
         // Spawn account workers
         for worker_id in 0..account_worker_count {
@@ -188,21 +193,33 @@ impl ProofWorkerHandle {
             let account_available_workers_clone = account_available_workers.clone();
 
             executor.spawn_blocking(move || {
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-
                 let _guard = span.enter();
+
+                #[cfg(feature = "metrics")]
+                let worker = {
+                    // Capture timestamp when this worker spawns
+                    let spawn_start = Instant::now();
+                    let metrics = ProofTaskTrieMetrics::default();
+                    AccountProofWorker::new(
+                        task_ctx_clone,
+                        work_rx_clone,
+                        worker_id,
+                        storage_work_tx_clone,
+                        account_available_workers_clone,
+                        spawn_start,
+                        metrics,
+                    )
+                };
+
+                #[cfg(not(feature = "metrics"))]
                 let worker = AccountProofWorker::new(
                     task_ctx_clone,
                     work_rx_clone,
                     worker_id,
                     storage_work_tx_clone,
                     account_available_workers_clone,
-                    #[cfg(feature = "metrics")]
-                    account_spawn_start,
-                    #[cfg(feature = "metrics")]
-                    metrics,
                 );
+
                 worker.run()
             });
         }
@@ -648,6 +665,25 @@ enum StorageWorkerJob {
     },
 }
 
+/// RAII guard that marks a worker as busy for the duration of a scope.
+struct WorkerAvailabilityGuard {
+    available_workers: Arc<AtomicUsize>,
+}
+
+impl WorkerAvailabilityGuard {
+    /// Marks the worker as busy by decrementing the available worker counter.
+    fn new(available_workers: Arc<AtomicUsize>) -> Self {
+        available_workers.fetch_sub(1, Ordering::Relaxed);
+        Self { available_workers }
+    }
+}
+
+impl Drop for WorkerAvailabilityGuard {
+    fn drop(&mut self) {
+        self.available_workers.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 /// Worker for storage trie operations.
 ///
 /// Each worker maintains a dedicated database transaction and processes
@@ -723,26 +759,6 @@ where
             metrics,
         } = self;
 
-        // Create provider from factory
-        #[cfg(feature = "metrics")]
-        let db_provider_start = Instant::now();
-
-        let provider = task_ctx
-            .factory
-            .database_provider_ro()
-            .expect("Storage worker failed to initialize: unable to create provider");
-
-        #[cfg(feature = "metrics")]
-        metrics.record_storage_worker_db_provider_creation_duration(db_provider_start.elapsed());
-
-        #[cfg(feature = "metrics")]
-        let proof_tx_start = Instant::now();
-
-        let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
-
-        #[cfg(feature = "metrics")]
-        metrics.record_storage_worker_proof_tx_creation_duration(proof_tx_start.elapsed());
-
         trace!(
             target: "trie::proof_task",
             worker_id,
@@ -752,16 +768,52 @@ where
         let mut storage_proofs_processed = 0u64;
         let mut storage_nodes_processed = 0u64;
 
-        // Initially mark this worker as available.
+        // Lazy initialization: DB provider and ProofTaskTx created on first message
+        let mut proof_tx: Option<ProofTaskTx<_>> = None;
+
+        // Initially mark this worker as available immediately (no DB creation yet).
         available_workers.fetch_add(1, Ordering::Relaxed);
 
         // Record time from spawn start to worker marking itself available
+        // This is now very fast (~microseconds) since we haven't created DB provider yet
         #[cfg(feature = "metrics")]
         metrics.record_storage_worker_spawn_to_available_duration(spawn_start.elapsed());
 
         while let Ok(job) = work_rx.recv() {
-            // Mark worker as busy.
-            available_workers.fetch_sub(1, Ordering::Relaxed);
+            // Mark worker as busy for the duration of the job (including lazy init)
+            let _availability_guard = WorkerAvailabilityGuard::new(available_workers.clone());
+
+            // Lazy initialization: create DB provider and ProofTaskTx on first message
+            let proof_tx = proof_tx.get_or_insert_with(|| {
+                #[cfg(feature = "metrics")]
+                let db_provider_start = Instant::now();
+
+                let provider = task_ctx
+                    .factory
+                    .database_provider_ro()
+                    .expect("Storage worker failed to initialize: unable to create provider");
+
+                #[cfg(feature = "metrics")]
+                metrics.record_storage_worker_db_provider_creation_duration(
+                    db_provider_start.elapsed(),
+                );
+
+                #[cfg(feature = "metrics")]
+                let proof_tx_start = Instant::now();
+
+                let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets.clone(), worker_id);
+
+                #[cfg(feature = "metrics")]
+                metrics.record_storage_worker_proof_tx_creation_duration(proof_tx_start.elapsed());
+
+                trace!(
+                target: "trie::proof_task",
+                worker_id,
+                "Storage worker initialized DB provider on first message"
+                );
+
+                proof_tx
+            });
 
             match job {
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
@@ -786,8 +838,7 @@ where
                 }
             }
 
-            // Mark worker as available again.
-            available_workers.fetch_add(1, Ordering::Relaxed);
+            // `_availability_guard` is dropped here, marking worker as available again.
         }
 
         trace!(
@@ -992,26 +1043,6 @@ where
             metrics,
         } = self;
 
-        // Create provider from factory
-        #[cfg(feature = "metrics")]
-        let db_provider_start = Instant::now();
-
-        let provider = task_ctx
-            .factory
-            .database_provider_ro()
-            .expect("Account worker failed to initialize: unable to create provider");
-
-        #[cfg(feature = "metrics")]
-        metrics.record_account_worker_db_provider_creation_duration(db_provider_start.elapsed());
-
-        #[cfg(feature = "metrics")]
-        let proof_tx_start = Instant::now();
-
-        let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
-
-        #[cfg(feature = "metrics")]
-        metrics.record_account_worker_proof_tx_creation_duration(proof_tx_start.elapsed());
-
         trace!(
             target: "trie::proof_task",
             worker_id,
@@ -1021,16 +1052,52 @@ where
         let mut account_proofs_processed = 0u64;
         let mut account_nodes_processed = 0u64;
 
-        // Count this worker as available only after successful initialization.
+        // Lazy initialization: DB provider and ProofTaskTx created on first message
+        let mut proof_tx: Option<ProofTaskTx<_>> = None;
+
+        // Count this worker as available immediately (no DB creation yet).
         available_workers.fetch_add(1, Ordering::Relaxed);
 
         // Record time from spawn start to worker marking itself available
+        // This is now very fast (~microseconds) since we haven't created DB provider yet
         #[cfg(feature = "metrics")]
         metrics.record_account_worker_spawn_to_available_duration(spawn_start.elapsed());
 
         while let Ok(job) = work_rx.recv() {
-            // Mark worker as busy.
-            available_workers.fetch_sub(1, Ordering::Relaxed);
+            // Mark worker as busy for the duration of the job (including lazy init)
+            let _availability_guard = WorkerAvailabilityGuard::new(available_workers.clone());
+
+            // Lazy initialization: create DB provider and ProofTaskTx on first message
+            let proof_tx = proof_tx.get_or_insert_with(|| {
+                #[cfg(feature = "metrics")]
+                let db_provider_start = Instant::now();
+
+                let provider = task_ctx
+                    .factory
+                    .database_provider_ro()
+                    .expect("Account worker failed to initialize: unable to create provider");
+
+                #[cfg(feature = "metrics")]
+                metrics.record_account_worker_db_provider_creation_duration(
+                    db_provider_start.elapsed(),
+                );
+
+                #[cfg(feature = "metrics")]
+                let proof_tx_start = Instant::now();
+
+                let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets.clone(), worker_id);
+
+                #[cfg(feature = "metrics")]
+                metrics.record_account_worker_proof_tx_creation_duration(proof_tx_start.elapsed());
+
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    "Account worker initialized DB provider on first message"
+                );
+
+                proof_tx
+            });
 
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
@@ -1054,8 +1121,7 @@ where
                 }
             }
 
-            // Mark worker as available again.
-            available_workers.fetch_add(1, Ordering::Relaxed);
+            // `_availability_guard` is dropped here, marking worker as available again.
         }
 
         trace!(
