@@ -159,8 +159,6 @@ where
     metrics: EngineApiMetrics,
     /// Validator for the payload.
     validator: V,
-    /// A cleared trie input, kept around to be reused so allocations can be minimized.
-    trie_input: Option<TrieInput>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -204,7 +202,6 @@ where
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
             validator,
-            trie_input: Default::default(),
         }
     }
 
@@ -682,27 +679,20 @@ where
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let provider = self.provider.database_provider_ro()?;
 
-        let (mut input, _reusable_input, block_number) =
-            self.compute_trie_input(provider, parent_hash, state, None)?;
+        let (mut input, block_number) = self.compute_trie_input(provider, parent_hash, state)?;
 
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        // Convert the TrieInput into a MultProofConfig, since everything uses the sorted
-        // forms of the state/trie fields.
-        let (_, multiproof_config) = MultiProofConfig::from_input(input);
-
         let factory = OverlayStateProviderFactory::new(self.provider.clone())
             .with_block_number(Some(block_number))
-            .with_trie_overlay(Some(multiproof_config.nodes_sorted))
-            .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
+            .with_trie_overlay(Some(input.nodes))
+            .with_hashed_state_overlay(Some(input.state));
 
         // The `hashed_state` argument is already taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
-        let prefix_sets = Arc::into_inner(multiproof_config.prefix_sets)
-            .expect("MultiProofConfig was never cloned")
-            .freeze();
+        let prefix_sets = input.prefix_sets.freeze();
 
         ParallelStateRoot::new(factory, prefix_sets).incremental_root_with_updates()
     }
@@ -801,16 +791,12 @@ where
     > {
         match strategy {
             StateRootStrategy::StateRootTask => {
-                // get allocated trie input if it exists
-                let allocated_trie_input = self.trie_input.take();
-
                 // Compute trie input
                 let trie_input_start = Instant::now();
-                let (trie_input, mut reusable_input, block_number) = self.compute_trie_input(
+                let (trie_input, block_number) = self.compute_trie_input(
                     self.provider.database_provider_ro()?,
                     parent_hash,
                     state,
-                    allocated_trie_input,
                 )?;
 
                 self.metrics
@@ -976,12 +962,7 @@ where
         provider: TP,
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-        allocated_trie_input: Option<TrieInput>,
-    ) -> ProviderResult<(TrieInputSorted, TrieInput, BlockNumber)> {
-        // Build with unsorted structures for fast append operations, reusing allocated capacity.
-        let mut input = allocated_trie_input.unwrap_or_default();
-        input.clear(); // Keep HashMap capacity, drop contents
-
+    ) -> ProviderResult<(TrieInputSorted, BlockNumber)> {
         let (historical, blocks) = state
             .tree_state
             .blocks_by_hash(parent_hash)
@@ -1000,10 +981,7 @@ where
 
         // Extend with contents of parent in-memory blocks directly in sorted form, skipping the
         // merge path on the first iteration to avoid redundant work.
-        let mut sorted_input = TrieInputSorted {
-            prefix_sets: core::mem::take(&mut input.prefix_sets),
-            ..Default::default()
-        };
+        let mut sorted_input = TrieInputSorted::default();
 
         let mut blocks_iter = blocks.iter().rev();
         if let Some(first) = blocks_iter.next() {
@@ -1020,7 +998,7 @@ where
             }
         }
 
-        Ok((sorted_input, input, block_number))
+        Ok((sorted_input, block_number))
     }
 }
 
