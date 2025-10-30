@@ -238,11 +238,11 @@ mod tests {
             impl TestStruct {
                 #[doc = "Used bytes by [`TestStructFlags`]"]
                 pub const fn bitflag_encoded_bytes() -> usize {
-                    2u8 as usize
+                    2usize
                 }
                 #[doc = "Unused bits for new fields by [`TestStructFlags`]"]
                 pub const fn bitflag_unused_bits() -> usize {
-                    1u8 as usize
+                    1usize
                 }
             }
 
