@@ -591,8 +591,8 @@ where
             .with_bal_builder() //TODO
             .without_state_clear()
             .build();
-        db.bal_state.bal_index = 0;
-        db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+        // db.bal_state.bal_index = 0;
+        // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
         let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
         let ctx =

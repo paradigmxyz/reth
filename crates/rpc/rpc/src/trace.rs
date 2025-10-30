@@ -158,10 +158,12 @@ where
         self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).with_bal_builder().build();
-                db.bal_state.bal_index = 0;
-                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(state))
+                    .with_bal_builder()
+                    .build();
+                // db.bal_state.bal_index = 0;
+                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 let mut calls = calls.into_iter().peekable();
 

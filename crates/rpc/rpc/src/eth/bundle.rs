@@ -150,9 +150,12 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let coinbase = evm_env.block_env.beneficiary();
                 let basefee = evm_env.block_env.basefee();
-                let mut db = State::builder().with_database(StateProviderDatabase::new(state)).with_bal_builder().build();
-                db.bal_state.bal_index = 0;
-                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(state))
+                    .with_bal_builder()
+                    .build();
+                // db.bal_state.bal_index = 0;
+                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 let initial_coinbase = db
                     .basic_ref(coinbase)

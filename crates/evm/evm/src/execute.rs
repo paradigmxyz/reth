@@ -570,8 +570,8 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
             .with_bal_builder()
             .without_state_clear()
             .build();
-        db.bal_state.bal_index = 0;
-        db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+        // db.bal_state.bal_index = 0;
+        // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
         Self { strategy_factory, db }
     }
 }
