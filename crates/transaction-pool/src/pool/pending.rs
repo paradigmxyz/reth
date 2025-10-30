@@ -334,20 +334,32 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let tx = self.by_id.remove(id)?;
         self.size_of -= tx.transaction.size();
 
-        if let Some(highest) = self.highest_nonces.get(&id.sender) &&
-            highest.transaction.nonce() == id.nonce
-        {
-            if let Some((_, new_highest)) = self
-                .by_id
-                .range((
-                    id.sender.start_bound(),
-                    std::ops::Bound::Included(TransactionId::new(id.sender, u64::MAX)),
-                ))
-                .last()
-            {
-                self.highest_nonces.insert(id.sender, new_highest.clone());
-            } else {
-                self.highest_nonces.remove(&id.sender);
+        match self.highest_nonces.entry(id.sender) {
+            Entry::Occupied(mut entry) => {
+                if entry.get().transaction.nonce() == id.nonce {
+                    // we just removed the tx with the highest nonce for this sender, find the
+                    // highest remaining tx from that sender
+                    if let Some((_, new_highest)) = self
+                        .by_id
+                        .range((
+                            id.sender.start_bound(),
+                            std::ops::Bound::Included(TransactionId::new(id.sender, u64::MAX)),
+                        ))
+                        .last()
+                    {
+                        // insert the new highest nonce for this sender
+                        entry.insert(new_highest.clone());
+                    } else {
+                        entry.remove();
+                    }
+                }
+            }
+            Entry::Vacant(_) => {
+                debug_assert!(
+                    false,
+                    "removed transaction without a tracked highest nonce {:?}",
+                    id
+                );
             }
         }
 
