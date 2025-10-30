@@ -639,7 +639,7 @@ where
         hashed_state: &HashedPostState,
         state: &EngineApiTreeState<N>,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        let (mut input, block_hash) = self.compute_trie_input(parent_hash, state, None)?;
+        let (mut input, block_hash) = self.compute_trie_input(parent_hash, state)?;
 
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
@@ -915,11 +915,7 @@ where
         &self,
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-        allocated_trie_input: Option<TrieInput>,
-    ) -> ProviderResult<(TrieInput, B256)> {
-        // get allocated trie input or use a default trie input
-        let mut input = allocated_trie_input.unwrap_or_default();
-
+    ) -> ProviderResult<(TrieInputSorted, B256)> {
         let (block_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
