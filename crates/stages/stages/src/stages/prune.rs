@@ -105,11 +105,8 @@ where
         let prune_checkpoints = provider.get_prune_checkpoints()?;
         for (segment, mut checkpoint) in prune_checkpoints {
             // Only update the checkpoint if unwind_to is lower than the existing checkpoint.
-            // The checkpoint should be one less than unwind_to since it represents the last
-            // block pruned.
-            let new_checkpoint_block = input.unwind_to.saturating_sub(1);
-            if checkpoint.block_number.is_none_or(|block| new_checkpoint_block < block) {
-                checkpoint.block_number = Some(new_checkpoint_block);
+            if checkpoint.block_number.is_none_or(|block| input.unwind_to < block) {
+                checkpoint.block_number = Some(input.unwind_to);
                 provider.save_prune_checkpoint(segment, checkpoint)?;
             }
         }

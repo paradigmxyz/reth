@@ -96,6 +96,12 @@ where
                 }
             })?;
 
+        // If the requested block is the DB tip (determined by the MerkleChangeSets stage
+        // checkpoint) then there won't be any reverts necessary, and we can simply return Ok.
+        if upper_bound == requested_block {
+            return Ok(())
+        }
+
         // Extract the lower bound from prune checkpoint if available
         // The prune checkpoint's block_number is the highest pruned block, so data is available
         // starting from the next block
