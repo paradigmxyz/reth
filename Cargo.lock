@@ -274,8 +274,8 @@ dependencies = [
  "alloy-sol-types",
  "auto_impl",
  "derive_more",
- "op-alloy-consensus 0.22.0",
- "op-alloy-rpc-types-engine 0.22.0",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
  "op-revm",
  "revm",
  "thiserror 2.0.17",
@@ -383,7 +383,7 @@ dependencies = [
  "alloy-op-hardforks",
  "alloy-primitives",
  "auto_impl",
- "op-alloy-consensus 0.22.0",
+ "op-alloy-consensus",
  "op-revm",
  "revm",
  "thiserror 2.0.17",
@@ -3438,9 +3438,9 @@ dependencies = [
  "eyre",
  "jsonrpsee",
  "modular-bitfield",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "op-alloy-rpc-types",
- "op-alloy-rpc-types-engine 0.21.0",
+ "op-alloy-rpc-types-engine",
  "op-revm",
  "reth-chain-state",
  "reth-codecs",
@@ -6007,9 +6007,9 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "op-alloy-consensus"
-version = "0.21.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf1fc8aa0e2f5b136d101630be009e4e6dbdd1f17bc3ce670f431511600d2930"
+checksum = "e42e9de945efe3c2fbd207e69720c9c1af2b8caa6872aee0e216450c25a3ca70"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6026,20 +6026,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "op-alloy-consensus"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e42e9de945efe3c2fbd207e69720c9c1af2b8caa6872aee0e216450c25a3ca70"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rlp",
- "derive_more",
- "thiserror 2.0.17",
-]
-
-[[package]]
 name = "op-alloy-flz"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6047,9 +6033,9 @@ checksum = "a79f352fc3893dcd670172e615afef993a41798a1d3fc0db88a3e60ef2e70ecc"
 
 [[package]]
 name = "op-alloy-network"
-version = "0.21.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c5cca341184dbfcb49dbc124e5958e6a857499f04782907e5d969abb644e0b6"
+checksum = "9c9da49a2812a0189dd05e81e4418c3ae13fd607a92654107f02ebad8e91ed9e"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -6057,15 +6043,15 @@ dependencies = [
  "alloy-provider",
  "alloy-rpc-types-eth",
  "alloy-signer",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "op-alloy-rpc-types",
 ]
 
 [[package]]
 name = "op-alloy-rpc-jsonrpsee"
-version = "0.21.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "190e9884a69012d4abc26d1c0bc60fe01d57899ab5417c8f38105ffaaab4149b"
+checksum = "b62ceb771ab9323647093ea2e58dc7f25289a1b95cbef2faa2620f6ca2dee4d9"
 dependencies = [
  "alloy-primitives",
  "jsonrpsee",
@@ -6073,9 +6059,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types"
-version = "0.21.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "274972c3c5e911b6675f6794ea0476b05e0bc1ea7e464f99ec2dc01b76d2eeb6"
+checksum = "9cd1eb7bddd2232856ba9d259320a094f9edf2b9061acfe5966e7960208393e6"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6085,31 +6071,9 @@ dependencies = [
  "alloy-serde",
  "arbitrary",
  "derive_more",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "op-alloy-rpc-types-engine"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "860edb8d5a8d54bbcdabcbd8642c45b974351ce4e10ed528dd4508eee2a43833"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-engine",
- "alloy-serde",
- "arbitrary",
- "derive_more",
- "ethereum_ssz",
- "ethereum_ssz_derive",
- "op-alloy-consensus 0.21.0",
- "serde",
- "snap",
  "thiserror 2.0.17",
 ]
 
@@ -6124,10 +6088,13 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
+ "alloy-serde",
+ "arbitrary",
  "derive_more",
  "ethereum_ssz",
  "ethereum_ssz_derive",
- "op-alloy-consensus 0.22.0",
+ "op-alloy-consensus",
+ "serde",
  "snap",
  "thiserror 2.0.17",
 ]
@@ -6153,7 +6120,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "11.2.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "auto_impl",
  "revm",
@@ -7348,8 +7315,8 @@ dependencies = [
  "eyre",
  "futures",
  "humantime",
- "op-alloy-consensus 0.21.0",
- "op-alloy-rpc-types-engine 0.21.0",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
  "reqwest",
  "reth-cli-runner",
  "reth-cli-util",
@@ -7554,7 +7521,7 @@ dependencies = [
  "arbitrary",
  "bytes",
  "modular-bitfield",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-codecs-derive",
@@ -7969,7 +7936,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "eyre",
  "futures-util",
- "op-alloy-rpc-types-engine 0.21.0",
+ "op-alloy-rpc-types-engine",
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
@@ -9231,7 +9198,7 @@ dependencies = [
  "alloy-primitives",
  "derive_more",
  "miniz_oxide",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "op-alloy-rpc-types",
  "paste",
  "reth-chainspec",
@@ -9258,7 +9225,7 @@ dependencies = [
  "derive_more",
  "eyre",
  "futures-util",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "proptest",
  "reth-chainspec",
  "reth-cli",
@@ -9306,7 +9273,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-trie",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
@@ -9338,8 +9305,8 @@ dependencies = [
  "alloy-genesis",
  "alloy-op-evm",
  "alloy-primitives",
- "op-alloy-consensus 0.21.0",
- "op-alloy-rpc-types-engine 0.21.0",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
  "op-revm",
  "reth-chainspec",
  "reth-evm",
@@ -9419,9 +9386,9 @@ dependencies = [
  "clap",
  "eyre",
  "futures",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "op-alloy-network",
- "op-alloy-rpc-types-engine 0.21.0",
+ "op-alloy-rpc-types-engine",
  "op-revm",
  "reth-chainspec",
  "reth-consensus",
@@ -9476,8 +9443,8 @@ dependencies = [
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
  "derive_more",
- "op-alloy-consensus 0.21.0",
- "op-alloy-rpc-types-engine 0.21.0",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
  "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-chainspec",
@@ -9515,7 +9482,7 @@ dependencies = [
  "bincode 1.3.3",
  "bytes",
  "modular-bitfield",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
@@ -9552,11 +9519,11 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-jsonrpsee",
  "op-alloy-rpc-types",
- "op-alloy-rpc-types-engine 0.21.0",
+ "op-alloy-rpc-types-engine",
  "op-revm",
  "reqwest",
  "reth-chain-state",
@@ -9619,7 +9586,7 @@ dependencies = [
  "derive_more",
  "futures-util",
  "metrics",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "op-alloy-flz",
  "op-alloy-rpc-types",
  "op-revm",
@@ -9682,7 +9649,7 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "either",
- "op-alloy-rpc-types-engine 0.21.0",
+ "op-alloy-rpc-types-engine",
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
@@ -9751,7 +9718,7 @@ dependencies = [
  "derive_more",
  "modular-bitfield",
  "once_cell",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
@@ -10132,7 +10099,7 @@ dependencies = [
  "auto_impl",
  "dyn-clone",
  "jsonrpsee-types",
- "op-alloy-consensus 0.21.0",
+ "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types",
  "op-revm",
@@ -10869,7 +10836,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "30.2.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10887,7 +10854,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "7.0.2"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "bitvec",
  "phf 0.13.1",
@@ -10898,7 +10865,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "10.1.2"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10914,7 +10881,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "11.1.2"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10929,7 +10896,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "9.0.2"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10942,7 +10909,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "8.0.3"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "auto_impl",
  "either",
@@ -10954,7 +10921,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "11.2.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10972,7 +10939,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "11.2.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "auto_impl",
  "either",
@@ -11009,7 +10976,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "28.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11021,7 +10988,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "28.1.1"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11045,7 +11012,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "21.0.1"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -11056,11 +11023,10 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "8.0.2"
-source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#4a2c5ceeceffa3646daae57d997e4cd4117c386c"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#d9d8896b663e152574609216e5bf370012760810"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.10.0",
- "indexmap 2.12.0",
  "revm-bytecode",
  "revm-primitives",
  "serde",

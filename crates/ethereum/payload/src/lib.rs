@@ -159,8 +159,8 @@ where
         .with_bundle_update()
         .with_bal_builder()
         .build();
-    db.bal_index = 0;
-    db.bal_builder = Some(revm::state::bal::Bal::new());
+    db.bal_state.bal_index = 0;
+    db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
     let mut builder = evm_config
         .builder_for_next_block(
             &mut db,

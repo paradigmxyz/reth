@@ -570,8 +570,8 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
             .with_bal_builder()
             .without_state_clear()
             .build();
-        db.bal_index = 0;
-        db.bal_builder = Some(revm::state::bal::Bal::new());
+        db.bal_state.bal_index = 0;
+        db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
         Self { strategy_factory, db }
     }
 }
@@ -747,6 +747,7 @@ mod tests {
             nonce,
             code_hash: KECCAK_EMPTY,
             code: None,
+            storage_id: None,
         };
         state.insert_account(addr, account_info);
         state
@@ -783,8 +784,13 @@ mod tests {
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
-        let account2 =
-            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        let account2 = AccountInfo {
+            balance: U256::from(200),
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+            storage_id: None,
+        };
         state.insert_account(addr2, account2);
 
         let mut increments = HashMap::default();
@@ -805,8 +811,13 @@ mod tests {
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
-        let account2 =
-            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        let account2 = AccountInfo {
+            balance: U256::from(200),
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+            storage_id: None,
+        };
         state.insert_account(addr2, account2);
 
         let mut increments = HashMap::default();

@@ -239,8 +239,8 @@ pub trait LoadPendingBlock:
         let mut db =
             State::builder().with_database(state).with_bundle_update().with_bal_builder().build();
 
-        db.bal_index = 0;
-        db.bal_builder = Some(revm::state::bal::Bal::new());
+        db.bal_state.bal_index = 0;
+        db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
         let mut builder = self
             .evm_config()
