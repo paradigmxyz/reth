@@ -151,7 +151,7 @@ where
             executor.into_state().take_bundle(),
             results,
         );
-        let chain = Chain::new(blocks, outcome, BTreeMap::new());
+        let chain = Chain::new(blocks, outcome, BTreeMap::new(), BTreeMap::new());
         Ok(chain)
     }
 }

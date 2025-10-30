@@ -416,6 +416,7 @@ where
                 blocks,
                 state.clone(),
                 BTreeMap::new(),
+                BTreeMap::new(),
             ));
 
             if previous_input.is_some() {
@@ -516,6 +517,7 @@ where
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
                 bundle_state_with_receipts,
+                BTreeMap::new(),
                 BTreeMap::new(),
             ));
 

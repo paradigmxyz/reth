@@ -207,11 +207,13 @@ pub(super) mod serde_bincode_compat {
                             .unwrap()],
                         Default::default(),
                         BTreeMap::new(),
+                        BTreeMap::new(),
                     )),
                     new: Arc::new(Chain::new(
                         vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                             .unwrap()],
                         Default::default(),
+                        BTreeMap::new(),
                         BTreeMap::new(),
                     )),
                 },

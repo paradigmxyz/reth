@@ -262,6 +262,7 @@ mod tests {
             vec![block1.clone(), block2.clone()],
             ExecutionOutcome::default(),
             BTreeMap::new(),
+            BTreeMap::new(),
         ));
 
         // Create a commit notification
@@ -300,10 +301,12 @@ mod tests {
             vec![block1.clone()],
             ExecutionOutcome::default(),
             BTreeMap::new(),
+            BTreeMap::new(),
         ));
         let new_chain = Arc::new(Chain::new(
             vec![block2.clone(), block3.clone()],
             ExecutionOutcome::default(),
+            BTreeMap::new(),
             BTreeMap::new(),
         ));
 
@@ -370,6 +373,7 @@ mod tests {
             vec![block1.clone(), block2.clone()],
             execution_outcome,
             BTreeMap::new(),
+            BTreeMap::new(),
         ));
 
         // Create a commit notification containing the new chain segment.
@@ -427,8 +431,12 @@ mod tests {
             ExecutionOutcome { receipts: old_receipts, ..Default::default() };
 
         // Create an old chain segment to be reverted, containing `old_block1`.
-        let old_chain: Arc<Chain> =
-            Arc::new(Chain::new(vec![old_block1.clone()], old_execution_outcome, BTreeMap::new()));
+        let old_chain: Arc<Chain> = Arc::new(Chain::new(
+            vec![old_block1.clone()],
+            old_execution_outcome,
+            BTreeMap::new(),
+            BTreeMap::new(),
+        ));
 
         // Define block2 for the new chain segment, which will be committed.
         let mut body = BlockBody::<TransactionSigned>::default();
@@ -456,8 +464,12 @@ mod tests {
             ExecutionOutcome { receipts: new_receipts, ..Default::default() };
 
         // Create a new chain segment to be committed, containing `new_block1`.
-        let new_chain =
-            Arc::new(Chain::new(vec![new_block1.clone()], new_execution_outcome, BTreeMap::new()));
+        let new_chain = Arc::new(Chain::new(
+            vec![new_block1.clone()],
+            new_execution_outcome,
+            BTreeMap::new(),
+            BTreeMap::new(),
+        ));
 
         // Create a reorg notification with both reverted (old) and committed (new) chain segments.
         let notification = CanonStateNotification::Reorg { old: old_chain, new: new_chain };

@@ -304,23 +304,36 @@ mod tests {
                 vec![blocks[0].clone(), blocks[1].clone()],
                 Default::default(),
                 BTreeMap::new(),
+                BTreeMap::new(),
             )),
         };
         let reverted_notification = ExExNotification::ChainReverted {
-            old: Arc::new(Chain::new(vec![blocks[1].clone()], Default::default(), BTreeMap::new())),
+            old: Arc::new(Chain::new(
+                vec![blocks[1].clone()],
+                Default::default(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+            )),
         };
         let committed_notification_2 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
                 vec![block_1_reorged.clone(), blocks[2].clone()],
                 Default::default(),
                 BTreeMap::new(),
+                BTreeMap::new(),
             )),
         };
         let reorged_notification = ExExNotification::ChainReorged {
-            old: Arc::new(Chain::new(vec![blocks[2].clone()], Default::default(), BTreeMap::new())),
+            old: Arc::new(Chain::new(
+                vec![blocks[2].clone()],
+                Default::default(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+            )),
             new: Arc::new(Chain::new(
                 vec![block_2_reorged.clone(), blocks[3].clone()],
                 Default::default(),
+                BTreeMap::new(),
                 BTreeMap::new(),
             )),
         };

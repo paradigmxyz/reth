@@ -213,8 +213,18 @@ mod tests {
         let new_block = random_block(&mut rng, 0, Default::default()).try_recover()?;
 
         let notification = ExExNotification::ChainReorged {
-            new: Arc::new(Chain::new(vec![new_block], Default::default(), BTreeMap::new())),
-            old: Arc::new(Chain::new(vec![old_block], Default::default(), BTreeMap::new())),
+            new: Arc::new(Chain::new(
+                vec![new_block],
+                Default::default(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+            )),
+            old: Arc::new(Chain::new(
+                vec![old_block],
+                Default::default(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+            )),
         };
 
         // Do a round trip serialization and deserialization

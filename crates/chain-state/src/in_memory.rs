@@ -823,6 +823,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                         exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
                         exec.trie_updates.clone(),
+                        exec.hashed_state.clone(),
                     );
                     chain
                 }));
@@ -834,6 +835,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                         exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
                         exec.trie_updates.clone(),
+                        exec.hashed_state.clone(),
                     );
                     chain
                 }));
@@ -842,6 +844,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                         exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
                         exec.trie_updates.clone(),
+                        exec.hashed_state.clone(),
                     );
                     chain
                 }));
@@ -1432,13 +1435,19 @@ mod tests {
         expected_trie_updates.insert(0, block0.trie_updates.clone());
         expected_trie_updates.insert(1, block1.trie_updates.clone());
 
+        // Build expected hashed state map
+        let mut expected_hashed_state = BTreeMap::new();
+        expected_hashed_state.insert(0, block0.hashed_state.clone());
+        expected_hashed_state.insert(1, block1.hashed_state.clone());
+
         assert_eq!(
             chain_commit.to_chain_notification(),
             CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
                     vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
                     sample_execution_outcome.clone(),
-                    expected_trie_updates
+                    expected_trie_updates,
+                    expected_hashed_state
                 ))
             }
         );
@@ -1459,18 +1468,30 @@ mod tests {
         new_trie_updates.insert(1, block1a.trie_updates.clone());
         new_trie_updates.insert(2, block2a.trie_updates.clone());
 
+        // Build expected hashed state for old chain
+        let mut old_hashed_state = BTreeMap::new();
+        old_hashed_state.insert(1, block1.hashed_state.clone());
+        old_hashed_state.insert(2, block2.hashed_state.clone());
+
+        // Build expected hashed state for new chain
+        let mut new_hashed_state = BTreeMap::new();
+        new_hashed_state.insert(1, block1a.hashed_state.clone());
+        new_hashed_state.insert(2, block2a.hashed_state.clone());
+
         assert_eq!(
             chain_reorg.to_chain_notification(),
             CanonStateNotification::Reorg {
                 old: Arc::new(Chain::new(
                     vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
                     sample_execution_outcome.clone(),
-                    old_trie_updates
+                    old_trie_updates,
+                    old_hashed_state
                 )),
                 new: Arc::new(Chain::new(
                     vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
                     sample_execution_outcome,
-                    new_trie_updates
+                    new_trie_updates,
+                    new_hashed_state
                 ))
             }
         );
