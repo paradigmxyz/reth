@@ -185,10 +185,4 @@ impl TrieInputSorted {
         Arc::make_mut(&mut self.state).clear();
         self.prefix_sets.clear();
     }
-
-    /// Return a cleared version of this sorted trie input.
-    pub fn cleared(mut self) -> Self {
-        self.clear();
-        self
-    }
 }
