@@ -36,7 +36,7 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
-    eth::{ext::OpEthExtApi, OpEthApiBuilder},
+    eth::{ext::OpEthExtApi, mantle_ext::MantleEthExtApi, OpEthApiBuilder},
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, OpEthApiError, SequencerClient,
@@ -49,7 +49,7 @@ use reth_optimism_txpool::{
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc_api::DebugApiServer;
-use reth_rpc_eth_api::ext::L2EthApiExtServer;
+use reth_rpc_eth_api::{ext::L2EthApiExtServer, MantleEthApiServer};
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -328,6 +328,10 @@ where
             ctx.node.provider().clone(),
         );
 
+        // We need to create mantle_ext inside the closure since it requires access to registry.eth_api()
+        // Here we just define a placeholder; it will be actually created inside the closure.
+        let provider = ctx.node.provider().clone();
+
         rpc_add_ons
             .launch_add_ons_with(ctx, move |modules, auth_modules, registry| {
                 debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
@@ -358,6 +362,14 @@ where
                         tx_conditional_ext.into_rpc(),
                     )?;
                 }
+
+                // extend the eth namespace with mantle methods
+                info!(target: "reth::cli", "Installing Mantle RPC extension endpoints");
+                let eth_api = registry.eth_api();
+                let sequencer_client = eth_api.sequencer_client().cloned();
+                let mantle_ext: MantleEthExtApi<N::Provider, OpEthApi<N>> =
+                    MantleEthExtApi::new(provider.clone(), Arc::new(eth_api.clone()), sequencer_client);
+                modules.merge_if_module_configured(RethRpcModule::Eth, mantle_ext.into_rpc())?;
 
                 Ok(())
             })

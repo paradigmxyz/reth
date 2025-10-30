@@ -191,6 +191,27 @@ impl SequencerClient {
         self.metrics().record_forward_latency(start.elapsed());
         Ok(tx_hash)
     }
+
+    /// Forwards a transaction with preconfirmation to the sequencer endpoint.
+    pub async fn forward_raw_transaction_with_preconf(
+        &self,
+        tx: &[u8],
+    ) -> Result<reth_rpc_eth_api::PreconfTxEvent, SequencerClientError> {
+        let start = Instant::now();
+        let rlp_hex = hex::encode_prefixed(tx);
+        let preconf_event = self
+            .request("eth_sendRawTransactionWithPreconf", (rlp_hex,))
+            .await
+            .inspect_err(|err| {
+                warn!(
+                    target: "rpc::eth",
+                    %err,
+                    "Failed to forward transaction with preconf to sequencer",
+                );
+            })?;
+        self.metrics().record_forward_latency(start.elapsed());
+        Ok(preconf_event)
+    }
 }
 
 #[derive(Debug)]
