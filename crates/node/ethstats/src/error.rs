@@ -64,6 +64,6 @@ pub enum EthStatsError {
     DataFetchError(String),
 
     /// The request sent to the server was invalid or malformed
-    #[error("Inivalid request")]
+    #[error("Invalid request")]
     InvalidRequest,
 }
