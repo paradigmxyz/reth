@@ -52,9 +52,7 @@ impl MetricsListener {
         trace!(target: "sync::metrics", ?event, "Metric event received");
         match event {
             MetricEvent::SyncHeight { height } => {
-                // Efficiently update all stage checkpoints to the new sync height
-                // This avoids creating 16 separate StageCheckpoint events and recursive calls
-                self.sync_metrics.update_all_stages_height(height);
+                self.update_all_stages_height(height);
             }
             MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number, elapsed } => {
                 let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
@@ -73,6 +71,19 @@ impl MetricsListener {
                     stage_metrics.entities_total.set(total as f64);
                 }
             }
+        }
+    }
+}
+
+impl MetricsListener {
+    /// Updates all stage checkpoints to the given height efficiently.
+    fn update_all_stages_height(&mut self, height: BlockNumber) {
+        for stage_id in StageId::ALL {
+            let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
+            let height_f64 = height as f64;
+            stage_metrics.checkpoint.set(height_f64);
+            stage_metrics.entities_processed.set(height_f64);
+            stage_metrics.entities_total.set(height_f64);
         }
     }
 }
