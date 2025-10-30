@@ -128,7 +128,7 @@ impl Default for EthConfig {
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
-            rpc_evm_memory_limit: u64::MAX,
+            rpc_evm_memory_limit: (1 << 32) - 1,
         }
     }
 }

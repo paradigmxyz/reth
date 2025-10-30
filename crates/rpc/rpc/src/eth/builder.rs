@@ -148,7 +148,7 @@ where
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
             send_raw_transaction_sync_timeout: Duration::from_secs(30),
-            evm_memory_limit: u64::MAX,
+            evm_memory_limit: (1 << 32) - 1,
         }
     }
 }
