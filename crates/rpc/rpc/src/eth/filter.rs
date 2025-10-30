@@ -18,7 +18,7 @@ use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
-    helpers::{EthBlocks, LoadBlock, LoadReceipt},
+    helpers::{EthBlocks, LoadReceipt},
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
     RpcNodeCoreExt, RpcTransaction,
 };
@@ -52,7 +52,6 @@ impl<Eth> EngineEthFilter for EthFilter<Eth>
 where
     Eth: FullEthApiTypes
         + RpcNodeCoreExt<Provider: BlockIdReader>
-        + LoadBlock
         + LoadReceipt
         + EthBlocks
         + 'static,
@@ -202,7 +201,6 @@ impl<Eth> EthFilter<Eth>
 where
     Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader>
         + RpcNodeCoreExt
-        + LoadBlock
         + LoadReceipt
         + EthBlocks
         + 'static,
@@ -327,7 +325,7 @@ where
 #[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt + LoadBlock + LoadReceipt + EthBlocks + 'static,
+    Eth: FullEthApiTypes + RpcNodeCoreExt + LoadReceipt + EthBlocks + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -446,7 +444,6 @@ impl<Eth> EthFilterInner<Eth>
 where
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
         + EthApiTypes<NetworkTypes: reth_rpc_eth_api::types::RpcTypes>
-        + LoadBlock
         + LoadReceipt
         + EthBlocks
         + 'static,
@@ -953,7 +950,6 @@ where
 enum RangeMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
         + EthApiTypes
-        + LoadBlock
         + LoadReceipt
         + EthBlocks
         + 'static,
@@ -967,7 +963,6 @@ enum RangeMode<
 impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
             + EthApiTypes
-            + LoadBlock
             + LoadReceipt
             + EthBlocks
             + 'static,
@@ -1044,7 +1039,6 @@ impl<
 struct CachedMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
         + EthApiTypes
-        + LoadBlock
         + LoadReceipt
         + EthBlocks
         + 'static,
@@ -1056,7 +1050,6 @@ struct CachedMode<
 impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
             + EthApiTypes
-            + LoadBlock
             + LoadReceipt
             + EthBlocks
             + 'static,
@@ -1088,7 +1081,6 @@ type ReceiptFetchFuture<P> =
 struct RangeBlockMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
         + EthApiTypes
-        + LoadBlock
         + LoadReceipt
         + EthBlocks
         + 'static,
@@ -1104,7 +1096,6 @@ struct RangeBlockMode<
 impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
             + EthApiTypes
-            + LoadBlock
             + LoadReceipt
             + EthBlocks
             + 'static,
