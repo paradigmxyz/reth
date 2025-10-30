@@ -1,6 +1,7 @@
 //! `eth_` `Filter` RPC handler implementation
 
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockId;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
     BlockNumHash, BlockNumberOrTag, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
@@ -17,6 +18,7 @@ use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
+    helpers::{EthBlocks, LoadBlock, LoadReceipt},
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
     RpcNodeCoreExt, RpcTransaction,
 };
@@ -48,7 +50,12 @@ use tracing::{debug, error, trace};
 
 impl<Eth> EngineEthFilter for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt<Provider: BlockIdReader> + 'static,
+    Eth: FullEthApiTypes
+        + RpcNodeCoreExt<Provider: BlockIdReader>
+        + LoadBlock
+        + LoadReceipt
+        + EthBlocks
+        + 'static,
 {
     /// Returns logs matching given filter object, no query limits
     fn logs(
@@ -193,7 +200,12 @@ where
 
 impl<Eth> EthFilter<Eth>
 where
-    Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader> + RpcNodeCoreExt + 'static,
+    Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader>
+        + RpcNodeCoreExt
+        + LoadBlock
+        + LoadReceipt
+        + EthBlocks
+        + 'static,
 {
     /// Access the underlying provider.
     fn provider(&self) -> &Eth::Provider {
@@ -315,7 +327,7 @@ where
 #[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt + 'static,
+    Eth: FullEthApiTypes + RpcNodeCoreExt + LoadBlock + LoadReceipt + EthBlocks + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -434,6 +446,9 @@ impl<Eth> EthFilterInner<Eth>
 where
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
         + EthApiTypes<NetworkTypes: reth_rpc_eth_api::types::RpcTypes>
+        + LoadBlock
+        + LoadReceipt
+        + EthBlocks
         + 'static,
 {
     /// Access the underlying provider.
@@ -487,25 +502,18 @@ where
                 Ok(all_logs)
             }
             FilterBlockOption::Range { from_block, to_block } => {
-                // Check if either from_block or to_block is pending
-                let has_pending = from_block
-                    .is_some_and(|b| matches!(b, BlockNumberOrTag::Pending)) ||
-                    to_block.is_some_and(|b| matches!(b, BlockNumberOrTag::Pending));
-
-                if has_pending {
-                    // Handle pending blocks separately
+                // Handle special case where from block is pending
+                if from_block.is_some_and(|b| matches!(b, BlockNumberOrTag::Pending)) {
                     let mut all_logs = Vec::new();
 
-                    // If pending block is requested, try to get it from provider
-                    if let Ok(Some((block, receipts))) =
-                        self.provider().pending_block_and_receipts()
+                    // Try to get pending block and receipts
+                    if let Ok(Some((block_arc, receipts_arc))) =
+                        self.eth_api.load_block_and_receipts(BlockId::pending()).await
                     {
-                        let block_num_hash = BlockNumHash::new(block.number(), block.hash());
-                        let block_timestamp = block.timestamp();
-                        let block_arc = Arc::new(block);
-                        let receipts_arc = Arc::new(receipts);
+                        let block_num_hash =
+                            BlockNumHash::new(block_arc.number(), block_arc.hash());
+                        let block_timestamp = block_arc.timestamp();
 
-                        // Use existing append_matching_block_logs function to process pending logs
                         append_matching_block_logs(
                             &mut all_logs,
                             ProviderOrBlock::<Eth::Provider>::Block(block_arc),
@@ -517,78 +525,33 @@ where
                         )?;
                     }
 
-                    // If the range includes both pending and non-pending blocks, handle the
-                    // non-pending part
-                    let non_pending_from = if matches!(from_block, Some(BlockNumberOrTag::Pending))
-                    {
-                        None
-                    } else {
-                        from_block
-                    };
-                    let non_pending_to = if matches!(to_block, Some(BlockNumberOrTag::Pending)) {
-                        None
-                    } else {
-                        to_block
-                    };
-
-                    if non_pending_from.is_some() || non_pending_to.is_some() {
-                        // Process non-pending range using the original logic
-                        let info = self.provider().chain_info()?;
-                        let start_block = info.best_number;
-                        let from = non_pending_from
-                            .map(|num| self.provider().convert_block_number(num))
-                            .transpose()?
-                            .flatten();
-                        let to = non_pending_to
-                            .map(|num| self.provider().convert_block_number(num))
-                            .transpose()?
-                            .flatten();
-
-                        if let Some(f) = from &&
-                            f <= info.best_number
-                        {
-                            let (from_block_number, to_block_number) =
-                                logs_utils::get_filter_block_range(from, to, start_block, info);
-
-                            let mut non_pending_logs = self
-                                .get_logs_in_block_range(
-                                    filter,
-                                    from_block_number,
-                                    to_block_number,
-                                    limits,
-                                )
-                                .await?;
-                            all_logs.append(&mut non_pending_logs);
-                        }
-                    }
-
-                    Ok(all_logs)
-                } else {
-                    // Original logic for non-pending blocks
-                    let info = self.provider().chain_info()?;
-                    let start_block = info.best_number;
-                    let from = from_block
-                        .map(|num| self.provider().convert_block_number(num))
-                        .transpose()?
-                        .flatten();
-                    let to = to_block
-                        .map(|num| self.provider().convert_block_number(num))
-                        .transpose()?
-                        .flatten();
-
-                    if let Some(f) = from &&
-                        f > info.best_number
-                    {
-                        // start block higher than local head, can return empty
-                        return Ok(Vec::new());
-                    }
-
-                    let (from_block_number, to_block_number) =
-                        logs_utils::get_filter_block_range(from, to, start_block, info);
-
-                    self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
-                        .await
+                    return Ok(all_logs);
                 }
+
+                // Original logic for non-pending ranges
+                let info = self.provider().chain_info()?;
+                let start_block = info.best_number;
+                let from = from_block
+                    .map(|num| self.provider().convert_block_number(num))
+                    .transpose()?
+                    .flatten();
+                let to = to_block
+                    .map(|num| self.provider().convert_block_number(num))
+                    .transpose()?
+                    .flatten();
+
+                if let Some(f) = from &&
+                    f > info.best_number
+                {
+                    // start block higher than local head, can return empty
+                    return Ok(Vec::new());
+                }
+
+                let (from_block_number, to_block_number) =
+                    logs_utils::get_filter_block_range(from, to, start_block, info);
+
+                self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
+                    .await
             }
         }
     }
@@ -988,7 +951,12 @@ where
 
 /// Represents different modes for processing block ranges when filtering logs
 enum RangeMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+        + EthApiTypes
+        + LoadBlock
+        + LoadReceipt
+        + EthBlocks
+        + 'static,
 > {
     /// Use cache-based processing for recent blocks
     Cached(CachedMode<Eth>),
@@ -997,7 +965,12 @@ enum RangeMode<
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+            + EthApiTypes
+            + LoadBlock
+            + LoadReceipt
+            + EthBlocks
+            + 'static,
     > RangeMode<Eth>
 {
     /// Creates a new `RangeMode`.
@@ -1069,14 +1042,24 @@ impl<
 
 /// Mode for processing blocks using cache optimization for recent blocks
 struct CachedMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+        + EthApiTypes
+        + LoadBlock
+        + LoadReceipt
+        + EthBlocks
+        + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
     headers_iter: std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+            + EthApiTypes
+            + LoadBlock
+            + LoadReceipt
+            + EthBlocks
+            + 'static,
     > CachedMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
@@ -1103,7 +1086,12 @@ type ReceiptFetchFuture<P> =
 
 /// Mode for processing blocks using range queries for older blocks
 struct RangeBlockMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+        + EthApiTypes
+        + LoadBlock
+        + LoadReceipt
+        + EthBlocks
+        + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
     iter: Peekable<std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
@@ -1114,7 +1102,12 @@ struct RangeBlockMode<
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+            + EthApiTypes
+            + LoadBlock
+            + LoadReceipt
+            + EthBlocks
+            + 'static,
     > RangeBlockMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
