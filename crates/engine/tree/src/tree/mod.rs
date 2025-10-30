@@ -1593,7 +1593,7 @@ where
                 );
 
                 self.emit_event(EngineApiEvent::Download(DownloadRequest::BlockRange(
-                    sync_target_state.head_block_hash,
+                    lowest_buffered.parent_hash(),
                     distance,
                 )));
                 return Ok(());
