@@ -194,7 +194,7 @@ pub struct RpcServerArgs {
         alias = "rpc-evm-memory-limit",
         value_name = "MEMORY_LIMIT",
         value_parser = MaxOr::new(RangedU64ValueParser::<u64>::new().range(1..)),
-        default_value_t = u64::MAX
+        default_value_t = (1 << 32) - 1
     )]
     pub rpc_evm_memory_limit: u64,
 
