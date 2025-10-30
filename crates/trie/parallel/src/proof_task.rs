@@ -141,6 +141,10 @@ impl ProofWorkerHandle {
         let parent_span =
             debug_span!(target: "trie::proof_task", "storage proof workers", ?storage_worker_count)
                 .entered();
+
+        // Capture timestamp before spawning storage workers
+        let storage_spawn_start = Instant::now();
+
         // Spawn storage workers
         for worker_id in 0..storage_worker_count {
             let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
@@ -159,6 +163,8 @@ impl ProofWorkerHandle {
                     worker_id,
                     storage_available_workers_clone,
                     #[cfg(feature = "metrics")]
+                    storage_spawn_start,
+                    #[cfg(feature = "metrics")]
                     metrics,
                 );
                 worker.run()
@@ -169,6 +175,10 @@ impl ProofWorkerHandle {
         let parent_span =
             debug_span!(target: "trie::proof_task", "account proof workers", ?storage_worker_count)
                 .entered();
+
+        // Capture timestamp before spawning account workers
+        let account_spawn_start = Instant::now();
+
         // Spawn account workers
         for worker_id in 0..account_worker_count {
             let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
@@ -188,6 +198,8 @@ impl ProofWorkerHandle {
                     worker_id,
                     storage_work_tx_clone,
                     account_available_workers_clone,
+                    #[cfg(feature = "metrics")]
+                    account_spawn_start,
                     #[cfg(feature = "metrics")]
                     metrics,
                 );
@@ -649,6 +661,9 @@ struct StorageProofWorker<Factory> {
     worker_id: usize,
     /// Counter tracking worker availability
     available_workers: Arc<AtomicUsize>,
+    /// Timestamp when worker spawning started
+    #[cfg(feature = "metrics")]
+    spawn_start: Instant,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -664,6 +679,7 @@ where
         work_rx: CrossbeamReceiver<StorageWorkerJob>,
         worker_id: usize,
         available_workers: Arc<AtomicUsize>,
+        #[cfg(feature = "metrics")] spawn_start: Instant,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
     ) -> Self {
         Self {
@@ -671,6 +687,8 @@ where
             work_rx,
             worker_id,
             available_workers,
+            #[cfg(feature = "metrics")]
+            spawn_start,
             #[cfg(feature = "metrics")]
             metrics,
         }
@@ -700,6 +718,8 @@ where
             worker_id,
             available_workers,
             #[cfg(feature = "metrics")]
+            spawn_start,
+            #[cfg(feature = "metrics")]
             metrics,
         } = self;
 
@@ -721,6 +741,10 @@ where
 
         // Initially mark this worker as available.
         available_workers.fetch_add(1, Ordering::Relaxed);
+
+        // Record time from spawn start to worker marking itself available
+        #[cfg(feature = "metrics")]
+        metrics.record_storage_worker_spawn_to_available_duration(spawn_start.elapsed());
 
         while let Ok(job) = work_rx.recv() {
             // Mark worker as busy.
@@ -890,6 +914,9 @@ struct AccountProofWorker<Factory> {
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Counter tracking worker availability
     available_workers: Arc<AtomicUsize>,
+    /// Timestamp when worker spawning started
+    #[cfg(feature = "metrics")]
+    spawn_start: Instant,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -906,6 +933,7 @@ where
         worker_id: usize,
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         available_workers: Arc<AtomicUsize>,
+        #[cfg(feature = "metrics")] spawn_start: Instant,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
     ) -> Self {
         Self {
@@ -914,6 +942,8 @@ where
             worker_id,
             storage_work_tx,
             available_workers,
+            #[cfg(feature = "metrics")]
+            spawn_start,
             #[cfg(feature = "metrics")]
             metrics,
         }
@@ -944,6 +974,8 @@ where
             storage_work_tx,
             available_workers,
             #[cfg(feature = "metrics")]
+            spawn_start,
+            #[cfg(feature = "metrics")]
             metrics,
         } = self;
 
@@ -965,6 +997,10 @@ where
 
         // Count this worker as available only after successful initialization.
         available_workers.fetch_add(1, Ordering::Relaxed);
+
+        // Record time from spawn start to worker marking itself available
+        #[cfg(feature = "metrics")]
+        metrics.record_account_worker_spawn_to_available_duration(spawn_start.elapsed());
 
         while let Ok(job) = work_rx.recv() {
             // Mark worker as busy.
