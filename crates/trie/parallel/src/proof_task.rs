@@ -703,13 +703,6 @@ where
             metrics,
         } = self;
 
-        // Create provider from factory
-        let provider = task_ctx
-            .factory
-            .database_provider_ro()
-            .expect("Storage worker failed to initialize: unable to create provider");
-        let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
-
         trace!(
             target: "trie::proof_task",
             worker_id,
@@ -719,10 +712,29 @@ where
         let mut storage_proofs_processed = 0u64;
         let mut storage_nodes_processed = 0u64;
 
-        // Initially mark this worker as available.
+        // Lazy initialization: DB provider and ProofTaskTx created on first message
+        let mut proof_tx: Option<ProofTaskTx<_>> = None;
+
+        // Initially mark this worker as available immediately (no DB creation yet).
         available_workers.fetch_add(1, Ordering::Relaxed);
 
         while let Ok(job) = work_rx.recv() {
+            // Lazy initialization: create DB provider and ProofTaskTx on first message
+            let proof_tx = proof_tx.get_or_insert_with(|| {
+                let provider = task_ctx
+                    .factory
+                    .database_provider_ro()
+                    .expect("Storage worker failed to initialize: unable to create provider");
+
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    "Storage worker initialized DB provider on first message"
+                );
+
+                ProofTaskTx::new(provider, task_ctx.prefix_sets.clone(), worker_id)
+            });
+
             // Mark worker as busy.
             available_workers.fetch_sub(1, Ordering::Relaxed);
 
@@ -947,13 +959,6 @@ where
             metrics,
         } = self;
 
-        // Create provider from factory
-        let provider = task_ctx
-            .factory
-            .database_provider_ro()
-            .expect("Account worker failed to initialize: unable to create provider");
-        let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
-
         trace!(
             target: "trie::proof_task",
             worker_id,
@@ -963,10 +968,29 @@ where
         let mut account_proofs_processed = 0u64;
         let mut account_nodes_processed = 0u64;
 
-        // Count this worker as available only after successful initialization.
+        // Lazy initialization: DB provider and ProofTaskTx created on first message
+        let mut proof_tx: Option<ProofTaskTx<_>> = None;
+
+        // Count this worker as available immediately (no DB creation yet).
         available_workers.fetch_add(1, Ordering::Relaxed);
 
         while let Ok(job) = work_rx.recv() {
+            // Lazy initialization: create DB provider and ProofTaskTx on first message
+            let proof_tx = proof_tx.get_or_insert_with(|| {
+                let provider = task_ctx
+                    .factory
+                    .database_provider_ro()
+                    .expect("Account worker failed to initialize: unable to create provider");
+
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    "Account worker initialized DB provider on first message"
+                );
+
+                ProofTaskTx::new(provider, task_ctx.prefix_sets.clone(), worker_id)
+            });
+
             // Mark worker as busy.
             available_workers.fetch_sub(1, Ordering::Relaxed);
 
