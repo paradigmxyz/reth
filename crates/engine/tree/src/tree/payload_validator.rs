@@ -5,7 +5,7 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     executor::WorkloadExecutor,
     instrumented_state::InstrumentedStateProvider,
-    payload_processor::{multiproof::MultiProofConfig, PayloadProcessor},
+    payload_processor::PayloadProcessor,
     persistence_state::CurrentPersistenceAction,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
@@ -39,7 +39,7 @@ use reth_provider::{
     StateRootProvider, TrieReader,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput, TrieInputSorted};
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
@@ -818,23 +818,13 @@ where
                     .trie_input_duration
                     .record(trie_input_start.elapsed().as_secs_f64());
 
-                // Convert the TrieInput into a MultProofConfig, since everything uses the sorted
-                // forms of the state/trie fields.
-                let (mut cleared_sorted_input, multiproof_config) =
-                    MultiProofConfig::from_input(trie_input);
-
-                // Rescue the prefix_sets from the cleared sorted input and attach to reusable
-                // builder
-                reusable_input.prefix_sets = core::mem::take(&mut cleared_sorted_input.prefix_sets);
-                self.trie_input.replace(reusable_input);
-
-                // Create OverlayStateProviderFactory with the multiproof config, for use with
+                // Create OverlayStateProviderFactory with the sorted trie input, for use with
                 // multiproofs.
                 let multiproof_provider_factory =
                     OverlayStateProviderFactory::new(self.provider.clone())
                         .with_block_number(Some(block_number))
-                        .with_trie_overlay(Some(multiproof_config.nodes_sorted))
-                        .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
+                        .with_trie_overlay(Some(trie_input.nodes))
+                        .with_hashed_state_overlay(Some(trie_input.state));
 
                 // Use state root task only if prefix sets are empty, otherwise proof generation is
                 // too expensive because it requires walking all paths in every proof.
