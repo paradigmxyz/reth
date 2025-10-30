@@ -17,16 +17,6 @@ impl SyncMetrics {
             .or_insert_with(|| StageMetrics::new_with_labels(&[("stage", stage_id.to_string())]))
     }
 
-    /// Updates all stage checkpoints to the given height efficiently.
-    /// This avoids creating multiple individual events when sync height changes.
-    pub(crate) fn update_all_stages_height(&mut self, height: u64) {
-        for stage_id in StageId::ALL {
-            let stage_metrics = self.get_stage_metrics(stage_id);
-            stage_metrics.checkpoint.set(height as f64);
-            stage_metrics.entities_processed.set(height as f64);
-            stage_metrics.entities_total.set(height as f64);
-        }
-    }
 }
 
 #[derive(Metrics)]
