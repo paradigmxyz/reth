@@ -1283,4 +1283,88 @@ mod tests {
         assert_eq!(storage3.zero_valued_slots.len(), 1);
         assert!(storage3.zero_valued_slots.contains(&B256::from([4; 32])));
     }
+
+    /// Test extending with sorted accounts merges correctly into HashMap
+    #[test]
+    fn test_hashed_post_state_extend_from_sorted_with_accounts() {
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+
+        let mut state = HashedPostState::default();
+        state.accounts.insert(addr1, Some(Default::default()));
+
+        let mut sorted_state = HashedPostStateSorted::default();
+        sorted_state.accounts.accounts.push((addr2, Default::default()));
+
+        state.extend_from_sorted(&sorted_state);
+
+        assert_eq!(state.accounts.len(), 2);
+        assert!(state.accounts.contains_key(&addr1));
+        assert!(state.accounts.contains_key(&addr2));
+    }
+
+    /// Test destroyed accounts (None values) are inserted correctly
+    #[test]
+    fn test_hashed_post_state_extend_from_sorted_with_destroyed_accounts() {
+        let addr1 = B256::random();
+
+        let mut state = HashedPostState::default();
+
+        let mut sorted_state = HashedPostStateSorted::default();
+        sorted_state.accounts.destroyed_accounts.insert(addr1);
+
+        state.extend_from_sorted(&sorted_state);
+
+        assert!(state.accounts.contains_key(&addr1));
+        assert_eq!(state.accounts.get(&addr1), Some(&None));
+    }
+
+    /// Test non-wiped storage merges both zero and non-zero valued slots
+    #[test]
+    fn test_hashed_storage_extend_from_sorted_non_wiped() {
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        let slot3 = B256::random();
+
+        let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
+
+        let mut zero_valued_slots = B256Set::default();
+        zero_valued_slots.insert(slot3);
+
+        let sorted = HashedStorageSorted {
+            non_zero_valued_slots: vec![(slot2, U256::from(200))],
+            zero_valued_slots,
+            wiped: false,
+        };
+
+        storage.extend_from_sorted(&sorted);
+
+        assert!(!storage.wiped);
+        assert_eq!(storage.storage.len(), 3);
+        assert_eq!(storage.storage.get(&slot1), Some(&U256::from(100)));
+        assert_eq!(storage.storage.get(&slot2), Some(&U256::from(200)));
+        assert_eq!(storage.storage.get(&slot3), Some(&U256::ZERO));
+    }
+
+    /// Test wiped=true clears existing storage and only keeps new slots (critical edge case)
+    #[test]
+    fn test_hashed_storage_extend_from_sorted_wiped() {
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+
+        let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
+
+        let sorted = HashedStorageSorted {
+            non_zero_valued_slots: vec![(slot2, U256::from(200))],
+            zero_valued_slots: Default::default(),
+            wiped: true,
+        };
+
+        storage.extend_from_sorted(&sorted);
+
+        assert!(storage.wiped);
+        // After wipe, old storage should be cleared and only new storage remains
+        assert_eq!(storage.storage.len(), 1);
+        assert_eq!(storage.storage.get(&slot2), Some(&U256::from(200)));
+    }
 }

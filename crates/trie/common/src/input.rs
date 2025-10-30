@@ -186,3 +186,44 @@ impl TrieInputSorted {
         self.prefix_sets.clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{hashed_state::HashedStorage, Nibbles};
+    use alloy_primitives::{keccak256, Address, B256, U256};
+
+    /// Test appending sorted state ref populates prefix sets and state correctly
+    #[test]
+    fn test_trie_input_sorted_append_ref_populates_prefix_sets_and_state() {
+        // Build an unsorted hashed state with one account and one storage slot
+        let address = Address::random();
+        let hashed_addr = keccak256(address);
+        let slot = B256::random();
+
+        let mut state = HashedPostState::default();
+        state.accounts.insert(hashed_addr, Some(Default::default()));
+        state
+            .storages
+            .insert(hashed_addr, HashedStorage::from_iter(false, [(slot, U256::from(1))]));
+
+        let mut input = TrieInputSorted::default();
+        input.append_ref(&state);
+
+        // Prefix sets should include the address and the slot
+        let mut acct_ps = input.prefix_sets.account_prefix_set.clone().freeze();
+        assert!(acct_ps.contains(&Nibbles::unpack(&hashed_addr)));
+        let mut storage_ps =
+            input.prefix_sets.storage_prefix_sets.get(&hashed_addr).unwrap().clone().freeze();
+        assert!(storage_ps.contains(&Nibbles::unpack(&slot)));
+
+        // Sorted state should contain exactly one account and one storage entry
+        assert_eq!(input.state.accounts.accounts.len(), 1);
+        assert!(input.state.storages.contains_key(&hashed_addr));
+
+        // Appending the same state again should keep deduplicated contents
+        input.append_ref(&state);
+        assert_eq!(input.state.accounts.accounts.len(), 1);
+        assert!(input.state.storages.contains_key(&hashed_addr));
+    }
+}

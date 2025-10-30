@@ -822,6 +822,151 @@ mod tests {
         assert_eq!(storage3.storage_nodes[0].0, Nibbles::from_nibbles_unchecked([0x06]));
         assert_eq!(storage3.storage_nodes[1].0, Nibbles::from_nibbles_unchecked([0x07]));
     }
+
+    /// Test extending with storage tries adds both nodes and removed nodes correctly
+    #[test]
+    fn test_trie_updates_extend_from_sorted_with_storage_tries() {
+        let hashed_address = B256::from([1; 32]);
+
+        let mut updates = TrieUpdates::default();
+
+        let storage_trie = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x0a]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x0b]), None),
+            ],
+        };
+
+        let sorted = TrieUpdatesSorted {
+            account_nodes: vec![],
+            storage_tries: B256Map::from_iter([(hashed_address, storage_trie)]),
+        };
+
+        updates.extend_from_sorted(&sorted);
+
+        assert_eq!(updates.storage_tries.len(), 1);
+        let storage = updates.storage_tries.get(&hashed_address).unwrap();
+        assert!(!storage.is_deleted);
+        assert_eq!(storage.storage_nodes.len(), 1);
+        assert!(storage.removed_nodes.contains(&Nibbles::from_nibbles_unchecked([0x0b])));
+    }
+
+    /// Test deleted=true clears old storage nodes before adding new ones (critical edge case)
+    #[test]
+    fn test_trie_updates_extend_from_sorted_with_deleted_storage() {
+        let hashed_address = B256::from([1; 32]);
+
+        let mut updates = TrieUpdates::default();
+        updates.storage_tries.insert(
+            hashed_address,
+            StorageTrieUpdates {
+                is_deleted: false,
+                storage_nodes: HashMap::from_iter([(
+                    Nibbles::from_nibbles_unchecked([0x01]),
+                    BranchNodeCompact::default(),
+                )]),
+                removed_nodes: Default::default(),
+            },
+        );
+
+        let storage_trie = StorageTrieUpdatesSorted {
+            is_deleted: true,
+            storage_nodes: vec![(
+                Nibbles::from_nibbles_unchecked([0x0a]),
+                Some(BranchNodeCompact::default()),
+            )],
+        };
+
+        let sorted = TrieUpdatesSorted {
+            account_nodes: vec![],
+            storage_tries: B256Map::from_iter([(hashed_address, storage_trie)]),
+        };
+
+        updates.extend_from_sorted(&sorted);
+
+        let storage = updates.storage_tries.get(&hashed_address).unwrap();
+        assert!(storage.is_deleted);
+        // After deletion, old nodes should be cleared
+        assert_eq!(storage.storage_nodes.len(), 1);
+        assert!(storage.storage_nodes.contains_key(&Nibbles::from_nibbles_unchecked([0x0a])));
+    }
+
+    /// Test non-deleted storage merges nodes and tracks removed nodes
+    #[test]
+    fn test_storage_trie_updates_extend_from_sorted_non_deleted() {
+        let mut storage = StorageTrieUpdates {
+            is_deleted: false,
+            storage_nodes: HashMap::from_iter([(
+                Nibbles::from_nibbles_unchecked([0x01]),
+                BranchNodeCompact::default(),
+            )]),
+            removed_nodes: Default::default(),
+        };
+
+        let sorted = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x02]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x03]), None),
+            ],
+        };
+
+        storage.extend_from_sorted(&sorted);
+
+        assert!(!storage.is_deleted);
+        assert_eq!(storage.storage_nodes.len(), 2);
+        assert!(storage.removed_nodes.contains(&Nibbles::from_nibbles_unchecked([0x03])));
+    }
+
+    /// Test deleted=true clears old nodes before extending (edge case)
+    #[test]
+    fn test_storage_trie_updates_extend_from_sorted_deleted() {
+        let mut storage = StorageTrieUpdates {
+            is_deleted: false,
+            storage_nodes: HashMap::from_iter([(
+                Nibbles::from_nibbles_unchecked([0x01]),
+                BranchNodeCompact::default(),
+            )]),
+            removed_nodes: Default::default(),
+        };
+
+        let sorted = StorageTrieUpdatesSorted {
+            is_deleted: true,
+            storage_nodes: vec![(
+                Nibbles::from_nibbles_unchecked([0x0a]),
+                Some(BranchNodeCompact::default()),
+            )],
+        };
+
+        storage.extend_from_sorted(&sorted);
+
+        assert!(storage.is_deleted);
+        // Old nodes should be cleared when deleted
+        assert_eq!(storage.storage_nodes.len(), 1);
+        assert!(storage.storage_nodes.contains_key(&Nibbles::from_nibbles_unchecked([0x0a])));
+    }
+
+    /// Test empty nibbles are filtered out during conversion (edge case bug)
+    #[test]
+    fn test_trie_updates_extend_from_sorted_filters_empty_nibbles() {
+        let mut updates = TrieUpdates::default();
+
+        let sorted = TrieUpdatesSorted {
+            account_nodes: vec![
+                (Nibbles::default(), Some(BranchNodeCompact::default())), // Empty nibbles
+                (Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default())),
+            ],
+            storage_tries: B256Map::default(),
+        };
+
+        updates.extend_from_sorted(&sorted);
+
+        // Empty nibbles should be filtered out
+        assert_eq!(updates.account_nodes.len(), 1);
+        assert!(updates.account_nodes.contains_key(&Nibbles::from_nibbles_unchecked([0x01])));
+        assert!(!updates.account_nodes.contains_key(&Nibbles::default()));
+    }
 }
 
 /// Bincode-compatible trie updates type serde implementations.
