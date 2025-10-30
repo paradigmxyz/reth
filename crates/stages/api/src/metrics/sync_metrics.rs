@@ -16,7 +16,6 @@ impl SyncMetrics {
             .entry(stage_id)
             .or_insert_with(|| StageMetrics::new_with_labels(&[("stage", stage_id.to_string())]))
     }
-
 }
 
 #[derive(Metrics)]
