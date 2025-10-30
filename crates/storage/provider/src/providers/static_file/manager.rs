@@ -242,7 +242,7 @@ pub struct StaticFileProviderInner<N> {
     /// `expired_history_height + 1`.
     ///
     /// This is effectively the transaction range that has been expired:
-    /// [`StaticFileProvider::delete_transactions_below`] and mirrors
+    /// [`StaticFileProvider::delete_segment_below_block`] and mirrors
     /// `static_files_min_block[transactions] - blocks_per_file`.
     ///
     /// This additional tracker exists for more efficient lookups because the node must be aware of
@@ -443,43 +443,59 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.map.remove(&(fixed_block_range_end, segment));
     }
 
-    /// This handles history expiry by deleting all transaction static files below the given block.
+    /// This handles history expiry by deleting all static files for the given segment below the
+    /// given block.
     ///
     /// For example if block is 1M and the blocks per file are 500K this will delete all individual
     /// files below 1M, so 0-499K and 500K-999K.
     ///
     /// This will not delete the file that contains the block itself, because files can only be
     /// removed entirely.
-    pub fn delete_transactions_below(&self, block: BlockNumber) -> ProviderResult<()> {
+    ///
+    /// # Safety
+    ///
+    /// This method will never delete the highest static file for the segment, even if the
+    /// requested block is higher than the highest block in static files. This ensures we always
+    /// maintain at least one static file if any exist.
+    ///
+    /// Returns a list of `SegmentHeader`s from the deleted jars.
+    pub fn delete_segment_below_block(
+        &self,
+        segment: StaticFileSegment,
+        block: BlockNumber,
+    ) -> ProviderResult<Vec<SegmentHeader>> {
         // Nothing to delete if block is 0.
         if block == 0 {
-            return Ok(())
+            return Ok(Vec::new())
         }
 
+        let highest_block = self.get_highest_static_file_block(segment);
+        let mut deleted_headers = Vec::new();
+
         loop {
-            let Some(block_height) =
-                self.get_lowest_static_file_block(StaticFileSegment::Transactions)
-            else {
-                return Ok(())
+            let Some(block_height) = self.get_lowest_static_file_block(segment) else {
+                return Ok(deleted_headers)
             };
 
-            if block_height >= block {
-                return Ok(())
+            // Stop if we've reached the target block or the highest static file
+            if block_height >= block || Some(block_height) == highest_block {
+                return Ok(deleted_headers)
             }
 
             debug!(
                 target: "provider::static_file",
+                ?segment,
                 ?block_height,
-                "Deleting transaction static file below block"
+                "Deleting static file below block"
             );
 
             // now we need to wipe the static file, this will take care of updating the index and
-            // advance the lowest tracked block height for the transactions segment.
-            self.delete_jar(StaticFileSegment::Transactions, block_height)
-                .inspect_err(|err| {
-                    warn!( target: "provider::static_file", %block_height, ?err, "Failed to delete transaction static file below block")
-                })
-                ?;
+            // advance the lowest tracked block height for the segment.
+            let header = self.delete_jar(segment, block_height).inspect_err(|err| {
+                warn!( target: "provider::static_file", ?segment, %block_height, ?err, "Failed to delete static file below block")
+            })?;
+
+            deleted_headers.push(header);
         }
     }
 
@@ -488,7 +504,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// CAUTION: destructive. Deletes files on disk.
     ///
     /// This will re-initialize the index after deletion, so all files are tracked.
-    pub fn delete_jar(&self, segment: StaticFileSegment, block: BlockNumber) -> ProviderResult<()> {
+    ///
+    /// Returns the `SegmentHeader` of the deleted jar.
+    pub fn delete_jar(
+        &self,
+        segment: StaticFileSegment,
+        block: BlockNumber,
+    ) -> ProviderResult<SegmentHeader> {
         let fixed_block_range = self.find_fixed_range(block);
         let key = (fixed_block_range.end(), segment);
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
@@ -505,11 +527,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             NippyJar::<SegmentHeader>::load(&file).map_err(ProviderError::other)?
         };
 
+        let header = jar.user_header().clone();
         jar.delete().map_err(ProviderError::other)?;
 
         self.initialize_index()?;
 
-        Ok(())
+        Ok(header)
     }
 
     /// Given a segment and block range it returns a cached
@@ -1040,6 +1063,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_lowest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
         self.static_files_min_block.read().get(&segment).map(|range| range.end())
+    }
+
+    /// Gets the lowest static file's block range if it exists for a static file segment.
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
+    pub fn get_lowest_range(&self, segment: StaticFileSegment) -> Option<SegmentRangeInclusive> {
+        self.static_files_min_block.read().get(&segment).copied()
     }
 
     /// Gets the highest static file's block height if it exists for a static file segment.

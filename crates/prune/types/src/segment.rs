@@ -1,10 +1,13 @@
+#![allow(deprecated)] // necessary to all defining deprecated `PruneSegment` variants
+
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
 use thiserror::Error;
 
 /// Segment of the data that can be pruned.
 ///
-/// NOTE new variants must be added to the end of this enum. The variant index is encoded directly
+/// VERY IMPORTANT NOTE: new variants must be added to the end of this enum, and old variants which
+/// are no longer used must not be removed from this enum. The variant index is encoded directly
 /// when writing to the `PruneCheckpoint` table, so changing the order here will corrupt the table.
 #[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
@@ -24,13 +27,17 @@ pub enum PruneSegment {
     AccountHistory,
     /// Prune segment responsible for the `StorageChangeSets` and `StoragesHistory` tables.
     StorageHistory,
+    #[deprecated = "Variant indexes cannot be changed"]
     /// Prune segment responsible for the `CanonicalHeaders`, `Headers` tables.
     Headers,
+    #[deprecated = "Variant indexes cannot be changed"]
     /// Prune segment responsible for the `Transactions` table.
     Transactions,
     /// Prune segment responsible for all rows in `AccountsTrieChangeSets` and
     /// `StoragesTrieChangeSets` table.
     MerkleChangeSets,
+    /// Prune segment responsible for bodies (transactions in static files).
+    Bodies,
 }
 
 #[cfg(test)]
@@ -45,15 +52,17 @@ impl PruneSegment {
     /// Returns minimum number of blocks to keep in the database for this segment.
     pub const fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
         match self {
-            Self::SenderRecovery | Self::TransactionLookup | Self::Headers | Self::Transactions => {
-                0
-            }
+            Self::SenderRecovery | Self::TransactionLookup => 0,
             Self::Receipts if purpose.is_static_file() => 0,
             Self::ContractLogs |
             Self::AccountHistory |
             Self::StorageHistory |
             Self::MerkleChangeSets |
+            Self::Bodies |
             Self::Receipts => MINIMUM_PRUNING_DISTANCE,
+            #[expect(deprecated)]
+            #[expect(clippy::match_same_arms)]
+            Self::Headers | Self::Transactions => 0,
         }
     }
 

@@ -84,6 +84,7 @@ async fn test_apply_with_import() -> Result<()> {
             alloy_rpc_types_eth::Block,
             alloy_rpc_types_eth::Receipt,
             alloy_rpc_types_eth::Header,
+            reth_ethereum_primitives::TransactionSigned,
         >::block_by_number(
             &client.rpc,
             alloy_eips::BlockNumberOrTag::Number(10),

@@ -25,10 +25,7 @@ use reth_evm::{
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{CacheDB, State},
-};
+use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -291,7 +288,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let this = self.clone();
             self.spawn_with_state_at_block(at.into(), move |state| {
                 let mut all_results = Vec::with_capacity(bundles.len());
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -404,7 +402,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     {
         self.spawn_blocking_io_fut(move |this| async move {
             let state = this.state_at_block_id(at).await?;
-            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+            let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
 
             if let Some(state_overrides) = state_override {
                 apply_state_overrides(state_overrides, &mut db)
@@ -634,8 +632,9 @@ pub trait Call:
             let this = self.clone();
             self.spawn_blocking_io_fut(move |_| async move {
                 let state = this.state_at_block_id(at).await?;
-                let mut db =
-                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)))
+                    .build();
 
                 let (evm_env, tx_env) =
                     this.prepare_call_env(evm_env, request, &mut db, overrides)?;
@@ -686,7 +685,8 @@ pub trait Call:
 
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
                 let block_txs = block.transactions_recovered();
 
                 // replay all transactions prior to the targeted transaction
@@ -705,7 +705,7 @@ pub trait Call:
     /// Replays all the transactions until the target transaction is found.
     ///
     /// All transactions before the target transaction are executed and their changes are written to
-    /// the _runtime_ db ([`CacheDB`]).
+    /// the _runtime_ db ([`State`]).
     ///
     /// Note: This assumes the target transaction is in the given iterator.
     /// Returns the index of the target transaction in the given iterator.

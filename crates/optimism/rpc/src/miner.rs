@@ -36,9 +36,7 @@ impl MinerApiExtServer for OpMinerExtApi {
         Ok(true)
     }
 
-    async fn set_gas_limit(&self, gas_limit: U64) -> RpcResult<bool> {
-        debug!(target: "rpc", "Setting gas limit: {}", gas_limit);
-        // self.da_config.set_gas_limit(gas_limit.to());
+    async fn set_gas_limit(&self, _max_block_gas: U64) -> RpcResult<bool> {
         Ok(true)
     }
 }

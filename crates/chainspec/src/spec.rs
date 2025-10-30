@@ -10,7 +10,7 @@ use crate::{
     sepolia::SEPOLIA_PARIS_BLOCK,
     EthChainSpec,
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
@@ -451,7 +451,26 @@ impl<H: BlockHeader> ChainSpec<H> {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(self.hardforks.forks_iter())
+        // Create an iterator with hardfork, condition, and optional blob metadata
+        let hardforks_with_meta = self.hardforks.forks_iter().map(|(fork, condition)| {
+            // Generate blob metadata for timestamp-based hardforks that have blob params
+            let metadata = match condition {
+                ForkCondition::Timestamp(timestamp) => {
+                    // Try to get blob params for this timestamp
+                    // This automatically handles all hardforks with blob support
+                    EthChainSpec::blob_params_at_timestamp(self, timestamp).map(|params| {
+                        format!(
+                            "blob: (target: {}, max: {}, fraction: {})",
+                            params.target_blob_count, params.max_blob_count, params.update_fraction
+                        )
+                    })
+                }
+                _ => None,
+            };
+            (fork, condition, metadata)
+        });
+
+        DisplayHardforks::with_meta(hardforks_with_meta)
     }
 
     /// Get the fork id for the given hardfork.
@@ -895,7 +914,7 @@ impl ChainSpecBuilder {
 
     /// Remove the given fork from the spec.
     pub fn without_fork<H: Hardfork>(mut self, fork: H) -> Self {
-        self.hardforks.remove(fork);
+        self.hardforks.remove(&fork);
         self
     }
 
@@ -1182,8 +1201,8 @@ Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-- Cancun                           @1710338135
-- Prague                           @1746612311"
+- Cancun                           @1710338135          blob: (target: 3, max: 6, fraction: 3338477)
+- Prague                           @1746612311          blob: (target: 6, max: 9, fraction: 5007716)"
         );
     }
 
