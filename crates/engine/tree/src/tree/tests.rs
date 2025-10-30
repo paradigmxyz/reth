@@ -403,7 +403,7 @@ impl ValidatorTestHarness {
         Self { harness, validator, metrics: TestMetrics::default() }
     }
 
-    /// Configure `PersistenceState` for specific `PersistingKind` scenarios
+    /// Configure `PersistenceState` for specific persistence scenarios
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
         use tokio::sync::oneshot;
 
@@ -432,7 +432,6 @@ impl ValidatorTestHarness {
     ) -> ValidationOutcome<EthPrimitives> {
         let ctx = TreeCtx::new(
             &mut self.harness.tree.state,
-            &self.harness.tree.persistence_state,
             &self.harness.tree.canonical_in_memory_state,
         );
         let result = self.validator.validate_block(block, ctx);

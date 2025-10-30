@@ -1648,9 +1648,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 if let Some(writer) = &mut receipts_static_writer {
                     writer.append_receipt(receipt_idx, receipt)?;
+                } else {
+                    receipts_cursor.append(receipt_idx, receipt)?;
                 }
-
-                receipts_cursor.append(receipt_idx, receipt)?;
             }
         }
 

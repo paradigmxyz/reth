@@ -545,6 +545,13 @@ impl HashedPostStateSorted {
         &self.storages
     }
 
+    /// Returns `true` if there are no account or storage updates.
+    pub fn is_empty(&self) -> bool {
+        self.accounts.accounts.is_empty() &&
+            self.accounts.destroyed_accounts.is_empty() &&
+            self.storages.is_empty()
+    }
+
     /// Returns the total number of updates including all accounts and storage updates.
     pub fn total_len(&self) -> usize {
         self.accounts.accounts.len() +
