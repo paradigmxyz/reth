@@ -939,9 +939,14 @@ where
             input.state = Arc::clone(&first.hashed_state);
             input.nodes = Arc::clone(&first.trie_updates);
 
-            for block in blocks_iter {
-                Arc::make_mut(&mut input.state).extend_ref(block.hashed_state());
-                Arc::make_mut(&mut input.nodes).extend_ref(block.trie_updates());
+            // Only clone and mutate if there are multiple in-memory blocks.
+            if blocks.len() > 1 {
+                let state_mut = Arc::make_mut(&mut input.state);
+                let nodes_mut = Arc::make_mut(&mut input.nodes);
+                for block in blocks_iter {
+                    state_mut.extend_ref(block.hashed_state());
+                    nodes_mut.extend_ref(block.trie_updates());
+                }
             }
         }
 
