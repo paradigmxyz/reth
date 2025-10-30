@@ -14,7 +14,7 @@ use revm::{
     Database, DatabaseCommit,
 };
 
-/// Helper alias type for the state's [`CacheDB`]
+/// Helper alias type for the state's [`State`]
 pub type StateCacheDb<'a> = State<StateProviderDatabase<StateProviderTraitObjWrapper<'a>>>;
 
 /// Hack to get around 'higher-ranked lifetime error', see
@@ -213,19 +213,19 @@ impl<'a> DatabaseRef for StateCacheDbRefMutWrapper<'a, '_> {
     type Error = <StateCacheDb<'a> as Database>::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.0.basic_ref(address).map_err(|e| BalDatabaseError::Database(e))
+        self.0.basic_ref(address).map_err(BalDatabaseError::Database)
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.0.code_by_hash_ref(code_hash).map_err(|e| BalDatabaseError::Database(e))
+        self.0.code_by_hash_ref(code_hash).map_err(BalDatabaseError::Database)
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.0.storage_ref(address, index).map_err(|e| BalDatabaseError::Database(e))
+        self.0.storage_ref(address, index).map_err(BalDatabaseError::Database)
     }
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        self.0.block_hash_ref(number).map_err(|e| BalDatabaseError::Database(e))
+        self.0.block_hash_ref(number).map_err(BalDatabaseError::Database)
     }
 }
 

@@ -13,7 +13,7 @@ go build .
 echo "Building images"
 ./hive -client reth --sim "ethereum/eels" \
   --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal@v1.3.0/fixtures_bal.tar.gz \
-  --sim.buildarg branch=main \
+  --sim.buildarg branch=forks/amsterdam \
   --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
 ./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
