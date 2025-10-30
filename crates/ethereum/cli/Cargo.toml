@@ -37,7 +37,7 @@ tracing.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc", "otlp"]
+default = []
 
 otlp = ["reth-tracing/otlp", "reth-node-core/otlp"]
 
