@@ -763,8 +763,7 @@ where
                     .trie_input_duration
                     .record(trie_input_start.elapsed().as_secs_f64());
 
-                // Create OverlayStateProviderFactory with the sorted trie input, for use with
-                // multiproofs.
+                // Create OverlayStateProviderFactory with sorted trie data for multiproofs
                 let multiproof_provider_factory =
                     OverlayStateProviderFactory::new(self.provider.clone())
                         .with_block_hash(Some(block_hash))
