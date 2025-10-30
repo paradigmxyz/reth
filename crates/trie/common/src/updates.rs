@@ -73,6 +73,45 @@ impl TrieUpdates {
         self.account_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
     }
 
+    /// Extend trie updates with sorted data, converting directly into the unsorted `HashMap`
+    /// representation. This is more efficient than first converting to `TrieUpdates` and
+    /// then extending, as it avoids creating intermediate `HashMap` allocations.
+    pub fn extend_from_sorted(&mut self, sorted: &TrieUpdatesSorted) {
+        // Reserve capacity for account nodes
+        let new_nodes_count = sorted
+            .account_nodes
+            .iter()
+            .filter(|(nibbles, node)| !nibbles.is_empty() && node.is_some())
+            .count();
+        self.account_nodes.reserve(new_nodes_count);
+
+        // Insert account nodes from sorted (only non-None entries)
+        for (nibbles, maybe_node) in &sorted.account_nodes {
+            if nibbles.is_empty() {
+                continue;
+            }
+            match maybe_node {
+                Some(node) => {
+                    self.removed_nodes.remove(nibbles);
+                    self.account_nodes.insert(*nibbles, node.clone());
+                }
+                None => {
+                    self.account_nodes.remove(nibbles);
+                    self.removed_nodes.insert(*nibbles);
+                }
+            }
+        }
+
+        // Extend storage tries
+        self.storage_tries.reserve(sorted.storage_tries.len());
+        for (hashed_address, sorted_storage) in &sorted.storage_tries {
+            self.storage_tries
+                .entry(*hashed_address)
+                .or_default()
+                .extend_from_sorted(sorted_storage);
+        }
+    }
+
     /// Insert storage updates for a given hashed address.
     pub fn insert_storage_updates(
         &mut self,
@@ -251,6 +290,40 @@ impl StorageTrieUpdates {
         }
         self.is_deleted |= other.is_deleted;
         self.storage_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
+    }
+
+    /// Extend storage trie updates with sorted data, converting directly into the unsorted
+    /// `HashMap` representation. This is more efficient than first converting to
+    /// `StorageTrieUpdates` and then extending, as it avoids creating intermediate `HashMap`
+    /// allocations.
+    pub fn extend_from_sorted(&mut self, sorted: &StorageTrieUpdatesSorted) {
+        if sorted.is_deleted {
+            self.storage_nodes.clear();
+            self.removed_nodes.clear();
+        }
+        self.is_deleted |= sorted.is_deleted;
+
+        // Reserve capacity for storage nodes
+        let new_nodes_count = sorted
+            .storage_nodes
+            .iter()
+            .filter(|(nibbles, node)| !nibbles.is_empty() && node.is_some())
+            .count();
+        self.storage_nodes.reserve(new_nodes_count);
+
+        // Remove nodes marked as removed and insert new nodes
+        for (nibbles, maybe_node) in &sorted.storage_nodes {
+            if nibbles.is_empty() {
+                continue;
+            }
+            if let Some(node) = maybe_node {
+                self.removed_nodes.remove(nibbles);
+                self.storage_nodes.insert(*nibbles, node.clone());
+            } else {
+                self.storage_nodes.remove(nibbles);
+                self.removed_nodes.insert(*nibbles);
+            }
+        }
     }
 
     /// Finalize storage trie updates for by taking updates from walker and hash builder.

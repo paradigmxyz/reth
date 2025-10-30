@@ -53,7 +53,7 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     /// Return lazy-loaded trie state aggregated from in-memory blocks.
     fn trie_input(&self) -> &TrieInput {
         self.trie_input.get_or_init(|| {
-            TrieInput::from_blocks(
+            TrieInput::from_blocks_sorted(
                 self.in_memory
                     .iter()
                     .rev()
