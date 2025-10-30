@@ -76,6 +76,9 @@ impl TrieUpdates {
     /// Extend trie updates with sorted data, converting directly into the unsorted `HashMap`
     /// representation. This is more efficient than first converting to `TrieUpdates` and
     /// then extending, as it avoids creating intermediate `HashMap` allocations.
+    ///
+    /// This top-level helper merges account nodes and delegates each account's storage trie to
+    /// [`StorageTrieUpdates::extend_from_sorted`].
     pub fn extend_from_sorted(&mut self, sorted: &TrieUpdatesSorted) {
         // Reserve capacity for account nodes
         let new_nodes_count = sorted
