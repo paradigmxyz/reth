@@ -36,6 +36,8 @@ pub enum PruneSegment {
     /// Prune segment responsible for all rows in `AccountsTrieChangeSets` and
     /// `StoragesTrieChangeSets` table.
     MerkleChangeSets,
+    /// Prune segment responsible for bodies (transactions in static files).
+    Bodies,
 }
 
 /// Array of [`PruneSegment`]s actively in use.
@@ -67,6 +69,7 @@ impl PruneSegment {
             Self::AccountHistory |
             Self::StorageHistory |
             Self::MerkleChangeSets |
+            Self::Bodies |
             Self::Receipts => MINIMUM_PRUNING_DISTANCE,
             #[expect(deprecated)]
             #[expect(clippy::match_same_arms)]

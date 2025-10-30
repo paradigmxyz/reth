@@ -6,16 +6,15 @@ use crate::tree::{
     executor::WorkloadExecutor,
     instrumented_state::InstrumentedStateProvider,
     payload_processor::{multiproof::MultiProofConfig, PayloadProcessor},
-    persistence_state::CurrentPersistenceAction,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, PersistenceState,
-    PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
+    StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::B256;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
@@ -33,8 +32,8 @@ use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
-    DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
+    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
     PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
     StateRootProvider, TrieReader,
 };
@@ -51,8 +50,6 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 pub struct TreeCtx<'a, N: NodePrimitives> {
     /// The engine API tree state
     state: &'a mut EngineApiTreeState<N>,
-    /// Information about the current persistence state
-    persistence: &'a PersistenceState,
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
 }
@@ -61,7 +58,6 @@ impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TreeCtx")
             .field("state", &"EngineApiTreeState")
-            .field("persistence_info", &self.persistence)
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .finish()
     }
@@ -71,10 +67,9 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     /// Creates a new tree context
     pub const fn new(
         state: &'a mut EngineApiTreeState<N>,
-        persistence: &'a PersistenceState,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
     ) -> Self {
-        Self { state, persistence, canonical_in_memory_state }
+        Self { state, canonical_in_memory_state }
     }
 
     /// Returns a reference to the engine tree state
@@ -87,42 +82,9 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         self.state
     }
 
-    /// Returns a reference to the persistence info
-    pub const fn persistence(&self) -> &PersistenceState {
-        self.persistence
-    }
-
     /// Returns a reference to the canonical in-memory state
     pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
         self.canonical_in_memory_state
-    }
-
-    /// Determines the persisting kind for the given block based on persistence info.
-    ///
-    /// Based on the given header it returns whether any conflicting persistence operation is
-    /// currently in progress.
-    ///
-    /// This is adapted from the `persisting_kind_for` method in `EngineApiTreeHandler`.
-    pub fn persisting_kind_for(&self, block: BlockWithParent) -> PersistingKind {
-        // Check that we're currently persisting.
-        let Some(action) = self.persistence().current_action() else {
-            return PersistingKind::NotPersisting
-        };
-        // Check that the persistince action is saving blocks, not removing them.
-        let CurrentPersistenceAction::SavingBlocks { highest } = action else {
-            return PersistingKind::PersistingNotDescendant
-        };
-
-        // The block being validated can only be a descendant if its number is higher than
-        // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.block.number > highest.number &&
-            self.state().tree_state.is_descendant(*highest, block)
-        {
-            return PersistingKind::PersistingDescendant
-        }
-
-        // In all other cases, the block is not a descendant.
-        PersistingKind::PersistingNotDescendant
     }
 }
 
@@ -680,10 +642,7 @@ where
         hashed_state: &HashedPostState,
         state: &EngineApiTreeState<N>,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        let provider = self.provider.database_provider_ro()?;
-
-        let (mut input, block_number) =
-            self.compute_trie_input(provider, parent_hash, state, None)?;
+        let (mut input, block_hash) = self.compute_trie_input(parent_hash, state, None)?;
 
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
@@ -693,7 +652,7 @@ where
         let (_, multiproof_config) = MultiProofConfig::from_input(input);
 
         let factory = OverlayStateProviderFactory::new(self.provider.clone())
-            .with_block_number(Some(block_number))
+            .with_block_hash(Some(block_hash))
             .with_trie_overlay(Some(multiproof_config.nodes_sorted))
             .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
 
@@ -806,12 +765,8 @@ where
 
                 // Compute trie input
                 let trie_input_start = Instant::now();
-                let (trie_input, block_number) = self.compute_trie_input(
-                    self.provider.database_provider_ro()?,
-                    parent_hash,
-                    state,
-                    allocated_trie_input,
-                )?;
+                let (trie_input, block_hash) =
+                    self.compute_trie_input(parent_hash, state, allocated_trie_input)?;
 
                 self.metrics
                     .block_validation
@@ -827,7 +782,7 @@ where
                 // multiproofs.
                 let multiproof_provider_factory =
                     OverlayStateProviderFactory::new(self.provider.clone())
-                        .with_block_number(Some(block_number))
+                        .with_block_hash(Some(block_hash))
                         .with_trie_overlay(Some(multiproof_config.nodes_sorted))
                         .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
 
@@ -962,52 +917,41 @@ where
     ///
     /// It works as follows:
     /// 1. Collect in-memory blocks that are descendants of the provided parent hash using
-    ///    [`crate::tree::TreeState::blocks_by_hash`].
-    /// 2. If the persistence is in progress, and the block that we're computing the trie input for
-    ///    is a descendant of the currently persisting blocks, we need to be sure that in-memory
-    ///    blocks are not overlapping with the database blocks that may have been already persisted.
-    ///    To do that, we're filtering out in-memory blocks that are lower than the highest database
-    ///    block.
-    /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
-    ///    [`HashedPostState`] from them.
+    ///    [`crate::tree::TreeState::blocks_by_hash`]. This returns the highest persisted ancestor
+    ///    hash (`block_hash`) and the list of in-memory descendant blocks.
+    /// 2. Extend the `TrieInput` with the contents of these in-memory blocks (from oldest to
+    ///    newest) to build the overlay state and trie updates that sit on top of the database view
+    ///    anchored at `block_hash`.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
         fields(parent_hash)
     )]
-    fn compute_trie_input<TP: DBProvider + BlockNumReader + TrieReader>(
+    fn compute_trie_input(
         &self,
-        provider: TP,
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
         allocated_trie_input: Option<TrieInput>,
-    ) -> ProviderResult<(TrieInput, BlockNumber)> {
+    ) -> ProviderResult<(TrieInput, B256)> {
         // get allocated trie input or use a default trie input
         let mut input = allocated_trie_input.unwrap_or_default();
 
-        let (historical, blocks) = state
-            .tree_state
-            .blocks_by_hash(parent_hash)
-            .map_or_else(|| (parent_hash.into(), vec![]), |(hash, blocks)| (hash.into(), blocks));
+        let (block_hash, blocks) =
+            state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
         if blocks.is_empty() {
             debug!(target: "engine::tree::payload_validator", "Parent found on disk");
         } else {
-            debug!(target: "engine::tree::payload_validator", %historical, blocks = blocks.len(), "Parent found in memory");
+            debug!(target: "engine::tree::payload_validator", historical = ?block_hash, blocks = blocks.len(), "Parent found in memory");
         }
-
-        // Convert the historical block to the block number
-        let block_number = provider
-            .convert_hash_or_number(historical)?
-            .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
 
         // Extend with contents of parent in-memory blocks.
         input.extend_with_blocks(
             blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())),
         );
 
-        Ok((input, block_number))
+        Ok((input, block_hash))
     }
 }
 

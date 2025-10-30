@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.8.2"
+version = "1.8.3"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -469,31 +469,31 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "30.1.1", default-features = false }
+revm = { version = "30.2.0", default-features = false }
 revm-bytecode = { version = "7.0.2", default-features = false }
-revm-database = { version = "9.0.0", default-features = false }
-revm-state = { version = "8.0.0", default-features = false }
-revm-primitives = { version = "21.0.0", default-features = false }
-revm-interpreter = { version = "27.0.0", default-features = false }
-revm-inspector = { version = "11.1.0", default-features = false }
-revm-context = { version = "10.1.0", default-features = false }
-revm-context-interface = { version = "11.1.0", default-features = false }
-revm-database-interface = { version = "8.0.1", default-features = false }
-op-revm = { version = "11.2.0", default-features = false }
+revm-database = { version = "9.0.2", default-features = false }
+revm-state = { version = "8.0.2", default-features = false }
+revm-primitives = { version = "21.0.1", default-features = false }
+revm-interpreter = { version = "27.0.2", default-features = false }
+revm-inspector = { version = "11.1.2", default-features = false }
+revm-context = { version = "10.1.2", default-features = false }
+revm-context-interface = { version = "11.1.2", default-features = false }
+revm-database-interface = { version = "8.0.3", default-features = false }
+op-revm = { version = "11.3.0", default-features = false }
 revm-inspectors = "0.31.0"
 
 # eth
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-dyn-abi = "1.4.1"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.22.4", default-features = false }
+alloy-evm = { version = "0.22.5", default-features = false }
 alloy-primitives = { version = "1.4.1", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.4.1"
 alloy-sol-types = { version = "1.4.1", default-features = false }
 alloy-trie = { version = "0.9.1", default-features = false }
 
-alloy-hardforks = "0.4.0"
+alloy-hardforks = "0.4.2"
 
 alloy-consensus = { version = "1.0.41", default-features = false }
 alloy-contract = { version = "1.0.41", default-features = false }
@@ -524,13 +524,13 @@ alloy-transport-ipc = { version = "1.0.41", default-features = false }
 alloy-transport-ws = { version = "1.0.41", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.22.4", default-features = false }
-alloy-op-hardforks = "0.4.0"
-op-alloy-rpc-types = { version = "0.21.0", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.21.0", default-features = false }
-op-alloy-network = { version = "0.21.0", default-features = false }
-op-alloy-consensus = { version = "0.21.0", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.21.0", default-features = false }
+alloy-op-evm = { version = "0.22.6", default-features = false }
+alloy-op-hardforks = "0.4.2"
+op-alloy-rpc-types = { version = "0.22.0", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.22.0", default-features = false }
+op-alloy-network = { version = "0.22.0", default-features = false }
+op-alloy-consensus = { version = "0.22.0", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.22.0", default-features = false }
 op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc
@@ -623,8 +623,8 @@ tower = "0.5"
 tower-http = "0.6"
 
 # p2p
-discv5 = "0.9"
-if-addrs = "0.13"
+discv5 = "0.10"
+if-addrs = "0.14"
 
 # rpc
 jsonrpsee = "0.26.0"
@@ -773,3 +773,6 @@ vergen-git2 = "1.0.5"
 # jsonrpsee-server = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-http-client = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-types = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+
+# alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
+# alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
