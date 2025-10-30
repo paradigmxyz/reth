@@ -12,7 +12,7 @@ use opentelemetry::{global, trace::TracerProvider, KeyValue, Value};
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{
     propagation::TraceContextPropagator,
-    trace::{SdkTracer, SdkTracerProvider},
+    trace::{BatchConfigBuilder, BatchSpanProcessor, SdkTracer, SdkTracerProvider},
     Resource,
 };
 use opentelemetry_semantic_conventions::{attribute::SERVICE_VERSION, SCHEMA_URL};
@@ -50,7 +50,11 @@ where
 
     let tracer_provider = SdkTracerProvider::builder()
         .with_resource(resource)
-        .with_batch_exporter(span_exporter)
+        .with_span_processor(
+            BatchSpanProcessor::builder(span_exporter)
+                .with_batch_config(BatchConfigBuilder::default().with_max_queue_size(10000).build())
+                .build(),
+        )
         .build();
 
     global::set_tracer_provider(tracer_provider.clone());
