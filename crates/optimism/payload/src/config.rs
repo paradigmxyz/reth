@@ -120,6 +120,7 @@ mod tests {
         assert_eq!(da.max_da_block_size(), None);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_da_constrained() {
         let config = OpBuilderConfig::default();
