@@ -22,6 +22,8 @@ modular-bitfield = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
+clap = { workspace = true, optional = true }
+
 [dev-dependencies]
 reth-codecs.workspace = true
 
@@ -61,3 +63,4 @@ serde = [
     "alloy-primitives/serde",
     "reth-codecs?/serde",
 ]
+clap = ["dep:clap"]

@@ -11,6 +11,7 @@ use std::{
 mod checksum;
 mod clear;
 mod diff;
+mod drop_prune_checkpoint;
 mod get;
 mod list;
 mod repair_trie;
@@ -49,6 +50,8 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
+    /// Drops the prune checkpoint for the specified segment
+    DropPruneCheckpoint(drop_prune_checkpoint::Command),
     /// Verifies trie consistency and outputs any inconsistencies
     RepairTrie(repair_trie::Command),
     /// Lists current and local database versions
@@ -135,6 +138,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 tool.drop(db_path, static_files_path, exex_wal_path)?;
             }
             Subcommands::Clear(command) => {
+                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+                command.execute(provider_factory)?;
+            }
+            Subcommands::DropPruneCheckpoint(command) => {
                 let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
                 command.execute(provider_factory)?;
             }

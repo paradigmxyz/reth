@@ -9847,6 +9847,7 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "assert_matches",
+ "clap",
  "derive_more",
  "modular-bitfield",
  "proptest",
