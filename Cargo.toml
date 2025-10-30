@@ -474,7 +474,7 @@ revm-bytecode = { version = "7.0.2", default-features = false }
 revm-database = { version = "9.0.2", default-features = false }
 revm-state = { version = "8.0.2", default-features = false }
 revm-primitives = { version = "21.0.1", default-features = false }
-revm-interpreter = { version = "27.0.2", default-features = false }
+revm-interpreter = { version = "28.0.0", default-features = false }
 revm-inspector = { version = "11.1.2", default-features = false }
 revm-context = { version = "10.1.2", default-features = false }
 revm-context-interface = { version = "11.1.2", default-features = false }
