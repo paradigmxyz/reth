@@ -921,17 +921,17 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<(TrieInputSorted, B256)> {
-        let (block_hash, blocks) =
-            state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
-
-        if blocks.is_empty() {
+        let Some((block_hash, blocks)) = state.tree_state.blocks_by_hash(parent_hash) else {
             debug!(target: "engine::tree::payload_validator", "Parent found on disk");
-        } else {
-            debug!(target: "engine::tree::payload_validator", historical = ?block_hash, blocks = blocks.len(), "Parent found in memory");
-        }
+            return Ok((TrieInputSorted::default(), parent_hash));
+        };
 
-        // Extend with contents of parent in-memory blocks directly in sorted form.
-        let mut input = TrieInputSorted::default();
+        debug!(
+            target: "engine::tree::payload_validator",
+            historical = ?block_hash,
+            blocks = blocks.len(),
+            "Parent found in memory"
+        );
         let mut blocks_iter = blocks.iter().rev();
 
         if let Some(first) = blocks_iter.next() {
