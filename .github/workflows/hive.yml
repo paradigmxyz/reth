@@ -32,8 +32,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v5
         with:
-          repository: raxhvl/hive
-          ref: feat/asmterdam-bal
+          repository: ethereum/hive
+          ref: master
           path: hivetests
 
       - name: Get hive commit hash
@@ -208,8 +208,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v5
         with:
-          repository: raxhvl/hive
-          ref: feat/asmterdam-bal
+          repository: ethereum/hive
+          ref: master
           path: hivetests
 
       - name: Run simulator
