@@ -569,8 +569,8 @@ where
         Ok(ExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
-            hashed_state: Arc::new(hashed_state),
-            trie_updates: Arc::new(trie_output),
+            hashed_state: Arc::new(hashed_state.into_sorted()),
+            trie_updates: Arc::new(trie_output.into_sorted()),
         })
     }
 
@@ -802,7 +802,7 @@ where
         match strategy {
             StateRootStrategy::StateRootTask => {
                 // get allocated trie input if it exists
-                let allocated = self.trie_input.take();
+                let allocated_trie_input = self.trie_input.take();
 
                 // Compute trie input
                 let trie_input_start = Instant::now();
@@ -810,7 +810,7 @@ where
                     self.provider.database_provider_ro()?,
                     parent_hash,
                     state,
-                    allocated,
+                    allocated_trie_input,
                 )?;
 
                 self.metrics
@@ -1008,16 +1008,26 @@ where
             .convert_hash_or_number(historical)?
             .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
 
-        // Rebuild the overlay directly in sorted form, reusing the prefix-set allocation we already
-        // paid for on previous iterations.
+        // Extend with contents of parent in-memory blocks directly in sorted form, skipping the
+        // merge path on the first iteration to avoid redundant work.
         let mut sorted_input = TrieInputSorted {
             prefix_sets: core::mem::take(&mut input.prefix_sets),
             ..Default::default()
         };
 
-        for block in blocks.iter().rev() {
-            sorted_input.state.extend_ref(block.hashed_state());
-            sorted_input.nodes.extend_ref(block.trie_updates());
+        let mut blocks_iter = blocks.iter().rev();
+        if let Some(first) = blocks_iter.next() {
+            // Clone the Arc (cheap) instead of deep cloning the data
+            sorted_input.state = Arc::clone(&first.hashed_state);
+            sorted_input.nodes = Arc::clone(&first.trie_updates);
+
+            // Merge remaining blocks directly without Vec allocation
+            for block in blocks_iter {
+                let state = Arc::make_mut(&mut sorted_input.state);
+                let nodes = Arc::make_mut(&mut sorted_input.nodes);
+                state.extend_ref(block.hashed_state());
+                nodes.extend_ref(block.trie_updates());
+            }
         }
 
         Ok((sorted_input, input, block_number))

@@ -830,8 +830,8 @@ fn test_tree_state_on_new_head_deep_fork() {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
             recovered_block: Arc::new(block.clone()),
             execution_output: Arc::new(ExecutionOutcome::default()),
-            hashed_state: Arc::new(HashedPostState::default()),
-            trie_updates: Arc::new(TrieUpdates::default()),
+            hashed_state: Arc::new(HashedPostState::default().into_sorted()),
+            trie_updates: Arc::new(TrieUpdates::default().into_sorted()),
         });
     }
     test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
@@ -840,8 +840,8 @@ fn test_tree_state_on_new_head_deep_fork() {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
             recovered_block: Arc::new(block.clone()),
             execution_output: Arc::new(ExecutionOutcome::default()),
-            hashed_state: Arc::new(HashedPostState::default()),
-            trie_updates: Arc::new(TrieUpdates::default()),
+            hashed_state: Arc::new(HashedPostState::default().into_sorted()),
+            trie_updates: Arc::new(TrieUpdates::default().into_sorted()),
         });
     }
 

@@ -389,8 +389,8 @@ impl<Txs> OpBuilder<'_, Txs> {
         let executed: ExecutedBlock<N> = ExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
-            trie_updates: Arc::new(trie_updates),
+            hashed_state: Arc::new(hashed_state.into_sorted()),
+            trie_updates: Arc::new(trie_updates.into_sorted()),
         };
 
         let no_tx_pool = ctx.attributes().no_tx_pool();

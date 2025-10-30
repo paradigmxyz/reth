@@ -1759,8 +1759,8 @@ where
         Ok(Some(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
             execution_output: Arc::new(execution_output),
-            hashed_state: Arc::new(hashed_state),
-            trie_updates: Arc::new(trie_updates.into()),
+            hashed_state: Arc::new(hashed_state.into_sorted()),
+            trie_updates: Arc::new(trie_updates),
         }))
     }
 
