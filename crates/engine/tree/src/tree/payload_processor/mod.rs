@@ -228,11 +228,24 @@ where
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory, prefix_sets);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
+
+        debug!(
+            target: "engine::tree::payload_processor",
+            storage_worker_count,
+            account_worker_count,
+            "Spawning proof worker pools for new payload"
+        );
+
         let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
             task_ctx,
             storage_worker_count,
             account_worker_count,
+        );
+
+        debug!(
+            target: "engine::tree::payload_processor",
+            "Proof worker pools spawned successfully"
         );
 
         let multi_proof_task = MultiProofTask::new(

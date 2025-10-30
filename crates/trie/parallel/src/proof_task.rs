@@ -724,11 +724,24 @@ where
         } = self;
 
         // Create provider from factory
+        #[cfg(feature = "metrics")]
+        let db_provider_start = Instant::now();
+
         let provider = task_ctx
             .factory
             .database_provider_ro()
             .expect("Storage worker failed to initialize: unable to create provider");
+
+        #[cfg(feature = "metrics")]
+        metrics.record_storage_worker_db_provider_creation_duration(db_provider_start.elapsed());
+
+        #[cfg(feature = "metrics")]
+        let proof_tx_start = Instant::now();
+
         let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
+
+        #[cfg(feature = "metrics")]
+        metrics.record_storage_worker_proof_tx_creation_duration(proof_tx_start.elapsed());
 
         trace!(
             target: "trie::proof_task",
@@ -980,11 +993,24 @@ where
         } = self;
 
         // Create provider from factory
+        #[cfg(feature = "metrics")]
+        let db_provider_start = Instant::now();
+
         let provider = task_ctx
             .factory
             .database_provider_ro()
             .expect("Account worker failed to initialize: unable to create provider");
+
+        #[cfg(feature = "metrics")]
+        metrics.record_account_worker_db_provider_creation_duration(db_provider_start.elapsed());
+
+        #[cfg(feature = "metrics")]
+        let proof_tx_start = Instant::now();
+
         let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
+
+        #[cfg(feature = "metrics")]
+        metrics.record_account_worker_proof_tx_creation_duration(proof_tx_start.elapsed());
 
         trace!(
             target: "trie::proof_task",

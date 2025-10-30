@@ -14,6 +14,14 @@ pub struct ProofTaskTrieMetrics {
     /// A histogram tracking time from starting account worker spawn to when each worker marks
     /// itself available (after initialization, before grabbing first job).
     account_worker_spawn_to_available_duration: Histogram,
+    /// A histogram tracking time to create database provider in storage workers.
+    storage_worker_db_provider_creation_duration: Histogram,
+    /// A histogram tracking time to create database provider in account workers.
+    account_worker_db_provider_creation_duration: Histogram,
+    /// A histogram tracking time to create ProofTaskTx in storage workers.
+    storage_worker_proof_tx_creation_duration: Histogram,
+    /// A histogram tracking time to create ProofTaskTx in account workers.
+    account_worker_proof_tx_creation_duration: Histogram,
 }
 
 impl ProofTaskTrieMetrics {
@@ -35,5 +43,31 @@ impl ProofTaskTrieMetrics {
     /// Record account worker spawn-to-available duration.
     pub fn record_account_worker_spawn_to_available_duration(&self, duration: std::time::Duration) {
         self.account_worker_spawn_to_available_duration.record(duration.as_secs_f64());
+    }
+
+    /// Record storage worker database provider creation duration.
+    pub fn record_storage_worker_db_provider_creation_duration(
+        &self,
+        duration: std::time::Duration,
+    ) {
+        self.storage_worker_db_provider_creation_duration.record(duration.as_secs_f64());
+    }
+
+    /// Record account worker database provider creation duration.
+    pub fn record_account_worker_db_provider_creation_duration(
+        &self,
+        duration: std::time::Duration,
+    ) {
+        self.account_worker_db_provider_creation_duration.record(duration.as_secs_f64());
+    }
+
+    /// Record storage worker ProofTaskTx creation duration.
+    pub fn record_storage_worker_proof_tx_creation_duration(&self, duration: std::time::Duration) {
+        self.storage_worker_proof_tx_creation_duration.record(duration.as_secs_f64());
+    }
+
+    /// Record account worker ProofTaskTx creation duration.
+    pub fn record_account_worker_proof_tx_creation_duration(&self, duration: std::time::Duration) {
+        self.account_worker_proof_tx_creation_duration.record(duration.as_secs_f64());
     }
 }
