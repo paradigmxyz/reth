@@ -920,8 +920,10 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<(TrieInputSorted, B256)> {
-        let (block_hash, blocks) =
-            state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
+        let (block_hash, blocks) = state
+            .tree_state
+            .blocks_by_hash(parent_hash)
+            .unwrap_or_else(|| (parent_hash, vec![]));
 
         if blocks.is_empty() {
             debug!(target: "engine::tree::payload_validator", "Parent found on disk");
@@ -929,31 +931,21 @@ where
             debug!(target: "engine::tree::payload_validator", historical = ?block_hash, blocks = blocks.len(), "Parent found in memory");
         }
 
-        // Convert the historical block to the block number
-        let block_number = provider
-            .convert_hash_or_number(historical)?
-            .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
-
-        // Extend with contents of parent in-memory blocks directly in sorted form, skipping the
-        // merge path on the first iteration to avoid redundant work.
-        let mut sorted_input = TrieInputSorted::default();
-
+        // Extend with contents of parent in-memory blocks directly in sorted form.
+        let mut input = TrieInputSorted::default();
         let mut blocks_iter = blocks.iter().rev();
-        if let Some(first) = blocks_iter.next() {
-            // Clone the Arc (cheap) instead of deep cloning the data
-            sorted_input.state = Arc::clone(&first.hashed_state);
-            sorted_input.nodes = Arc::clone(&first.trie_updates);
 
-            // Merge remaining blocks directly without Vec allocation
+        if let Some(first) = blocks_iter.next() {
+            input.state = Arc::clone(&first.hashed_state);
+            input.nodes = Arc::clone(&first.trie_updates);
+
             for block in blocks_iter {
-                let state = Arc::make_mut(&mut sorted_input.state);
-                let nodes = Arc::make_mut(&mut sorted_input.nodes);
-                state.extend_ref(block.hashed_state());
-                nodes.extend_ref(block.trie_updates());
+                Arc::make_mut(&mut input.state).extend_ref(block.hashed_state());
+                Arc::make_mut(&mut input.nodes).extend_ref(block.trie_updates());
             }
         }
 
-        Ok((sorted_input, block_number))
+        Ok((input, block_hash))
     }
 }
 
