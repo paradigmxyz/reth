@@ -131,8 +131,10 @@ impl PruningArgs {
                     receipts: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    // TODO: set default to pre-merge block if available
-                    bodies_history: None,
+                    bodies_history: chain_spec
+                        .ethereum_fork_activation(EthereumHardfork::Paris)
+                        .block_number()
+                        .map(PruneMode::Before),
                     merkle_changesets: PruneMode::Distance(MINIMUM_PRUNING_DISTANCE),
                     #[expect(deprecated)]
                     receipts_log_filter: (),

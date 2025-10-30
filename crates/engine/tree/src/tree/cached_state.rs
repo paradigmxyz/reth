@@ -302,7 +302,7 @@ pub(crate) struct ExecutionCache {
 
     /// Per-account storage cache: outer cache keyed by Address, inner cache tracks that account’s
     /// storage slots.
-    storage_cache: Cache<Address, AccountStorageCache>,
+    storage_cache: Cache<Address, Arc<AccountStorageCache>>,
 
     /// Cache for basic account information (nonce, balance, code hash).
     account_cache: Cache<Address, Option<Account>>,
@@ -340,15 +340,15 @@ impl ExecutionCache {
     where
         I: IntoIterator<Item = (StorageKey, Option<StorageValue>)>,
     {
-        let account_cache = self.storage_cache.get(&address).unwrap_or_else(|| {
-            let account_cache = AccountStorageCache::default();
-            self.storage_cache.insert(address, account_cache.clone());
-            account_cache
-        });
+        let account_cache = self.storage_cache.get(&address).unwrap_or_default();
 
         for (key, value) in storage_entries {
             account_cache.insert_storage(key, value);
         }
+
+        // Insert to the cache so that moka picks up on the changed size, even though the actual
+        // value (the Arc<AccountStorageCache>) is the same
+        self.storage_cache.insert(address, account_cache);
     }
 
     /// Invalidate storage for specific account
@@ -465,7 +465,7 @@ impl ExecutionCacheBuilder {
         const TIME_TO_IDLE: Duration = Duration::from_secs(3600); // 1 hour
 
         let storage_cache = CacheBuilder::new(self.storage_cache_entries)
-            .weigher(|_key: &Address, value: &AccountStorageCache| -> u32 {
+            .weigher(|_key: &Address, value: &Arc<AccountStorageCache>| -> u32 {
                 // values based on results from measure_storage_cache_overhead test
                 let base_weight = 39_000;
                 let slots_weight = value.len() * 218;
