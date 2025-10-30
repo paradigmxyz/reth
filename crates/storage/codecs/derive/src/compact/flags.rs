@@ -64,11 +64,11 @@ pub(crate) fn generate_flag_struct(
             impl<'a> #ident<'a> {
                 #[doc = #bitflag_encoded_bytes]
                 pub const fn bitflag_encoded_bytes() -> usize {
-                    #total_bytes as usize
+                    #total_bytes
                 }
                 #[doc = #bitflag_unused_bits]
                 pub const fn bitflag_unused_bits() -> usize {
-                    #unused_bits as usize
+                    #unused_bits
                 }
            }
         }
@@ -77,11 +77,11 @@ pub(crate) fn generate_flag_struct(
             impl #ident {
                 #[doc = #bitflag_encoded_bytes]
                 pub const fn bitflag_encoded_bytes() -> usize {
-                    #total_bytes as usize
+                    #total_bytes
                 }
                 #[doc = #bitflag_unused_bits]
                 pub const fn bitflag_unused_bits() -> usize {
-                    #unused_bits as usize
+                    #unused_bits
                 }
            }
         }
