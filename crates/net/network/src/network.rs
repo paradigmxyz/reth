@@ -2,7 +2,6 @@ use crate::{
     config::NetworkMode, message::PeerMessage, protocol::RlpxSubProtocol,
     swarm::NetworkConnectionState, transactions::TransactionsHandle, FetchClient,
 };
-use alloy_primitives::B256;
 use enr::Enr;
 use futures::StreamExt;
 use parking_lot::Mutex;
@@ -109,15 +108,6 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     /// Update the status of the node.
     pub fn update_status(&self, head: Head) {
         self.send_message(NetworkHandleMessage::StatusUpdate { head });
-    }
-
-    /// Announce a block over devp2p
-    ///
-    /// Caution: in `PoS` this is a noop because new blocks are no longer announced over devp2p.
-    /// Instead they are sent to the node by CL and can be requested over devp2p.
-    /// Broadcasting new blocks is considered a protocol violation.
-    pub fn announce_block(&self, block: N::NewBlockPayload, hash: B256) {
-        self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
     /// Sends a [`PeerRequest`] to the given peer's session.
@@ -483,8 +473,6 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
     RemovePeer(PeerId, PeerKind),
     /// Disconnects a connection to a peer if it exists, optionally providing a disconnect reason.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
-    /// Broadcasts an event to announce a new block to all nodes.
-    AnnounceBlock(N::NewBlockPayload, B256),
     /// Sends a list of transactions to the given peer.
     SendTransaction {
         /// The ID of the peer to which the transactions are sent.
