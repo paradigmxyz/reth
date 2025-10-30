@@ -17,6 +17,9 @@ impl OpBuilderConfig {
 
     /// Returns the Data Availability configuration for the OP builder, if it has configured
     /// constraints.
+    #[deprecated(
+        note = "Use OpDAConfig::max_da_tx_size()/max_da_block_size() directly. This method is unused and will be removed in a future release."
+    )]
     pub fn constrained_da_config(&self) -> Option<&OpDAConfig> {
         if self.da_config.is_empty() {
             None
