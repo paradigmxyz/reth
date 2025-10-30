@@ -34,6 +34,12 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     ///
     /// Additionally, it includes the individual state changes that led to the current state.
     execution_outcome: ExecutionOutcome<N::Receipt>,
+    /// Deprecated: Legacy field for backwards compatibility.
+    ///
+    /// This field is no longer populated and exists only to maintain serialization compatibility
+    /// with older versions. Use [`Chain::trie_updates`] instead.
+    #[deprecated(note = "Left to support deserialization, use `trie_updates` map instead")]
+    trie_updates_legacy: Option<Arc<TrieUpdates>>,
     /// State trie updates for each block in the chain, keyed by block number.
     trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdates>>,
 }
@@ -43,6 +49,8 @@ impl<N: NodePrimitives> Default for Chain<N> {
         Self {
             blocks: Default::default(),
             execution_outcome: Default::default(),
+            #[allow(deprecated)]
+            trie_updates_legacy: None,
             trie_updates: Default::default(),
         }
     }
@@ -63,7 +71,13 @@ impl<N: NodePrimitives> Chain<N> {
             blocks.into_iter().map(|b| (b.header().number(), b)).collect::<BTreeMap<_, _>>();
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
-        Self { blocks, execution_outcome, trie_updates }
+        Self {
+            blocks,
+            execution_outcome,
+            #[allow(deprecated)]
+            trie_updates_legacy: None,
+            trie_updates,
+        }
     }
 
     /// Create new Chain from a single block and its state.
@@ -457,6 +471,7 @@ pub(super) mod serde_bincode_compat {
     {
         blocks: RecoveredBlocks<'a, N::Block>,
         execution_outcome: serde_bincode_compat::ExecutionOutcome<'a, N::Receipt>,
+        trie_updates_legacy: Option<TrieUpdates<'a>>,
         trie_updates: BTreeMap<BlockNumber, TrieUpdates<'a>>,
     }
 
@@ -510,6 +525,8 @@ pub(super) mod serde_bincode_compat {
             Self {
                 blocks: RecoveredBlocks(Cow::Borrowed(&value.blocks)),
                 execution_outcome: value.execution_outcome.as_repr(),
+                #[allow(deprecated)]
+                trie_updates_legacy: None,
                 trie_updates: value
                     .trie_updates
                     .iter()
@@ -529,6 +546,8 @@ pub(super) mod serde_bincode_compat {
             Self {
                 blocks: value.blocks.0.into_owned(),
                 execution_outcome: ExecutionOutcome::from_repr(value.execution_outcome),
+                #[allow(deprecated)]
+                trie_updates_legacy: None,
                 trie_updates: value
                     .trie_updates
                     .into_iter()
