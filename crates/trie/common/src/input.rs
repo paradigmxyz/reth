@@ -3,6 +3,7 @@ use crate::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted,
 };
+use alloc::sync::Arc;
 
 /// Inputs for trie-related computations.
 #[derive(Default, Debug, Clone)]
@@ -148,8 +149,8 @@ impl TrieInput {
     /// retained for the next cycle.
     pub fn drain_into_sorted(&mut self) -> TrieInputSorted {
         TrieInputSorted {
-            nodes: self.nodes.drain_into_sorted(),
-            state: self.state.drain_into_sorted(),
+            nodes: Arc::new(self.nodes.drain_into_sorted()),
+            state: Arc::new(self.state.drain_into_sorted()),
             prefix_sets: core::mem::take(&mut self.prefix_sets),
         }
     }
@@ -162,9 +163,9 @@ impl TrieInput {
 #[derive(Default, Debug, Clone)]
 pub struct TrieInputSorted {
     /// Sorted cached in-memory intermediate trie nodes.
-    pub nodes: TrieUpdatesSorted,
+    pub nodes: Arc<TrieUpdatesSorted>,
     /// Sorted in-memory overlay hashed state.
-    pub state: HashedPostStateSorted,
+    pub state: Arc<HashedPostStateSorted>,
     /// Prefix sets for computation.
     pub prefix_sets: TriePrefixSetsMut,
 }
@@ -172,8 +173,8 @@ pub struct TrieInputSorted {
 impl TrieInputSorted {
     /// Create new sorted trie input.
     pub const fn new(
-        nodes: TrieUpdatesSorted,
-        state: HashedPostStateSorted,
+        nodes: Arc<TrieUpdatesSorted>,
+        state: Arc<HashedPostStateSorted>,
         prefix_sets: TriePrefixSetsMut,
     ) -> Self {
         Self { nodes, state, prefix_sets }
@@ -182,8 +183,8 @@ impl TrieInputSorted {
     /// Create from unsorted [`TrieInput`] by sorting.
     pub fn from_unsorted(input: TrieInput) -> Self {
         Self {
-            nodes: input.nodes.into_sorted(),
-            state: input.state.into_sorted(),
+            nodes: Arc::new(input.nodes.into_sorted()),
+            state: Arc::new(input.state.into_sorted()),
             prefix_sets: input.prefix_sets,
         }
     }
