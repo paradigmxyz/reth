@@ -6,9 +6,12 @@ use crate::version::default_client_version;
 use clap::{
     builder::{PossibleValue, TypedValueParser},
     error::ErrorKind,
-    Arg, Args, Command, Error,
+    value_parser, Arg, Args, Command, Error,
 };
-use reth_db::{mdbx::MaxReadTransactionDuration, ClientVersion};
+use reth_db::{
+    mdbx::{MaxReadTransactionDuration, SyncMode},
+    ClientVersion,
+};
 use reth_storage_errors::db::LogLevel;
 
 /// Parameters for database configuration
@@ -34,6 +37,12 @@ pub struct DatabaseArgs {
     /// Maximum number of readers allowed to access the database concurrently.
     #[arg(long = "db.max-readers")]
     pub max_readers: Option<u64>,
+    /// Controls how aggressively the database synchronizes data to disk.
+    #[arg(
+        long = "db.sync-mode",
+        value_parser = value_parser!(SyncMode),
+    )]
+    pub sync_mode: Option<SyncMode>,
 }
 
 impl DatabaseArgs {
@@ -61,6 +70,7 @@ impl DatabaseArgs {
             .with_geometry_max_size(self.max_size)
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
+            .with_sync_mode(self.sync_mode)
     }
 }
 
@@ -339,5 +349,37 @@ mod tests {
     fn test_command_parser_without_log_level() {
         let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth"]).unwrap();
         assert_eq!(cmd.args.log_level, None);
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_default_sync_mode() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth"]).unwrap();
+        assert!(cmd.args.sync_mode.is_none());
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_sync_mode_durable() {
+        let cmd =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "durable"])
+                .unwrap();
+        assert!(matches!(cmd.args.sync_mode, Some(SyncMode::Durable)));
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_sync_mode_safe_no_sync() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.sync-mode",
+            "safe-no-sync",
+        ])
+        .unwrap();
+        assert!(matches!(cmd.args.sync_mode, Some(SyncMode::SafeNoSync)));
+    }
+
+    #[test]
+    fn test_command_parser_with_invalid_sync_mode() {
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "ultra-fast"]);
+        assert!(result.is_err());
     }
 }

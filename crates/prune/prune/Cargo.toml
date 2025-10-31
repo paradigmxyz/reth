@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
 reth-exex-types.workspace = true
 reth-db-api.workspace = true
 reth-errors.workspace = true
@@ -25,7 +24,6 @@ reth-primitives-traits.workspace = true
 reth-static-file-types.workspace = true
 
 # ethereum
-alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
 # metrics

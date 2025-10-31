@@ -462,7 +462,6 @@ impl From<reth_errors::ProviderError> for EthApiError {
             }
             ProviderError::BestBlockNotFound => Self::HeaderNotFound(BlockId::latest()),
             ProviderError::BlockNumberForTransactionIndexNotFound => Self::UnknownBlockOrTxIndex,
-            ProviderError::TotalDifficultyNotFound(num) => Self::HeaderNotFound(num.into()),
             ProviderError::FinalizedBlockNotFound => Self::HeaderNotFound(BlockId::finalized()),
             ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
             err => Self::Internal(err.into()),
@@ -620,6 +619,9 @@ pub enum RpcInvalidTransactionError {
     /// Contains the gas limit.
     #[error("out of gas: gas exhausted during memory expansion: {0}")]
     MemoryOutOfGas(u64),
+    /// Memory limit was exceeded during memory expansion.
+    #[error("out of memory: memory limit exceeded during memory expansion")]
+    MemoryLimitOutOfGas,
     /// Gas limit was exceeded during precompile execution.
     /// Contains the gas limit.
     #[error("out of gas: gas exhausted during precompiled contract execution: {0}")]
@@ -724,7 +726,8 @@ impl RpcInvalidTransactionError {
             OutOfGasError::Basic | OutOfGasError::ReentrancySentry => {
                 Self::BasicOutOfGas(gas_limit)
             }
-            OutOfGasError::Memory | OutOfGasError::MemoryLimit => Self::MemoryOutOfGas(gas_limit),
+            OutOfGasError::Memory => Self::MemoryOutOfGas(gas_limit),
+            OutOfGasError::MemoryLimit => Self::MemoryLimitOutOfGas,
             OutOfGasError::Precompile => Self::PrecompileOutOfGas(gas_limit),
             OutOfGasError::InvalidOperand => Self::InvalidOperandOutOfGas(gas_limit),
         }
@@ -931,8 +934,13 @@ pub enum RpcPoolError {
     #[error("negative value")]
     NegativeValue,
     /// When oversized data is encountered
-    #[error("oversized data")]
-    OversizedData,
+    #[error("oversized data: transaction size {size}, limit {limit}")]
+    OversizedData {
+        /// Size of the transaction/input data that exceeded the limit.
+        size: usize,
+        /// Configured limit that was exceeded.
+        limit: usize,
+    },
     /// When the max initcode size is exceeded
     #[error("max initcode size exceeded")]
     ExceedsMaxInitCodeSize,
@@ -974,7 +982,7 @@ impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
             RpcPoolError::MaxTxGasLimitExceeded |
             RpcPoolError::ExceedsFeeCap { .. } |
             RpcPoolError::NegativeValue |
-            RpcPoolError::OversizedData |
+            RpcPoolError::OversizedData { .. } |
             RpcPoolError::ExceedsMaxInitCodeSize |
             RpcPoolError::PoolTransactionError(_) |
             RpcPoolError::Eip4844(_) |
@@ -1018,7 +1026,9 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::IntrinsicGasTooLow => {
                 Self::Invalid(RpcInvalidTransactionError::GasTooLow)
             }
-            InvalidPoolTransactionError::OversizedData(_, _) => Self::OversizedData,
+            InvalidPoolTransactionError::OversizedData { size, limit } => {
+                Self::OversizedData { size, limit }
+            }
             InvalidPoolTransactionError::Underpriced => Self::Underpriced,
             InvalidPoolTransactionError::Eip2681 => {
                 Self::Invalid(RpcInvalidTransactionError::NonceMaxValue)

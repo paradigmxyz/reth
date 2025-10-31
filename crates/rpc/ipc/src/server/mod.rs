@@ -391,7 +391,7 @@ where
     fn call(&mut self, request: String) -> Self::Future {
         trace!("{:?}", request);
 
-        let cfg = RpcServiceCfg::CallsAndSubscriptions {
+        let cfg = RpcServiceCfg {
             bounded_subscriptions: BoundedSubscriptions::new(
                 self.inner.server_cfg.max_subscriptions_per_connection,
             ),

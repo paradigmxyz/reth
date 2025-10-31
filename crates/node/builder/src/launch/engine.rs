@@ -138,7 +138,7 @@ impl EngineNodeLauncher {
 
         let consensus = Arc::new(ctx.components().consensus().clone());
 
-        let mut pipeline = build_networked_pipeline(
+        let pipeline = build_networked_pipeline(
             &ctx.toml_config().stages,
             network_client.clone(),
             consensus.clone(),
@@ -154,18 +154,7 @@ impl EngineNodeLauncher {
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
-        pipeline.ensure_static_files_consistency().await?;
-
-        // Try to expire pre-merge transaction history if configured
-        ctx.expire_pre_merge_transactions()?;
-
-        let initial_target = if let Some(tip) = ctx.node_config().debug.tip {
-            Some(tip)
-        } else {
-            pipeline.initial_backfill_target()?
-        };
-
-        ctx.ensure_chain_specific_db_checks()?;
+        pipeline.move_to_static_files()?;
 
         let pipeline_events = pipeline.events();
 
@@ -176,7 +165,7 @@ impl EngineNodeLauncher {
         }
         let pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
         let pruner_events = pruner.events();
-        info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
+        info!(target: "reth::cli", prune_config=?ctx.prune_config(), "Pruner initialized");
 
         let event_sender = EventSender::default();
 
@@ -258,6 +247,7 @@ impl EngineNodeLauncher {
             add_ons.launch_add_ons(add_ons_ctx).await?;
 
         // Run consensus engine to completion
+        let initial_target = ctx.initial_backfill_target()?;
         let mut built_payloads = ctx
             .components()
             .payload_builder_handle()
@@ -271,12 +261,16 @@ impl EngineNodeLauncher {
         let provider = ctx.blockchain_db().clone();
         let (exit, rx) = oneshot::channel();
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
+        let startup_sync_state_idle = ctx.node_config().debug.startup_sync_state_idle;
 
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
+                // network_handle's sync state is already initialized at Syncing
                 engine_service.orchestrator_mut().start_backfill_sync(initial_target);
+            } else if startup_sync_state_idle {
+                network_handle.update_sync_state(SyncState::Idle);
             }
 
             let mut res = Ok(());
@@ -298,6 +292,9 @@ impl EngineNodeLauncher {
                                 if terminate_after_backfill {
                                     debug!(target: "reth::cli", "Terminating after initial backfill");
                                     break
+                                }
+                                if startup_sync_state_idle {
+                                    network_handle.update_sync_state(SyncState::Idle);
                                 }
                             }
                             ChainEvent::BackfillSyncStarted => {

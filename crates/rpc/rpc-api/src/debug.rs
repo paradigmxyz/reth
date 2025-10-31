@@ -222,7 +222,7 @@ pub trait DebugApi<TxReq: RpcObject> {
 
     /// Returns the raw value of a key stored in the database.
     #[method(name = "dbGet")]
-    async fn debug_db_get(&self, key: String) -> RpcResult<()>;
+    async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>>;
 
     /// Retrieves the state that corresponds to the block number and returns a list of accounts
     /// (including storage and code).

@@ -24,6 +24,7 @@ use alloy_consensus::transaction::TxHashRef;
 use alloy_eips::Typed2718;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
+use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
@@ -83,7 +84,7 @@ where
     /// The number of transactions to be processed
     transaction_count_hint: usize,
     /// Sender to emit evm state outcome messages, if any.
-    to_multi_proof: Option<Sender<MultiProofMessage>>,
+    to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
 }
@@ -99,14 +100,14 @@ where
         executor: WorkloadExecutor,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        to_multi_proof: Option<Sender<MultiProofMessage>>,
+        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         transaction_count_hint: usize,
         max_concurrency: usize,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
         let (actions_tx, actions_rx) = channel();
 
         trace!(
-            target: "engine::tree::prewarm",
+            target: "engine::tree::payload_processor::prewarm",
             max_concurrency,
             transaction_count_hint,
             "Initialized prewarm task"
@@ -145,10 +146,6 @@ where
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
             let (done_tx, done_rx) = mpsc::channel();
-            let mut executing = 0usize;
-
-            // Initialize worker handles container
-            let mut handles = Vec::with_capacity(max_concurrency);
 
             // When transaction_count_hint is 0, it means the count is unknown. In this case, spawn
             // max workers to handle potentially many transactions in parallel rather
@@ -159,67 +156,52 @@ where
                 transaction_count_hint.min(max_concurrency)
             };
 
+            // Initialize worker handles container
+            let mut handles = Vec::with_capacity(workers_needed);
+
             // Only spawn initial workers as needed
             for i in 0..workers_needed {
                 handles.push(ctx.spawn_worker(i, &executor, actions_tx.clone(), done_tx.clone()));
             }
 
+            // Distribute transactions to workers
             let mut tx_index = 0usize;
+            while let Ok(tx) = pending.recv() {
+                // Stop distributing if termination was requested
+                if ctx.terminate_execution.load(Ordering::Relaxed) {
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        "Termination requested, stopping transaction distribution"
+                    );
+                    break;
+                }
 
-            // Handle first transaction - special case for system transactions
-            if let Ok(first_tx) = pending.recv() {
-                // Move the transaction into the indexed wrapper to avoid an extra clone
-                let indexed_tx = IndexedTransaction { index: tx_index, tx: first_tx };
-                // Compute metadata from the moved value
-                let tx_ref = indexed_tx.tx.tx();
-                let is_system_tx = tx_ref.ty() > MAX_STANDARD_TX_TYPE;
-                let first_tx_hash = tx_ref.tx_hash();
+                let indexed_tx = IndexedTransaction { index: tx_index, tx };
+                let is_system_tx = indexed_tx.tx.tx().ty() > MAX_STANDARD_TX_TYPE;
 
-                // Check if this is a system transaction (type > 4)
-                // System transactions in the first position typically set critical metadata
-                // that affects all subsequent transactions (e.g., L1 block info, fees on L2s).
-                if is_system_tx {
-                    // Broadcast system transaction to all workers to ensure they have the
-                    // critical state. This is particularly important for L2s like Optimism
-                    // where the first deposit transaction contains essential block metadata.
+                // System transactions (type > 4) in the first position set critical metadata
+                // that affects all subsequent transactions (e.g., L1 block info on L2s).
+                // Broadcast the first system transaction to all workers to ensure they have
+                // the critical state. This is particularly important for L2s like Optimism
+                // where the first deposit transaction (type 126) contains essential block metadata.
+                if tx_index == 0 && is_system_tx {
                     for handle in &handles {
-                        if let Err(err) = handle.send(indexed_tx.clone()) {
-                            warn!(
-                                target: "engine::tree::prewarm",
-                                tx_hash = %first_tx_hash,
-                                error = %err,
-                                "Failed to send deposit transaction to worker"
-                            );
-                        }
+                        // Ignore send errors: workers listen to terminate_execution and may
+                        // exit early when signaled. Sending to a disconnected worker is
+                        // possible and harmless and should happen at most once due to
+                        //  the terminate_execution check above.
+                        let _ = handle.send(indexed_tx.clone());
                     }
                 } else {
-                    // Not a deposit, send to first worker via round-robin
-                    if let Err(err) = handles[0].send(indexed_tx) {
-                        warn!(
-                            target: "engine::tree::prewarm",
-                            task_idx = 0,
-                            error = %err,
-                            "Failed to send transaction to worker"
-                        );
-                    }
+                    // Round-robin distribution for all other transactions
+                    let worker_idx = tx_index % workers_needed;
+                    // Ignore send errors: workers listen to terminate_execution and may
+                    // exit early when signaled. Sending to a disconnected worker is
+                    // possible and harmless and should happen at most once due to
+                    //  the terminate_execution check above.
+                    let _ = handles[worker_idx].send(indexed_tx);
                 }
-                executing += 1;
-                tx_index += 1;
-            }
 
-            // Process remaining transactions with round-robin distribution
-            while let Ok(executable) = pending.recv() {
-                let indexed_tx = IndexedTransaction { index: tx_index, tx: executable };
-                let task_idx = executing % workers_needed;
-                if let Err(err) = handles[task_idx].send(indexed_tx) {
-                    warn!(
-                        target: "engine::tree::prewarm",
-                        task_idx,
-                        error = %err,
-                        "Failed to send transaction to worker"
-                    );
-                }
-                executing += 1;
                 tx_index += 1;
             }
 
@@ -229,12 +211,23 @@ where
             while done_rx.recv().is_ok() {}
 
             let _ = actions_tx
-                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: executing });
+                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_index });
         });
+    }
+
+    /// Returns true if prewarming was terminated and no more transactions should be prewarmed.
+    fn is_execution_terminated(&self) -> bool {
+        self.ctx.terminate_execution.load(Ordering::Relaxed)
     }
 
     /// If configured and the tx returned proof targets, emit the targets the transaction produced
     fn send_multi_proof_targets(&self, targets: Option<MultiProofTargets>) {
+        if self.is_execution_terminated() {
+            // if execution is already terminated then we dont need to send more proof fetch
+            // messages
+            return
+        }
+
         if let Some((proof_targets, to_multi_proof)) = targets.zip(self.to_multi_proof.as_ref()) {
             let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(proof_targets));
         }
@@ -259,9 +252,9 @@ where
             self;
         let hash = env.hash;
 
+        debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
         // Perform all cache operations atomically under the lock
         execution_cache.update_with_guard(|cached| {
-
             // consumes the `SavedCache` held by the prewarming task, which releases its usage guard
             let (caches, cache_metrics) = saved_cache.split();
             let new_cache = SavedCache::new(hash, caches, cache_metrics);
@@ -275,13 +268,15 @@ where
             }
 
             new_cache.update_metrics();
-            debug!(target: "engine::caching", parent_hash=?new_cache.executed_block_hash(), "Updated execution cache");
 
             // Replace the shared cache with the new one; the previous cache (if any) is dropped.
             *cached = Some(new_cache);
         });
 
-        metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
+        let elapsed = start.elapsed();
+        debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+
+        metrics.cache_saving_duration.set(elapsed.as_secs_f64());
     }
 
     /// Executes the task.
@@ -308,6 +303,7 @@ where
             match event {
                 PrewarmTaskEvent::TerminateTransactionExecution => {
                     // stop tx processing
+                    debug!(target: "engine::tree::prewarm", "Terminating prewarm execution");
                     self.ctx.terminate_execution.store(true, Ordering::Relaxed);
                 }
                 PrewarmTaskEvent::Outcome { proof_targets } => {
@@ -315,7 +311,7 @@ where
                     self.send_multi_proof_targets(proof_targets);
                 }
                 PrewarmTaskEvent::Terminate { block_output } => {
-                    trace!(target: "engine::tree::prewarm", "Received termination signal");
+                    trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
                     final_block_output = Some(block_output);
 
                     if finished_execution {
@@ -324,7 +320,7 @@ where
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
-                    trace!(target: "engine::tree::prewarm", "Finished prewarm execution signal");
+                    trace!(target: "engine::tree::payload_processor::prewarm", "Finished prewarm execution signal");
                     self.ctx.metrics.transactions.set(executed_transactions as f64);
                     self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);
 
@@ -338,7 +334,7 @@ where
             }
         }
 
-        trace!(target: "engine::tree::prewarm", "Completed prewarm execution");
+        debug!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
 
         // save caches and finish
         if let Some(Some(state)) = final_block_output {
@@ -460,6 +456,9 @@ where
                 debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
                     .entered();
 
+            // create the tx env
+            let start = Instant::now();
+
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
             if terminate_execution.load(Ordering::Relaxed) {
@@ -467,13 +466,11 @@ where
                 break
             }
 
-            // create the tx env
-            let start = Instant::now();
             let res = match evm.transact(&tx) {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
-                        target: "engine::tree::prewarm",
+                        target: "engine::tree::payload_processor::prewarm",
                         %err,
                         tx_hash=%tx.tx().tx_hash(),
                         sender=%tx.signer(),
@@ -488,6 +485,13 @@ where
             metrics.execution_duration.record(start.elapsed());
 
             drop(_enter);
+
+            // If the task was cancelled, stop execution, send an empty result to notify the task,
+            // and exit.
+            if terminate_execution.load(Ordering::Relaxed) {
+                let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: None });
+                break
+            }
 
             // Only send outcome for transactions after the first txn
             // as the main execution will be just as fast
@@ -517,7 +521,7 @@ where
         done_tx: Sender<()>,
     ) -> mpsc::Sender<IndexedTransaction<Tx>>
     where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
         let (tx, rx) = mpsc::channel();
         let ctx = self.clone();

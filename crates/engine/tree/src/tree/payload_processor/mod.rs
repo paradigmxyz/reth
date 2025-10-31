@@ -15,6 +15,7 @@ use crate::tree::{
 };
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
+use crossbeam_channel::Sender as CrossbeamSender;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
@@ -25,12 +26,12 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor, TxEnvFor,
 };
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateProviderFactory,
-    StateReader,
-};
+use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_trie::TrieInput;
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
+    trie_cursor::TrieCursorFactory,
+};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
@@ -40,10 +41,13 @@ use reth_trie_sparse::{
     ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
-use std::sync::{
-    atomic::AtomicBool,
-    mpsc::{self, channel, Sender},
-    Arc,
+use std::{
+    sync::{
+        atomic::AtomicBool,
+        mpsc::{self, channel},
+        Arc,
+    },
+    time::Instant,
 };
 use tracing::{debug, debug_span, instrument, warn};
 
@@ -62,6 +66,29 @@ use configured_sparse_trie::ConfiguredSparseTrie;
 /// would deteriorate to the point where PST might as well not be used.
 pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
     ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
+
+/// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
+/// nodes in allocated sparse tries.
+///
+/// Node maps have a key of `Nibbles` and value of `SparseNode`.
+/// The `size_of::<Nibbles>` is 40, and `size_of::<SparseNode>` is 80.
+///
+/// If we have 1 million entries of 120 bytes each, this conservative estimate comes out at around
+/// 120MB.
+pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
+
+/// Default value capacity for shrinking the sparse trie. This is used to limit the number of values
+/// in allocated sparse tries.
+///
+/// There are storage and account values, the largest of the two being account values, which are
+/// essentially `TrieAccount`s.
+///
+/// Account value maps have a key of `Nibbles` and value of `TrieAccount`.
+/// The `size_of::<Nibbles>` is 40, and `size_of::<TrieAccount>` is 104.
+///
+/// If we have 1 million entries of 144 bytes each, this conservative estimate comes out at around
+/// 144MB.
+pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -94,8 +121,6 @@ where
     >,
     /// Whether to disable the parallel sparse trie.
     disable_parallel_sparse_trie: bool,
-    /// A cleared trie input, kept around to be reused so allocations can be minimized.
-    trie_input: Option<TrieInput>,
     /// Maximum concurrency for prewarm task.
     prewarm_max_concurrency: usize,
 }
@@ -122,7 +147,6 @@ where
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: Arc::default(),
-            trie_input: None,
             disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
         }
@@ -173,57 +197,47 @@ where
         name = "payload processor",
         skip_all
     )]
-    pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
+    pub fn spawn<P, F, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-        consistent_view: ConsistentDbView<P>,
-        trie_input: TrieInput,
+        multiproof_provider_factory: F,
         config: &TreeConfig,
     ) -> Result<
         PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
         (ParallelStateRootError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
     >
     where
-        P: DatabaseProviderFactory<Provider: BlockReader>
-            + BlockReader
-            + StateProviderFactory
-            + StateReader
+        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
+            + Send
             + 'static,
     {
+        let span = tracing::Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
-        // spawn multiproof task, save the trie input
-        let (trie_input, state_root_config) = MultiProofConfig::from_input(trie_input);
-        self.trie_input = Some(trie_input);
+
+        // We rely on the cursor factory to provide whatever DB overlay is necessary to see a
+        // consistent view of the database, including the trie tables. Because of this there is no
+        // need for an overarching prefix set to invalidate any section of the trie tables, and so
+        // we use an empty prefix set.
+        let prefix_sets = Arc::new(TriePrefixSetsMut::default());
 
         // Create and spawn the storage proof task
-        let task_ctx = ProofTaskCtx::new(
-            state_root_config.nodes_sorted.clone(),
-            state_root_config.state_sorted.clone(),
-            state_root_config.prefix_sets.clone(),
-        );
+        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory, prefix_sets);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
-            consistent_view,
             task_ctx,
             storage_worker_count,
             account_worker_count,
         );
 
-        // We set it to half of the proof task concurrency, because often for each multiproof we
-        // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
-        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
         let multi_proof_task = MultiProofTask::new(
-            state_root_config,
-            self.executor.clone(),
             proof_handle.clone(),
             to_sparse_trie,
-            max_multi_proof_task_concurrency,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );
 
@@ -242,7 +256,6 @@ where
         );
 
         // spawn multi-proof task
-        let span = tracing::Span::current();
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
             multi_proof_task.run();
@@ -305,7 +318,7 @@ where
         let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
             for tx in transactions {
-                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx });
+                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
                 // only send Ok(_) variants to prewarming task
                 if let Ok(tx) = &tx {
                     let _ = prewarm_tx.send(tx.clone());
@@ -324,7 +337,7 @@ where
         mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
-        to_multi_proof: Option<Sender<MultiProofMessage>>,
+        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     ) -> CacheTaskHandle
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -370,11 +383,6 @@ where
         }
 
         CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
-    }
-
-    /// Takes the trie input from the inner payload processor, if it exists.
-    pub const fn take_trie_input(&mut self) -> Option<TrieInput> {
-        self.trie_input.take()
     }
 
     /// Returns the cache for the given parent hash.
@@ -441,11 +449,19 @@ where
             // Send state root computation result
             let _ = state_root_tx.send(result);
 
-            // Clear the SparseStateTrie and replace it back into the mutex _after_ sending
+            // Clear the SparseStateTrie, shrink, and replace it back into the mutex _after_ sending
             // results to the next step, so that time spent clearing doesn't block the step after
             // this one.
             let _enter = debug_span!(target: "engine::tree::payload_processor", "clear").entered();
-            cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
+            let mut cleared_trie = ClearedSparseStateTrie::from_state_trie(trie);
+
+            // Shrink the sparse trie so that we don't have ever increasing memory.
+            cleared_trie.shrink_to(
+                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+            );
+
+            cleared_sparse_trie.lock().replace(cleared_trie);
         });
     }
 }
@@ -454,7 +470,7 @@ where
 #[derive(Debug)]
 pub struct PayloadHandle<Tx, Err> {
     /// Channel for evm state updates
-    to_multi_proof: Option<Sender<MultiProofMessage>>,
+    to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle,
     /// Receiver for the state root
@@ -532,7 +548,7 @@ pub(crate) struct CacheTaskHandle {
     /// Metrics for the caches
     cache_metrics: CachedStateMetrics,
     /// Channel to the spawned prewarm task if any
-    to_prewarm_task: Option<Sender<PrewarmTaskEvent>>,
+    to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent>>,
 }
 
 impl CacheTaskHandle {
@@ -601,8 +617,16 @@ impl ExecutionCache {
     /// A cache is considered available when:
     /// - It exists and matches the requested parent hash
     /// - No other tasks are currently using it (checked via Arc reference count)
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
     pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
+        let start = Instant::now();
         let cache = self.inner.read();
+
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 5 {
+            warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
+        }
+
         cache
             .as_ref()
             .filter(|c| c.executed_block_hash() == parent_hash && c.is_available())
@@ -681,12 +705,12 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
-        providers::{BlockchainProvider, ConsistentDbView},
+        providers::{BlockchainProvider, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory_with_chain_spec,
         ChainSpecProvider, HashingWriter,
     };
     use reth_testing_utils::generators;
-    use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
+    use reth_trie::{test_utils::state_root, HashedPostState};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
@@ -868,7 +892,9 @@ mod tests {
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
         );
-        let provider = BlockchainProvider::new(factory).unwrap();
+
+        let provider_factory = BlockchainProvider::new(factory).unwrap();
+
         let mut handle =
             payload_processor
                 .spawn(
@@ -876,9 +902,8 @@ mod tests {
                     core::iter::empty::<
                         Result<Recovered<TransactionSigned>, core::convert::Infallible>,
                     >(),
-                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                    ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-                    TrieInput::from_state(hashed_state),
+                    StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+                    OverlayStateProviderFactory::new(provider_factory),
                     &TreeConfig::default(),
                 )
                 .map_err(|(err, ..)| err)
