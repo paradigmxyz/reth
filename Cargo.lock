@@ -8555,6 +8555,7 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
+ "reth-trie-common",
  "rmp-serde",
  "secp256k1 0.30.0",
  "tempfile",

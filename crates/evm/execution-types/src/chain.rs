@@ -67,12 +67,7 @@ impl<N: NodePrimitives> Chain<N> {
             blocks.into_iter().map(|b| (b.header().number(), b)).collect::<BTreeMap<_, _>>();
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
-        Self {
-            blocks,
-            execution_outcome,
-            trie_updates,
-            hashed_state,
-        }
+        Self { blocks, execution_outcome, trie_updates, hashed_state }
     }
 
     /// Create new Chain from a single block and its state.
@@ -465,7 +460,6 @@ pub(super) mod serde_bincode_compat {
         serde_bincode_compat::{RecoveredBlock, SerdeBincodeCompat},
         Block, NodePrimitives,
     };
-    use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
     use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -485,6 +479,7 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
+    #[serde(bound = "")]
     pub struct Chain<'a, N = EthPrimitives>
     where
         N: NodePrimitives<
@@ -494,11 +489,13 @@ pub(super) mod serde_bincode_compat {
         blocks: RecoveredBlocks<'a, N::Block>,
         execution_outcome: serde_bincode_compat::ExecutionOutcome<'a, N::Receipt>,
         #[serde(default, skip_serializing, rename = "trie_updates_legacy")]
-        _trie_updates_legacy: Option<TrieUpdates<'a>>,
+        _trie_updates_legacy:
+            Option<reth_trie_common::serde_bincode_compat::updates::TrieUpdates<'a>>,
         #[serde(default)]
-        trie_updates: BTreeMap<BlockNumber, Arc<super::TrieUpdates>>,
-        #[serde(default)]
-        hashed_state: BTreeMap<BlockNumber, Arc<super::HashedPostState>>,
+        trie_updates:
+            BTreeMap<BlockNumber, reth_trie_common::serde_bincode_compat::updates::TrieUpdates<'a>>,
+        //#[serde(default)]
+        //hashed_state: BTreeMap<BlockNumber, super::HashedPostState>,
     }
 
     #[derive(Debug)]
@@ -552,8 +549,16 @@ pub(super) mod serde_bincode_compat {
                 blocks: RecoveredBlocks(Cow::Borrowed(&value.blocks)),
                 execution_outcome: value.execution_outcome.as_repr(),
                 _trie_updates_legacy: None,
-                trie_updates: value.trie_updates.clone(),
-                hashed_state: value.hashed_state.clone(),
+                trie_updates: value
+                    .trie_updates
+                    .iter()
+                    .map(|(k, v)| (*k, v.as_ref().into()))
+                    .collect(),
+                //hashed_state: value
+                //    .hashed_state
+                //    .iter()
+                //    .map(|(k, v)| (*k, v.as_ref().clone()))
+                //    .collect(),
             }
         }
     }
@@ -568,8 +573,17 @@ pub(super) mod serde_bincode_compat {
             Self {
                 blocks: value.blocks.0.into_owned(),
                 execution_outcome: ExecutionOutcome::from_repr(value.execution_outcome),
-                trie_updates: value.trie_updates,
-                hashed_state: value.hashed_state,
+                trie_updates: value
+                    .trie_updates
+                    .into_iter()
+                    .map(|(k, v)| (k, Arc::new(v.into())))
+                    .collect(),
+                hashed_state: Default::default(),
+                //hashed_state: value
+                //    .hashed_state
+                //    .into_iter()
+                //    .map(|(k, v)| (k, Arc::new(v)))
+                //    .collect(),
             }
         }
     }

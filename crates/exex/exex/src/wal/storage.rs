@@ -183,7 +183,7 @@ mod tests {
     use reth_testing_utils::generators::{self, random_block};
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
-    // wal with 1 block and tx
+    // wal with 1 block and tx (old 3-field format)
     // <https://github.com/paradigmxyz/reth/issues/15012>
     #[test]
     fn decode_notification_wal() {
@@ -197,6 +197,39 @@ mod tests {
             ExExNotification::ChainCommitted { new } => {
                 assert_eq!(new.blocks().len(), 1);
                 assert_eq!(new.tip().transaction_count(), 1);
+            }
+            _ => panic!("unexpected notification"),
+        }
+    }
+
+    // wal with 1 block and tx (new 4-field format with trie updates and hashed state)
+    #[test]
+    fn decode_notification_wal_new_format() {
+        use alloy_consensus::BlockHeader;
+
+        let wal = include_bytes!("../../test-data/new_format.wal");
+        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
+            '_,
+            reth_ethereum_primitives::EthPrimitives,
+        > = rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
+        let notification: ExExNotification = notification.into();
+        match notification {
+            ExExNotification::ChainCommitted { new } => {
+                // Check blocks
+                assert_eq!(new.blocks().len(), 1);
+                let block_number = new.tip().header().number();
+
+                // The key thing is that this WAL was created with the new 4-field format
+                // (blocks, execution_outcome, trie_updates, hashed_state)
+                // Even if the maps are empty, they should be present in the serialized data
+                assert!(
+                    new.trie_updates().contains_key(&block_number),
+                    "trie updates map should contain entry for block"
+                );
+                assert!(
+                    new.hashed_state().contains_key(&block_number),
+                    "hashed state map should contain entry for block"
+                );
             }
             _ => panic!("unexpected notification"),
         }
@@ -235,6 +268,60 @@ mod tests {
             deserialized_notification.map(|(notification, _)| notification),
             Some(notification)
         );
+
+        Ok(())
+    }
+
+    /// Generate a new WAL file for testing.
+    ///
+    /// Run this test with `--ignored` to generate a new test WAL file:
+    /// ```sh
+    /// cargo test -p reth-exex generate_test_wal -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore]
+    fn generate_test_wal() -> eyre::Result<()> {
+        use alloy_consensus::BlockHeader;
+        use alloy_primitives::{B256, U256};
+        use reth_trie_common::{updates::TrieUpdates, HashedPostState, HashedStorage};
+        use std::io::Write;
+
+        let mut rng = generators::rng();
+
+        // Create a block with a transaction
+        let block = random_block(&mut rng, 0, Default::default()).try_recover()?;
+        let block_number = block.header().number();
+
+        // Create some non-empty trie updates and hashed state to ensure the 4-field format is used
+        let trie_updates = TrieUpdates::default();
+        let hashed_state = HashedPostState::default();
+
+        let notification: ExExNotification<reth_ethereum_primitives::EthPrimitives> =
+            ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(
+                    vec![block],
+                    Default::default(),
+                    BTreeMap::from([(block_number, Arc::new(trie_updates))]),
+                    BTreeMap::from([(block_number, Arc::new(hashed_state))]),
+                )),
+            };
+
+        // Serialize the notification
+        let notification_compat =
+            reth_exex_types::serde_bincode_compat::ExExNotification::from(&notification);
+        let encoded = rmp_serde::encode::to_vec(&notification_compat)?;
+
+        // Write to test-data directory
+        let test_data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-data");
+        std::fs::create_dir_all(&test_data_dir)?;
+
+        let output_path = test_data_dir.join("new_format.wal");
+        let mut file = File::create(&output_path)?;
+        file.write_all(&encoded)?;
+
+        println!("Generated WAL file at: {}", output_path.display());
+        println!("File size: {} bytes", encoded.len());
+        println!("✓ WAL file created successfully!");
 
         Ok(())
     }
