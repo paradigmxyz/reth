@@ -202,9 +202,9 @@ where
                                     .map(|tx| {
                                         let transaction_hash = *tx.tx_hash();
                                         let block_metadata = BlockMetadata {
-                                            block_hash: new.tip().hash(),
-                                            block_number: new.tip().number(),
-                                            gas_used: new.tip().gas_used(),
+                                            block_hash: block.hash(),
+                                            block_number: block.number,
+                                            gas_used: block.gas_used,
                                         };
                                         BlobTransactionEvent::Reorged(ReorgedBlob {
                                             transaction_hash,
