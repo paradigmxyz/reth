@@ -296,12 +296,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             self.write_state(&execution_output, OriginalValuesKnown::No)?;
 
             // insert hashes and intermediate merkle nodes
-            self.write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
+            self.write_hashed_state(&hashed_state)?;
 
-            // sort trie updates and insert changesets
-            let trie_updates_sorted = (*trie_updates).clone().into_sorted();
-            self.write_trie_changesets(block_number, &trie_updates_sorted, None)?;
-            self.write_trie_updates_sorted(&trie_updates_sorted)?;
+            self.write_trie_changesets(block_number, &trie_updates, None)?;
+            self.write_trie_updates_sorted(&trie_updates)?;
         }
 
         // update history indices
