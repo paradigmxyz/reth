@@ -73,9 +73,7 @@ impl MetricsListener {
             }
         }
     }
-}
 
-impl MetricsListener {
     /// Updates all stage checkpoints to the given height efficiently.
     fn update_all_stages_height(&mut self, height: BlockNumber) {
         for stage_id in StageId::ALL {
