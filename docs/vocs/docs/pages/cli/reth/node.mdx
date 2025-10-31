@@ -701,6 +701,11 @@ Debug:
       --ethstats <ETHSTATS>
           The URL of the ethstats server to connect to. Example: `nodename:secret@host:port`
 
+      --debug.startup-sync-state-idle
+          Set the node to idle state when the backfill is not running.
+
+          This makes the `eth_syncing` RPC return "Idle" when the node has just started or finished the backfill, but did not yet receive any new blocks.
+
 Database:
       --db.log-level <LOG_LEVEL>
           Database logging level. Levels higher than "notice" require a debug build
