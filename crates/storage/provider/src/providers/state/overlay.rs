@@ -216,15 +216,22 @@ where
             // Collect trie reverts
             let mut trie_reverts = {
                 #[cfg(feature = "metrics")]
-                let _trie_timer = OverlayMetricsTimer::start(&self.metrics.trie_reverts_duration);
+                let _trie_timer =
+                    OverlayMetricsTimer::start(&self.metrics.trie_reverts_duration);
                 provider.trie_reverts(from_block + 1)?
             };
 
+            let trie_reverts_is_empty = trie_reverts.is_empty();
+
             #[cfg(feature = "metrics")]
-            if trie_reverts.is_empty() {
-                self.metrics.trie_reverts_empty.increment(1);
-            } else {
-                self.metrics.trie_reverts_nonempty.increment(1);
+            {
+                let trie_reverts_len = trie_reverts.total_len() as f64;
+                self.metrics.trie_reverts_len.record(trie_reverts_len);
+                if trie_reverts_is_empty {
+                    self.metrics.trie_reverts_empty.increment(1);
+                } else {
+                    self.metrics.trie_reverts_nonempty.increment(1);
+                }
             }
 
             // Collect state reverts
@@ -242,17 +249,23 @@ where
                 .into_sorted()
             };
 
+            let hashed_state_reverts_is_empty = hashed_state_reverts.is_empty();
+
             #[cfg(feature = "metrics")]
-            if hashed_state_reverts.is_empty() {
-                self.metrics.state_reverts_empty.increment(1);
-            } else {
-                self.metrics.state_reverts_nonempty.increment(1);
+            {
+                let hashed_state_reverts_len = hashed_state_reverts.total_len() as f64;
+                self.metrics.state_reverts_len.record(hashed_state_reverts_len);
+                if hashed_state_reverts_is_empty {
+                    self.metrics.state_reverts_empty.increment(1);
+                } else {
+                    self.metrics.state_reverts_nonempty.increment(1);
+                }
             }
 
             // Extend with overlays if provided. If the reverts are empty we should just use the
             // overlays directly, because `extend_ref` will actually clone the overlay.
             let trie_updates = match self.trie_overlay.as_ref() {
-                Some(trie_overlay) if trie_reverts.is_empty() => Arc::clone(trie_overlay),
+                Some(trie_overlay) if trie_reverts_is_empty => Arc::clone(trie_overlay),
                 Some(trie_overlay) => {
                     trie_reverts.extend_ref(trie_overlay);
                     Arc::new(trie_reverts)
@@ -261,7 +274,7 @@ where
             };
 
             let hashed_state_updates = match self.hashed_state_overlay.as_ref() {
-                Some(hashed_state_overlay) if hashed_state_reverts.is_empty() => {
+                Some(hashed_state_overlay) if hashed_state_reverts_is_empty => {
                     Arc::clone(hashed_state_overlay)
                 }
                 Some(hashed_state_overlay) => {
@@ -289,6 +302,13 @@ where
             #[cfg(feature = "metrics")]
             if self.block_hash.is_none() {
                 self.metrics.block_hash_not_set.increment(1);
+            }
+
+            #[cfg(feature = "metrics")]
+            {
+                // Record zero revert counts so histograms reflect skipped runs.
+                self.metrics.trie_reverts_len.record(0.0);
+                self.metrics.state_reverts_len.record(0.0);
             }
 
             // If no block_hash, use overlays directly or defaults

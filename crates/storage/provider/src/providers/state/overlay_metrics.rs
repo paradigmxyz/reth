@@ -17,6 +17,10 @@ pub(super) struct OverlayStateProviderMetrics {
     pub(super) reverts_validation_duration: Histogram,
     /// Time to fetch state reverts from DB via `from_reverts`
     pub(super) from_reverts_duration: Histogram,
+    /// Count of trie revert entries collected per invocation
+    pub(super) trie_reverts_len: Histogram,
+    /// Count of hashed state revert entries collected per invocation
+    pub(super) state_reverts_len: Histogram,
     /// Total time in database_provider_ro()
     pub(super) total_database_provider_ro_duration: Histogram,
     /// Counter for when block_hash is not set (no reverts path)
