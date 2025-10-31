@@ -106,8 +106,8 @@ pub struct DebugArgs {
     ///
     /// This makes the `eth_syncing` RPC return "Idle" when the node has just started or finished
     /// the backfill, but did not yet receive any new blocks.
-    #[arg(long = "debug.backfill-sync-state-idle", help_heading = "Debug")]
-    pub backfill_sync_state_idle: bool,
+    #[arg(long = "debug.startup-sync-state-idle", help_heading = "Debug")]
+    pub startup_sync_state_idle: bool,
 }
 
 impl Default for DebugArgs {
@@ -126,7 +126,7 @@ impl Default for DebugArgs {
             invalid_block_hook: Some(InvalidBlockSelection::default()),
             healthy_node_rpc_url: None,
             ethstats: None,
-            backfill_sync_state_idle: false,
+            startup_sync_state_idle: false,
         }
     }
 }
