@@ -109,10 +109,9 @@ where
             "Attempting to connect to EthStats server at {}", self.credentials.host
         );
         let full_url = format!("ws://{}/api", self.credentials.host);
-        let url = Url::parse(&full_url)
-            .map_err(|e| EthStatsError::InvalidUrl(format!("Invalid URL: {full_url} - {e}")))?;
+        let url = Url::parse(&full_url).map_err(EthStatsError::Url)?;
 
-        match timeout(CONNECT_TIMEOUT, connect_async(url.to_string())).await {
+        match timeout(CONNECT_TIMEOUT, connect_async(url.as_str())).await {
             Ok(Ok((ws_stream, _))) => {
                 debug!(
                     target: "ethstats",
@@ -123,7 +122,7 @@ where
                 self.login().await?;
                 Ok(())
             }
-            Ok(Err(e)) => Err(EthStatsError::InvalidUrl(e.to_string())),
+            Ok(Err(e)) => Err(EthStatsError::WebSocket(e)),
             Err(_) => {
                 debug!(target: "ethstats", "Connection to EthStats server timed out");
                 Err(EthStatsError::Timeout)

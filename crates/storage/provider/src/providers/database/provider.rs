@@ -52,7 +52,7 @@ use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, RecoveredBlock, SealedHeader, StorageEntry,
 };
 use reth_prune_types::{
-    PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
+    PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE, PRUNE_SEGMENTS,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -1650,9 +1650,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 if let Some(writer) = &mut receipts_static_writer {
                     writer.append_receipt(receipt_idx, receipt)?;
+                } else {
+                    receipts_cursor.append(receipt_idx, receipt)?;
                 }
-
-                receipts_cursor.append(receipt_idx, receipt)?;
             }
         }
 
@@ -2077,7 +2077,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
 
         // Process sorted account nodes
-        for (key, updated_node) in &trie_updates.account_nodes {
+        for (key, updated_node) in trie_updates.account_nodes_ref() {
             let nibbles = StoredNibbles(*key);
             match updated_node {
                 Some(node) => {
@@ -2144,7 +2144,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
             )?;
         }
 
-        let mut storage_updates = trie_updates.storage_tries.iter().collect::<Vec<_>>();
+        let mut storage_updates = trie_updates.storage_tries_ref().iter().collect::<Vec<_>>();
         storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
         num_entries += self.write_storage_trie_changesets(
@@ -2194,7 +2194,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         let tx = self.tx_ref();
 
         // Read account trie changes directly into a Vec - data is already sorted by nibbles
-        // within each block, and we want the oldest (first) version of each node
+        // within each block, and we want the oldest (first) version of each node sorted by path.
         let mut account_nodes = Vec::new();
         let mut seen_account_keys = HashSet::new();
         let mut accounts_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
@@ -2207,8 +2207,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
             }
         }
 
+        account_nodes.sort_by_key(|(path, _)| *path);
+
         // Read storage trie changes - data is sorted by (block, hashed_address, nibbles)
-        // Keep track of seen (address, nibbles) pairs to only keep the oldest version
+        // Keep track of seen (address, nibbles) pairs to only keep the oldest version per address,
+        // sorted by path.
         let mut storage_tries = B256Map::<Vec<_>>::default();
         let mut seen_storage_keys = HashSet::new();
         let mut storages_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
@@ -2231,12 +2234,13 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         // Convert to StorageTrieUpdatesSorted
         let storage_tries = storage_tries
             .into_iter()
-            .map(|(address, nodes)| {
+            .map(|(address, mut nodes)| {
+                nodes.sort_by_key(|(path, _)| *path);
                 (address, StorageTrieUpdatesSorted { storage_nodes: nodes, is_deleted: false })
             })
             .collect();
 
-        Ok(TrieUpdatesSorted { account_nodes, storage_tries })
+        Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
     }
 
     fn get_block_trie_updates(
@@ -2254,7 +2258,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
 
         // Step 3: Collect all account trie nodes that changed in the target block
-        let mut trie_updates = TrieUpdatesSorted::default();
+        let mut account_nodes = Vec::new();
 
         // Walk through all account trie changes for this block
         let mut accounts_trie_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
@@ -2264,10 +2268,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
             let (_, TrieChangeSetsEntry { nibbles, .. }) = entry?;
             // Look up the current value of this trie node using the overlay cursor
             let node_value = account_cursor.seek_exact(nibbles.0)?.map(|(_, node)| node);
-            trie_updates.account_nodes.push((nibbles.0, node_value));
+            account_nodes.push((nibbles.0, node_value));
         }
 
         // Step 4: Collect all storage trie nodes that changed in the target block
+        let mut storage_tries = B256Map::default();
         let mut storages_trie_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
         let storage_range_start = BlockNumberHashedAddress((block_number, B256::ZERO));
         let storage_range_end = BlockNumberHashedAddress((block_number + 1, B256::ZERO));
@@ -2291,8 +2296,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
             let cursor =
                 storage_cursor.as_mut().expect("storage_cursor was just initialized above");
             let node_value = cursor.seek_exact(nibbles.0)?.map(|(_, node)| node);
-            trie_updates
-                .storage_tries
+            storage_tries
                 .entry(hashed_address)
                 .or_insert_with(|| StorageTrieUpdatesSorted {
                     storage_nodes: Vec::new(),
@@ -2302,7 +2306,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
                 .push((nibbles.0, node_value));
         }
 
-        Ok(trie_updates)
+        Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
     }
 }
 
@@ -2379,7 +2383,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
 
             // Get the overlay updates for this storage trie, or use an empty array
             let overlay_updates = updates_overlay
-                .and_then(|overlay| overlay.storage_tries.get(hashed_address))
+                .and_then(|overlay| overlay.storage_tries_ref().get(hashed_address))
                 .map(|updates| updates.storage_nodes_ref())
                 .unwrap_or(&EMPTY_UPDATES);
 
@@ -3020,10 +3024,14 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(self
-            .tx
-            .cursor_read::<tables::PruneCheckpoints>()?
-            .walk(None)?
+        Ok(PRUNE_SEGMENTS
+            .iter()
+            .filter_map(|segment| {
+                self.tx
+                    .get::<tables::PruneCheckpoints>(*segment)
+                    .transpose()
+                    .map(|chk| chk.map(|chk| (*segment, chk)))
+            })
             .collect::<Result<_, _>>()?)
     }
 }
@@ -3463,7 +3471,7 @@ mod tests {
         storage_tries.insert(storage_address1, storage_trie1);
         storage_tries.insert(storage_address2, storage_trie2);
 
-        let trie_updates = TrieUpdatesSorted { account_nodes, storage_tries };
+        let trie_updates = TrieUpdatesSorted::new(account_nodes, storage_tries);
 
         // Write the changesets
         let num_written =
@@ -3679,10 +3687,7 @@ mod tests {
         overlay_storage_tries.insert(storage_address1, overlay_storage_trie1);
         overlay_storage_tries.insert(storage_address2, overlay_storage_trie2);
 
-        let overlay = TrieUpdatesSorted {
-            account_nodes: overlay_account_nodes,
-            storage_tries: overlay_storage_tries,
-        };
+        let overlay = TrieUpdatesSorted::new(overlay_account_nodes, overlay_storage_tries);
 
         // Normal storage trie: one Some (update) and one None (new)
         let storage_trie1 = StorageTrieUpdatesSorted {
@@ -3709,7 +3714,7 @@ mod tests {
         storage_tries.insert(storage_address1, storage_trie1);
         storage_tries.insert(storage_address2, storage_trie2);
 
-        let trie_updates = TrieUpdatesSorted { account_nodes, storage_tries };
+        let trie_updates = TrieUpdatesSorted::new(account_nodes, storage_tries);
 
         // Write the changesets WITH OVERLAY
         let num_written =
@@ -4275,7 +4280,7 @@ mod tests {
         storage_tries.insert(storage_address1, storage_trie1);
         storage_tries.insert(storage_address2, storage_trie2);
 
-        let trie_updates = TrieUpdatesSorted { account_nodes, storage_tries };
+        let trie_updates = TrieUpdatesSorted::new(account_nodes, storage_tries);
 
         // Write the sorted trie updates
         let num_entries = provider_rw.write_trie_updates_sorted(&trie_updates).unwrap();
@@ -4539,11 +4544,11 @@ mod tests {
         let result = provider.get_block_trie_updates(target_block).unwrap();
 
         // Verify account trie updates
-        assert_eq!(result.account_nodes.len(), 2, "Should have 2 account trie updates");
+        assert_eq!(result.account_nodes_ref().len(), 2, "Should have 2 account trie updates");
 
         // Check nibbles1 - should have the current value (node1)
         let nibbles1_update = result
-            .account_nodes
+            .account_nodes_ref()
             .iter()
             .find(|(n, _)| n == &account_nibbles1)
             .expect("Should find nibbles1");
@@ -4556,7 +4561,7 @@ mod tests {
 
         // Check nibbles2 - should have the current value (node2)
         let nibbles2_update = result
-            .account_nodes
+            .account_nodes_ref()
             .iter()
             .find(|(n, _)| n == &account_nibbles2)
             .expect("Should find nibbles2");
@@ -4569,14 +4574,14 @@ mod tests {
 
         // nibbles3 should NOT be in the result (it was changed in next_block, not target_block)
         assert!(
-            !result.account_nodes.iter().any(|(n, _)| n == &account_nibbles3),
+            !result.account_nodes_ref().iter().any(|(n, _)| n == &account_nibbles3),
             "nibbles3 should not be in target_block updates"
         );
 
         // Verify storage trie updates
-        assert_eq!(result.storage_tries.len(), 1, "Should have 1 storage trie");
+        assert_eq!(result.storage_tries_ref().len(), 1, "Should have 1 storage trie");
         let storage_updates = result
-            .storage_tries
+            .storage_tries_ref()
             .get(&storage_address1)
             .expect("Should have storage updates for address1");
 

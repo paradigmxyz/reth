@@ -80,6 +80,12 @@ asm-keccak = ["alloy-primitives/asm-keccak"]
 # Feature to enable opentelemetry export
 otlp = ["reth-tracing/otlp"]
 
+min-error-logs = ["tracing/release_max_level_error"]
+min-warn-logs = ["tracing/release_max_level_warn"]
+min-info-logs = ["tracing/release_max_level_info"]
+min-debug-logs = ["tracing/release_max_level_debug"]
+min-trace-logs = ["tracing/release_max_level_trace"]
+
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }
 vergen-git2.workspace = true
