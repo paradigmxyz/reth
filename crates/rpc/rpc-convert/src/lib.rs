@@ -21,8 +21,8 @@ pub use fees::{CallFees, CallFeesError};
 pub use receipt::TryFromReceiptResponse;
 pub use rpc::*;
 pub use transaction::{
-    EthTxEnvError, IntoRpcTx, RpcConvert, RpcConverter, TransactionConversionError,
-    TryFromTransactionResponse, TryIntoSimTx, TxInfoMapper,
+    build_convert_receipt_inputs, EthTxEnvError, IntoRpcTx, RpcConvert, RpcConverter,
+    TransactionConversionError, TryFromTransactionResponse, TryIntoSimTx, TxInfoMapper,
 };
 
 #[cfg(feature = "op")]
