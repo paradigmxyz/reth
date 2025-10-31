@@ -60,6 +60,7 @@ impl<T, H> TrieWitness<T, H> {
     pub fn with_trie_cursor_factory<TF, F>(self, f: F) -> TrieWitness<TF, H>
     where
         F: FnOnce(T) -> TF,
+        TF: TrieCursorFactory,
     {
         TrieWitness {
             trie_cursor_factory: f(self.trie_cursor_factory),
@@ -74,6 +75,7 @@ impl<T, H> TrieWitness<T, H> {
     pub fn with_hashed_cursor_factory<HF, F>(self, f: F) -> TrieWitness<T, HF>
     where
         F: FnOnce(H) -> HF,
+        HF: HashedCursorFactory,
     {
         TrieWitness {
             trie_cursor_factory: self.trie_cursor_factory,
