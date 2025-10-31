@@ -44,6 +44,18 @@ struct MerkleChangeSetsMetrics {
 
     /// Number of stage executions
     execution_count: Counter,
+
+    /// Total state revert items collected per execution
+    state_reverts_collected: Histogram,
+
+    /// Total trie revert items collected per execution
+    trie_reverts_collected: Histogram,
+
+    /// Average state reverts per block
+    state_reverts_per_block: Histogram,
+
+    /// Average trie reverts per block
+    trie_reverts_per_block: Histogram,
 }
 
 /// The `MerkleChangeSets` stage.
@@ -56,6 +68,13 @@ pub struct MerkleChangeSets {
     retention_blocks: u64,
     #[cfg(feature = "metrics")]
     metrics: MerkleChangeSetsMetrics,
+}
+
+/// Counts of reverts collected during populate_range execution
+#[derive(Debug, Default)]
+struct RevertCounts {
+    total_state_reverts: usize,
+    total_trie_reverts: usize,
 }
 
 impl MerkleChangeSets {
@@ -200,7 +219,7 @@ impl MerkleChangeSets {
     fn populate_range<Provider>(
         provider: &Provider,
         target_range: Range<BlockNumber>,
-    ) -> Result<(), StageError>
+    ) -> Result<RevertCounts, StageError>
     where
         Provider: StageCheckpointReader
             + TrieWriter
@@ -238,11 +257,19 @@ impl MerkleChangeSets {
             "Computing per-block state reverts",
         );
         let mut per_block_state_reverts = Vec::new();
+        let mut revert_counts = RevertCounts::default();
+
         for block_number in target_range.clone() {
-            per_block_state_reverts.push(HashedPostState::from_reverts::<KeccakKeyHasher>(
+            let state_revert = HashedPostState::from_reverts::<KeccakKeyHasher>(
                 provider.tx_ref(),
                 block_number..=block_number,
-            )?);
+            )?;
+
+            // Count state reverts (accounts + storage slots)
+            revert_counts.total_state_reverts += state_revert.accounts.len() +
+                state_revert.storages.values().map(|s| s.storage.len()).sum::<usize>();
+
+            per_block_state_reverts.push(state_revert);
         }
 
         // Helper to retrieve state revert data for a specific block from the pre-computed array
@@ -305,6 +332,9 @@ impl MerkleChangeSets {
             input.nodes.extend_ref(&this_trie_updates);
             let this_trie_updates = this_trie_updates.into_sorted();
 
+            // Count trie reverts
+            revert_counts.total_trie_reverts += this_trie_updates.total_len();
+
             // Write the changesets to the DB using the trie updates produced by the block, and the
             // trie reverts as the overlay.
             debug!(
@@ -319,7 +349,7 @@ impl MerkleChangeSets {
             )?;
         }
 
-        Ok(())
+        Ok(revert_counts)
     }
 }
 
@@ -412,7 +442,7 @@ where
         self.metrics.blocks_per_execution.record(blocks_count as f64);
 
         // Populate the target range with changesets
-        Self::populate_range(provider, target_range)?;
+        let revert_counts = Self::populate_range(provider, target_range)?;
 
         // Update the prune checkpoint to reflect that all data before `computed_range.start`
         // is not available.
@@ -445,6 +475,18 @@ where
             if let Ok(Some(tip)) = provider.last_finalized_block_number() {
                 let lag = tip.saturating_sub(checkpoint.block_number);
                 self.metrics.checkpoint_lag.set(lag as f64);
+            }
+
+            // Record revert collection metrics
+            self.metrics.state_reverts_collected.record(revert_counts.total_state_reverts as f64);
+            self.metrics.trie_reverts_collected.record(revert_counts.total_trie_reverts as f64);
+
+            if blocks_count > 0 {
+                let state_per_block =
+                    revert_counts.total_state_reverts as f64 / blocks_count as f64;
+                let trie_per_block = revert_counts.total_trie_reverts as f64 / blocks_count as f64;
+                self.metrics.state_reverts_per_block.record(state_per_block);
+                self.metrics.trie_reverts_per_block.record(trie_per_block);
             }
         }
 
