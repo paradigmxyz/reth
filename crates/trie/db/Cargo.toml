@@ -55,6 +55,7 @@ serde = [
     "similar-asserts/serde",
     "alloy-consensus/serde",
     "alloy-primitives/serde",
+    "reth-storage-api/serde",
     "reth-trie/serde",
     "reth-trie-common/serde",
     "reth-primitives-traits/serde",
