@@ -1961,3 +1961,132 @@ where
     tx.encode_2718(rlp_buf);
     Ok((keccak256(rlp_buf), tx_id))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use reth_chain_state::EthPrimitives;
+    use reth_db::test_utils::create_test_static_files_dir;
+    use reth_static_file_types::SegmentRangeInclusive;
+
+    use crate::providers::StaticFileProvider;
+
+    #[test]
+    fn test_find_fixed_range_with_block_index() -> eyre::Result<()> {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)?
+            .with_custom_blocks_per_file(100);
+
+        // Test with None - should use default behavior
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(None, 0),
+            SegmentRangeInclusive::new(0, 99)
+        );
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(None, 250),
+            SegmentRangeInclusive::new(200, 299)
+        );
+
+        // Test with empty index - should fall back to default behavior
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&BTreeMap::new()), 150),
+            SegmentRangeInclusive::new(100, 199)
+        );
+
+        // Create block index with existing ranges
+        let block_index = BTreeMap::from_iter([
+            (99, SegmentRangeInclusive::new(0, 99)),
+            (199, SegmentRangeInclusive::new(100, 199)),
+            (299, SegmentRangeInclusive::new(200, 299)),
+        ]);
+
+        // Test blocks within existing ranges - should return the matching range
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&block_index), 0),
+            SegmentRangeInclusive::new(0, 99)
+        );
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&block_index), 50),
+            SegmentRangeInclusive::new(0, 99)
+        );
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&block_index), 99),
+            SegmentRangeInclusive::new(0, 99)
+        );
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&block_index), 100),
+            SegmentRangeInclusive::new(100, 199)
+        );
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&block_index), 150),
+            SegmentRangeInclusive::new(100, 199)
+        );
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&block_index), 199),
+            SegmentRangeInclusive::new(100, 199)
+        );
+
+        // Test blocks beyond existing ranges - should derive new ranges from the last range
+        // Block 300 is exactly one segment after the last range
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&block_index), 300),
+            SegmentRangeInclusive::new(300, 399)
+        );
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&block_index), 350),
+            SegmentRangeInclusive::new(300, 399)
+        );
+
+        // Block 500 skips one segment (300-399)
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&block_index), 500),
+            SegmentRangeInclusive::new(500, 599)
+        );
+
+        // Block 1000 skips many segments
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&block_index), 1000),
+            SegmentRangeInclusive::new(1000, 1099)
+        );
+
+        // Test with block index having different sizes than blocks_per_file setting
+        // This simulates the scenario where blocks_per_file was changed between runs
+        let mixed_size_index = BTreeMap::from_iter([
+            (49, SegmentRangeInclusive::new(0, 49)),     // 50 blocks
+            (149, SegmentRangeInclusive::new(50, 149)),  // 100 blocks
+            (349, SegmentRangeInclusive::new(150, 349)), // 200 blocks
+        ]);
+
+        // Blocks within existing ranges should return those ranges regardless of size
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&mixed_size_index), 25),
+            SegmentRangeInclusive::new(0, 49)
+        );
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&mixed_size_index), 100),
+            SegmentRangeInclusive::new(50, 149)
+        );
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&mixed_size_index), 200),
+            SegmentRangeInclusive::new(150, 349)
+        );
+
+        // Block after the last range should derive using current blocks_per_file (100)
+        // from the end of the last range (349)
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&mixed_size_index), 350),
+            SegmentRangeInclusive::new(350, 449)
+        );
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&mixed_size_index), 450),
+            SegmentRangeInclusive::new(450, 549)
+        );
+        assert_eq!(
+            sf_rw.find_fixed_range_with_block_index(Some(&mixed_size_index), 550),
+            SegmentRangeInclusive::new(550, 649)
+        );
+
+        Ok(())
+    }
+}
