@@ -42,6 +42,10 @@ where
                 let _ = self.better_payloads_tx.send(Arc::new(payload.clone()));
                 Ok(BuildOutcome::Better { payload, cached_reads })
             }
+            Ok(BuildOutcome::Freeze(payload)) => {
+                let _ = self.better_payloads_tx.send(Arc::new(payload.clone()));
+                Ok(BuildOutcome::Freeze(payload))
+            }
             res => res,
         }
     }
