@@ -75,8 +75,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
                 .with_database(StateProviderDatabase::new(state))
                 .with_bal_builder()
                 .build();
-            // db.bal_state.bal_index = 0;
-            // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+            db.bal_state.bal_index = 0;
+            db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
             let mut inspector = TracingInspector::new(config);
             let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
             f(inspector, res)
@@ -115,8 +115,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
                 .with_database(StateProviderDatabase::new(state))
                 .with_bal_builder()
                 .build();
-            // db.bal_state.bal_index = 0;
-            // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+            db.bal_state.bal_index = 0;
+            db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
             let mut inspector = TracingInspector::new(config);
             let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
             f(inspector, res, db)
@@ -201,8 +201,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
                     .with_database(StateProviderDatabase::new(state))
                     .with_bal_builder()
                     .build();
-                // db.bal_state.bal_index = 0;
-                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
                 let block_txs = block.transactions_recovered();
 
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
@@ -328,8 +328,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
                     .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)))
                     .with_bal_builder()
                     .build();
-                // db.bal_state.bal_index = 0;
-                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 // prepare transactions, we do everything upfront to reduce time spent with open

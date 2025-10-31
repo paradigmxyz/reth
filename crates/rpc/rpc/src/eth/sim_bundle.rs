@@ -250,8 +250,8 @@ where
                     .with_database(StateProviderDatabase::new(state))
                     .with_bal_builder()
                     .build();
-                // db.bal_state.bal_index = 0;
-                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 // apply overrides
                 apply_block_overrides(block_overrides, &mut db, evm_env.block_env.inner_mut());

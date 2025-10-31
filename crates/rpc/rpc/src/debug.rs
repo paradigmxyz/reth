@@ -100,8 +100,8 @@ where
                     .with_database(StateProviderDatabase::new(state))
                     .with_bal_builder()
                     .build();
-                // db.bal_state.bal_index = 0;
-                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
@@ -235,8 +235,8 @@ where
                     .with_database(StateProviderDatabase::new(state))
                     .with_bal_builder()
                     .build();
-                // db.bal_state.bal_index = 0;
-                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
@@ -545,8 +545,8 @@ where
                     .with_database(StateProviderDatabase::new(state))
                     .with_bal_builder()
                     .build();
-                // db.bal_state.bal_index = 0;
-                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are

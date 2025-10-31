@@ -100,8 +100,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     .with_database(StateProviderDatabase::new(state))
                     .with_bal_builder()
                     .build();
-                // db.bal_state.bal_index = 0;
-                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
                 for block in block_state_calls {
@@ -293,8 +293,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     .with_database(StateProviderDatabase::new(state))
                     .with_bal_builder()
                     .build();
-                // db.bal_state.bal_index = 0;
-                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -411,8 +411,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 .with_database(StateProviderDatabase::new(state))
                 .with_bal_builder()
                 .build();
-            // db.bal_state.bal_index = 0;
-            // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+            db.bal_state.bal_index = 0;
+            db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
             if let Some(state_overrides) = state_override {
                 apply_state_overrides(state_overrides, &mut db)
@@ -649,8 +649,8 @@ pub trait Call:
                     .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)))
                     .with_bal_builder()
                     .build();
-                // db.bal_state.bal_index = 0;
-                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 let (evm_env, tx_env) =
                     this.prepare_call_env(evm_env, request, &mut db, overrides)?;
@@ -705,8 +705,8 @@ pub trait Call:
                     .with_database(StateProviderDatabase::new(state))
                     .with_bal_builder()
                     .build();
-                // db.bal_state.bal_index = 0;
-                // db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
                 let block_txs = block.transactions_recovered();
 
                 // replay all transactions prior to the targeted transaction
