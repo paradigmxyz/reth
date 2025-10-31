@@ -6451,7 +6451,7 @@
               }
             ]
           },
-          "unit": "blocks/sec"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -6494,7 +6494,7 @@
           "refId": "A"
         }
       ],
-      "title": "Consensus Engine - Beacon Executed Blocks",
+      "title": "Consensus Engine - Total Beacon Executed Blocks",
       "type": "stat"
     },
     {
