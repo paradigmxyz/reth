@@ -23,7 +23,7 @@ use tracing::debug;
 #[path = "overlay_metrics.rs"]
 mod overlay_metrics;
 #[cfg(feature = "metrics")]
-use overlay_metrics::OverlayStateProviderMetrics;
+use overlay_metrics::{OverlayMetricsTimer, OverlayStateProviderMetrics};
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
@@ -99,15 +99,11 @@ where
     fn get_block_number(&self, provider: &F::Provider) -> ProviderResult<Option<BlockNumber>> {
         if let Some(block_hash) = self.block_hash {
             #[cfg(feature = "metrics")]
-            let lookup_start = std::time::Instant::now();
-
+            let _lookup_timer =
+                OverlayMetricsTimer::start(&self.metrics.block_hash_lookup_duration);
             let block_number = provider
                 .convert_hash_or_number(block_hash.into())?
                 .ok_or_else(|| ProviderError::BlockHashNotFound(block_hash))?;
-
-            #[cfg(feature = "metrics")]
-            self.metrics.block_hash_lookup_duration.record(lookup_start.elapsed().as_secs_f64());
-
             Ok(Some(block_number))
         } else {
             Ok(None)
@@ -125,6 +121,10 @@ where
         provider: &F::Provider,
         requested_block: BlockNumber,
     ) -> ProviderResult<bool> {
+        #[cfg(feature = "metrics")]
+        let _validation_timer =
+            OverlayMetricsTimer::start(&self.metrics.reverts_validation_duration);
+
         // Get the MerkleChangeSets stage and prune checkpoints.
         let stage_checkpoint = provider.get_stage_checkpoint(StageId::MerkleChangeSets)?;
         let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::MerkleChangeSets)?;
@@ -141,8 +141,22 @@ where
         // If the requested block is the DB tip (determined by the MerkleChangeSets stage
         // checkpoint) then there won't be any reverts necessary, and we can simply return Ok.
         if upper_bound == requested_block {
+            #[cfg(feature = "metrics")]
+            self.metrics.reverts_not_required.increment(1);
+
             return Ok(false)
         }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.checkpoint_delta.record((upper_bound - requested_block) as f64);
+
+        tracing::info!(
+            target: "providers::state::overlay",
+            requested_block,
+            upper_bound,
+            delta = upper_bound - requested_block,
+            "reverts_required: requested != checkpoint, REVERTS NEEDED"
+        );
 
         // Extract the lower bound from prune checkpoint if available
         // The prune checkpoint's block_number is the highest pruned block, so data is available
@@ -179,46 +193,60 @@ where
     /// Create a read-only [`OverlayStateProvider`].
     fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
         #[cfg(feature = "metrics")]
-        let total_start = std::time::Instant::now();
+        let _total_timer =
+            OverlayMetricsTimer::start(&self.metrics.total_database_provider_ro_duration);
 
-        // Get a read-only provider
-        #[cfg(feature = "metrics")]
-        let base_start = std::time::Instant::now();
-
-        let provider = self.factory.database_provider_ro()?;
-
-        #[cfg(feature = "metrics")]
-        self.metrics.base_provider_creation_duration.record(base_start.elapsed().as_secs_f64());
+        let provider = {
+            #[cfg(feature = "metrics")]
+            let _provider_timer =
+                OverlayMetricsTimer::start(&self.metrics.provider_creation_duration);
+            self.factory.database_provider_ro()?
+        };
 
         // If block_hash is provided, collect reverts
         let (trie_updates, hashed_state) = if let Some(from_block) =
             self.get_block_number(&provider)? &&
             self.reverts_required(&provider, from_block)?
         {
+            #[cfg(feature = "metrics")]
+            self.metrics.reverts_required.increment(1);
+
             // Collect trie reverts
-            #[cfg(feature = "metrics")]
-            let trie_start = std::time::Instant::now();
+            let mut trie_reverts = {
+                #[cfg(feature = "metrics")]
+                let _trie_timer =
+                    OverlayMetricsTimer::start(&self.metrics.trie_reverts_duration);
+                provider.trie_reverts(from_block + 1)?
+            };
 
-            let mut trie_reverts = provider.trie_reverts(from_block + 1)?;
-
             #[cfg(feature = "metrics")]
-            self.metrics.trie_reverts_duration.record(trie_start.elapsed().as_secs_f64());
+            if trie_reverts.is_empty() {
+                self.metrics.trie_reverts_empty.increment(1);
+            } else {
+                self.metrics.trie_reverts_nonempty.increment(1);
+            }
 
             // Collect state reverts
             //
             // TODO(mediocregopher) make from_reverts return sorted
             // https://github.com/paradigmxyz/reth/issues/19382
-            #[cfg(feature = "metrics")]
-            let state_start = std::time::Instant::now();
+            let mut hashed_state_reverts = {
+                #[cfg(feature = "metrics")]
+                let _from_reverts_timer =
+                    OverlayMetricsTimer::start(&self.metrics.from_reverts_duration);
+                HashedPostState::from_reverts::<KeccakKeyHasher>(
+                    provider.tx_ref(),
+                    from_block + 1..,
+                )?
+                .into_sorted()
+            };
 
-            let mut hashed_state_reverts = HashedPostState::from_reverts::<KeccakKeyHasher>(
-                provider.tx_ref(),
-                from_block + 1..,
-            )?
-            .into_sorted();
-
             #[cfg(feature = "metrics")]
-            self.metrics.state_reverts_duration.record(state_start.elapsed().as_secs_f64());
+            if hashed_state_reverts.is_empty() {
+                self.metrics.state_reverts_empty.increment(1);
+            } else {
+                self.metrics.state_reverts_nonempty.increment(1);
+            }
 
             // Extend with overlays if provided. If the reverts are empty we should just use the
             // overlays directly, because `extend_ref` will actually clone the overlay.
@@ -253,6 +281,9 @@ where
 
             (trie_updates, hashed_state_updates)
         } else {
+            #[cfg(feature = "metrics")]
+            self.metrics.block_hash_not_set.increment(1);
+
             // If no block_hash, use overlays directly or defaults
             let trie_updates =
                 self.trie_overlay.clone().unwrap_or_else(|| Arc::new(TrieUpdatesSorted::default()));
@@ -263,11 +294,6 @@ where
 
             (trie_updates, hashed_state)
         };
-
-        #[cfg(feature = "metrics")]
-        self.metrics
-            .total_database_provider_ro_duration
-            .record(total_start.elapsed().as_secs_f64());
 
         Ok(OverlayStateProvider::new(provider, trie_updates, hashed_state))
     }
