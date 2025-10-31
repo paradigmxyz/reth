@@ -11,7 +11,6 @@ use alloy_primitives::{B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
-use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{
     block::BlockExecutorFor,
@@ -30,7 +29,7 @@ use reth_optimism_txpool::{
     OpPooledTx,
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::{BuildNextEnv, PayloadBuilderAttributes};
+use reth_payload_primitives::{BuildNextEnv, BuiltPayloadExecutedBlock, PayloadBuilderAttributes};
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives_traits::{
     HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, SignedTransaction, TxTy,
@@ -386,7 +385,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         );
 
         // create the executed block data
-        let executed: ExecutedBlock<N> = ExecutedBlock {
+        let executed: BuiltPayloadExecutedBlock<N> = BuiltPayloadExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(execution_outcome),
             hashed_state: Arc::new(hashed_state),
