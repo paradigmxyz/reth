@@ -386,7 +386,7 @@ impl TaskExecutor {
         // Choose the appropriate finished counter based on task kind
         let finished_counter = match task_kind {
             TaskKind::Default => self.metrics.finished_regular_tasks_total.clone(),
-            TaskKind::Blocking => self.metrics.finished_regular_block_tasks_total.clone(),
+            TaskKind::Blocking => self.metrics.finished_regular_blocking_tasks_total.clone(),
         };
 
         // Wrap the original future to increment the finished tasks counter upon completion
@@ -644,7 +644,7 @@ impl TaskSpawner for TaskExecutor {
     }
 
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.metrics.inc_regular_block_tasks();
+        self.metrics.inc_regular_blocking_tasks();
         self.spawn_blocking(fut)
     }
 

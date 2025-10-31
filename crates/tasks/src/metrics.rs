@@ -17,9 +17,9 @@ pub struct TaskExecutorMetrics {
     /// Number of finished spawned regular tasks
     pub(crate) finished_regular_tasks_total: Counter,
     /// Number of spawned regular blocking tasks
-    pub(crate) regular_block_tasks_total: Counter,
+    pub(crate) regular_blocking_tasks_total: Counter,
     /// Number of finished spawned regular blocking tasks
-    pub(crate) finished_regular_block_tasks_total: Counter,
+    pub(crate) finished_regular_blocking_tasks_total: Counter,
 }
 
 impl TaskExecutorMetrics {
@@ -34,8 +34,8 @@ impl TaskExecutorMetrics {
     }
 
     /// Increments the counter for spawned regular blocking tasks.
-    pub(crate) fn inc_regular_block_tasks(&self) {
-        self.regular_block_tasks_total.increment(1);
+    pub(crate) fn inc_regular_blocking_tasks(&self) {
+        self.regular_blocking_tasks_total.increment(1);
     }
 }
 
