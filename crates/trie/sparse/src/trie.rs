@@ -259,44 +259,6 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
         revealed.remove_leaf(path, provider)?;
         Ok(())
     }
-
-    /// Returns the allocated capacity for sparse trie nodes.
-    pub fn node_capacity(&self) -> usize {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => trie.node_capacity(),
-            _ => 0,
-        }
-    }
-
-    /// Returns the allocated capacity for sparse trie values.
-    pub fn value_capacity(&self) -> usize {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => trie.value_capacity(),
-            _ => 0,
-        }
-    }
-
-    /// Shrinks the capacity of the sparse trie's node storage.
-    /// Works for both revealed and blind tries with allocated storage.
-    pub fn shrink_nodes_to(&mut self, size: usize) {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => {
-                trie.shrink_nodes_to(size);
-            }
-            _ => {}
-        }
-    }
-
-    /// Shrinks the capacity of the sparse trie's value storage.
-    /// Works for both revealed and blind tries with allocated storage.
-    pub fn shrink_values_to(&mut self, size: usize) {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => {
-                trie.shrink_values_to(size);
-            }
-            _ => {}
-        }
-    }
 }
 
 /// The representation of revealed sparse trie.
@@ -1101,24 +1063,6 @@ impl SparseTrieInterface for SerialSparseTrie {
 
         // If we get here, there's no leaf at the target path
         Ok(LeafLookup::NonExistent)
-    }
-
-    fn node_capacity(&self) -> usize {
-        self.nodes.capacity()
-    }
-
-    fn value_capacity(&self) -> usize {
-        self.values.capacity()
-    }
-
-    fn shrink_nodes_to(&mut self, size: usize) {
-        self.nodes.shrink_to(size);
-        self.branch_node_tree_masks.shrink_to(size);
-        self.branch_node_hash_masks.shrink_to(size);
-    }
-
-    fn shrink_values_to(&mut self, size: usize) {
-        self.values.shrink_to(size);
     }
 }
 
