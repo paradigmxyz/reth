@@ -25,7 +25,12 @@ pub struct DatabaseArgs {
     /// NFS volume.
     #[arg(long = "db.exclusive")]
     pub exclusive: Option<bool>,
-    /// Maximum database size (e.g., 4TB, 8MB)
+    /// Maximum database size (e.g., 4TB, 8MB).
+    ///
+    /// This sets the "map size" of the database. If the database grows beyond this
+    /// limit, the node will stop with an "environment map size limit reached" error.
+    ///
+    /// The default value is 8TB.
     #[arg(long = "db.max-size", value_parser = parse_byte_size)]
     pub max_size: Option<usize>,
     /// Database growth step (e.g., 4GB, 4KB)
