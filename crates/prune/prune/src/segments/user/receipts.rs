@@ -6,7 +6,7 @@ use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,
-    PruneCheckpointWriter, TransactionsProvider,
+    PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 use tracing::instrument;
@@ -28,6 +28,8 @@ where
         + PruneCheckpointWriter
         + TransactionsProvider
         + BlockReader
+        + StorageSettingsCache
+        + StaticFileProviderFactory
         + NodePrimitivesProvider<Primitives: NodePrimitives<Receipt: Value>>,
 {
     fn segment(&self) -> PruneSegment {
