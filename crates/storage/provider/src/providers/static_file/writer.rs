@@ -1014,7 +1014,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
     /// Helper function to override block range for testing.
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
+    pub const fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
         self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
     }
 
