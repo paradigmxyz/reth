@@ -282,8 +282,14 @@ where
 
             (trie_updates, hashed_state_updates)
         } else {
+            // This else block is reached when either:
+            // 1. block_hash is None (get_block_number returns None), OR
+            // 2. reverts_required returned false (optimization path - already incremented)
+            // Only increment block_hash_not_set for case 1
             #[cfg(feature = "metrics")]
-            self.metrics.block_hash_not_set.increment(1);
+            if self.block_hash.is_none() {
+                self.metrics.block_hash_not_set.increment(1);
+            }
 
             // If no block_hash, use overlays directly or defaults
             let trie_updates =
