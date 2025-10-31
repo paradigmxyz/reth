@@ -1,5 +1,5 @@
 use crate::BeaconSidecarConfig;
-use alloy_consensus::{BlockHeader, Signed, Transaction as _, TxEip4844WithSidecar, Typed2718};
+use alloy_consensus::{Signed, Transaction as _, TxEip4844WithSidecar, Typed2718};
 use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
