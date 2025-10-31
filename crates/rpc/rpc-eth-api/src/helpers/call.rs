@@ -508,6 +508,9 @@ pub trait Call:
     /// Returns the maximum number of blocks accepted for `eth_simulateV1`.
     fn max_simulate_blocks(&self) -> u64;
 
+    /// Returns the maximum memory the EVM can allocate per RPC request.
+    fn evm_memory_limit(&self) -> u64;
+
     /// Returns the max gas limit that the caller can afford given a transaction environment.
     fn caller_gas_allowance(
         &self,
@@ -832,6 +835,8 @@ pub trait Call:
         // See:
         // <https://github.com/paradigmxyz/reth/issues/18470>
         evm_env.cfg_env.disable_fee_charge = true;
+
+        evm_env.cfg_env.memory_limit = self.evm_memory_limit();
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
