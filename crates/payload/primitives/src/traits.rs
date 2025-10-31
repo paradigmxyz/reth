@@ -9,9 +9,13 @@ use alloy_eips::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
+use either::Either;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use reth_trie_common::{
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, HashedPostStateSorted,
+};
 
 /// Represents an executed block for payload building purposes.
 ///
@@ -24,18 +28,28 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
     /// Block's hashed state.
-    pub hashed_state: Arc<HashedPostState>,
+    pub hashed_state: Either<Arc<HashedPostState>, Arc<HashedPostStateSorted>>,
     /// Trie updates that result from calculating the state root for the block.
-    pub trie_updates: Arc<TrieUpdates>,
+    pub trie_updates: Either<Arc<TrieUpdates>, Arc<TrieUpdatesSorted>>,
 }
 
 impl<N: NodePrimitives> From<BuiltPayloadExecutedBlock<N>> for reth_chain_state::ExecutedBlock<N> {
     fn from(block: BuiltPayloadExecutedBlock<N>) -> Self {
+        let hashed_state = match block.hashed_state {
+            Either::Left(unsorted) => unsorted,
+            Either::Right(sorted) => Arc::new(Arc::unwrap_or_clone(sorted).into()),
+        };
+
+        let trie_updates = match block.trie_updates {
+            Either::Left(unsorted) => unsorted,
+            Either::Right(sorted) => Arc::new(Arc::unwrap_or_clone(sorted).into()),
+        };
+
         Self {
             recovered_block: block.recovered_block,
             execution_output: block.execution_output,
-            hashed_state: block.hashed_state,
-            trie_updates: block.trie_updates,
+            hashed_state,
+            trie_updates,
         }
     }
 }
@@ -183,7 +197,7 @@ where
     }
 }
 
-impl<Attributes, L, R> PayloadAttributesBuilder<Attributes> for either::Either<L, R>
+impl<Attributes, L, R> PayloadAttributesBuilder<Attributes> for Either<L, R>
 where
     L: PayloadAttributesBuilder<Attributes>,
     R: PayloadAttributesBuilder<Attributes>,

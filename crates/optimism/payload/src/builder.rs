@@ -388,8 +388,8 @@ impl<Txs> OpBuilder<'_, Txs> {
         let executed: BuiltPayloadExecutedBlock<N> = BuiltPayloadExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
-            trie_updates: Arc::new(trie_updates),
+            hashed_state: either::Either::Left(Arc::new(hashed_state)),
+            trie_updates: either::Either::Left(Arc::new(trie_updates)),
         };
 
         let no_tx_pool = ctx.attributes().no_tx_pool();
