@@ -10,21 +10,25 @@ use core::{
     fmt::{Display, Formatter, Result},
     time::Duration,
 };
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_chain_state::ExecutedBlock;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
+/// Type alias for backwards compat
+#[deprecated(note = "Use ConsensusEngineEvent instead")]
+pub type BeaconConsensusEngineEvent<N> = ConsensusEngineEvent<N>;
+
 /// Events emitted by the consensus engine.
 #[derive(Clone, Debug)]
-pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
+pub enum ConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     /// The fork choice state was updated, and the current fork choice status
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the fork chain.
-    ForkBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
+    ForkBlockAdded(ExecutedBlock<N>, Duration),
     /// A new block was received from the consensus engine
     BlockReceived(BlockNumHash),
     /// A block was added to the canonical chain, and the elapsed time validating the block
-    CanonicalBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
+    CanonicalBlockAdded(ExecutedBlock<N>, Duration),
     /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
     /// The consensus engine processed an invalid block.
@@ -33,9 +37,9 @@ pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     LiveSyncProgress(ConsensusEngineLiveSyncProgress),
 }
 
-impl<N: NodePrimitives> BeaconConsensusEngineEvent<N> {
+impl<N: NodePrimitives> ConsensusEngineEvent<N> {
     /// Returns the canonical header if the event is a
-    /// [`BeaconConsensusEngineEvent::CanonicalChainCommitted`].
+    /// [`ConsensusEngineEvent::CanonicalChainCommitted`].
     pub const fn canonical_header(&self) -> Option<&SealedHeader<N::BlockHeader>> {
         match self {
             Self::CanonicalChainCommitted(header, _) => Some(header),
@@ -44,7 +48,7 @@ impl<N: NodePrimitives> BeaconConsensusEngineEvent<N> {
     }
 }
 
-impl<N> Display for BeaconConsensusEngineEvent<N>
+impl<N> Display for ConsensusEngineEvent<N>
 where
     N: NodePrimitives<BlockHeader: BlockHeader>,
 {
@@ -86,7 +90,7 @@ pub enum ConsensusEngineLiveSyncProgress {
     DownloadingBlocks {
         /// The number of blocks remaining to download.
         remaining_blocks: u64,
-        /// The target block hash and number to download.
+        /// The target block hash to download.
         target: B256,
     },
 }

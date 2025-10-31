@@ -8,9 +8,10 @@ use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
     payload::ExecutionPayloadEnvelopeV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
+use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::{collections::HashSet, marker::PhantomData, time::Duration};
@@ -73,13 +74,17 @@ where
             let engine_client = node_client.engine.http_client();
 
             // get the latest block to use as parent
-            let latest_block =
-                EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
-                    rpc_client,
-                    alloy_eips::BlockNumberOrTag::Latest,
-                    false,
-                )
-                .await?;
+            let latest_block = EthApiClient::<
+                TransactionRequest,
+                Transaction,
+                Block,
+                Receipt,
+                Header,
+                TransactionSigned,
+            >::block_by_number(
+                rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
+            )
+            .await?;
 
             let latest_block = latest_block.ok_or_else(|| eyre::eyre!("Latest block not found"))?;
             let parent_hash = latest_block.header.hash;
@@ -93,31 +98,66 @@ where
                 finalized_block_hash: parent_hash,
             };
 
-            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v2(
+            // Try v2 first for backwards compatibility, fall back to v3 on error.
+            match EngineApiClient::<Engine>::fork_choice_updated_v2(
                 &engine_client,
                 fork_choice_state,
                 Some(self.payload_attributes.clone()),
             )
-            .await?;
-
-            debug!("FCU result: {:?}", fcu_result);
-
-            // check if we got a valid payload ID
-            match fcu_result.payload_status.status {
-                PayloadStatusEnum::Valid => {
-                    if let Some(payload_id) = fcu_result.payload_id {
-                        debug!("Got payload ID: {payload_id}");
-
-                        // get the payload that was built
-                        let _engine_payload =
-                            EngineApiClient::<Engine>::get_payload_v2(&engine_client, payload_id)
+            .await
+            {
+                Ok(fcu_result) => {
+                    debug!(?fcu_result, "FCU v2 result");
+                    match fcu_result.payload_status.status {
+                        PayloadStatusEnum::Valid => {
+                            if let Some(payload_id) = fcu_result.payload_id {
+                                debug!(id=%payload_id, "Got payload");
+                                let _engine_payload = EngineApiClient::<Engine>::get_payload_v2(
+                                    &engine_client,
+                                    payload_id,
+                                )
                                 .await?;
-                        Ok(())
-                    } else {
-                        Err(eyre::eyre!("No payload ID returned from forkchoiceUpdated"))
+                                Ok(())
+                            } else {
+                                Err(eyre::eyre!("No payload ID returned from forkchoiceUpdated"))
+                            }
+                        }
+                        _ => Err(eyre::eyre!(
+                            "Payload status not valid: {:?}",
+                            fcu_result.payload_status
+                        ))?,
                     }
                 }
-                _ => Err(eyre::eyre!("Payload status not valid: {:?}", fcu_result.payload_status)),
+                Err(_) => {
+                    // If v2 fails due to unsupported fork/missing fields, try v3
+                    let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
+                        &engine_client,
+                        fork_choice_state,
+                        Some(self.payload_attributes.clone()),
+                    )
+                    .await?;
+
+                    debug!(?fcu_result, "FCU v3 result");
+                    match fcu_result.payload_status.status {
+                        PayloadStatusEnum::Valid => {
+                            if let Some(payload_id) = fcu_result.payload_id {
+                                debug!(id=%payload_id, "Got payload");
+                                let _engine_payload = EngineApiClient::<Engine>::get_payload_v3(
+                                    &engine_client,
+                                    payload_id,
+                                )
+                                .await?;
+                                Ok(())
+                            } else {
+                                Err(eyre::eyre!("No payload ID returned from forkchoiceUpdated"))
+                            }
+                        }
+                        _ => Err(eyre::eyre!(
+                            "Payload status not valid: {:?}",
+                            fcu_result.payload_status
+                        )),
+                    }
+                }
             }
         })
     }
@@ -339,14 +379,18 @@ where
             } else {
                 // fallback to RPC query
                 let rpc_client = &env.node_clients[0].rpc;
-                let current_head_block =
-                    EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
-                        rpc_client,
-                        alloy_eips::BlockNumberOrTag::Latest,
-                        false,
-                    )
-                    .await?
-                    .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
+                let current_head_block = EthApiClient::<
+                    TransactionRequest,
+                    Transaction,
+                    Block,
+                    Receipt,
+                    Header,
+                    TransactionSigned,
+                >::block_by_number(
+                    rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
+                )
+                .await?
+                .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
                 debug!("Using RPC latest block hash as head: {}", current_head_block.header.hash);
                 current_head_block.header.hash
             };
@@ -409,14 +453,18 @@ where
         Box::pin(async move {
             // get the latest block from the first client to update environment state
             let rpc_client = &env.node_clients[0].rpc;
-            let latest_block =
-                EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
-                    rpc_client,
-                    alloy_eips::BlockNumberOrTag::Latest,
-                    false,
-                )
-                .await?
-                .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
+            let latest_block = EthApiClient::<
+                TransactionRequest,
+                Transaction,
+                Block,
+                Receipt,
+                Header,
+                TransactionSigned,
+            >::block_by_number(
+                rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
+            )
+            .await?
+            .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
 
             // update environment with the new block information
             env.set_current_block_info(BlockInfo {
@@ -501,7 +549,7 @@ where
         Box::pin(async move {
             let mut accepted_check: bool = false;
 
-            let mut latest_block = env
+            let latest_block = env
                 .current_block_info()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
@@ -516,13 +564,18 @@ where
                 let rpc_client = &client.rpc;
 
                 // get the last header by number using latest_head_number
-                let rpc_latest_header =
-                    EthApiClient::<Transaction, Block, Receipt, Header>::header_by_number(
-                        rpc_client,
-                        alloy_eips::BlockNumberOrTag::Latest,
-                    )
-                    .await?
-                    .ok_or_else(|| eyre::eyre!("No latest header found from rpc"))?;
+                let rpc_latest_header = EthApiClient::<
+                    TransactionRequest,
+                    Transaction,
+                    Block,
+                    Receipt,
+                    Header,
+                    TransactionSigned,
+                >::header_by_number(
+                    rpc_client, alloy_eips::BlockNumberOrTag::Latest
+                )
+                .await?
+                .ok_or_else(|| eyre::eyre!("No latest header found from rpc"))?;
 
                 // perform several checks
                 let next_new_payload = env
@@ -577,14 +630,19 @@ where
                 // at least one client passes all the check, save the header in Env
                 if !accepted_check {
                     accepted_check = true;
-                    // save the header in Env
-                    env.active_node_state_mut()?.latest_header_time = next_new_payload.timestamp;
+                    // save the current block info in Env
+                    env.set_current_block_info(BlockInfo {
+                        hash: rpc_latest_header.hash,
+                        number: rpc_latest_header.inner.number,
+                        timestamp: rpc_latest_header.inner.timestamp,
+                    })?;
 
-                    // add it to header history
+                    // align latest header time and forkchoice state with the accepted canonical
+                    // head
+                    env.active_node_state_mut()?.latest_header_time =
+                        rpc_latest_header.inner.timestamp;
                     env.active_node_state_mut()?.latest_fork_choice_state.head_block_hash =
                         rpc_latest_header.hash;
-                    latest_block.hash = rpc_latest_header.hash;
-                    latest_block.number = rpc_latest_header.inner.number;
                 }
             }
 
@@ -599,7 +657,17 @@ where
 
 /// Action that broadcasts the next new payload
 #[derive(Debug, Default)]
-pub struct BroadcastNextNewPayload {}
+pub struct BroadcastNextNewPayload {
+    /// If true, only send to the active node. If false, broadcast to all nodes.
+    active_node_only: bool,
+}
+
+impl BroadcastNextNewPayload {
+    /// Create a new `BroadcastNextNewPayload` action that only sends to the active node
+    pub const fn with_active_node() -> Self {
+        Self { active_node_only: true }
+    }
+}
 
 impl<Engine> Action<Engine> for BroadcastNextNewPayload
 where
@@ -630,14 +698,11 @@ where
             let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = payload_envelope.into();
             let execution_payload = execution_payload_envelope.execution_payload;
 
-            // Loop through all clients and broadcast the next new payload
-            let mut broadcast_results = Vec::new();
-            let mut first_valid_seen = false;
+            if self.active_node_only {
+                // Send only to the active node
+                let active_idx = env.active_node_idx;
+                let engine = env.node_clients[active_idx].engine.http_client();
 
-            for (idx, client) in env.node_clients.iter().enumerate() {
-                let engine = client.engine.http_client();
-
-                // Broadcast the execution payload
                 let result = EngineApiClient::<Engine>::new_payload_v3(
                     &engine,
                     execution_payload.clone(),
@@ -646,35 +711,70 @@ where
                 )
                 .await?;
 
-                broadcast_results.push((idx, result.status.clone()));
-                debug!("Node {}: new_payload broadcast status: {:?}", idx, result.status);
+                debug!("Active node {}: new_payload status: {:?}", active_idx, result.status);
 
-                // Check if this node accepted the payload
-                if result.status == PayloadStatusEnum::Valid && !first_valid_seen {
-                    first_valid_seen = true;
-                } else if let PayloadStatusEnum::Invalid { validation_error } = result.status {
-                    debug!(
-                        "Node {}: Invalid payload status returned from broadcast: {:?}",
-                        idx, validation_error
-                    );
+                // Validate the response
+                match result.status {
+                    PayloadStatusEnum::Valid => {
+                        env.active_node_state_mut()?.latest_payload_executed =
+                            Some(next_new_payload);
+                        Ok(())
+                    }
+                    other => Err(eyre::eyre!(
+                        "Active node {}: Unexpected payload status: {:?}",
+                        active_idx,
+                        other
+                    )),
                 }
+            } else {
+                // Loop through all clients and broadcast the next new payload
+                let mut broadcast_results = Vec::new();
+                let mut first_valid_seen = false;
+
+                for (idx, client) in env.node_clients.iter().enumerate() {
+                    let engine = client.engine.http_client();
+
+                    // Broadcast the execution payload
+                    let result = EngineApiClient::<Engine>::new_payload_v3(
+                        &engine,
+                        execution_payload.clone(),
+                        vec![],
+                        parent_beacon_block_root,
+                    )
+                    .await?;
+
+                    broadcast_results.push((idx, result.status.clone()));
+                    debug!("Node {}: new_payload broadcast status: {:?}", idx, result.status);
+
+                    // Check if this node accepted the payload
+                    if result.status == PayloadStatusEnum::Valid && !first_valid_seen {
+                        first_valid_seen = true;
+                    } else if let PayloadStatusEnum::Invalid { validation_error } = result.status {
+                        debug!(
+                            "Node {}: Invalid payload status returned from broadcast: {:?}",
+                            idx, validation_error
+                        );
+                    }
+                }
+
+                // Update the executed payload state after broadcasting to all nodes
+                if first_valid_seen {
+                    env.active_node_state_mut()?.latest_payload_executed = Some(next_new_payload);
+                }
+
+                // Check if at least one node accepted the payload
+                let any_valid =
+                    broadcast_results.iter().any(|(_, status)| *status == PayloadStatusEnum::Valid);
+                if !any_valid {
+                    return Err(eyre::eyre!(
+                        "Failed to successfully broadcast payload to any client"
+                    ));
+                }
+
+                debug!("Broadcast complete. Results: {:?}", broadcast_results);
+
+                Ok(())
             }
-
-            // Update the executed payload state after broadcasting to all nodes
-            if first_valid_seen {
-                env.active_node_state_mut()?.latest_payload_executed = Some(next_new_payload);
-            }
-
-            // Check if at least one node accepted the payload
-            let any_valid =
-                broadcast_results.iter().any(|(_, status)| *status == PayloadStatusEnum::Valid);
-            if !any_valid {
-                return Err(eyre::eyre!("Failed to successfully broadcast payload to any client"));
-            }
-
-            debug!("Broadcast complete. Results: {:?}", broadcast_results);
-
-            Ok(())
         })
     }
 }
@@ -868,6 +968,60 @@ where
             expect_valid.execute(env).await?;
 
             debug!("Successfully validated that '{}' remains canonical", self.tag);
+            Ok(())
+        })
+    }
+}
+
+/// Action that produces blocks locally without broadcasting to other nodes
+/// This sends the payload only to the active node to ensure it's available locally
+#[derive(Debug)]
+pub struct ProduceBlocksLocally<Engine> {
+    /// Number of blocks to produce
+    pub num_blocks: u64,
+    /// Tracks engine type
+    _phantom: PhantomData<Engine>,
+}
+
+impl<Engine> ProduceBlocksLocally<Engine> {
+    /// Create a new `ProduceBlocksLocally` action
+    pub fn new(num_blocks: u64) -> Self {
+        Self { num_blocks, _phantom: Default::default() }
+    }
+}
+
+impl<Engine> Default for ProduceBlocksLocally<Engine> {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+impl<Engine> Action<Engine> for ProduceBlocksLocally<Engine>
+where
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // Remember the active node to ensure all blocks are produced on the same node
+            let producer_idx = env.active_node_idx;
+
+            for _ in 0..self.num_blocks {
+                // Ensure we always use the same producer
+                env.last_producer_idx = Some(producer_idx);
+
+                // create a sequence that produces blocks and sends only to active node
+                let mut sequence = Sequence::new(vec![
+                    // Skip PickNextBlockProducer to maintain the same producer
+                    Box::new(GeneratePayloadAttributes::default()),
+                    Box::new(GenerateNextPayload::default()),
+                    // Send payload only to the active node to make it available
+                    Box::new(BroadcastNextNewPayload::with_active_node()),
+                    Box::new(UpdateBlockInfoToLatestPayload::default()),
+                ]);
+                sequence.execute(env).await?;
+            }
             Ok(())
         })
     }

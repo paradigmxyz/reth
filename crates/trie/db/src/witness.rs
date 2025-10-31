@@ -18,7 +18,7 @@ pub trait DatabaseTrieWitness {
 }
 
 impl<'a, TX: DbTx> DatabaseTrieWitness
-    for TrieWitness<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
+    for TrieWitness<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn overlay_witness(
         &self,
@@ -37,6 +37,7 @@ impl<'a, TX: DbTx> DatabaseTrieWitness
                 HashedPostStateCursorFactory::new(factory, &state_sorted)
             })
             .with_prefix_sets_mut(input.prefix_sets)
+            .always_include_root_node()
             .compute(target)
     }
 }

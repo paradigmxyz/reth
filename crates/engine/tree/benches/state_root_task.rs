@@ -9,22 +9,21 @@ use alloy_primitives::{Address, B256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
 use rand::Rng;
-use reth_chain_state::EthPrimitives;
 use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis;
 use reth_engine_tree::tree::{
     executor::WorkloadExecutor, precompile_cache::PrecompileCacheMap, PayloadProcessor,
     StateProviderBuilder, TreeConfig,
 };
+use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::OnStateHook;
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{Account as RethAccount, StorageEntry};
+use reth_primitives_traits::{Account as RethAccount, Recovered, StorageEntry};
 use reth_provider::{
-    providers::{BlockchainProvider, ConsistentDbView},
+    providers::{BlockchainProvider, OverlayStateProviderFactory},
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
     AccountReader, ChainSpecProvider, HashingWriter, ProviderFactory,
 };
-use reth_trie::TrieInput;
 use revm_primitives::{HashMap, U256};
 use revm_state::{Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
 use std::{hint::black_box, sync::Arc};
@@ -42,13 +41,9 @@ struct BenchParams {
 fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
     let mut runner = TestRunner::deterministic();
     let mut rng = runner.rng().clone();
-    let all_addresses: Vec<Address> = (0..params.num_accounts)
-        .map(|_| {
-            // TODO: rand08
-            Address::random()
-        })
-        .collect();
-    let mut updates = Vec::new();
+    let all_addresses: Vec<Address> =
+        (0..params.num_accounts).map(|_| Address::random_with(&mut rng)).collect();
+    let mut updates = Vec::with_capacity(params.updates_per_account);
 
     for _ in 0..params.updates_per_account {
         let mut state_update = EvmState::default();
@@ -66,6 +61,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                     info: AccountInfo::default(),
                     storage: HashMap::default(),
                     status: AccountStatus::SelfDestructed,
+                    transaction_id: 0,
                 }
             } else {
                 RevmAccount {
@@ -82,11 +78,13 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                                 EvmStorageSlot::new_changed(
                                     U256::ZERO,
                                     U256::from(rng.random::<u64>()),
+                                    0,
                                 ),
                             )
                         })
                         .collect(),
                     status: AccountStatus::Touched,
+                    transaction_id: 0,
                 }
             };
 
@@ -123,7 +121,7 @@ fn setup_provider(
     for update in state_updates {
         let provider_rw = factory.provider_rw()?;
 
-        let mut account_updates = Vec::new();
+        let mut account_updates = Vec::with_capacity(update.len());
 
         for (address, account) in update {
             // only process self-destructs if account exists, always process
@@ -217,7 +215,7 @@ fn bench_state_root(c: &mut Criterion) {
                         let state_updates = create_bench_state_updates(params);
                         setup_provider(&factory, &state_updates).expect("failed to setup provider");
 
-                        let payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
+                        let payload_processor = PayloadProcessor::new(
                             WorkloadExecutor::default(),
                             EthEvmConfig::new(factory.chain_spec()),
                             &TreeConfig::default(),
@@ -229,14 +227,21 @@ fn bench_state_root(c: &mut Criterion) {
                     },
                     |(genesis_hash, mut payload_processor, provider, state_updates)| {
                         black_box({
-                            let mut handle = payload_processor.spawn(
-                                Default::default(),
-                                Default::default(),
-                                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                                ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-                                TrieInput::default(),
-                                &TreeConfig::default(),
-                            );
+                            let mut handle = payload_processor
+                                .spawn(
+                                    Default::default(),
+                                    core::iter::empty::<
+                                        Result<
+                                            Recovered<TransactionSigned>,
+                                            core::convert::Infallible,
+                                        >,
+                                    >(),
+                                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                                    OverlayStateProviderFactory::new(provider),
+                                    &TreeConfig::default(),
+                                )
+                                .map_err(|(err, ..)| err)
+                                .expect("failed to spawn payload processor");
 
                             let mut state_hook = handle.state_hook();
 

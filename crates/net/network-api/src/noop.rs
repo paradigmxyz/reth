@@ -6,6 +6,13 @@
 use core::{fmt, marker::PhantomData};
 use std::net::{IpAddr, SocketAddr};
 
+use crate::{
+    events::{NetworkPeersEvents, PeerEventStream},
+    test_utils::{PeersHandle, PeersHandleProvider},
+    BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
+    NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerId, PeerInfo, PeerRequest, Peers,
+    PeersInfo,
+};
 use alloy_rpc_types_admin::EthProtocolInfo;
 use enr::{secp256k1::SecretKey, Enr};
 use reth_eth_wire_types::{
@@ -18,20 +25,13 @@ use reth_tokio_util::{EventSender, EventStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use crate::{
-    events::{NetworkPeersEvents, PeerEventStream},
-    test_utils::{PeersHandle, PeersHandleProvider},
-    BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
-    NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerId, PeerInfo, PeerRequest, Peers,
-    PeersInfo,
-};
-
 /// A type that implements all network trait that does nothing.
 ///
 /// Intended for testing purposes where network is not used.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct NoopNetwork<Net = EthNetworkPrimitives> {
+    chain_id: u64,
     peers_handle: PeersHandle,
     _marker: PhantomData<Net>,
 }
@@ -41,15 +41,23 @@ impl<Net> NoopNetwork<Net> {
     pub fn new() -> Self {
         let (tx, _) = mpsc::unbounded_channel();
 
-        Self { peers_handle: PeersHandle::new(tx), _marker: PhantomData }
+        Self {
+            chain_id: 1, // mainnet
+            peers_handle: PeersHandle::new(tx),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Creates a new [`NoopNetwork`] from an existing one but with a new chain id.
+    pub const fn with_chain_id(mut self, chain_id: u64) -> Self {
+        self.chain_id = chain_id;
+        self
     }
 }
 
 impl Default for NoopNetwork<EthNetworkPrimitives> {
     fn default() -> Self {
-        let (tx, _) = mpsc::unbounded_channel();
-
-        Self { peers_handle: PeersHandle::new(tx), _marker: PhantomData }
+        Self::new()
     }
 }
 
@@ -73,12 +81,12 @@ where
                 config: Default::default(),
                 head: Default::default(),
             },
+            capabilities: vec![],
         })
     }
 
     fn chain_id(&self) -> u64 {
-        // mainnet
-        1
+        self.chain_id
     }
 
     fn is_syncing(&self) -> bool {
@@ -163,7 +171,7 @@ where
 
 impl<Net> BlockDownloaderProvider for NoopNetwork<Net>
 where
-    Net: NetworkPrimitives + Default,
+    Net: NetworkPrimitives,
 {
     type Client = NoopFullBlockClient<Net>;
 

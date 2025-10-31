@@ -315,7 +315,7 @@ fn recover_sender<T: SignedTransaction>(
     // value is greater than `secp256k1n / 2` if past EIP-2. There are transactions
     // pre-homestead which have large `s` values, so using [Signature::recover_signer] here
     // would not be backwards-compatible.
-    let sender = tx.recover_signer_unchecked_with_buf(rlp_buf).map_err(|_| {
+    let sender = tx.recover_unchecked_with_buf(rlp_buf).map_err(|_| {
         SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id })
     })?;
 
@@ -490,7 +490,7 @@ mod tests {
             ExecOutput {
                 checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
-                        processed: runner.db.table::<tables::TransactionSenders>().unwrap().len()
+                        processed: runner.db.count_entries::<tables::TransactionSenders>().unwrap()
                             as u64,
                         total: total_transactions
                     }

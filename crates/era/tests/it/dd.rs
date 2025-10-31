@@ -4,7 +4,9 @@
 use alloy_consensus::{BlockBody, Header};
 use alloy_primitives::U256;
 use reth_era::{
+    e2s_types::IndexEntry,
     era1_file::{Era1Reader, Era1Writer},
+    era_file_ops::{StreamReader, StreamWriter},
     execution_types::CompressedBody,
 };
 use reth_ethereum_primitives::TransactionSigned;
@@ -30,7 +32,7 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Resul
 
         for &block_idx in &test_block_indices {
             let block = &file.group.blocks[block_idx];
-            let block_number = file.group.block_index.starting_number + block_idx as u64;
+            let block_number = file.group.block_index.starting_number() + block_idx as u64;
 
             println!(
                 "\n  Testing block {}, compressed body size: {} bytes",
@@ -93,7 +95,7 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Resul
         let mut buffer = Vec::new();
         {
             let mut writer = Era1Writer::new(&mut buffer);
-            writer.write_era1_file(&file)?;
+            writer.write_file(&file)?;
         }
 
         // Read back from buffer
@@ -110,7 +112,7 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Resul
         for &idx in &test_block_indices {
             let original_block = &file.group.blocks[idx];
             let read_back_block = &read_back_file.group.blocks[idx];
-            let block_number = file.group.block_index.starting_number + idx as u64;
+            let block_number = file.group.block_index.starting_number() + idx as u64;
 
             println!("Block {block_number} details:");
             println!("  Header size: {} bytes", original_block.header.data.len());

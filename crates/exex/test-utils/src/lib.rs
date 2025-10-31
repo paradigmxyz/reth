@@ -5,7 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use std::{
@@ -35,7 +35,7 @@ use reth_node_api::{
 use reth_node_builder::{
     components::{
         BasicPayloadServiceBuilder, Components, ComponentsBuilder, ConsensusBuilder,
-        ExecutorBuilder, NodeComponentsBuilder, PoolBuilder,
+        ExecutorBuilder, PoolBuilder,
     },
     BuilderContext, Node, NodeAdapter, RethFullAdapter,
 };
@@ -116,7 +116,6 @@ pub struct TestNode;
 impl NodeTypes for TestNode {
     type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
-    type StateCommitment = reth_trie_db::MerklePatriciaTrie;
     type Storage = EthStorage;
     type Payload = EthEngineTypes;
 }
@@ -133,11 +132,8 @@ where
         TestExecutorBuilder,
         TestConsensusBuilder,
     >;
-    type AddOns = EthereumAddOns<
-        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-        EthereumEthApiBuilder,
-        EthereumEngineValidatorBuilder<ChainSpec>,
-    >;
+    type AddOns =
+        EthereumAddOns<NodeAdapter<N>, EthereumEthApiBuilder, EthereumEngineValidatorBuilder>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
@@ -158,16 +154,7 @@ where
 pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 /// The [`NodeAdapter`] for the [`TestExExContext`]. Contains type necessary to
 /// boot the testing environment
-pub type Adapter = NodeAdapter<
-    RethFullAdapter<TmpDB, TestNode>,
-    <<TestNode as Node<
-        FullNodeTypesAdapter<
-            TestNode,
-            TmpDB,
-            BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
-        >,
-    >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<TmpDB, TestNode>>>::Components,
->;
+pub type Adapter = NodeAdapter<RethFullAdapter<TmpDB, TestNode>>;
 /// An [`ExExContext`] using the [`Adapter`] type.
 pub type TestExExContext = ExExContext<Adapter>;
 

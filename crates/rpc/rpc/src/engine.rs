@@ -1,12 +1,13 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use alloy_rpc_types_eth::{
-    state::StateOverride, transaction::TransactionRequest, BlockOverrides,
-    EIP1186AccountProofResponse, Filter, Log, SyncStatus,
+    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus,
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::core::RpcResult as Result;
+use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EngineEthApiServer, EthApiServer};
+use reth_rpc_convert::RpcTxReq;
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
 use reth_rpc_eth_api::{
@@ -16,7 +17,7 @@ use tracing_futures::Instrument;
 
 macro_rules! engine_span {
     () => {
-        tracing::trace_span!(target: "rpc", "engine")
+        tracing::info_span!(target: "rpc", "engine")
     };
 }
 
@@ -36,14 +37,20 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
 }
 
 #[async_trait::async_trait]
-impl<Eth, EthFilter> EngineEthApiServer<RpcBlock<Eth::NetworkTypes>, RpcReceipt<Eth::NetworkTypes>>
-    for EngineEthApi<Eth, EthFilter>
+impl<Eth, EthFilter>
+    EngineEthApiServer<
+        RpcTxReq<Eth::NetworkTypes>,
+        RpcBlock<Eth::NetworkTypes>,
+        RpcReceipt<Eth::NetworkTypes>,
+    > for EngineEthApi<Eth, EthFilter>
 where
     Eth: EthApiServer<
+            RpcTxReq<Eth::NetworkTypes>,
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
             RpcHeader<Eth::NetworkTypes>,
+            TxTy<Eth::Primitives>,
         > + FullEthApiTypes,
     EthFilter: EngineEthFilter,
 {
@@ -71,7 +78,7 @@ where
     /// Handler for: `eth_call`
     async fn call(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<Eth::NetworkTypes>,
         block_id: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,

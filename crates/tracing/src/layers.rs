@@ -1,13 +1,16 @@
+use crate::formatter::LogFormat;
+use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
     fmt,
     path::{Path, PathBuf},
 };
-
-use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
-
-use crate::formatter::LogFormat;
+#[cfg(feature = "otlp")]
+use {
+    reth_tracing_otlp::{span_layer, OtlpProtocol},
+    url::Url,
+};
 
 /// A worker guard returned by the file layer.
 ///
@@ -18,16 +21,20 @@ pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
 ///  A boxed tracing [Layer].
 pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
-const RETH_LOG_FILE_NAME: &str = "reth.log";
-
-/// Default [directives](Directive) for [`EnvFilter`] which disables high-frequency debug logs from
-/// `hyper`, `hickory-resolver`, `jsonrpsee-server`, and `discv5`.
-const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 5] = [
+/// Default [directives](Directive) for [`EnvFilter`] which:
+/// 1. Disable high-frequency debug logs from dependencies such as `hyper`, `hickory-resolver`,
+///    `hickory_proto`, `discv5`, `jsonrpsee-server`, and `hyper_util::client::legacy::pool`.
+/// 2. Set `opentelemetry_*` crates log level to `WARN`, as `DEBUG` is too noisy.
+const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 9] = [
     "hyper::proto::h1=off",
     "hickory_resolver=off",
     "hickory_proto=off",
     "discv5=off",
     "jsonrpsee-server=off",
+    "opentelemetry-otlp=warn",
+    "opentelemetry_sdk=warn",
+    "opentelemetry-http=warn",
+    "hyper_util::client::legacy::pool=off",
 ];
 
 /// Manages the collection of layers for a tracing subscriber.
@@ -125,6 +132,26 @@ impl Layers {
         self.add_layer(layer);
         Ok(guard)
     }
+
+    /// Add OTLP spans layer to the layer collection
+    #[cfg(feature = "otlp")]
+    pub fn with_span_layer(
+        &mut self,
+        service_name: String,
+        endpoint_exporter: Url,
+        filter: EnvFilter,
+        otlp_protocol: OtlpProtocol,
+    ) -> eyre::Result<()> {
+        // Create the span provider
+
+        let span_layer = span_layer(service_name, &endpoint_exporter, otlp_protocol)
+            .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?
+            .with_filter(filter);
+
+        self.add_layer(span_layer);
+
+        Ok(())
+    }
 }
 
 /// Holds configuration information for file logging.
@@ -140,8 +167,13 @@ pub struct FileInfo {
 
 impl FileInfo {
     /// Creates a new `FileInfo` instance.
-    pub fn new(dir: PathBuf, max_size_bytes: u64, max_files: usize) -> Self {
-        Self { dir, file_name: RETH_LOG_FILE_NAME.to_string(), max_size_bytes, max_files }
+    pub const fn new(
+        dir: PathBuf,
+        file_name: String,
+        max_size_bytes: u64,
+        max_files: usize,
+    ) -> Self {
+        Self { dir, file_name, max_size_bytes, max_files }
     }
 
     /// Creates the log directory if it doesn't exist.

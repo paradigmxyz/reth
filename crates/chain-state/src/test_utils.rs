@@ -1,10 +1,8 @@
 use crate::{
-    in_memory::ExecutedBlockWithTrieUpdates, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions, ExecutedTrieUpdates,
+    in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
+    CanonStateSubscriptions,
 };
-use alloy_consensus::{
-    Header, SignableTransaction, Transaction as _, TxEip1559, TxReceipt, EMPTY_ROOT_HASH,
-};
+use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::{
     eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE},
     eip7685::Requests,
@@ -25,11 +23,10 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::{root::state_root_unhashed, HashedPostState};
+use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::{
-    collections::HashMap,
     ops::Range,
     sync::{Arc, Mutex},
 };
@@ -148,12 +145,10 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             mix_hash: B256::random(),
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
-            transactions_root: calculate_transaction_root(
-                &transactions.clone().into_iter().map(|tx| tx.into_inner()).collect::<Vec<_>>(),
-            ),
+            transactions_root: calculate_transaction_root(&transactions),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),
-            state_root: state_root_unhashed(HashMap::from([(
+            state_root: state_root_unhashed([(
                 self.signer,
                 Account {
                     balance: initial_signer_balance - signer_balance_decrease,
@@ -161,7 +156,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     ..Default::default()
                 }
                 .into_trie_account(EMPTY_ROOT_HASH),
-            )])),
+            )]),
             // use the number as the timestamp so it is monotonically increasing
             timestamp: number +
                 EthereumHardfork::Cancun.activation_timestamp(self.chain_spec.chain).unwrap(),
@@ -203,45 +198,45 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         fork
     }
 
-    /// Gets an [`ExecutedBlockWithTrieUpdates`] with [`BlockNumber`], receipts and parent hash.
+    /// Gets an [`ExecutedBlock`] with [`BlockNumber`], receipts and parent hash.
     fn get_executed_block(
         &mut self,
         block_number: BlockNumber,
         receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
-    ) -> ExecutedBlockWithTrieUpdates {
+    ) -> ExecutedBlock {
         let block_with_senders = self.generate_random_block(block_number, parent_hash);
 
         let (block, senders) = block_with_senders.split_sealed();
-        ExecutedBlockWithTrieUpdates::new(
-            Arc::new(RecoveredBlock::new_sealed(block, senders)),
-            Arc::new(ExecutionOutcome::new(
+        ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
+            execution_output: Arc::new(ExecutionOutcome::new(
                 BundleState::default(),
                 receipts,
                 block_number,
                 vec![Requests::default()],
             )),
-            Arc::new(HashedPostState::default()),
-            ExecutedTrieUpdates::empty(),
-        )
+            hashed_state: Arc::new(HashedPostState::default()),
+            trie_updates: Arc::new(TrieUpdates::default()),
+        }
     }
 
-    /// Generates an [`ExecutedBlockWithTrieUpdates`] that includes the given receipts.
+    /// Generates an [`ExecutedBlock`] that includes the given receipts.
     pub fn get_executed_block_with_receipts(
         &mut self,
         receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
-    ) -> ExecutedBlockWithTrieUpdates {
+    ) -> ExecutedBlock {
         let number = rand::rng().random::<u64>();
         self.get_executed_block(number, receipts, parent_hash)
     }
 
-    /// Generates an [`ExecutedBlockWithTrieUpdates`] with the given [`BlockNumber`].
+    /// Generates an [`ExecutedBlock`] with the given [`BlockNumber`].
     pub fn get_executed_block_with_number(
         &mut self,
         block_number: BlockNumber,
         parent_hash: B256,
-    ) -> ExecutedBlockWithTrieUpdates {
+    ) -> ExecutedBlock {
         self.get_executed_block(block_number, vec![vec![]], parent_hash)
     }
 
@@ -249,7 +244,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     pub fn get_executed_blocks(
         &mut self,
         range: Range<u64>,
-    ) -> impl Iterator<Item = ExecutedBlockWithTrieUpdates> + '_ {
+    ) -> impl Iterator<Item = ExecutedBlock> + '_ {
         let mut parent_hash = B256::default();
         range.map(move |number| {
             let current_parent_hash = parent_hash;
@@ -266,6 +261,16 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         &mut self,
         block: RecoveredBlock<reth_ethereum_primitives::Block>,
     ) -> ExecutionOutcome {
+        let num_txs = block.body().transactions.len() as u64;
+        let single_cost = Self::single_tx_cost();
+
+        let mut final_balance = self.signer_execute_account_info.balance;
+        for _ in 0..num_txs {
+            final_balance -= single_cost;
+        }
+
+        let final_nonce = self.signer_execute_account_info.nonce + num_txs;
+
         let receipts = block
             .body()
             .transactions
@@ -279,26 +284,18 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             })
             .collect::<Vec<_>>();
 
-        let mut bundle_state_builder = BundleState::builder(block.number..=block.number);
-
-        for tx in &block.body().transactions {
-            self.signer_execute_account_info.balance -= Self::single_tx_cost();
-            bundle_state_builder = bundle_state_builder.state_present_account_info(
+        let bundle_state = BundleState::builder(block.number..=block.number)
+            .state_present_account_info(
                 self.signer,
-                AccountInfo {
-                    nonce: tx.nonce(),
-                    balance: self.signer_execute_account_info.balance,
-                    ..Default::default()
-                },
-            );
-        }
+                AccountInfo { nonce: final_nonce, balance: final_balance, ..Default::default() },
+            )
+            .build();
 
-        let execution_outcome = ExecutionOutcome::new(
-            bundle_state_builder.build(),
-            vec![vec![]],
-            block.number,
-            Vec::new(),
-        );
+        self.signer_execute_account_info.balance = final_balance;
+        self.signer_execute_account_info.nonce = final_nonce;
+
+        let execution_outcome =
+            ExecutionOutcome::new(bundle_state, vec![vec![]], block.number, Vec::new());
 
         execution_outcome.with_receipts(vec![receipts])
     }

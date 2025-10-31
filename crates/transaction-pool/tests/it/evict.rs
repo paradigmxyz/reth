@@ -9,7 +9,8 @@ use reth_transaction_pool::{
     test_utils::{
         MockFeeRange, MockTransactionDistribution, MockTransactionRatio, TestPool, TestPoolBuilder,
     },
-    BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionPool, TransactionPoolExt,
+    AddedTransactionOutcome, BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin,
+    TransactionPool, TransactionPoolExt,
 };
 
 #[tokio::test(flavor = "multi_thread")]
@@ -97,7 +98,7 @@ async fn only_blobs_eviction() {
             let results = pool.add_transactions(TransactionOrigin::External, set).await;
             for (i, result) in results.iter().enumerate() {
                 match result {
-                    Ok(hash) => {
+                    Ok(AddedTransactionOutcome { hash, .. }) => {
                         println!("✅ Inserted tx into pool with hash: {hash}");
                     }
                     Err(e) => {

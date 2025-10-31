@@ -19,6 +19,7 @@ use crate::{
         BlockRangeInfo, EthVersion, SessionId,
     },
 };
+use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::Sealable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
@@ -43,10 +44,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, trace};
 
-/// The recommended interval at which a new range update should be sent to the remote peer.
+/// The recommended interval at which to check if a new range update should be sent to the remote
+/// peer.
 ///
-/// This is set to 120 seconds (2 minutes) as per the Ethereum specification for eth69.
-pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(120);
+/// Updates are only sent when the block height has advanced by at least one epoch (32 blocks)
+/// since the last update. The interval is set to one epoch duration in seconds.
+pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(EPOCH_SLOTS * 12);
 
 // Constants for timeout updating.
 
@@ -126,8 +129,12 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// This represents the range of blocks that this node can serve to other peers.
     pub(crate) local_range_info: BlockRangeInfo,
     /// Optional interval for sending periodic range updates to the remote peer (eth69+)
-    /// Recommended frequency is ~2 minutes per spec
+    /// The interval is set to one epoch duration (~6.4 minutes), but updates are only sent when
+    /// the block height has advanced by at least one epoch (32 blocks) since the last update
     pub(crate) range_update_interval: Option<Interval>,
+    /// The last latest block number we sent in a range update
+    /// Used to avoid sending unnecessary updates when block height hasn't changed significantly
+    pub(crate) last_sent_latest_block: Option<u64>,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -277,9 +284,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetReceipts)
             }
             EthMessage::Receipts69(resp) => {
-                // TODO: remove mandatory blooms
-                let resp = resp.map(|receipts| receipts.into_with_bloom());
-                on_response!(resp, GetReceipts)
+                on_response!(resp, GetReceipts69)
             }
             EthMessage::BlockRangeUpdate(msg) => {
                 // Validate that earliest <= latest according to the spec
@@ -289,6 +294,16 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                             "invalid block range: earliest ({}) > latest ({})",
                             msg.earliest, msg.latest
                         ))),
+                        message: EthMessage::BlockRangeUpdate(msg),
+                    };
+                }
+
+                // Validate that the latest hash is not zero
+                if msg.latest_hash.is_zero() {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(MessageError::Other(
+                            "invalid block range: latest_hash cannot be zero".to_string(),
+                        )),
                         message: EthMessage::BlockRangeUpdate(msg),
                     };
                 }
@@ -330,6 +345,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             PeerMessage::PooledTransactions(msg) => {
                 if msg.is_valid_for_version(self.conn.version()) {
                     self.queued_outgoing.push_back(EthMessage::from(msg).into());
+                } else {
+                    debug!(target: "net", ?msg,  version=?self.conn.version(), "Message is invalid for connection version, skipping");
                 }
             }
             PeerMessage::EthRequest(req) => {
@@ -728,21 +745,32 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         }
 
         if let Some(interval) = &mut this.range_update_interval {
-            // queue in new range updates if the interval is ready
+            // Check if we should send a range update based on block height changes
             while interval.poll_tick(cx).is_ready() {
-                this.queued_outgoing.push_back(
-                    EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
-                );
+                let current_latest = this.local_range_info.latest();
+                let should_send = if let Some(last_sent) = this.last_sent_latest_block {
+                    // Only send if block height has advanced by at least one epoch (32 blocks)
+                    current_latest.saturating_sub(last_sent) >= EPOCH_SLOTS
+                } else {
+                    true // First update, always send
+                };
+
+                if should_send {
+                    this.queued_outgoing.push_back(
+                        EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
+                    );
+                    this.last_sent_latest_block = Some(current_latest);
+                }
             }
         }
 
         while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
             // check for timed out requests
-            if this.check_timed_out_requests(Instant::now()) {
-                if let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx) {
-                    let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
-                    this.pending_message_to_session = Some(msg);
-                }
+            if this.check_timed_out_requests(Instant::now()) &&
+                let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx)
+            {
+                let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
+                this.pending_message_to_session = Some(msg);
             }
         }
 
@@ -828,6 +856,7 @@ enum RequestState<R> {
 }
 
 /// Outgoing messages that can be sent over the wire.
+#[derive(Debug)]
 pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     /// A message that is owned.
     Eth(EthMessage<N>),
@@ -895,6 +924,16 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 }
 
+impl<N: NetworkPrimitives> Drop for QueuedOutgoingMessages<N> {
+    fn drop(&mut self) {
+        // Ensure gauge is decremented for any remaining items to avoid metric leak on teardown.
+        let remaining = self.messages.len();
+        if remaining > 0 {
+            self.count.decrement(remaining as f64);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -951,7 +990,7 @@ mod tests {
             F: FnOnce(EthStream<P2PStream<ECIESStream<TcpStream>>, N>) -> O + Send + 'static,
             O: Future<Output = ()> + Send + Sync,
         {
-            let status = self.status;
+            let mut status = self.status;
             let fork_filter = self.fork_filter.clone();
             let local_peer_id = self.local_peer_id;
             let mut hello = self.hello.clone();
@@ -962,6 +1001,9 @@ mod tests {
                 let sink = ECIESStream::connect(outgoing, key, local_peer_id).await.unwrap();
 
                 let (p2p_stream, _) = UnauthedP2PStream::new(sink).handshake(hello).await.unwrap();
+
+                let eth_version = p2p_stream.shared_capabilities().eth_version().unwrap();
+                status.set_eth_version(eth_version);
 
                 let (client_stream, _) = UnauthedEthStream::new(p2p_stream)
                     .handshake(status, fork_filter)
@@ -1040,6 +1082,7 @@ mod tests {
                             alloy_primitives::B256::ZERO,
                         ),
                         range_update_interval: None,
+                        last_sent_latest_block: None,
                     }
                 }
                 ev => {

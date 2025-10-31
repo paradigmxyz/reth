@@ -1,8 +1,6 @@
 use alloy_eips::BlockId;
 use alloy_primitives::{map::HashSet, Bytes, B256};
-use alloy_rpc_types_eth::{
-    state::StateOverride, transaction::TransactionRequest, BlockOverrides, Index,
-};
+use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides, Index};
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},
@@ -13,12 +11,12 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 /// Ethereum trace API
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "trace"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "trace"))]
-pub trait TraceApi {
+pub trait TraceApi<TxReq> {
     /// Executes the given call and returns a number of possible traces for it.
     #[method(name = "call")]
     async fn trace_call(
         &self,
-        call: TransactionRequest,
+        call: TxReq,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
         state_overrides: Option<StateOverride>,
@@ -31,7 +29,7 @@ pub trait TraceApi {
     #[method(name = "callMany")]
     async fn trace_call_many(
         &self,
-        calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
+        calls: Vec<(TxReq, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>>;
 

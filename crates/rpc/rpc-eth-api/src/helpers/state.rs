@@ -1,5 +1,6 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
+
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -8,10 +9,12 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, AccountInfo, EIP1186AccountProofResponse};
 use alloy_serde::JsonStorageKey;
 use futures::Future;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
-use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
+use reth_rpc_convert::RpcConvert;
+use reth_rpc_eth_types::{
+    error::FromEvmError, EthApiError, PendingBlockEnv, RpcInvalidTransactionError,
+};
 use reth_storage_api::{
     BlockIdReader, BlockNumReader, StateProvider, StateProviderBox, StateProviderFactory,
 };
@@ -49,9 +52,10 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        self.spawn_blocking_io(move |this| {
+        self.spawn_blocking_io_fut(move |this| async move {
             Ok(this
-                .state_at_block_id_or_latest(block_id)?
+                .state_at_block_id_or_latest(block_id)
+                .await?
                 .account_balance(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default())
@@ -65,9 +69,10 @@ pub trait EthState: LoadState + SpawnBlocking {
         index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
-        self.spawn_blocking_io(move |this| {
+        self.spawn_blocking_io_fut(move |this| async move {
             Ok(B256::new(
-                this.state_at_block_id_or_latest(block_id)?
+                this.state_at_block_id_or_latest(block_id)
+                    .await?
                     .storage(address, index.as_b256())
                     .map_err(Self::Error::from_eth_err)?
                     .unwrap_or_default()
@@ -110,8 +115,8 @@ pub trait EthState: LoadState + SpawnBlocking {
                 return Err(EthApiError::ExceedsMaxProofWindow.into())
             }
 
-            self.spawn_blocking_io(move |this| {
-                let state = this.state_at_block_id(block_id)?;
+            self.spawn_blocking_io_fut(move |this| async move {
+                let state = this.state_at_block_id(block_id).await?;
                 let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
@@ -128,8 +133,8 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<Account>, Self::Error>> + Send {
-        self.spawn_blocking_io(move |this| {
-            let state = this.state_at_block_id(block_id)?;
+        self.spawn_blocking_io_fut(move |this| async move {
+            let state = this.state_at_block_id(block_id).await?;
             let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
             let Some(account) = account else { return Ok(None) };
 
@@ -165,8 +170,8 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: BlockId,
     ) -> impl Future<Output = Result<AccountInfo, Self::Error>> + Send {
-        self.spawn_blocking_io(move |this| {
-            let state = this.state_at_block_id(block_id)?;
+        self.spawn_blocking_io_fut(move |this| async move {
+            let state = this.state_at_block_id(block_id).await?;
             let account = state
                 .basic_account(&address)
                 .map_err(Self::Error::from_eth_err)?
@@ -193,12 +198,11 @@ pub trait EthState: LoadState + SpawnBlocking {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
 pub trait LoadState:
-    EthApiTypes
-    + RpcNodeCoreExt<
-        Provider: StateProviderFactory
-                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>,
-        Pool: TransactionPool,
-    >
+    LoadPendingBlock
+    + EthApiTypes<
+        Error: FromEvmError<Self::Evm> + FromEthApiError,
+        RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
+    > + RpcNodeCoreExt
 {
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
@@ -209,8 +213,22 @@ pub trait LoadState:
     ///
     /// Note: if not [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this
     /// will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
-    fn state_at_block_id(&self, at: BlockId) -> Result<StateProviderBox, Self::Error> {
-        self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)
+    fn state_at_block_id(
+        &self,
+        at: BlockId,
+    ) -> impl Future<Output = Result<StateProviderBox, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        async move {
+            if at.is_pending() &&
+                let Ok(Some(state)) = self.local_pending_state().await
+            {
+                return Ok(state)
+            }
+
+            self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)
+        }
     }
 
     /// Returns the _latest_ state
@@ -224,11 +242,16 @@ pub trait LoadState:
     fn state_at_block_id_or_latest(
         &self,
         block_id: Option<BlockId>,
-    ) -> Result<StateProviderBox, Self::Error> {
-        if let Some(block_id) = block_id {
-            self.state_at_block_id(block_id)
-        } else {
-            Ok(self.latest_state()?)
+    ) -> impl Future<Output = Result<StateProviderBox, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        async move {
+            if let Some(block_id) = block_id {
+                self.state_at_block_id(block_id).await
+            } else {
+                Ok(self.latest_state()?)
+            }
         }
     }
 
@@ -243,7 +266,7 @@ pub trait LoadState:
         at: BlockId,
     ) -> impl Future<Output = Result<(EvmEnvFor<Self::Evm>, BlockId), Self::Error>> + Send
     where
-        Self: LoadPendingBlock + SpawnBlocking,
+        Self: SpawnBlocking,
     {
         async move {
             if at.is_pending() {
@@ -258,7 +281,11 @@ pub trait LoadState:
 
                 let header =
                     self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
-                let evm_env = self.evm_config().evm_env(&header);
+                let evm_env = self
+                    .evm_config()
+                    .evm_env(&header)
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?;
 
                 Ok((evm_env, block_hash.into()))
             }
@@ -277,17 +304,15 @@ pub trait LoadState:
     {
         self.spawn_blocking_io(move |this| {
             // first fetch the on chain nonce of the account
-            let on_chain_account_nonce = this
+            let mut next_nonce = this
                 .latest_state()?
                 .account_nonce(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default();
 
-            let mut next_nonce = on_chain_account_nonce;
             // Retrieve the highest consecutive transaction for the sender from the transaction pool
-            if let Some(highest_tx) = this
-                .pool()
-                .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
+            if let Some(highest_tx) =
+                this.pool().get_highest_consecutive_transaction_by_sender(address, next_nonce)
             {
                 // Return the nonce of the highest consecutive transaction + 1
                 next_nonce = highest_tx.nonce().checked_add(1).ok_or_else(|| {
@@ -313,10 +338,11 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io(move |this| {
+        self.spawn_blocking_io_fut(move |this| async move {
             // first fetch the on chain nonce of the account
             let on_chain_account_nonce = this
-                .state_at_block_id_or_latest(block_id)?
+                .state_at_block_id_or_latest(block_id)
+                .await?
                 .account_nonce(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default();
@@ -358,9 +384,10 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io(move |this| {
+        self.spawn_blocking_io_fut(move |this| async move {
             Ok(this
-                .state_at_block_id_or_latest(block_id)?
+                .state_at_block_id_or_latest(block_id)
+                .await?
                 .account_code(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default()

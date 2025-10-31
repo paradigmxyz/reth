@@ -5,22 +5,24 @@ use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
-use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
-    StateCommitmentProvider,
-};
+use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    hashed_cursor::HashedCursorFactory,
     node_iter::{TrieElement, TrieNodeIter},
-    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
+    prefix_set::TriePrefixSets,
+    trie_cursor::TrieCursorFactory,
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, Nibbles, StorageRoot, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{mpsc, OnceLock},
+    time::Duration,
+};
 use thiserror::Error;
+use tokio::runtime::{Builder, Handle, Runtime};
 use tracing::*;
 
 /// Parallel incremental state root calculator.
@@ -30,16 +32,15 @@ use tracing::*;
 /// nodes in the process. Upon encountering a leaf node, it will poll the storage root
 /// task for the corresponding hashed address.
 ///
-/// Internally, the calculator uses [`ConsistentDbView`] since
-/// it needs to rely on database state saying the same until
-/// the last transaction is open.
-/// See docs of using [`ConsistentDbView`] for caveats.
+/// Note: This implementation only serves as a fallback for the sparse trie-based
+/// state root calculation. The sparse trie approach is more efficient as it avoids traversing
+/// the entire trie, only operating on the modified parts.
 #[derive(Debug)]
 pub struct ParallelStateRoot<Factory> {
-    /// Consistent view of the database.
-    view: ConsistentDbView<Factory>,
-    /// Trie input.
-    input: TrieInput,
+    /// Factory for creating state providers.
+    factory: Factory,
+    // Prefix sets indicating which portions of the trie need to be recomputed.
+    prefix_sets: TriePrefixSets,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -47,10 +48,10 @@ pub struct ParallelStateRoot<Factory> {
 
 impl<Factory> ParallelStateRoot<Factory> {
     /// Create new parallel state root calculator.
-    pub fn new(view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
+    pub fn new(factory: Factory, prefix_sets: TriePrefixSets) -> Self {
         Self {
-            view,
-            input,
+            factory,
+            prefix_sets,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
@@ -59,11 +60,9 @@ impl<Factory> ParallelStateRoot<Factory> {
 
 impl<Factory> ParallelStateRoot<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>
-        + StateCommitmentProvider
+    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
         + Send
-        + Sync
         + 'static,
 {
     /// Calculate incremental state root in parallel.
@@ -78,48 +77,45 @@ where
         self.calculate(true)
     }
 
+    /// Computes the state root by calculating storage roots in parallel for modified accounts,
+    /// then walking the state trie to build the final state root hash.
     fn calculate(
         self,
         retain_updates: bool,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
-        let trie_nodes_sorted = Arc::new(self.input.nodes.into_sorted());
-        let hashed_state_sorted = Arc::new(self.input.state.into_sorted());
-        let prefix_sets = self.input.prefix_sets.freeze();
         let storage_root_targets = StorageRootTargets::new(
-            prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
-            prefix_sets.storage_prefix_sets,
+            self.prefix_sets
+                .account_prefix_set
+                .iter()
+                .map(|nibbles| B256::from_slice(&nibbles.pack())),
+            self.prefix_sets.storage_prefix_sets,
         );
 
         // Pre-calculate storage roots in parallel for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
+
+        // Get runtime handle once outside the loop
+        let handle = get_runtime_handle();
+
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
-            let view = self.view.clone();
-            let hashed_state_sorted = hashed_state_sorted.clone();
-            let trie_nodes_sorted = trie_nodes_sorted.clone();
+            let factory = self.factory.clone();
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
-            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            let (tx, rx) = mpsc::sync_channel(1);
 
-            rayon::spawn_fifo(move || {
+            // Spawn a blocking task to calculate account's storage root from database I/O
+            drop(handle.spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
-                    let provider_ro = view.provider_ro()?;
-                    let trie_cursor_factory = InMemoryTrieCursorFactory::new(
-                        DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                        &trie_nodes_sorted,
-                    );
-                    let hashed_state = HashedPostStateCursorFactory::new(
-                        DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                        &hashed_state_sorted,
-                    );
+                    let provider = factory.database_provider_ro()?;
                     Ok(StorageRoot::new_hashed(
-                        trie_cursor_factory,
-                        hashed_state,
+                        &provider,
+                        &provider,
                         hashed_address,
                         prefix_set,
                         #[cfg(feature = "metrics")]
@@ -128,31 +124,23 @@ where
                     .calculate(retain_updates)?)
                 })();
                 let _ = tx.send(result);
-            });
+            }));
             storage_roots.insert(hashed_address, rx);
         }
 
         trace!(target: "trie::parallel_state_root", "calculating state root");
         let mut trie_updates = TrieUpdates::default();
 
-        let provider_ro = self.view.provider_ro()?;
-        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
-            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-            &trie_nodes_sorted,
-        );
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-            &hashed_state_sorted,
-        );
+        let provider = self.factory.database_provider_ro()?;
 
-        let walker = TrieWalker::state_trie(
-            trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
-            prefix_sets.account_prefix_set,
+        let walker = TrieWalker::<_>::state_trie(
+            provider.account_trie_cursor().map_err(ProviderError::Database)?,
+            self.prefix_sets.account_prefix_set,
         )
         .with_deletions_retained(retain_updates);
         let mut account_node_iter = TrieNodeIter::state_trie(
             walker,
-            hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+            provider.hashed_account_cursor().map_err(ProviderError::Database)?,
         );
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
@@ -163,7 +151,7 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
+                    let storage_root_result = match storage_roots.remove(&hashed_address) {
                         Some(rx) => rx.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
                                 DatabaseError::Other(format!(
@@ -176,14 +164,25 @@ where
                         None => {
                             tracker.inc_missed_leaves();
                             StorageRoot::new_hashed(
-                                trie_cursor_factory.clone(),
-                                hashed_cursor_factory.clone(),
+                                &provider,
+                                &provider,
                                 hashed_address,
                                 Default::default(),
                                 #[cfg(feature = "metrics")]
                                 self.metrics.storage_trie.clone(),
                             )
                             .calculate(retain_updates)?
+                        }
+                    };
+
+                    let (storage_root, _, updates) = match storage_root_result {
+                        reth_trie::StorageRootProgress::Complete(root, _, updates) => (root, (), updates),
+                        reth_trie::StorageRootProgress::Progress(..) => {
+                            return Err(ParallelStateRootError::StorageRoot(
+                                StorageRootError::Database(DatabaseError::Other(
+                                    "StorageRoot returned Progress variant in parallel trie calculation".to_string()
+                                ))
+                            ))
                         }
                     };
 
@@ -202,7 +201,7 @@ where
         let root = hash_builder.root();
 
         let removed_keys = account_node_iter.walker.take_removed_keys();
-        trie_updates.finalize(hash_builder, removed_keys, prefix_sets.destroyed_accounts);
+        trie_updates.finalize(hash_builder, removed_keys, self.prefix_sets.destroyed_accounts);
 
         let stats = tracker.finish();
 
@@ -256,6 +255,27 @@ impl From<alloy_rlp::Error> for ParallelStateRootError {
     }
 }
 
+/// Gets or creates a tokio runtime handle for spawning blocking tasks.
+/// This ensures we always have a runtime available for I/O operations.
+fn get_runtime_handle() -> Handle {
+    Handle::try_current().unwrap_or_else(|_| {
+        // Create a new runtime if no runtime is available
+        static RT: OnceLock<Runtime> = OnceLock::new();
+
+        let rt = RT.get_or_init(|| {
+            Builder::new_multi_thread()
+                // Keep the threads alive for at least the block time (12 seconds) plus buffer.
+                // This prevents the costly process of spawning new threads on every
+                // new block, and instead reuses the existing threads.
+                .thread_keep_alive(Duration::from_secs(15))
+                .build()
+                .expect("Failed to create tokio runtime")
+        });
+
+        rt.handle().clone()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,11 +284,13 @@ mod tests {
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
+    use std::sync::Arc;
 
-    #[test]
-    fn random_parallel_root() {
+    #[tokio::test]
+    async fn random_parallel_root() {
         let factory = create_test_provider_factory();
-        let consistent_view = ConsistentDbView::new(factory.clone(), None);
+        let mut overlay_factory =
+            reth_provider::providers::OverlayStateProviderFactory::new(factory.clone());
 
         let mut rng = rand::rng();
         let mut state = (0..100)
@@ -311,7 +333,7 @@ mod tests {
         }
 
         assert_eq!(
-            ParallelStateRoot::new(consistent_view.clone(), Default::default())
+            ParallelStateRoot::new(overlay_factory.clone(), Default::default())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state.clone())
@@ -342,8 +364,12 @@ mod tests {
             }
         }
 
+        let prefix_sets = hashed_state.construct_prefix_sets();
+        overlay_factory =
+            overlay_factory.with_hashed_state_overlay(Some(Arc::new(hashed_state.into_sorted())));
+
         assert_eq!(
-            ParallelStateRoot::new(consistent_view, TrieInput::from_state(hashed_state))
+            ParallelStateRoot::new(overlay_factory, prefix_sets.freeze())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state)

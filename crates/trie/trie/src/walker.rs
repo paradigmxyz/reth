@@ -4,17 +4,18 @@ use crate::{
     BranchNodeCompact, Nibbles,
 };
 use alloy_primitives::{map::HashSet, B256};
+use alloy_trie::proof::AddedRemovedKeys;
 use reth_storage_errors::db::DatabaseError;
 use tracing::{instrument, trace};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
 
-/// `TrieWalker` is a structure that enables traversal of a Merkle trie.
-/// It allows moving through the trie in a depth-first manner, skipping certain branches
-/// if they have not changed.
+/// Traverses the trie in lexicographic order.
+///
+/// This iterator depends on the ordering guarantees of [`TrieCursor`].
 #[derive(Debug)]
-pub struct TrieWalker<C> {
+pub struct TrieWalker<C, K = AddedRemovedKeys> {
     /// A mutable reference to a trie cursor instance used for navigating the trie.
     pub cursor: C,
     /// A vector containing the trie nodes that have been visited.
@@ -27,12 +28,16 @@ pub struct TrieWalker<C> {
     pub changes: PrefixSet,
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
+    /// Provided when it's necessary not to skip certain nodes during proof generation.
+    /// Specifically we don't skip certain branch nodes even when they are not in the `PrefixSet`,
+    /// when they might be required to support leaf removal.
+    added_removed_keys: Option<K>,
     #[cfg(feature = "metrics")]
     /// Walker metrics.
     metrics: WalkerMetrics,
 }
 
-impl<C> TrieWalker<C> {
+impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     /// Constructs a new `TrieWalker` for the state trie from existing stack and a cursor.
     pub fn state_trie_from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
         Self::from_stack(
@@ -72,6 +77,7 @@ impl<C> TrieWalker<C> {
             stack,
             can_skip_current_node: false,
             removed_keys: None,
+            added_removed_keys: None,
             #[cfg(feature = "metrics")]
             metrics: WalkerMetrics::new(trie_type),
         };
@@ -85,6 +91,21 @@ impl<C> TrieWalker<C> {
             self.removed_keys = Some(HashSet::default());
         }
         self
+    }
+
+    /// Configures the walker to not skip certain branch nodes, even when they are not in the
+    /// `PrefixSet`, when they might be needed to support leaf removal.
+    pub fn with_added_removed_keys<K2>(self, added_removed_keys: Option<K2>) -> TrieWalker<C, K2> {
+        TrieWalker {
+            cursor: self.cursor,
+            stack: self.stack,
+            can_skip_current_node: self.can_skip_current_node,
+            changes: self.changes,
+            removed_keys: self.removed_keys,
+            added_removed_keys,
+            #[cfg(feature = "metrics")]
+            metrics: self.metrics,
+        }
     }
 
     /// Split the walker into stack and trie updates.
@@ -139,9 +160,7 @@ impl<C> TrieWalker<C> {
     #[instrument(level = "trace", skip(self), ret)]
     pub fn next_unprocessed_key(&self) -> Option<(B256, Nibbles)> {
         self.key()
-            .and_then(
-                |key| if self.can_skip_current_node { key.increment() } else { Some(key.clone()) },
-            )
+            .and_then(|key| if self.can_skip_current_node { key.increment() } else { Some(*key) })
             .map(|key| {
                 let mut packed = key.pack();
                 packed.resize(32, 0);
@@ -152,10 +171,27 @@ impl<C> TrieWalker<C> {
     /// Updates the skip node flag based on the walker's current state.
     fn update_skip_node(&mut self) {
         let old = self.can_skip_current_node;
-        self.can_skip_current_node = self
-            .stack
-            .last()
-            .is_some_and(|node| !self.changes.contains(node.full_key()) && node.hash_flag());
+        self.can_skip_current_node = self.stack.last().is_some_and(|node| {
+            // If the current key is not removed according to the [`AddedRemovedKeys`], and all of
+            // its siblings are removed, then we don't want to skip it. This allows the
+            // `ProofRetainer` to include this node in the returned proofs. Required to support
+            // leaf removal.
+            let key_is_only_nonremoved_child =
+                self.added_removed_keys.as_ref().is_some_and(|added_removed_keys| {
+                    node.full_key_is_only_nonremoved_child(added_removed_keys.as_ref())
+                });
+
+            trace!(
+                target: "trie::walker",
+                ?key_is_only_nonremoved_child,
+                full_key=?node.full_key(),
+                "Checked for only non-removed child",
+            );
+
+            !self.changes.contains(node.full_key()) &&
+                node.hash_flag() &&
+                !key_is_only_nonremoved_child
+        });
         trace!(
             target: "trie::walker",
             old,
@@ -164,9 +200,7 @@ impl<C> TrieWalker<C> {
             "updated skip node flag"
         );
     }
-}
 
-impl<C: TrieCursor> TrieWalker<C> {
     /// Constructs a new [`TrieWalker`] for the state trie.
     pub fn state_trie(cursor: C, changes: PrefixSet) -> Self {
         Self::new(
@@ -200,6 +234,7 @@ impl<C: TrieCursor> TrieWalker<C> {
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
             removed_keys: None,
+            added_removed_keys: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: WalkerMetrics::new(trie_type),
         };
@@ -249,8 +284,8 @@ impl<C: TrieCursor> TrieWalker<C> {
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
     fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let key = self.key().expect("key must exist").clone();
-        let entry = if exact { self.cursor.seek_exact(key)? } else { self.cursor.seek(key)? };
+        let key = self.key().expect("key must exist");
+        let entry = if exact { self.cursor.seek_exact(*key)? } else { self.cursor.seek(*key)? };
         #[cfg(feature = "metrics")]
         self.metrics.inc_branch_nodes_seeked();
 
@@ -274,20 +309,20 @@ impl<C: TrieCursor> TrieWalker<C> {
         // We need to sync the stack with the trie structure when consuming a new node. This is
         // necessary for proper traversal and accurately representing the trie in the stack.
         if !key.is_empty() && !self.stack.is_empty() {
-            self.stack[0].set_nibble(key[0]);
+            self.stack[0].set_nibble(key.get_unchecked(0));
         }
 
         // The current tree mask might have been set incorrectly.
         // Sanity check that the newly retrieved trie node key is the child of the last item
         // on the stack. If not, advance to the next sibling instead of adding the node to the
         // stack.
-        if let Some(subnode) = self.stack.last() {
-            if !key.starts_with(subnode.full_key()) {
-                #[cfg(feature = "metrics")]
-                self.metrics.inc_out_of_order_subnode(1);
-                self.move_to_next_sibling(false)?;
-                return Ok(())
-            }
+        if let Some(subnode) = self.stack.last() &&
+            !key.starts_with(subnode.full_key())
+        {
+            #[cfg(feature = "metrics")]
+            self.metrics.inc_out_of_order_subnode(1);
+            self.move_to_next_sibling(false)?;
+            return Ok(())
         }
 
         // Create a new CursorSubNode and push it to the stack.
@@ -298,10 +333,10 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
-        if !self.can_skip_current_node || position.is_child() {
-            if let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?) {
-                keys.insert(key);
-            }
+        if (!self.can_skip_current_node || position.is_child()) &&
+            let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?)
+        {
+            keys.insert(key);
         }
 
         Ok(())

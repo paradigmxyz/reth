@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::TxHash;
+use alloy_primitives::{TxHash, U256};
 use alloy_rpc_types_eth::{
     pubsub::{Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata},
     Filter, Header, Log,
@@ -15,7 +15,7 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_eth_api::{
-    pubsub::EthPubSubApiServer, EthApiTypes, RpcNodeCore, RpcTransaction, TransactionCompat,
+    pubsub::EthPubSubApiServer, EthApiTypes, RpcConvert, RpcNodeCore, RpcTransaction,
 };
 use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
@@ -62,7 +62,7 @@ where
             Pool: TransactionPool,
             Network: NetworkInfo,
         > + EthApiTypes<
-            TransactionCompat: TransactionCompat<
+            RpcConvert: RpcConvert<
                 Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
             >,
         >,
@@ -101,6 +101,7 @@ where
         kind: SubscriptionKind,
         params: Option<Params>,
     ) -> Result<(), ErrorObject<'static>> {
+        #[allow(unreachable_patterns)]
         match kind {
             SubscriptionKind::NewHeads => {
                 pipe_from_stream(accepted_sink, self.new_headers_stream()).await
@@ -199,6 +200,10 @@ where
 
                 Ok(())
             }
+            _ => {
+                // TODO: implement once https://github.com/alloy-rs/alloy/pull/2974 is released
+                Err(invalid_params_rpc_err("Unsupported subscription kind"))
+            }
         }
     }
 }
@@ -211,7 +216,7 @@ where
             Pool: TransactionPool,
             Network: NetworkInfo,
         > + EthApiTypes<
-            TransactionCompat: TransactionCompat<
+            RpcConvert: RpcConvert<
                 Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
             >,
         > + 'static,
@@ -353,10 +358,18 @@ where
     /// Returns a stream that yields all new RPC blocks.
     fn new_headers_stream(&self) -> impl Stream<Item = Header<N::BlockHeader>> {
         self.eth_api.provider().canonical_state_stream().flat_map(|new_chain| {
-            let headers = new_chain.committed().headers().collect::<Vec<_>>();
-            futures::stream::iter(
-                headers.into_iter().map(|h| Header::from_consensus(h.into(), None, None)),
-            )
+            let headers = new_chain
+                .committed()
+                .blocks_iter()
+                .map(|block| {
+                    Header::from_consensus(
+                        block.clone_sealed_header().into(),
+                        None,
+                        Some(U256::from(block.rlp_length())),
+                    )
+                })
+                .collect::<Vec<_>>();
+            futures::stream::iter(headers)
         })
     }
 

@@ -24,6 +24,14 @@ pub use database::DatabaseArgs;
 mod log;
 pub use log::{ColorMode, LogArgs, Verbosity};
 
+/// `TraceArgs` for tracing and spans support
+mod trace;
+pub use trace::TraceArgs;
+
+/// `MetricArgs` to configure metrics.
+mod metric;
+pub use metric::MetricArgs;
+
 /// `PayloadBuilderArgs` struct for configuring the payload builder
 mod payload_builder;
 pub use payload_builder::PayloadBuilderArgs;
@@ -68,5 +76,4 @@ pub use ress_args::RessArgs;
 mod era;
 pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 
-mod error;
 pub mod types;

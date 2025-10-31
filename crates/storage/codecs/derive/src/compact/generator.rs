@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::ZstdConfig;
-use convert_case::{Case, Casing};
 use syn::{Attribute, LitStr};
 
 /// Generates code to implement the `Compact` trait for a data type.
@@ -19,11 +18,6 @@ pub fn generate_from_to(
 
     let to_compact = generate_to_compact(fields, ident, zstd.clone(), &reth_codecs);
     let from_compact = generate_from_compact(fields, ident, zstd);
-
-    let snake_case_ident = ident.to_string().to_case(Case::Snake);
-
-    let fuzz = format_ident!("fuzz_test_{snake_case_ident}");
-    let test = format_ident!("fuzz_{snake_case_ident}");
 
     let lifetime = if has_lifetime {
         quote! { 'a }
@@ -58,33 +52,8 @@ pub fn generate_from_to(
         }
     };
 
-    let fuzz_tests = if has_lifetime {
-        quote! {}
-    } else {
-        quote! {
-            #[cfg(test)]
-            #[expect(dead_code)]
-            #[test_fuzz::test_fuzz]
-            fn #fuzz(obj: #ident)  {
-                use #reth_codecs::Compact;
-                let mut buf = vec![];
-                let len = obj.clone().to_compact(&mut buf);
-                let (same_obj, buf) = #ident::from_compact(buf.as_ref(), len);
-                assert_eq!(obj, same_obj);
-            }
-
-            #[test]
-            #[expect(missing_docs)]
-            pub fn #test() {
-                #fuzz(#ident::default())
-            }
-        }
-    };
-
     // Build function
     quote! {
-        #fuzz_tests
-
         #impl_compact {
             fn to_compact<B>(&self, buf: &mut B) -> usize where B: #reth_codecs::__private::bytes::BufMut + AsMut<[u8]> {
                 let mut flags = #flags::default();

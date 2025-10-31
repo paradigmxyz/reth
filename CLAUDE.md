@@ -38,7 +38,7 @@ Reth is a high-performance Ethereum execution client written in Rust, focusing o
 
 2. **Linting**: Run clippy with all features
    ```bash
-   RUSTFLAGS="-D warnings" cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
+   RUSTFLAGS="-D warnings" cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features --locked
    ```
 
 3. **Testing**: Use nextest for faster test execution
@@ -147,6 +147,7 @@ mod tests {
 1. **Avoid Allocations in Hot Paths**: Use references and borrowing
 2. **Parallel Processing**: Use rayon for CPU-bound parallel work
 3. **Async/Await**: Use tokio for I/O-bound operations
+4. **File Operations**: Use `reth_fs_util` instead of `std::fs` for better error handling
 
 ### Common Pitfalls
 
@@ -161,6 +162,7 @@ Based on PR patterns, avoid:
 2. **Mixing unrelated changes**: One logical change per PR
 3. **Ignoring CI failures**: All checks must pass
 4. **Incomplete implementations**: Finish features before submitting
+5. **Modifying libmdbx sources**: Never modify files in `crates/storage/libmdbx-rs/mdbx-sys/libmdbx/` - this is vendored third-party code
 
 ### CI Requirements
 
@@ -178,8 +180,9 @@ Before submitting changes, ensure:
 Label PRs appropriately, first check the available labels and then apply the relevant ones:
 * when changes are RPC related, add A-rpc label
 * when changes are docs related, add C-docs label
-* when changes are optimism related (e.g. new feature or exlusive changes to crates/optimism), add A-op-reth label
+* when changes are optimism related (e.g. new feature or exclusive changes to crates/optimism), add A-op-reth label
 * ... and so on, check the available labels for more options.
+* if being tasked to open a pr, ensure that all changes are properly formatted: `cargo +nightly fmt --all`
 
 If changes in reth include changes to dependencies, run commands `zepter` and `make lint-toml` before finalizing the pr. Assume `zepter` binary is installed.
 
@@ -232,6 +235,85 @@ Common refactoring pattern:
 - Replace concrete types with generics
 - Add trait bounds for flexibility
 - Enable reuse across different chain types (Ethereum, Optimism)
+
+#### When to Comment
+
+Write comments that remain valuable after the PR is merged. Future readers won't have PR context - they only see the current code.
+
+##### ✅ DO: Add Value
+
+**Explain WHY and non-obvious behavior:**
+```rust
+// Process must handle allocations atomically to prevent race conditions
+// between dealloc on drop and concurrent limit checks
+unsafe impl GlobalAlloc for LimitedAllocator { ... }
+
+// Binary search requires sorted input. Panics on unsorted slices.
+fn find_index(items: &[Item], target: &Item) -> Option
+
+// Timeout set to 5s to match EVM block processing limits
+const TRACER_TIMEOUT: Duration = Duration::from_secs(5);
+```
+
+**Document constraints and assumptions:**
+```rust
+/// Returns heap size estimate.
+/// 
+/// Note: May undercount shared references (Rc/Arc). For precise
+/// accounting, combine with an allocator-based approach.
+fn deep_size_of(&self) -> usize
+```
+
+**Explain complex logic:**
+```rust
+// We reset limits at task start because tokio reuses threads in
+// spawn_blocking pool. Without reset, second task inherits first
+// task's allocation count and immediately hits limit.
+THREAD_ALLOCATED.with(|allocated| allocated.set(0));
+```
+
+##### ❌ DON'T: Describe Changes
+```rust
+// ❌ BAD - Describes the change, not the code
+// Changed from Vec to HashMap for O(1) lookups
+
+// ✅ GOOD - Explains the decision
+// HashMap provides O(1) symbol lookups during trace replay
+```
+```rust
+// ❌ BAD - PR-specific context
+// Fix for issue #234 where memory wasn't freed
+
+// ✅ GOOD - Documents the actual behavior
+// Explicitly drop allocations before limit check to ensure
+// accurate accounting
+```
+```rust
+// ❌ BAD - States the obvious
+// Increment counter
+counter += 1;
+
+// ✅ GOOD - Explains non-obvious purpose
+// Track allocations across all threads for global limit enforcement
+GLOBAL_COUNTER.fetch_add(1, Ordering::SeqCst);
+```
+
+✅ **Comment when:**
+- Non-obvious behavior or edge cases
+- Performance trade-offs
+- Safety requirements (unsafe blocks must always be documented)
+- Limitations or gotchas
+- Why simpler alternatives don't work
+
+❌ **Don't comment when:**
+- Code is self-explanatory
+- Just restating the code in English
+- Describing what changed in this PR
+
+##### The Test: "Will this make sense in 6 months?"
+
+Before adding a comment, ask: Would someone reading just the current code (no PR, no history) find this helpful?
+
 
 ### Example Contribution Workflow
 
@@ -292,7 +374,7 @@ Let's say you want to fix a bug where external IP resolution fails on startup:
 cargo +nightly fmt --all
 
 # Run lints
-RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --locked
+RUSTFLAGS="-D warnings" cargo +nightly clippy --workspace --all-features --locked
 
 # Run tests
 cargo nextest run --workspace

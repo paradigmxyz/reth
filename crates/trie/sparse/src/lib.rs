@@ -11,10 +11,10 @@ pub use state::*;
 mod trie;
 pub use trie::*;
 
-mod parallel_trie;
-pub use parallel_trie::*;
+mod traits;
+pub use traits::*;
 
-pub mod blinded;
+pub mod provider;
 
 #[cfg(feature = "metrics")]
 mod metrics;

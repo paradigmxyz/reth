@@ -72,15 +72,9 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 StatusMessage::Eth69(StatusEth69::decode(buf)?)
             }),
             EthMessageID::NewBlockHashes => {
-                if version.is_eth69() {
-                    return Err(MessageError::Invalid(version, EthMessageID::NewBlockHashes));
-                }
                 EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
             }
             EthMessageID::NewBlock => {
-                if version.is_eth69() {
-                    return Err(MessageError::Invalid(version, EthMessageID::NewBlock));
-                }
                 EthMessage::NewBlock(Box::new(N::NewBlockPayload::decode(buf)?))
             }
             EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
@@ -331,6 +325,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             self,
             Self::PooledTransactions(_) |
                 Self::Receipts(_) |
+                Self::Receipts69(_) |
                 Self::BlockHeaders(_) |
                 Self::BlockBodies(_) |
                 Self::NodeData(_)
@@ -504,6 +499,15 @@ impl EthMessageID {
         } else {
             Self::Receipts.to_u8()
         }
+    }
+
+    /// Returns the total number of message types for the given version.
+    ///
+    /// This is used for message ID multiplexing.
+    ///
+    /// <https://github.com/ethereum/go-ethereum/blob/85077be58edea572f29c3b1a6a055077f1a56a8b/eth/protocols/eth/protocol.go#L45-L47>
+    pub const fn message_count(version: EthVersion) -> u8 {
+        Self::max(version) + 1
     }
 }
 

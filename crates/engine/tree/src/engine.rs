@@ -7,8 +7,8 @@ use crate::{
 };
 use alloy_primitives::B256;
 use futures::{Stream, StreamExt};
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+use reth_chain_state::ExecutedBlock;
+use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
@@ -191,7 +191,7 @@ impl<Request, N: NodePrimitives> EngineRequestHandler for EngineApiRequestHandle
 where
     Request: Send,
 {
-    type Event = BeaconConsensusEngineEvent<N>;
+    type Event = ConsensusEngineEvent<N>;
     type Request = Request;
     type Block = N::Block;
 
@@ -246,7 +246,7 @@ pub enum EngineApiRequest<T: PayloadTypes, N: NodePrimitives> {
     /// A request received from the consensus engine.
     Beacon(BeaconEngineMessage<T>),
     /// Request to insert an already executed block, e.g. via payload building.
-    InsertExecutedBlock(ExecutedBlockWithTrieUpdates<N>),
+    InsertExecutedBlock(ExecutedBlock<N>),
 }
 
 impl<T: PayloadTypes, N: NodePrimitives> Display for EngineApiRequest<T, N> {
@@ -279,7 +279,7 @@ impl<T: PayloadTypes, N: NodePrimitives> From<EngineApiRequest<T, N>>
 pub enum EngineApiEvent<N: NodePrimitives = EthPrimitives> {
     /// Event from the consensus engine.
     // TODO(mattsse): find a more appropriate name for this variant, consider phasing it out.
-    BeaconConsensus(BeaconConsensusEngineEvent<N>),
+    BeaconConsensus(ConsensusEngineEvent<N>),
     /// Backfill action is needed.
     BackfillAction(BackfillAction),
     /// Block download is needed.
@@ -293,8 +293,8 @@ impl<N: NodePrimitives> EngineApiEvent<N> {
     }
 }
 
-impl<N: NodePrimitives> From<BeaconConsensusEngineEvent<N>> for EngineApiEvent<N> {
-    fn from(event: BeaconConsensusEngineEvent<N>) -> Self {
+impl<N: NodePrimitives> From<ConsensusEngineEvent<N>> for EngineApiEvent<N> {
+    fn from(event: ConsensusEngineEvent<N>) -> Self {
         Self::BeaconConsensus(event)
     }
 }

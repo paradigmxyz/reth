@@ -4,6 +4,8 @@ use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStor
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
+    eip7840::BlobParams,
+    merge::EPOCH_SLOTS,
 };
 use alloy_primitives::{TxHash, B256};
 use parking_lot::{Mutex, RwLock};
@@ -13,6 +15,13 @@ use tracing::{debug, trace};
 
 /// How many [`BlobTransactionSidecarVariant`] to cache in memory.
 pub const DEFAULT_MAX_CACHED_BLOBS: u32 = 100;
+
+/// A cache size heuristic based on the highest blob params
+///
+/// This uses the max blobs per tx and max blobs per block over 16 epochs: `21 * 6 * 512 = 64512`
+/// This should be ~4MB
+const VERSIONED_HASH_TO_TX_HASH_CACHE_SIZE: u64 =
+    BlobParams::bpo2().max_blobs_per_tx * BlobParams::bpo2().max_blob_count * EPOCH_SLOTS * 16;
 
 /// A blob store that stores blob data on disk.
 ///
@@ -288,7 +297,9 @@ impl DiskFileBlobStoreInner {
             size_tracker: Default::default(),
             file_lock: Default::default(),
             txs_to_delete: Default::default(),
-            versioned_hashes_to_txhash: Mutex::new(LruMap::new(ByLength::new(max_length * 6))),
+            versioned_hashes_to_txhash: Mutex::new(LruMap::new(ByLength::new(
+                VERSIONED_HASH_TO_TX_HASH_CACHE_SIZE as u32,
+            ))),
         }
     }
 
@@ -424,10 +435,9 @@ impl DiskFileBlobStoreInner {
         if let Some(blob) = self.blob_cache.lock().get(&tx) {
             return Ok(Some(blob.clone()))
         }
-        let blob = self.read_one(tx)?;
 
-        if let Some(blob) = &blob {
-            let blob_arc = Arc::new(blob.clone());
+        if let Some(blob) = self.read_one(tx)? {
+            let blob_arc = Arc::new(blob);
             self.blob_cache.lock().insert(tx, blob_arc.clone());
             return Ok(Some(blob_arc))
         }
@@ -478,7 +488,7 @@ impl DiskFileBlobStoreInner {
 
     /// Retrieves the raw blob data for the given transaction hashes.
     ///
-    /// Only returns the blobs that were found on file.
+    /// Only returns the blobs that were found in file.
     #[inline]
     fn read_many_raw(&self, txs: Vec<TxHash>) -> Vec<(TxHash, Vec<u8>)> {
         let mut res = Vec::with_capacity(txs.len());
@@ -542,11 +552,18 @@ impl DiskFileBlobStoreInner {
         if from_disk.is_empty() {
             return Ok(res)
         }
+        let from_disk = from_disk
+            .into_iter()
+            .map(|(tx, data)| {
+                let data = Arc::new(data);
+                res.push((tx, data.clone()));
+                (tx, data)
+            })
+            .collect::<Vec<_>>();
+
         let mut cache = self.blob_cache.lock();
         for (tx, data) in from_disk {
-            let arc = Arc::new(data.clone());
-            cache.insert(tx, arc.clone());
-            res.push((tx, arc.clone()));
+            cache.insert(tx, data);
         }
 
         Ok(res)

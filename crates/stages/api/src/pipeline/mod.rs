@@ -7,14 +7,17 @@ pub use event::*;
 use futures_util::Future;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader, BlockNumReader,
-    ChainStateBlockReader, ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory,
-    StageCheckpointReader, StageCheckpointWriter,
+    providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ChainStateBlockReader,
+    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
+    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::{EventSender, EventStream};
-use std::pin::Pin;
+use std::{
+    pin::Pin,
+    time::{Duration, Instant},
+};
 use tokio::sync::watch;
 use tracing::*;
 
@@ -138,6 +141,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 stage_id,
                 checkpoint: provider.get_stage_checkpoint(stage_id)?.unwrap_or_default(),
                 max_block_number: None,
+                elapsed: Duration::default(),
             });
         }
         Ok(())
@@ -301,7 +305,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         // Get the actual pruning configuration
         let prune_modes = provider.prune_modes_ref();
 
-        prune_modes.ensure_unwind_target_unpruned(latest_block, to)?;
+        let checkpoints = provider.get_prune_checkpoints()?;
+        prune_modes.ensure_unwind_target_unpruned(latest_block, to, &checkpoints)?;
 
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
@@ -338,6 +343,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 "Starting unwind"
             );
             while checkpoint.block_number > to {
+                let unwind_started_at = Instant::now();
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
                 self.event_sender.notify(PipelineEvent::Unwind { stage_id, input });
 
@@ -353,6 +359,13 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             done = checkpoint.block_number == to,
                             "Stage unwound"
                         );
+
+                        provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
+
+                        // Notify event listeners and update metrics.
+                        self.event_sender
+                            .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
+
                         if let Some(metrics_tx) = &mut self.metrics_tx {
                             let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
                                 stage_id,
@@ -360,12 +373,9 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                                 // We assume it was set in the previous execute iteration, so it
                                 // doesn't change when we unwind.
                                 max_block_number: None,
+                                elapsed: unwind_started_at.elapsed(),
                             });
                         }
-                        provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
-
-                        self.event_sender
-                            .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
                         // update finalized block if needed
                         let last_saved_finalized_block_number =
@@ -381,7 +391,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             ))?;
                         }
 
-                        UnifiedStorageWriter::commit_unwind(provider_rw)?;
+                        provider_rw.commit()?;
 
                         stage.post_unwind_commit()?;
 
@@ -452,6 +462,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 };
             }
 
+            let stage_started_at = Instant::now();
             let provider_rw = self.provider_factory.database_provider_rw()?;
 
             self.event_sender.notify(PipelineEvent::Run {
@@ -466,18 +477,16 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
             match self.stage(stage_index).execute(&provider_rw, exec_input) {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
-                    made_progress |=
-                        checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
-
-                    if let Some(metrics_tx) = &mut self.metrics_tx {
-                        let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
-                            stage_id,
-                            checkpoint,
-                            max_block_number: target,
-                        });
-                    }
+                    // Update stage checkpoint.
                     provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
+                    // Commit processed data to the database.
+                    provider_rw.commit()?;
+
+                    // Invoke stage post commit hook.
+                    self.stage(stage_index).post_execute_commit()?;
+
+                    // Notify event listeners and update metrics.
                     self.event_sender.notify(PipelineEvent::Ran {
                         pipeline_stages_progress: PipelineStagesProgress {
                             current: stage_index + 1,
@@ -486,13 +495,19 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         stage_id,
                         result: out.clone(),
                     });
+                    if let Some(metrics_tx) = &mut self.metrics_tx {
+                        let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
+                            stage_id,
+                            checkpoint,
+                            max_block_number: target,
+                            elapsed: stage_started_at.elapsed(),
+                        });
+                    }
 
-                    UnifiedStorageWriter::commit(provider_rw)?;
-
-                    self.stage(stage_index).post_execute_commit()?;
-
+                    let block_number = checkpoint.block_number;
+                    let prev_block_number = prev_checkpoint.unwrap_or_default().block_number;
+                    made_progress |= block_number != prev_block_number;
                     if done {
-                        let block_number = checkpoint.block_number;
                         return Ok(if made_progress {
                             ControlFlow::Continue { block_number }
                         } else {
@@ -557,14 +572,18 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     // FIXME: When handling errors, we do not commit the database transaction. This
                     // leads to the Merkle stage not clearing its checkpoint, and restarting from an
                     // invalid place.
-                    let provider_rw = self.provider_factory.database_provider_rw()?;
-                    provider_rw.save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
-                    provider_rw.save_stage_checkpoint(
-                        StageId::MerkleExecute,
-                        prev_checkpoint.unwrap_or_default(),
-                    )?;
+                    // Only reset MerkleExecute checkpoint if MerkleExecute itself failed
+                    if stage_id == StageId::MerkleExecute {
+                        let provider_rw = self.provider_factory.database_provider_rw()?;
+                        provider_rw
+                            .save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
+                        provider_rw.save_stage_checkpoint(
+                            StageId::MerkleExecute,
+                            prev_checkpoint.unwrap_or_default(),
+                        )?;
 
-                    UnifiedStorageWriter::commit(provider_rw)?;
+                        provider_rw.commit()?;
+                    }
 
                     // We unwind because of a validation error. If the unwind itself
                     // fails, we bail entirely,
@@ -602,7 +621,10 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 "Stage is missing static file data."
             );
 
-            Ok(Some(ControlFlow::Unwind { target: block.block.number - 1, bad_block: block }))
+            Ok(Some(ControlFlow::Unwind {
+                target: block.block.number.saturating_sub(1),
+                bad_block: block,
+            }))
         } else if err.is_fatal() {
             error!(target: "sync::pipeline", stage = %stage_id, "Stage encountered a fatal error: {err}");
             Err(err.into())

@@ -174,6 +174,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         }
     }
 
+    /// Returns the currently tracked [`ForkId`].
+    pub(crate) const fn fork_id(&self) -> ForkId {
+        self.fork_filter.current()
+    }
+
     /// Check whether the provided [`ForkId`] is compatible based on the validation rules in
     /// `EIP-2124`.
     pub fn is_valid_fork_id(&self, fork_id: ForkId) -> bool {
@@ -566,6 +571,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     range_info: None,
                     local_range_info: self.local_range_info.clone(),
                     range_update_interval,
+                    last_sent_latest_block: None,
                 };
 
                 self.spawn(session);
@@ -899,7 +905,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 }
 
 /// Starts the authentication process for a connection initiated by a remote peer.
-#[instrument(skip_all, fields(%remote_addr, peer_id), target = "net")]
+#[instrument(level = "trace", target = "net::network", skip_all, fields(%remote_addr, peer_id))]
 #[expect(clippy::too_many_arguments)]
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
@@ -1104,12 +1110,12 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         }
     };
 
+    // Before trying status handshake, set up the version to negotiated shared version
+    status.set_eth_version(eth_version);
+
     let (conn, their_status) = if p2p_stream.shared_capabilities().len() == 1 {
         // if the shared caps are 1, we know both support the eth version
         // if the hello handshake was successful we can try status handshake
-        //
-        // Before trying status handshake, set up the version to negotiated shared version
-        status.set_eth_version(eth_version);
 
         // perform the eth protocol handshake
         match handshake
@@ -1145,18 +1151,20 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 .ok();
         }
 
-        let (multiplex_stream, their_status) =
-            match multiplex_stream.into_eth_satellite_stream(status, fork_filter).await {
-                Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
-                Err(err) => {
-                    return PendingSessionEvent::Disconnected {
-                        remote_addr,
-                        session_id,
-                        direction,
-                        error: Some(PendingSessionHandshakeError::Eth(err)),
-                    }
+        let (multiplex_stream, their_status) = match multiplex_stream
+            .into_eth_satellite_stream(status, fork_filter, handshake)
+            .await
+        {
+            Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
+            Err(err) => {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::Eth(err)),
                 }
-            };
+            }
+        };
 
         (multiplex_stream.into(), their_status)
     };

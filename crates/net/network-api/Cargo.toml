@@ -21,6 +21,8 @@ reth-tokio-util.workspace = true
 reth-ethereum-forks.workspace = true
 
 # ethereum
+alloy-consensus.workspace = true
+alloy-rpc-types-eth.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-rpc-types-admin.workspace = true
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
@@ -44,4 +46,6 @@ serde = [
     "alloy-primitives/serde",
     "enr/serde",
     "reth-ethereum-forks/serde",
+    "alloy-consensus/serde",
+    "alloy-rpc-types-eth/serde",
 ]

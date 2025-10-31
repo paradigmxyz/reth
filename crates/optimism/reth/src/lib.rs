@@ -6,11 +6,11 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(unused_crate_dependencies)]
 
-/// Re-exported ethereum types
+/// Re-exported optimism types
 #[doc(inline)]
 pub use reth_optimism_primitives::*;
 
@@ -24,7 +24,11 @@ pub mod primitives {
 #[cfg(feature = "cli")]
 pub mod cli {
     #[doc(inline)]
-    pub use reth_cli_util::*;
+    pub use reth_cli_util::{
+        allocator, get_secret_key, hash_or_num_value_parser, load_secret_key,
+        parse_duration_from_secs, parse_duration_from_secs_or_ms, parse_ether_value,
+        parse_socket_address, sigsegv_handler,
+    };
     #[doc(inline)]
     pub use reth_optimism_cli::*;
 }
@@ -48,6 +52,7 @@ pub mod consensus {
 }
 
 /// Re-exported from `reth_chainspec`
+#[allow(ambiguous_glob_reexports)]
 pub mod chainspec {
     #[doc(inline)]
     pub use reth_chainspec::*;
@@ -99,6 +104,10 @@ pub mod provider {
     pub use reth_db as db;
 }
 
+/// Re-exported codec crate
+#[cfg(feature = "provider")]
+pub use reth_codecs as codec;
+
 /// Re-exported reth storage api types
 #[cfg(feature = "storage-api")]
 pub mod storage {
@@ -106,7 +115,7 @@ pub mod storage {
     pub use reth_storage_api::*;
 }
 
-/// Re-exported ethereum node
+/// Re-exported optimism node
 #[cfg(feature = "node-api")]
 pub mod node {
     #[doc(inline)]
@@ -117,6 +126,15 @@ pub mod node {
     pub use reth_node_core as core;
     #[cfg(feature = "node")]
     pub use reth_optimism_node::*;
+}
+
+/// Re-exported  engine types
+#[cfg(feature = "node")]
+pub mod engine {
+    #[doc(inline)]
+    pub use reth_engine_local as local;
+    #[doc(inline)]
+    pub use reth_optimism_node::engine::*;
 }
 
 /// Re-exported reth trie types

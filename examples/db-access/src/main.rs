@@ -7,7 +7,7 @@ use reth_ethereum::{
     primitives::{AlloyBlockHeader, SealedBlock, SealedHeader},
     provider::{
         providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
-        ReceiptProvider, StateProvider, TransactionsProvider,
+        ReceiptProvider, StateProvider, TransactionVariant, TransactionsProvider,
     },
     rpc::eth::primitives::Filter,
     TransactionSigned,
@@ -57,19 +57,14 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
     // Can query the header by number
     let header = provider.header_by_number(number)?.ok_or(eyre::eyre!("header not found"))?;
 
-    // We can convert a header to a sealed header which contains the hash w/o needing to re-compute
+    // We can convert a header to a sealed header which contains the hash w/o needing to recompute
     // it every time.
     let sealed_header = SealedHeader::seal_slow(header);
 
     // Can also query the header by hash!
     let header_by_hash =
-        provider.header(&sealed_header.hash())?.ok_or(eyre::eyre!("header by hash not found"))?;
+        provider.header(sealed_header.hash())?.ok_or(eyre::eyre!("header by hash not found"))?;
     assert_eq!(sealed_header.header(), &header_by_hash);
-
-    // The header's total difficulty is stored in a separate table, so we have a separate call for
-    // it. This is not needed for post PoS transition chains.
-    let td = provider.header_td_by_number(number)?.ok_or(eyre::eyre!("header td not found"))?;
-    assert!(!td.is_zero());
 
     // Can query headers by range as well, already sealed!
     let headers = provider.sealed_headers_range(100..200)?;
@@ -123,10 +118,12 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
     let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
     assert_eq!(block.number, number);
 
-    // Can query a block with its senders, this is useful when you'd want to execute a block and do
+    // Can query a block with its senders, this is useful when you want to execute a block and do
     // not want to manually recover the senders for each transaction (as each transaction is
     // stored on disk with its v,r,s but not its `from` field.).
-    let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
+    let _recovered_block = provider
+        .sealed_block_with_senders(number.into(), TransactionVariant::WithHash)?
+        .ok_or(eyre::eyre!("block num not found"))?;
 
     // Can seal the block to cache the hash, like the Header above.
     let sealed_block = SealedBlock::seal_slow(block.clone());
@@ -143,7 +140,7 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
         .ok_or(eyre::eyre!("block by hash not found"))?;
     assert_eq!(block, block_by_hash2);
 
-    // Or you can also specify the datasource. For this provider this always return `None`, but
+    // Or you can also specify the datasource. For this provider this always returns `None`, but
     // the blockchain tree is also able to access pending state not available in the db yet.
     let block_by_hash3 = provider
         .find_block_by_hash(sealed_block.hash(), BlockSource::Any)?
@@ -178,7 +175,7 @@ fn receipts_provider_example<
         .receipts_by_block(100.into())?
         .ok_or(eyre::eyre!("no receipts found for block"))?;
 
-    // Can check if a address/topic filter is present in a header, if it is we query the block and
+    // Can check if an address/topic filter is present in a header, if it is we query the block and
     // receipts and do something with the data
     // 1. get the bloom from the header
     let header = provider.header_by_number(header_num)?.unwrap();

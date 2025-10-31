@@ -1,5 +1,5 @@
 use crate::{network::NetworkTestContext, payload::PayloadTestContext, rpc::RpcTestContext};
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -14,11 +14,11 @@ use reth_node_api::{
     PrimitivesTy,
 };
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
-use reth_node_core::primitives::SignedTransaction;
+
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
-    StageCheckpointReader,
+    HeaderProvider, StageCheckpointReader,
 };
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
@@ -27,7 +27,7 @@ use std::pin::Pin;
 use tokio_stream::StreamExt;
 use url::Url;
 
-/// An helper struct to handle node actions
+/// A helper struct to handle node actions
 #[expect(missing_debug_implementations)]
 pub struct NodeTestContext<Node, AddOns>
 where
@@ -150,19 +150,18 @@ where
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-            if !check && wait_finish_checkpoint {
-                if let Some(checkpoint) =
-                    self.inner.provider.get_stage_checkpoint(StageId::Finish)?
-                {
-                    if checkpoint.block_number >= number {
-                        check = true
-                    }
-                }
+            if !check &&
+                wait_finish_checkpoint &&
+                let Some(checkpoint) =
+                    self.inner.provider.get_stage_checkpoint(StageId::Finish)? &&
+                checkpoint.block_number >= number
+            {
+                check = true
             }
 
             if check {
-                if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
-                    assert_eq!(latest_block.header().hash_slow(), expected_block_hash);
+                if let Some(latest_header) = self.inner.provider.header_by_number(number)? {
+                    assert_eq!(latest_header.hash_slow(), expected_block_hash);
                     break
                 }
                 assert!(
@@ -178,10 +177,10 @@ where
     pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            if let Some(checkpoint) = self.inner.provider.get_stage_checkpoint(StageId::Headers)? {
-                if checkpoint.block_number == number {
-                    break
-                }
+            if let Some(checkpoint) = self.inner.provider.get_stage_checkpoint(StageId::Headers)? &&
+                checkpoint.block_number == number
+            {
+                break
             }
         }
         Ok(())
@@ -207,14 +206,13 @@ where
             // wait for the block to commit
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             if let Some(latest_block) =
-                self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?
+                self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)? &&
+                latest_block.header().number() == block_number
             {
-                if latest_block.header().number() == block_number {
-                    // make sure the block hash we submitted via FCU engine api is the new latest
-                    // block using an RPC call
-                    assert_eq!(latest_block.header().hash_slow(), block_hash);
-                    break
-                }
+                // make sure the block hash we submitted via FCU engine api is the new latest
+                // block using an RPC call
+                assert_eq!(latest_block.header().hash_slow(), block_hash);
+                break
             }
         }
         Ok(())
@@ -304,5 +302,21 @@ where
     /// Returns an Engine API client.
     pub fn auth_server_handle(&self) -> AuthServerHandle {
         self.inner.auth_server_handle().clone()
+    }
+
+    /// Creates a [`crate::testsuite::NodeClient`] from this test context.
+    ///
+    /// This helper method extracts the necessary handles and creates a client
+    /// that can interact with both the regular RPC and Engine API endpoints.
+    /// It automatically includes the beacon engine handle for direct consensus engine interaction.
+    pub fn to_node_client(&self) -> eyre::Result<crate::testsuite::NodeClient<Payload>> {
+        let rpc = self
+            .rpc_client()
+            .ok_or_else(|| eyre::eyre!("Failed to create HTTP RPC client for node"))?;
+        let auth = self.auth_server_handle();
+        let url = self.rpc_url();
+        let beacon_handle = self.inner.add_ons_handle.beacon_engine_handle.clone();
+
+        Ok(crate::testsuite::NodeClient::new_with_beacon_engine(rpc, auth, url, beacon_handle))
     }
 }

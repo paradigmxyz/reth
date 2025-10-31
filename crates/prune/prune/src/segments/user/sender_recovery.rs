@@ -37,7 +37,7 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
+    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
@@ -91,7 +91,7 @@ mod tests {
     };
     use reth_db_api::tables;
     use reth_primitives_traits::SignerRecoverable;
-    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};

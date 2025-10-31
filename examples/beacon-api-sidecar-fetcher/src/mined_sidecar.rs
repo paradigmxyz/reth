@@ -103,7 +103,7 @@ where
             .body()
             .transactions()
             .filter(|tx| tx.is_eip4844())
-            .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
+            .map(|tx| (tx.clone(), tx.blob_count().unwrap_or(0) as usize))
             .collect();
 
         let mut all_blobs_available = true;

@@ -17,52 +17,53 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
+use alloy_network::{Ethereum, IntoWallet};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
 use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
-    server::{
-        middleware::rpc::{RpcService, RpcServiceBuilder, RpcServiceT},
-        AlreadyStoppedError, IdProvider, ServerHandle,
-    },
-    MethodResponse, Methods, RpcModule,
+    server::{middleware::rpc::RpcServiceBuilder, AlreadyStoppedError, IdProvider, ServerHandle},
+    Methods, RpcModule,
 };
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
     OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
-    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
+    helpers::{
+        pending_block::PendingEnvBuilder, Call, EthApiSpec, EthTransactions, LoadPendingBlock,
+        TraceExt,
+    },
+    node::RpcNodeCoreAdapter,
+    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcConvert, RpcConverter, RpcHeader,
+    RpcNodeCore, RpcReceipt, RpcTransaction, RpcTxReq,
 };
-use reth_rpc_eth_types::{EthConfig, EthSubscriptionIdProvider};
+use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_storage_api::{
-    AccountReader, BlockReader, BlockReaderIdExt, ChangeSetReader, FullRpcProvider, ProviderBlock,
+    AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, ProviderBlock,
     StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::{noop::NoopTransactionPool, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fmt::Debug,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tower::Layer;
 use tower_http::cors::CorsLayer;
 
 pub use cors::CorsDomainError;
@@ -82,6 +83,9 @@ pub mod auth;
 /// RPC server utilities.
 pub mod config;
 
+/// Utils for installing Rpc middleware
+pub mod middleware;
+
 /// Cors utilities.
 mod cors;
 
@@ -94,46 +98,13 @@ pub use eth::EthHandlers;
 
 // Rpc server metrics
 mod metrics;
+use crate::middleware::RethRpcMiddleware;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_rpc::eth::sim_bundle::EthSimBundle;
 
 // Rpc rate limiter
 pub mod rate_limiter;
-
-/// Convenience function for starting a server in one step.
-#[expect(clippy::too_many_arguments)]
-pub async fn launch<N, Provider, Pool, Network, EvmConfig, EthApi>(
-    provider: Provider,
-    pool: Pool,
-    network: Network,
-    module_config: impl Into<TransportRpcModuleConfig>,
-    server_config: impl Into<RpcServerConfig>,
-    executor: Box<dyn TaskSpawner + 'static>,
-    evm_config: EvmConfig,
-    eth: EthApi,
-    consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
-) -> Result<RpcServerHandle, RpcError>
-where
-    N: NodePrimitives,
-    Provider: FullRpcProvider<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
-        + CanonStateSubscriptions<Primitives = N>
-        + AccountReader
-        + ChangeSetReader,
-    Pool: TransactionPool + 'static,
-    Network: NetworkInfo + Peers + Clone + 'static,
-    EvmConfig: ConfigureEvm<Primitives = N> + 'static,
-    EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
-{
-    let module_config = module_config.into();
-    server_config
-        .into()
-        .start(
-            &RpcModuleBuilder::new(provider, pool, network, executor, evm_config, consensus)
-                .build(module_config, eth),
-        )
-        .await
-}
 
 /// A builder type to configure the RPC module: See [`RpcModule`]
 ///
@@ -160,9 +131,6 @@ pub struct RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus> {
 
 impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus>
-where
-    N: NodePrimitives,
-    EvmConfig: Clone,
 {
     /// Create a new instance of the builder
     pub const fn new(
@@ -180,12 +148,7 @@ where
     pub fn with_provider<P>(
         self,
         provider: P,
-    ) -> RpcModuleBuilder<N, P, Pool, Network, EvmConfig, Consensus>
-    where
-        P: BlockReader<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
-            + StateProviderFactory
-            + 'static,
-    {
+    ) -> RpcModuleBuilder<N, P, Pool, Network, EvmConfig, Consensus> {
         let Self { pool, network, executor, evm_config, consensus, _primitives, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
@@ -194,10 +157,7 @@ where
     pub fn with_pool<P>(
         self,
         pool: P,
-    ) -> RpcModuleBuilder<N, Provider, P, Network, EvmConfig, Consensus>
-    where
-        P: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
-    {
+    ) -> RpcModuleBuilder<N, Provider, P, Network, EvmConfig, Consensus> {
         let Self { provider, network, executor, evm_config, consensus, _primitives, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
@@ -226,10 +186,7 @@ where
     pub fn with_network<Net>(
         self,
         network: Net,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Net, EvmConfig, Consensus>
-    where
-        Net: NetworkInfo + Peers + 'static,
-    {
+    ) -> RpcModuleBuilder<N, Provider, Pool, Net, EvmConfig, Consensus> {
         let Self { provider, pool, executor, evm_config, consensus, _primitives, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
@@ -281,11 +238,7 @@ where
     pub fn with_evm_config<E>(
         self,
         evm_config: E,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Network, E, Consensus>
-    where
-        EvmConfig: 'static,
-        E: ConfigureEvm + Clone,
-    {
+    ) -> RpcModuleBuilder<N, Provider, Pool, Network, E, Consensus> {
         let Self { provider, pool, executor, network, consensus, _primitives, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
@@ -300,12 +253,20 @@ where
     }
 
     /// Instantiates a new [`EthApiBuilder`] from the configured components.
-    pub fn eth_api_builder(&self) -> EthApiBuilder<Provider, Pool, Network, EvmConfig>
+    #[expect(clippy::type_complexity)]
+    pub fn eth_api_builder<ChainSpec>(
+        &self,
+    ) -> EthApiBuilder<
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+    >
     where
-        Provider: BlockReaderIdExt + Clone,
+        Provider: Clone,
         Pool: Clone,
         Network: Clone,
         EvmConfig: Clone,
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
+            RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
     {
         EthApiBuilder::new(
             self.provider.clone(),
@@ -320,18 +281,22 @@ where
     /// Note: This spawns all necessary tasks.
     ///
     /// See also [`EthApiBuilder`].
-    pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig>
+    #[expect(clippy::type_complexity)]
+    pub fn bootstrap_eth_api<ChainSpec>(
+        &self,
+    ) -> EthApi<
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+    >
     where
-        Provider: BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
-            + StateProviderFactory
-            + CanonStateSubscriptions<Primitives = N>
-            + ChainSpecProvider
-            + Clone
-            + Unpin
-            + 'static,
+        Provider: Clone,
         Pool: Clone,
-        EvmConfig: Clone,
         Network: Clone,
+        EvmConfig: ConfigureEvm + Clone,
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
+            RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>: RpcConvert,
+        (): PendingEnvBuilder<EvmConfig>,
     {
         self.eth_api_builder().build()
     }
@@ -345,7 +310,7 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
@@ -488,7 +453,7 @@ pub struct RpcModuleConfigBuilder {
 
 impl RpcModuleConfigBuilder {
     /// Configures a custom eth namespace config
-    pub const fn eth(mut self, eth: EthConfig) -> Self {
+    pub fn eth(mut self, eth: EthConfig) -> Self {
         self.eth = Some(eth);
         self
     }
@@ -538,7 +503,7 @@ pub struct RpcRegistryInner<
     executor: Box<dyn TaskSpawner + 'static>,
     evm_config: EvmConfig,
     consensus: Consensus,
-    /// Holds a all `eth_` namespace handlers
+    /// Holds all `eth_` namespace handlers
     eth: EthHandlers<EthApi>,
     /// to put trace calls behind semaphore
     blocking_pool_guard: BlockingTaskGuard,
@@ -582,7 +547,7 @@ where
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 
-        let eth = EthHandlers::bootstrap(config.eth, executor.clone(), eth_api);
+        let eth = EthHandlers::bootstrap(config.eth.clone(), executor.clone(), eth_api);
 
         Self {
             provider,
@@ -654,11 +619,12 @@ where
     EvmConfig: ConfigureEvm,
 {
     /// Instantiates `AdminApi`
-    pub fn admin_api(&self) -> AdminApi<Network, Provider::ChainSpec>
+    pub fn admin_api(&self) -> AdminApi<Network, Provider::ChainSpec, Pool>
     where
         Network: Peers,
+        Pool: TransactionPool + Clone + 'static,
     {
-        AdminApi::new(self.network.clone(), self.provider.chain_spec())
+        AdminApi::new(self.network.clone(), self.provider.chain_spec(), self.pool.clone())
     }
 
     /// Instantiates `Web3Api`
@@ -670,6 +636,7 @@ where
     pub fn register_admin(&mut self) -> &mut Self
     where
         Network: Peers,
+        Pool: TransactionPool + Clone + 'static,
     {
         let adminapi = self.admin_api();
         self.modules.insert(RethRpcModule::Admin, adminapi.into_rpc().into());
@@ -698,10 +665,12 @@ where
         + CanonStateSubscriptions,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: EthApiServer<
+            RpcTxReq<EthApi::NetworkTypes>,
             RpcTransaction<EthApi::NetworkTypes>,
             RpcBlock<EthApi::NetworkTypes>,
             RpcReceipt<EthApi::NetworkTypes>,
             RpcHeader<EthApi::NetworkTypes>,
+            TxTy<N>,
         > + EthApiTypes,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -723,7 +692,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self
     where
-        EthApi: TraceExt + EthTransactions,
+        EthApi: TraceExt + EthTransactions<Primitives = N>,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -819,11 +788,12 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn trace_api(&self) -> TraceApi<EthApi>
-    where
-        EthApi: TraceExt,
-    {
-        TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone(), self.eth_config)
+    pub fn trace_api(&self) -> TraceApi<EthApi> {
+        TraceApi::new(
+            self.eth_api().clone(),
+            self.blocking_pool_guard.clone(),
+            self.eth_config.clone(),
+        )
     }
 
     /// Instantiates [`EthBundle`] Api
@@ -844,16 +814,8 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn debug_api(&self) -> DebugApi<EthApi, EvmConfig>
-    where
-        EthApi: EthApiSpec + EthTransactions + TraceExt,
-        EvmConfig::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
-    {
-        DebugApi::new(
-            self.eth_api().clone(),
-            self.blocking_pool_guard.clone(),
-            self.evm_config.clone(),
-        )
+    pub fn debug_api(&self) -> DebugApi<EthApi> {
+        DebugApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone())
     }
 
     /// Instantiates `NetApi`
@@ -883,9 +845,9 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
-    EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+    EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
 {
@@ -960,23 +922,22 @@ where
         let namespaces: Vec<_> = namespaces.collect();
         namespaces
             .iter()
-            .copied()
             .map(|namespace| {
                 self.modules
-                    .entry(namespace)
-                    .or_insert_with(|| match namespace {
-                        RethRpcModule::Admin => {
-                            AdminApi::new(self.network.clone(), self.provider.chain_spec())
-                                .into_rpc()
-                                .into()
-                        }
-                        RethRpcModule::Debug => DebugApi::new(
-                            eth_api.clone(),
-                            self.blocking_pool_guard.clone(),
-                            self.evm_config.clone(),
+                    .entry(namespace.clone())
+                    .or_insert_with(|| match namespace.clone() {
+                        RethRpcModule::Admin => AdminApi::new(
+                            self.network.clone(),
+                            self.provider.chain_spec(),
+                            self.pool.clone(),
                         )
                         .into_rpc()
                         .into(),
+                        RethRpcModule::Debug => {
+                            DebugApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
+                                .into_rpc()
+                                .into()
+                        }
                         RethRpcModule::Eth => {
                             // merge all eth handlers
                             let mut module = eth_api.clone().into_rpc();
@@ -1000,14 +961,14 @@ where
                         RethRpcModule::Trace => TraceApi::new(
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
-                            self.eth_config,
+                            self.eth_config.clone(),
                         )
                         .into_rpc()
                         .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => TxPoolApi::new(
                             self.eth.api.pool().clone(),
-                            self.eth.api.tx_resp_builder().clone(),
+                            dyn_clone::clone(self.eth.api.tx_resp_builder()),
                         )
                         .into_rpc()
                         .into(),
@@ -1028,7 +989,9 @@ where
                         // only relevant for Ethereum and configured in `EthereumAddOns`
                         // implementation
                         // TODO: can we get rid of this here?
-                        RethRpcModule::Flashbots => Default::default(),
+                        // Custom modules are not handled here - they should be registered via
+                        // extend_rpc_modules
+                        RethRpcModule::Flashbots | RethRpcModule::Other(_) => Default::default(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
@@ -1076,7 +1039,7 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
     /// Configurable RPC middleware
-    rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
+    rpc_middleware: RpcMiddleware,
 }
 
 // === impl RpcServerConfig ===
@@ -1095,7 +1058,7 @@ impl Default for RpcServerConfig<Identity> {
             ipc_server_config: None,
             ipc_endpoint: None,
             jwt_secret: None,
-            rpc_middleware: RpcServiceBuilder::new(),
+            rpc_middleware: Default::default(),
         }
     }
 }
@@ -1147,7 +1110,7 @@ impl RpcServerConfig {
 
 impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Configure rpc middleware
-    pub fn set_rpc_middleware<T>(self, rpc_middleware: RpcServiceBuilder<T>) -> RpcServerConfig<T> {
+    pub fn set_rpc_middleware<T>(self, rpc_middleware: T) -> RpcServerConfig<T> {
         RpcServerConfig {
             http_server_config: self.http_server_config,
             http_cors_domains: self.http_cors_domains,
@@ -1238,6 +1201,23 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         self
     }
 
+    /// Configures a custom tokio runtime for the rpc server.
+    pub fn with_tokio_runtime(mut self, tokio_runtime: Option<tokio::runtime::Handle>) -> Self {
+        let Some(tokio_runtime) = tokio_runtime else { return self };
+        if let Some(http_server_config) = self.http_server_config {
+            self.http_server_config =
+                Some(http_server_config.custom_tokio_runtime(tokio_runtime.clone()));
+        }
+        if let Some(ws_server_config) = self.ws_server_config {
+            self.ws_server_config =
+                Some(ws_server_config.custom_tokio_runtime(tokio_runtime.clone()));
+        }
+        if let Some(ipc_server_config) = self.ipc_server_config {
+            self.ipc_server_config = Some(ipc_server_config.custom_tokio_runtime(tokio_runtime));
+        }
+        self
+    }
+
     /// Returns true if any server is configured.
     ///
     /// If no server is configured, no server will be launched on [`RpcServerConfig::start`].
@@ -1289,16 +1269,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Returns the [`RpcServerHandle`] with the handle to the started servers.
     pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError>
     where
-        RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
-        for<'a> <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
-            Send
-                + Sync
-                + 'static
-                + RpcServiceT<
-                    MethodResponse = MethodResponse,
-                    BatchResponse = MethodResponse,
-                    NotificationResponse = MethodResponse,
-                >,
+        RpcMiddleware: RethRpcMiddleware,
     {
         let mut http_handle = None;
         let mut ws_handle = None;
@@ -1359,14 +1330,16 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                             )),
                     )
                     .set_rpc_middleware(
-                        self.rpc_middleware.clone().layer(
-                            modules
-                                .http
-                                .as_ref()
-                                .or(modules.ws.as_ref())
-                                .map(RpcRequestMetrics::same_port)
-                                .unwrap_or_default(),
-                        ),
+                        RpcServiceBuilder::default()
+                            .layer(
+                                modules
+                                    .http
+                                    .as_ref()
+                                    .or(modules.ws.as_ref())
+                                    .map(RpcRequestMetrics::same_port)
+                                    .unwrap_or_default(),
+                            )
+                            .layer(self.rpc_middleware.clone()),
                     )
                     .set_config(config.build())
                     .build(http_socket_addr)
@@ -1408,9 +1381,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
                 .set_rpc_middleware(
-                    self.rpc_middleware
-                        .clone()
-                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
+                    RpcServiceBuilder::default()
+                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default())
+                        .layer(self.rpc_middleware.clone()),
                 )
                 .build(ws_socket_addr)
                 .await
@@ -1434,9 +1407,11 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         .option_layer(Self::maybe_compression_layer(self.http_disable_compression)),
                 )
                 .set_rpc_middleware(
-                    self.rpc_middleware.clone().layer(
-                        modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
-                    ),
+                    RpcServiceBuilder::default()
+                        .layer(
+                            modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
+                        )
+                        .layer(self.rpc_middleware.clone()),
                 )
                 .build(http_socket_addr)
                 .await
@@ -1605,9 +1580,9 @@ impl TransportRpcModuleConfig {
             let ws_modules =
                 self.ws.as_ref().map(RpcModuleSelection::to_selection).unwrap_or_default();
 
-            let http_not_ws = http_modules.difference(&ws_modules).copied().collect();
-            let ws_not_http = ws_modules.difference(&http_modules).copied().collect();
-            let overlap = http_modules.intersection(&ws_modules).copied().collect();
+            let http_not_ws = http_modules.difference(&ws_modules).cloned().collect();
+            let ws_not_http = ws_modules.difference(&http_modules).cloned().collect();
+            let overlap = http_modules.intersection(&ws_modules).cloned().collect();
 
             Err(WsHttpSamePortError::ConflictingModules(Box::new(ConflictingModules {
                 overlap,
@@ -1743,7 +1718,7 @@ impl TransportRpcModules {
     /// Returns all unique endpoints installed for the given module.
     ///
     /// Note: In case of duplicate method names this only record the first occurrence.
-    pub fn methods_by_module<F>(&self, module: RethRpcModule) -> Methods {
+    pub fn methods_by_module(&self, module: RethRpcModule) -> Methods {
         self.methods_by(|name| name.starts_with(module.as_str()))
     }
 
@@ -1991,6 +1966,25 @@ impl TransportRpcModules {
         self.add_or_replace_ipc(other)?;
         Ok(())
     }
+    /// Adds or replaces the given [`Methods`] in the transport modules where the specified
+    /// [`RethRpcModule`] is configured.
+    pub fn add_or_replace_if_module_configured(
+        &mut self,
+        module: RethRpcModule,
+        other: impl Into<Methods>,
+    ) -> Result<(), RegisterMethodError> {
+        let other = other.into();
+        if self.module_config().contains_http(&module) {
+            self.add_or_replace_http(other.clone())?;
+        }
+        if self.module_config().contains_ws(&module) {
+            self.add_or_replace_ws(other.clone())?;
+        }
+        if self.module_config().contains_ipc(&module) {
+            self.add_or_replace_ipc(other)?;
+        }
+        Ok(())
+    }
 }
 
 /// Returns the methods installed in the given module that match the given filter.
@@ -2124,6 +2118,21 @@ impl RpcServerHandle {
         self.new_http_provider_for()
     }
 
+    /// Returns a new [`alloy_network::Ethereum`] http provider with its recommended fillers and
+    /// installed wallet.
+    pub fn eth_http_provider_with_wallet<W>(
+        &self,
+        wallet: W,
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static>
+    where
+        W: IntoWallet<alloy_network::Ethereum, NetworkWallet: Clone + Unpin + 'static>,
+    {
+        let rpc_url = self.http_url()?;
+        let provider =
+            ProviderBuilder::new().wallet(wallet).connect_http(rpc_url.parse().expect("valid url"));
+        Some(provider)
+    }
+
     /// Returns an http provider from the rpc server handle for the
     /// specified [`alloy_network::Network`].
     ///
@@ -2144,6 +2153,24 @@ impl RpcServerHandle {
         &self,
     ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
         self.new_ws_provider_for().await
+    }
+
+    /// Returns a new [`alloy_network::Ethereum`] ws provider with its recommended fillers and
+    /// installed wallet.
+    pub async fn eth_ws_provider_with_wallet<W>(
+        &self,
+        wallet: W,
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static>
+    where
+        W: IntoWallet<alloy_network::Ethereum, NetworkWallet: Clone + Unpin + 'static>,
+    {
+        let rpc_url = self.ws_url()?;
+        let provider = ProviderBuilder::new()
+            .wallet(wallet)
+            .connect(&rpc_url)
+            .await
+            .expect("failed to create ws client");
+        Some(provider)
     }
 
     /// Returns an ws provider from the rpc server handle for the
@@ -2513,5 +2540,57 @@ mod tests {
         assert!(modules.http.as_ref().unwrap().method("anything").is_some());
         assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
         assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
+    }
+
+    #[test]
+    fn test_add_or_replace_if_module_configured() {
+        // Create a config that enables RethRpcModule::Eth for HTTP and WS, but NOT IPC
+        let config = TransportRpcModuleConfig::default()
+            .with_http([RethRpcModule::Eth])
+            .with_ws([RethRpcModule::Eth]);
+
+        // Create HTTP module with an existing method (to test "replace")
+        let mut http_module = RpcModule::new(());
+        http_module.register_method("eth_existing", |_, _, _| "original").unwrap();
+
+        // Create WS module with the same existing method
+        let mut ws_module = RpcModule::new(());
+        ws_module.register_method("eth_existing", |_, _, _| "original").unwrap();
+
+        // Create IPC module (empty, to ensure no changes)
+        let ipc_module = RpcModule::new(());
+
+        // Set up TransportRpcModules with the config and modules
+        let mut modules = TransportRpcModules {
+            config,
+            http: Some(http_module),
+            ws: Some(ws_module),
+            ipc: Some(ipc_module),
+        };
+
+        // Create new methods: one to replace an existing method, one to add a new one
+        let mut new_module = RpcModule::new(());
+        new_module.register_method("eth_existing", |_, _, _| "replaced").unwrap(); // Replace
+        new_module.register_method("eth_new", |_, _, _| "added").unwrap(); // Add
+        let new_methods: Methods = new_module.into();
+
+        // Call the function for RethRpcModule::Eth
+        let result = modules.add_or_replace_if_module_configured(RethRpcModule::Eth, new_methods);
+        assert!(result.is_ok(), "Function should succeed");
+
+        // Verify HTTP: existing method still exists (replaced), new method added
+        let http = modules.http.as_ref().unwrap();
+        assert!(http.method("eth_existing").is_some());
+        assert!(http.method("eth_new").is_some());
+
+        // Verify WS: existing method still exists (replaced), new method added
+        let ws = modules.ws.as_ref().unwrap();
+        assert!(ws.method("eth_existing").is_some());
+        assert!(ws.method("eth_new").is_some());
+
+        // Verify IPC: no changes (Eth not configured for IPC)
+        let ipc = modules.ipc.as_ref().unwrap();
+        assert!(ipc.method("eth_existing").is_none());
+        assert!(ipc.method("eth_new").is_none());
     }
 }

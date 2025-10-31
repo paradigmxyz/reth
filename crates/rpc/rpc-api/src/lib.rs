@@ -12,13 +12,12 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod admin;
 mod anvil;
 mod debug;
 mod engine;
-mod ganache;
 mod hardhat;
 mod mev;
 mod miner;
@@ -69,7 +68,6 @@ pub mod clients {
         anvil::AnvilApiClient,
         debug::{DebugApiClient, DebugExecutionWitnessApiClient},
         engine::{EngineApiClient, EngineEthApiClient},
-        ganache::GanacheApiClient,
         hardhat::HardhatApiClient,
         mev::{MevFullApiClient, MevSimApiClient},
         miner::MinerApiClient,

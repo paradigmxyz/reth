@@ -1,6 +1,4 @@
-use alloy_rpc_types_mev::{
-    EthBundleHash, SendBundleRequest, SimBundleOverrides, SimBundleResponse,
-};
+use alloy_rpc_types_mev::{EthBundleHash, MevSendBundle, SimBundleOverrides, SimBundleResponse};
 use jsonrpsee::proc_macros::rpc;
 
 /// Mev rpc interface.
@@ -12,7 +10,7 @@ pub trait MevSimApi {
     #[method(name = "simBundle")]
     async fn sim_bundle(
         &self,
-        bundle: SendBundleRequest,
+        bundle: MevSendBundle,
         sim_overrides: SimBundleOverrides,
     ) -> jsonrpsee::core::RpcResult<SimBundleResponse>;
 }
@@ -26,7 +24,7 @@ pub trait MevFullApi {
     #[method(name = "sendBundle")]
     async fn send_bundle(
         &self,
-        request: SendBundleRequest,
+        request: MevSendBundle,
     ) -> jsonrpsee::core::RpcResult<EthBundleHash>;
 
     /// Similar to `mev_sendBundle` but instead of submitting a bundle to the relay, it returns
@@ -34,7 +32,7 @@ pub trait MevFullApi {
     #[method(name = "simBundle")]
     async fn sim_bundle(
         &self,
-        bundle: SendBundleRequest,
+        bundle: MevSendBundle,
         sim_overrides: SimBundleOverrides,
     ) -> jsonrpsee::core::RpcResult<SimBundleResponse>;
 }

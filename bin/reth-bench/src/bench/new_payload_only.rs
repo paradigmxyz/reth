@@ -8,12 +8,12 @@ use crate::{
             NEW_PAYLOAD_OUTPUT_SUFFIX,
         },
     },
-    valid_payload::call_new_payload,
+    valid_payload::{block_to_new_payload, call_new_payload},
 };
 use alloy_provider::Provider;
-use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use csv::Writer;
+use eyre::{Context, OptionExt};
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use std::time::{Duration, Instant};
@@ -26,6 +26,16 @@ pub struct Command {
     #[arg(long, value_name = "RPC_URL", verbatim_doc_comment)]
     rpc_url: String,
 
+    /// The size of the block buffer (channel capacity) for prefetching blocks from the RPC
+    /// endpoint.
+    #[arg(
+        long = "rpc-block-buffer-size",
+        value_name = "RPC_BLOCK_BUFFER_SIZE",
+        default_value = "20",
+        verbatim_doc_comment
+    )]
+    rpc_block_buffer_size: usize,
+
     #[command(flatten)]
     benchmark: BenchmarkArgs,
 }
@@ -33,29 +43,51 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-only` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
-            BenchContext::new(&self.benchmark, self.rpc_url).await?;
+        let BenchContext {
+            benchmark_mode,
+            block_provider,
+            auth_provider,
+            mut next_block,
+            is_optimism,
+        } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
-        let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
+        let buffer_size = self.rpc_block_buffer_size;
+
+        // Use a oneshot channel to propagate errors from the spawned task
+        let (error_sender, mut error_receiver) = tokio::sync::oneshot::channel();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer_size);
+
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
-                let block = block_res.unwrap().unwrap();
-                let block = block
-                    .into_inner()
-                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-                    .try_map_transactions(|tx| {
-                        tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
-                    })
-                    .unwrap()
-                    .into_consensus();
+                let block_res = block_provider
+                    .get_block_by_number(next_block.into())
+                    .full()
+                    .await
+                    .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"));
+                let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
+                    Ok(block) => block,
+                    Err(e) => {
+                        tracing::error!("Failed to fetch block {next_block}: {e}");
+                        let _ = error_sender.send(e);
+                        break;
+                    }
+                };
+                let header = block.header.clone();
 
-                let blob_versioned_hashes =
-                    block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
-                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+                let (version, params) = match block_to_new_payload(block, is_optimism) {
+                    Ok(result) => result,
+                    Err(e) => {
+                        tracing::error!("Failed to convert block to new payload: {e}");
+                        let _ = error_sender.send(e);
+                        break;
+                    }
+                };
 
                 next_block += 1;
-                sender.send((block.header, blob_versioned_hashes, payload, sidecar)).await.unwrap();
+                if let Err(e) = sender.send((header, version, params)).await {
+                    tracing::error!("Failed to send block data: {e}");
+                    break;
+                }
             }
         });
 
@@ -64,7 +96,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((header, versioned_hashes, payload, sidecar)) = {
+        while let Some((header, version, params)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
@@ -73,7 +105,7 @@ impl Command {
             // just put gas used here
             let gas_used = header.gas_used;
 
-            let block_number = payload.block_number();
+            let block_number = header.number;
 
             debug!(
                 target: "reth-bench",
@@ -82,14 +114,7 @@ impl Command {
             );
 
             let start = Instant::now();
-            call_new_payload(
-                &auth_provider,
-                payload,
-                sidecar,
-                header.parent_beacon_block_root,
-                versioned_hashes,
-            )
-            .await?;
+            call_new_payload(&auth_provider, version, params).await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
             info!(%new_payload_result);
@@ -101,6 +126,11 @@ impl Command {
             // record the current result
             let row = TotalGasRow { block_number, gas_used, time: current_duration };
             results.push((row, new_payload_result));
+        }
+
+        // Check if the spawned task encountered an error
+        if let Ok(error) = error_receiver.try_recv() {
+            return Err(error);
         }
 
         let (gas_output_results, new_payload_results): (_, Vec<NewPayloadResult>) =
@@ -130,7 +160,7 @@ impl Command {
         }
 
         // accumulate the results and calculate the overall Ggas/s
-        let gas_output = TotalGasOutput::new(gas_output_results);
+        let gas_output = TotalGasOutput::new(gas_output_results)?;
         info!(
             total_duration=?gas_output.total_duration,
             total_gas_used=?gas_output.total_gas_used,

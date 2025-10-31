@@ -77,7 +77,7 @@ where
         let (block_number, key) = partial_key_factory(entry?);
         cache.entry(key).or_default().push(block_number);
 
-        if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
+        if idx > 0 && idx.is_multiple_of(interval) && total_changesets > 1000 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
         }
 
@@ -131,7 +131,7 @@ where
         let sharded_key = decode_key(k)?;
         let new_list = BlockNumberList::decompress_owned(v)?;
 
-        if index > 0 && index % interval == 0 && total_entries > 10 {
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 
@@ -156,12 +156,11 @@ where
 
             // If it's not the first sync, there might an existing shard already, so we need to
             // merge it with the one coming from the collector
-            if !append_only {
-                if let Some((_, last_database_shard)) =
+            if !append_only &&
+                let Some((_, last_database_shard)) =
                     write_cursor.seek_exact(sharded_key_factory(current_partial, u64::MAX))?
-                {
-                    current_list.extend(last_database_shard.iter());
-                }
+            {
+                current_list.extend(last_database_shard.iter());
             }
         }
 
@@ -265,10 +264,10 @@ where
     // To be extra safe, we make sure that the last tx num matches the last block from its indices.
     // If not, get it.
     loop {
-        if let Some(indices) = provider.block_body_indices(last_block)? {
-            if indices.last_tx_num() <= last_tx_num {
-                break
-            }
+        if let Some(indices) = provider.block_body_indices(last_block)? &&
+            indices.last_tx_num() <= last_tx_num
+        {
+            break
         }
         if last_block == 0 {
             break

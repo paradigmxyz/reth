@@ -93,7 +93,7 @@ impl PoolError {
     ///
     /// Not all error variants are caused by the incorrect composition of the transaction (See also
     /// [`InvalidPoolTransactionError`]) and can be caused by the current state of the transaction
-    /// pool. For example the transaction pool is already full or the error was caused my an
+    /// pool. For example the transaction pool is already full or the error was caused by an
     /// internal error, such as database errors.
     ///
     /// This function returns true only if the transaction will never make it into the pool because
@@ -157,7 +157,7 @@ pub enum Eip4844PoolTransactionError {
     /// Thrown if an EIP-4844 transaction without any blobs arrives
     #[error("blobless blob transaction")]
     NoEip4844Blobs,
-    /// Thrown if an EIP-4844 transaction without any blobs arrives
+    /// Thrown if an EIP-4844 transaction arrives with too many blobs
     #[error("too many blobs in transaction: have {have}, permitted {permitted}")]
     TooManyEip4844Blobs {
         /// Number of blobs the transaction has
@@ -218,11 +218,14 @@ pub enum InvalidPoolTransactionError {
     /// respect the size limits of the pool.
     #[error("transaction's gas limit {0} exceeds block's gas limit {1}")]
     ExceedsGasLimit(u64, u64),
+    /// Thrown when a transaction's gas limit exceeds the configured maximum per-transaction limit.
+    #[error("transaction's gas limit {0} exceeds maximum per-transaction gas limit {1}")]
+    MaxTxGasLimitExceeded(u64, u64),
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the tx fee exceeds the configured cap
     #[error("tx fee ({max_tx_fee_wei} wei) exceeds the configured cap ({tx_fee_cap_wei} wei)")]
     ExceedsFeeCap {
-        /// max fee in wei of new tx submitted to the pull (e.g. 0.11534 ETH)
+        /// max fee in wei of new tx submitted to the pool (e.g. 0.11534 ETH)
         max_tx_fee_wei: u128,
         /// configured tx fee cap in wei (e.g. 1.0 ETH)
         tx_fee_cap_wei: u128,
@@ -234,8 +237,13 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if the input data of a transaction is greater
     /// than some meaningful limit a user might use. This is not a consensus error
     /// making the transaction invalid, rather a DOS protection.
-    #[error("input data too large")]
-    OversizedData(usize, usize),
+    #[error("oversized data: transaction size {size}, limit {limit}")]
+    OversizedData {
+        /// Size of the transaction/input data that exceeded the limit.
+        size: usize,
+        /// Configured limit that was exceeded.
+        limit: usize,
+    },
     /// Thrown if the transaction's fee is below the minimum fee
     #[error("transaction underpriced")]
     Underpriced,
@@ -247,6 +255,10 @@ pub enum InvalidPoolTransactionError {
         /// Balance of account.
         balance: U256,
     },
+    /// EIP-2681 error thrown if the nonce is higher or equal than `U64::max`
+    /// `<https://eips.ethereum.org/EIPS/eip-2681>`
+    #[error("nonce exceeds u64 limit")]
+    Eip2681,
     /// EIP-4844 related errors
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
@@ -260,6 +272,12 @@ pub enum InvalidPoolTransactionError {
     /// invocation.
     #[error("intrinsic gas too low")]
     IntrinsicGasTooLow,
+    /// The transaction priority fee is below the minimum required priority fee.
+    #[error("transaction priority fee below minimum required priority fee {minimum_priority_fee}")]
+    PriorityFeeBelowMinimum {
+        /// Minimum required priority fee.
+        minimum_priority_fee: u128,
+    },
 }
 
 // === impl InvalidPoolTransactionError ===
@@ -316,9 +334,13 @@ impl InvalidPoolTransactionError {
                 }
             }
             Self::ExceedsGasLimit(_, _) => true,
+            Self::MaxTxGasLimitExceeded(_, _) => {
+                // local setting
+                false
+            }
             Self::ExceedsFeeCap { max_tx_fee_wei: _, tx_fee_cap_wei: _ } => true,
             Self::ExceedsMaxInitCodeSize(_, _) => true,
-            Self::OversizedData(_, _) => true,
+            Self::OversizedData { .. } => true,
             Self::Underpriced => {
                 // local setting
                 false
@@ -326,6 +348,7 @@ impl InvalidPoolTransactionError {
             Self::IntrinsicGasTooLow => true,
             Self::Overdraft { .. } => false,
             Self::Other(err) => err.is_bad_transaction(),
+            Self::Eip2681 => true,
             Self::Eip4844(eip4844_err) => {
                 match eip4844_err {
                     Eip4844PoolTransactionError::MissingEip4844BlobSidecar => {
@@ -369,7 +392,13 @@ impl InvalidPoolTransactionError {
                 Eip7702PoolTransactionError::InflightTxLimitReached => false,
                 Eip7702PoolTransactionError::AuthorityReserved => false,
             },
+            Self::PriorityFeeBelowMinimum { .. } => false,
         }
+    }
+
+    /// Returns `true` if an import failed due to an oversized transaction
+    pub const fn is_oversized(&self) -> bool {
+        matches!(self, Self::OversizedData { .. })
     }
 
     /// Returns `true` if an import failed due to nonce gap.

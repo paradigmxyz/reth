@@ -16,7 +16,8 @@ reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-ethereum-primitives.workspace = true
-reth-primitives-traits.workspace = true
+## ensure secp256k1 recovery with rayon support is activated
+reth-primitives-traits = { workspace = true, features = ["secp256k1", "rayon"] }
 reth-node-builder.workspace = true
 reth-tracing.workspace = true
 reth-provider.workspace = true
@@ -24,49 +25,49 @@ reth-transaction-pool.workspace = true
 reth-network.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
-reth-consensus.workspace = true
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
+reth-rpc-eth-api.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc-server-types.workspace = true
 reth-node-api.workspace = true
 reth-chainspec.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
-reth-trie-db.workspace = true
 reth-rpc-eth-types.workspace = true
+reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true
 reth-payload-primitives.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-network.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
+
+# async
+tokio.workspace = true
+
 # revm with required ethereum features
-revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
+# Note: this must be kept to ensure all features are properly enabled/forwarded
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit"] }
 
 # misc
 eyre.workspace = true
 
 [dev-dependencies]
-reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-exex.workspace = true
 reth-node-core.workspace = true
-reth-payload-primitives.workspace = true
 reth-e2e-test-utils.workspace = true
-reth-rpc-eth-api.workspace = true
 reth-tasks.workspace = true
 
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
 alloy-genesis.workspace = true
 alloy-signer.workspace = true
-alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 alloy-contract.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
-alloy-rpc-types-engine.workspace = true
-alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true
 
 futures.workspace = true
@@ -76,18 +77,21 @@ rand.workspace = true
 
 [features]
 default = []
+asm-keccak = [
+    "alloy-primitives/asm-keccak",
+    "reth-node-core/asm-keccak",
+    "revm/asm-keccak",
+]
 js-tracer = ["reth-node-builder/js-tracer"]
 test-utils = [
     "reth-node-builder/test-utils",
     "reth-chainspec/test-utils",
-    "reth-consensus/test-utils",
     "reth-network/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-revm/test-utils",
     "reth-db/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
-    "reth-trie-db/test-utils",
     "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-evm-ethereum/test-utils",

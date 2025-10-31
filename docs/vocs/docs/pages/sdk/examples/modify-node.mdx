@@ -1,0 +1,85 @@
+# How to Modify an Existing Node
+
+This guide demonstrates how to extend a Reth node with custom functionality, including adding RPC endpoints, modifying transaction validation, and implementing custom services.
+
+## Adding Custom RPC Endpoints
+
+One of the most common modifications is adding custom RPC methods to expose additional functionality. This allows you to extend the standard Ethereum RPC API with your own methods while maintaining compatibility with existing tools and clients.
+
+### Basic Custom RPC Module
+
+The following example shows how to add a custom RPC namespace called `txpoolExt` that provides additional transaction pool functionality. This example is based on the `node-custom-rpc` example in the Reth repository.
+
+#### Project Structure
+
+First, create a new binary crate with the following dependencies in your `Cargo.toml`:
+
+```toml
+[package]
+name = "node-custom-rpc"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "node-custom-rpc"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.0", features = ["derive"] }
+jsonrpsee = { version = "0.22", features = ["macros", "server", "http-server", "ws-server"] }
+reth-ethereum = { path = "../../crates/ethereum" }
+tokio = { version = "1.0", features = ["full"] }
+```
+
+#### Implementation
+
+The complete implementation can be found in the [node-custom-rpc example](https://github.com/paradigmxyz/reth/tree/main/examples/node-custom-rpc). Here's a summary of the key components:
+
+1. **RPC Interface**: Define your custom RPC methods using `jsonrpsee` proc macros with a custom namespace
+2. **RPC Handler**: Implement the trait with access to node components like the transaction pool
+3. **CLI Extension**: Add custom CLI arguments to control your extensions
+4. **Node Integration**: Use `extend_rpc_modules` to integrate your custom functionality
+
+#### Running the Custom Node
+
+Build and run your custom node with the extension enabled:
+
+```bash
+cargo run -p node-custom-rpc -- node --http --ws --enable-ext
+```
+
+This will start a Reth node with your custom RPC methods available on both HTTP and WebSocket transports.
+
+#### Testing the Custom RPC Methods
+
+You can test your custom RPC methods using tools like `cast` from the Foundry suite:
+
+```bash
+# Get transaction count
+cast rpc txpoolExt_transactionCount
+
+# Clear the transaction pool
+cast rpc txpoolExt_clearTxpool
+
+# Subscribe to transaction count updates (WebSocket only)
+cast rpc txpoolExt_subscribeTransactionCount
+```
+
+### Key Concepts
+
+1. **RPC Namespaces**: Use the `namespace` parameter in the `rpc` macro to create a custom namespace for your methods.
+
+2. **Node Context**: Access node components like the transaction pool through the `ctx` parameter in `extend_rpc_modules`.
+
+3. **Transport Integration**: Your custom RPC methods are automatically available on all configured transports (HTTP, WebSocket, IPC).
+
+4. **CLI Integration**: Extend the default Reth CLI with your own arguments to control custom functionality.
+
+5. **Error Handling**: Use `RpcResult<T>` for methods that can fail and handle errors appropriately.
+
+## Next Steps
+
+- Explore [Standalone Components](/sdk/examples/standalone-components) for direct blockchain interaction
+- Learn about [Custom Node Building](/sdk/custom-node/prerequisites) for production deployments
+- Review [Type System](/sdk/typesystem/block) for working with blockchain data
+- Check out the [node-custom-rpc example](https://github.com/paradigmxyz/reth/tree/main/examples/node-custom-rpc) for the complete implementation

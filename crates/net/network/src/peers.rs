@@ -382,14 +382,15 @@ impl PeersManager {
 
     /// Bans the peer temporarily with the configured ban timeout
     fn ban_peer(&mut self, peer_id: PeerId) {
-        let mut ban_duration = self.ban_duration;
-        if let Some(peer) = self.peers.get(&peer_id) {
-            if peer.is_trusted() || peer.is_static() {
-                // For misbehaving trusted or static peers, we provide a bit more leeway when
-                // penalizing them.
-                ban_duration = self.backoff_durations.low / 2;
-            }
-        }
+        let ban_duration = if let Some(peer) = self.peers.get(&peer_id) &&
+            (peer.is_trusted() || peer.is_static())
+        {
+            // For misbehaving trusted or static peers, we provide a bit more leeway when
+            // penalizing them.
+            self.backoff_durations.low / 2
+        } else {
+            self.ban_duration
+        };
 
         self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + ban_duration);
         self.queued_actions.push_back(PeerAction::BanPeer { peer_id });
@@ -636,8 +637,11 @@ impl PeersManager {
                 if let Some(kind) = err.should_backoff() {
                     if peer.is_trusted() || peer.is_static() {
                         // provide a bit more leeway for trusted peers and use a lower backoff so
-                        // that we keep re-trying them after backing off shortly
-                        let backoff = self.backoff_durations.low / 2;
+                        // that we keep re-trying them after backing off shortly, but we should at
+                        // least backoff for the low duration to not violate the ip based inbound
+                        // connection throttle that peer has in place, because this peer might not
+                        // have us registered as a trusted peer.
+                        let backoff = self.backoff_durations.low;
                         backoff_until = Some(std::time::Instant::now() + backoff);
                     } else {
                         // Increment peer.backoff_counter
@@ -711,7 +715,7 @@ impl PeersManager {
     pub(crate) fn set_discovered_fork_id(&mut self, peer_id: PeerId, fork_id: ForkId) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             trace!(target: "net::peers", ?peer_id, ?fork_id, "set discovered fork id");
-            peer.fork_id = Some(fork_id);
+            peer.fork_id = Some(Box::new(fork_id));
         }
     }
 
@@ -753,7 +757,7 @@ impl PeersManager {
             Entry::Occupied(mut entry) => {
                 let peer = entry.get_mut();
                 peer.kind = kind;
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
 
                 if peer.state.is_incoming() {
@@ -766,7 +770,7 @@ impl PeersManager {
             Entry::Vacant(entry) => {
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "discovered new node");
                 let mut peer = Peer::with_kind(addr, kind);
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
@@ -804,7 +808,7 @@ impl PeersManager {
         }
     }
 
-    /// Connect to the given peer. NOTE: if the maximum number out outbound sessions is reached,
+    /// Connect to the given peer. NOTE: if the maximum number of outbound sessions is reached,
     /// this won't do anything. See `reth_network::SessionManager::dial_outbound`.
     #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn add_and_connect(
@@ -834,7 +838,7 @@ impl PeersManager {
             Entry::Occupied(mut entry) => {
                 let peer = entry.get_mut();
                 peer.kind = kind;
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
 
                 if peer.state == PeerConnectionState::Idle {
@@ -849,7 +853,7 @@ impl PeersManager {
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "connects new node");
                 let mut peer = Peer::with_kind(addr, kind);
                 peer.state = PeerConnectionState::PendingOut;
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 entry.insert(peer);
                 self.connection_info.inc_pending_out();
                 self.queued_actions
@@ -956,7 +960,7 @@ impl PeersManager {
 
             if peer.addr != new_addr {
                 peer.addr = new_addr;
-                trace!(target: "net::peers", ?peer_id, addre=?peer.addr, "Updated resolved trusted peer address");
+                trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "Updated resolved trusted peer address");
             }
         }
     }

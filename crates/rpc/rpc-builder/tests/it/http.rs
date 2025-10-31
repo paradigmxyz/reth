@@ -18,7 +18,7 @@ use jsonrpsee::{
     rpc_params,
     types::error::ErrorCode,
 };
-use reth_ethereum_primitives::Receipt;
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_network_peers::NodeRecord;
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
@@ -176,24 +176,38 @@ where
     .unwrap();
 
     // Implemented
-    EthApiClient::<Transaction, Block, Receipt, Header>::protocol_version(client).await.unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::chain_id(client).await.unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::accounts(client).await.unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::get_account(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::protocol_version(
+        client,
+    )
+    .await
+    .unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::chain_id(client)
+        .await
+        .unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::accounts(client)
+        .await
+        .unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::get_account(
         client,
         address,
         block_number.into(),
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::block_number(client).await.unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::get_code(client, address, None)
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::block_number(client)
         .await
         .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::send_raw_transaction(client, tx)
-        .await
-        .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::fee_history(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::get_code(
+        client, address, None,
+    )
+    .await
+    .unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::send_raw_transaction(
+        client, tx,
+    )
+    .await
+    .unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::fee_history(
         client,
         U64::from(0),
         block_number,
@@ -201,13 +215,17 @@ where
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::balance(client, address, None)
-        .await
-        .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::transaction_count(client, address, None)
-        .await
-        .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::storage_at(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::balance(
+        client, address, None,
+    )
+    .await
+    .unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::transaction_count(
+        client, address, None,
+    )
+    .await
+    .unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::storage_at(
         client,
         address,
         U256::default().into(),
@@ -215,72 +233,80 @@ where
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::block_by_hash(client, hash, false)
-        .await
-        .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::block_by_hash(
+        client, hash, false,
+    )
+    .await
+    .unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::block_by_number(
         client,
         block_number,
         false,
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::block_transaction_count_by_number(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::block_transaction_count_by_number(
         client,
         block_number,
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::block_transaction_count_by_hash(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::block_transaction_count_by_hash(
         client, hash,
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::block_uncles_count_by_hash(client, hash)
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::block_uncles_count_by_hash(client, hash)
         .await
         .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::block_uncles_count_by_number(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::block_uncles_count_by_number(
         client,
         block_number,
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::uncle_by_block_hash_and_index(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::uncle_by_block_hash_and_index(
         client, hash, index,
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::uncle_by_block_number_and_index(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::uncle_by_block_number_and_index(
         client,
         block_number,
         index,
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::sign(client, address, bytes.clone())
-        .await
-        .unwrap_err();
-    EthApiClient::<Transaction, Block, Receipt, Header>::sign_typed_data(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::sign(
+        client,
+        address,
+        bytes.clone(),
+    )
+    .await
+    .unwrap_err();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::sign_typed_data(
         client, address, typed_data,
     )
     .await
     .unwrap_err();
-    EthApiClient::<Transaction, Block, Receipt, Header>::transaction_by_hash(client, tx_hash)
-        .await
-        .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::transaction_by_block_hash_and_index(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::transaction_by_hash(
+        client, tx_hash,
+    )
+    .await
+    .unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::transaction_by_block_hash_and_index(
         client, hash, index,
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::transaction_by_block_number_and_index(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::transaction_by_block_number_and_index(
         client,
         block_number,
         index,
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::create_access_list(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::create_access_list(
         client,
         call_request.clone(),
         Some(block_number.into()),
@@ -288,7 +314,7 @@ where
     )
     .await
     .unwrap_err();
-    EthApiClient::<Transaction, Block, Receipt, Header>::estimate_gas(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::estimate_gas(
         client,
         call_request.clone(),
         Some(block_number.into()),
@@ -296,7 +322,7 @@ where
     )
     .await
     .unwrap_err();
-    EthApiClient::<Transaction, Block, Receipt, Header>::call(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::call(
         client,
         call_request.clone(),
         Some(block_number.into()),
@@ -305,56 +331,107 @@ where
     )
     .await
     .unwrap_err();
-    EthApiClient::<Transaction, Block, Receipt, Header>::syncing(client).await.unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::send_transaction(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::syncing(client)
+        .await
+        .unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::send_transaction(
         client,
         transaction_request.clone(),
     )
     .await
     .unwrap_err();
-    EthApiClient::<Transaction, Block, Receipt, Header>::sign_transaction(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::sign_transaction(
         client,
         transaction_request,
     )
     .await
     .unwrap_err();
-    EthApiClient::<Transaction, Block, Receipt, Header>::hashrate(client).await.unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::submit_hashrate(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::hashrate(client)
+        .await
+        .unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::submit_hashrate(
         client,
         U256::default(),
         B256::default(),
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::gas_price(client).await.unwrap_err();
-    EthApiClient::<Transaction, Block, Receipt, Header>::max_priority_fee_per_gas(client)
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::gas_price(client)
         .await
         .unwrap_err();
-    EthApiClient::<Transaction, Block, Receipt, Header>::get_proof(client, address, vec![], None)
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::max_priority_fee_per_gas(client)
         .await
-        .unwrap();
+        .unwrap_err();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::get_proof(
+        client,
+        address,
+        vec![],
+        None,
+    )
+    .await
+    .unwrap();
 
     // Unimplemented
-    assert!(is_unimplemented(
-        EthApiClient::<Transaction, Block, Receipt, Header>::author(client).await.err().unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::<Transaction, Block, Receipt, Header>::is_mining(client).await.err().unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::<Transaction, Block, Receipt, Header>::get_work(client).await.err().unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::<Transaction, Block, Receipt, Header>::submit_work(
-            client,
-            B64::default(),
-            B256::default(),
-            B256::default()
+    assert!(
+        is_unimplemented(
+            EthApiClient::<
+                TransactionRequest,
+                Transaction,
+                Block,
+                Receipt,
+                Header,
+                TransactionSigned,
+            >::author(client)
+            .await
+            .err()
+            .unwrap()
         )
-        .await
-        .err()
-        .unwrap()
-    ));
+    );
+    assert!(
+        is_unimplemented(
+            EthApiClient::<
+                TransactionRequest,
+                Transaction,
+                Block,
+                Receipt,
+                Header,
+                TransactionSigned,
+            >::is_mining(client)
+            .await
+            .err()
+            .unwrap()
+        )
+    );
+    assert!(
+        is_unimplemented(
+            EthApiClient::<
+                TransactionRequest,
+                Transaction,
+                Block,
+                Receipt,
+                Header,
+                TransactionSigned,
+            >::get_work(client)
+            .await
+            .err()
+            .unwrap()
+        )
+    );
+    assert!(
+        is_unimplemented(
+            EthApiClient::<
+                TransactionRequest,
+                Transaction,
+                Block,
+                Receipt,
+                Header,
+                TransactionSigned,
+            >::submit_work(client, B64::default(), B256::default(), B256::default())
+            .await
+            .err()
+            .unwrap()
+        )
+    );
     EthCallBundleApiClient::call_bundle(client, Default::default()).await.unwrap_err();
 }
 
@@ -364,11 +441,11 @@ where
 {
     let block_id = BlockId::Number(BlockNumberOrTag::default());
 
-    DebugApiClient::raw_header(client, block_id).await.unwrap();
-    DebugApiClient::raw_block(client, block_id).await.unwrap_err();
-    DebugApiClient::raw_transaction(client, B256::default()).await.unwrap();
-    DebugApiClient::raw_receipts(client, block_id).await.unwrap();
-    DebugApiClient::bad_blocks(client).await.unwrap();
+    DebugApiClient::<TransactionRequest>::raw_header(client, block_id).await.unwrap();
+    DebugApiClient::<TransactionRequest>::raw_block(client, block_id).await.unwrap_err();
+    DebugApiClient::<TransactionRequest>::raw_transaction(client, B256::default()).await.unwrap();
+    DebugApiClient::<TransactionRequest>::raw_receipts(client, block_id).await.unwrap();
+    DebugApiClient::<TransactionRequest>::bad_blocks(client).await.unwrap();
 }
 
 async fn test_basic_net_calls<C>(client: &C)
@@ -395,22 +472,39 @@ where
         count: None,
     };
 
-    TraceApiClient::trace_raw_transaction(client, Bytes::default(), HashSet::default(), None)
-        .await
-        .unwrap_err();
-    TraceApiClient::trace_call_many(client, vec![], Some(BlockNumberOrTag::Latest.into()))
-        .await
-        .unwrap_err();
-    TraceApiClient::replay_transaction(client, B256::default(), HashSet::default())
-        .await
-        .err()
-        .unwrap();
-    TraceApiClient::trace_block(client, block_id).await.unwrap_err();
-    TraceApiClient::replay_block_transactions(client, block_id, HashSet::default())
-        .await
-        .unwrap_err();
+    TraceApiClient::<TransactionRequest>::trace_raw_transaction(
+        client,
+        Bytes::default(),
+        HashSet::default(),
+        None,
+    )
+    .await
+    .unwrap_err();
+    TraceApiClient::<TransactionRequest>::trace_call_many(
+        client,
+        vec![],
+        Some(BlockNumberOrTag::Latest.into()),
+    )
+    .await
+    .unwrap_err();
+    TraceApiClient::<TransactionRequest>::replay_transaction(
+        client,
+        B256::default(),
+        HashSet::default(),
+    )
+    .await
+    .err()
+    .unwrap();
+    TraceApiClient::<TransactionRequest>::trace_block(client, block_id).await.unwrap_err();
+    TraceApiClient::<TransactionRequest>::replay_block_transactions(
+        client,
+        block_id,
+        HashSet::default(),
+    )
+    .await
+    .unwrap_err();
 
-    TraceApiClient::trace_filter(client, trace_filter).await.unwrap();
+    TraceApiClient::<TransactionRequest>::trace_filter(client, trace_filter).await.unwrap();
 }
 
 async fn test_basic_web3_calls<C>(client: &C)
@@ -1599,4 +1693,48 @@ async fn test_eth_fee_history_raw() {
         rpc_params!["0x0", "latest", [0]],
     )
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_debug_db_get() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_http(vec![RethRpcModule::Debug]).await;
+    let client = handle.http_client().unwrap();
+
+    let valid_test_cases = [
+        "0x630000000000000000000000000000000000000000000000000000000000000000",
+        "c00000000000000000000000000000000",
+    ];
+
+    for key in valid_test_cases {
+        DebugApiClient::<()>::debug_db_get(&client, key.into()).await.unwrap();
+    }
+
+    // Invalid test cases
+    let test_cases = [
+        ("0x0000", "Key must be 33 bytes, got 2"),
+        ("00", "Key must be 33 bytes, got 2"),
+        (
+            "0x000000000000000000000000000000000000000000000000000000000000000000",
+            "Key prefix must be 0x63",
+        ),
+        ("000000000000000000000000000000000", "Key prefix must be 0x63"),
+        ("0xc0000000000000000000000000000000000000000000000000000000000000000", "Invalid hex key"),
+    ];
+
+    let match_error_msg = |err: jsonrpsee::core::client::Error, expected: String| -> bool {
+        match err {
+            jsonrpsee::core::client::Error::Call(error_obj) => {
+                error_obj.code() == ErrorCode::InvalidParams.code() &&
+                    error_obj.message() == expected
+            }
+            _ => false,
+        }
+    };
+
+    for (key, expected) in test_cases {
+        let err = DebugApiClient::<()>::debug_db_get(&client, key.into()).await.unwrap_err();
+        assert!(match_error_msg(err, expected.into()));
+    }
 }
