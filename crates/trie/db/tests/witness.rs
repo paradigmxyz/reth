@@ -30,12 +30,14 @@ fn includes_empty_node_preimage() {
 
     // witness includes empty state trie root node
     assert_eq!(
-        TrieWitness::<DatabaseTrieCursorFactory<'_, _>, DatabaseHashedCursorFactory<'_, _>>::from_tx(provider.tx_ref())
-            .compute(HashedPostState {
-                accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
-                storages: HashMap::default(),
-            })
-            .unwrap(),
+        TrieWitness::<DatabaseTrieCursorFactory<_>, DatabaseHashedCursorFactory<_>>::from_tx(
+            provider.tx_ref()
+        )
+        .compute(HashedPostState {
+            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            storages: HashMap::default(),
+        })
+        .unwrap(),
         HashMap::from_iter([(EMPTY_ROOT_HASH, Bytes::from([EMPTY_STRING_CODE]))])
     );
 
@@ -97,7 +99,7 @@ fn includes_nodes_for_destroyed_storage_nodes() {
         .unwrap();
 
     let witness =
-        TrieWitness::<DatabaseTrieCursorFactory<'_, _>, DatabaseHashedCursorFactory<'_, _>>::from_tx(provider.tx_ref())
+        TrieWitness::<DatabaseTrieCursorFactory<_>, DatabaseHashedCursorFactory<_>>::from_tx(provider.tx_ref())
             .compute(HashedPostState {
                 accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
                 storages: HashMap::from_iter([(
@@ -145,7 +147,10 @@ fn correctly_decodes_branch_node_values() {
         )]))
         .unwrap();
 
-    let witness = TrieWitness::<DatabaseTrieCursorFactory<'_, _>, DatabaseHashedCursorFactory<'_, _>>::from_tx(provider.tx_ref())
+    let witness =
+        TrieWitness::<DatabaseTrieCursorFactory<_>, DatabaseHashedCursorFactory<_>>::from_tx(
+            provider.tx_ref(),
+        )
         .compute(HashedPostState {
             accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
             storages: HashMap::from_iter([(
