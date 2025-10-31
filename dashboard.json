@@ -6487,7 +6487,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "rate(reth_consensus_engine_beacon_executed_blocks{$instance_label=\"$instance\"}[5m])",
+          "expr": "reth_consensus_engine_beacon_executed_blocks{$instance_label=\"$instance\"}",
           "instant": false,
           "legendFormat": "Beacon Executed Blocks",
           "range": true,
