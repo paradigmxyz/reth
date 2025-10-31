@@ -17,6 +17,35 @@ use reth_trie_db::{DatabaseHashedPostState, DatabaseStateRoot};
 use std::ops::Range;
 use tracing::{debug, error};
 
+#[cfg(feature = "metrics")]
+use reth_metrics::{
+    metrics::{Counter, Gauge, Histogram},
+    Metrics,
+};
+
+#[cfg(feature = "metrics")]
+#[derive(Clone, Metrics)]
+#[metrics(scope = "stages.merkle_changesets")]
+struct MerkleChangeSetsMetrics {
+    /// Total execution duration per stage run
+    execution_duration: Histogram,
+
+    /// Number of blocks processed per execution
+    blocks_per_execution: Histogram,
+
+    /// Time to process one block (average)
+    per_block_duration: Histogram,
+
+    /// Current checkpoint block number
+    checkpoint_block: Gauge,
+
+    /// Checkpoint lag in blocks (tip - checkpoint)
+    checkpoint_lag: Gauge,
+
+    /// Number of stage executions
+    execution_count: Counter,
+}
+
 /// The `MerkleChangeSets` stage.
 ///
 /// This stage processes and maintains trie changesets from the finalized block to the latest block.
@@ -25,17 +54,35 @@ pub struct MerkleChangeSets {
     /// The number of blocks to retain changesets for, used as a fallback when the finalized block
     /// is not found. Defaults to 64 (2 epochs in beacon chain).
     retention_blocks: u64,
+    #[cfg(feature = "metrics")]
+    metrics: MerkleChangeSetsMetrics,
 }
 
 impl MerkleChangeSets {
     /// Creates a new `MerkleChangeSets` stage with default retention blocks of 64.
     pub const fn new() -> Self {
-        Self { retention_blocks: 64 }
+        #[cfg(not(feature = "metrics"))]
+        {
+            Self { retention_blocks: 64 }
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            Self { retention_blocks: 64, metrics: MerkleChangeSetsMetrics::default() }
+        }
     }
 
     /// Creates a new `MerkleChangeSets` stage with a custom finalized block height.
     pub const fn with_retention_blocks(retention_blocks: u64) -> Self {
-        Self { retention_blocks }
+        #[cfg(not(feature = "metrics"))]
+        {
+            Self { retention_blocks }
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            Self { retention_blocks, metrics: MerkleChangeSetsMetrics::default() }
+        }
     }
 
     /// Returns the range of blocks which are already computed. Will return an empty range if none
@@ -297,6 +344,12 @@ where
     }
 
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        #[cfg(feature = "metrics")]
+        let execution_start = std::time::Instant::now();
+
+        #[cfg(feature = "metrics")]
+        self.metrics.execution_count.increment(1);
+
         // Get merkle checkpoint and assert that the target is the same.
         let merkle_checkpoint = provider
             .get_stage_checkpoint(StageId::MerkleExecute)?
@@ -353,6 +406,11 @@ where
             computed_range = target_range.clone();
         }
 
+        let blocks_count = target_range.end.saturating_sub(target_range.start);
+
+        #[cfg(feature = "metrics")]
+        self.metrics.blocks_per_execution.record(blocks_count as f64);
+
         // Populate the target range with changesets
         Self::populate_range(provider, target_range)?;
 
@@ -369,6 +427,26 @@ where
 
         // `computed_range.end` is exclusive.
         let checkpoint = StageCheckpoint::new(computed_range.end.saturating_sub(1));
+
+        #[cfg(feature = "metrics")]
+        {
+            let execution_duration = execution_start.elapsed();
+            self.metrics.execution_duration.record(execution_duration.as_secs_f64());
+
+            if blocks_count > 0 {
+                let per_block = execution_duration.as_secs_f64() / blocks_count as f64;
+                self.metrics.per_block_duration.record(per_block);
+            }
+
+            // Record checkpoint state
+            self.metrics.checkpoint_block.set(checkpoint.block_number as f64);
+
+            // Calculate lag
+            if let Ok(Some(tip)) = provider.last_finalized_block_number() {
+                let lag = tip.saturating_sub(checkpoint.block_number);
+                self.metrics.checkpoint_lag.set(lag as f64);
+            }
+        }
 
         Ok(ExecOutput::done(checkpoint))
     }
