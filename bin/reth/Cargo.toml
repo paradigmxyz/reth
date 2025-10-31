@@ -83,7 +83,10 @@ tempfile.workspace = true
 [features]
 default = ["jemalloc", "otlp", "reth-revm/portable"]
 
-otlp = ["reth-ethereum-cli/otlp"]
+otlp = [
+    "reth-ethereum-cli/otlp",
+    "reth-node-core/otlp",
+]
 
 dev = ["reth-ethereum-cli/dev"]
 
@@ -125,22 +128,27 @@ snmalloc-native = [
 min-error-logs = [
     "tracing/release_max_level_error",
     "reth-ethereum-cli/min-error-logs",
+    "reth-node-core/min-error-logs",
 ]
 min-warn-logs = [
     "tracing/release_max_level_warn",
     "reth-ethereum-cli/min-warn-logs",
+    "reth-node-core/min-warn-logs",
 ]
 min-info-logs = [
     "tracing/release_max_level_info",
     "reth-ethereum-cli/min-info-logs",
+    "reth-node-core/min-info-logs",
 ]
 min-debug-logs = [
     "tracing/release_max_level_debug",
     "reth-ethereum-cli/min-debug-logs",
+    "reth-node-core/min-debug-logs",
 ]
 min-trace-logs = [
     "tracing/release_max_level_trace",
     "reth-ethereum-cli/min-trace-logs",
+    "reth-node-core/min-trace-logs",
 ]
 
 [[bin]]
