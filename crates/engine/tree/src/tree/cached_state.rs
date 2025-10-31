@@ -340,9 +340,16 @@ impl ExecutionCache {
     where
         I: IntoIterator<Item = (StorageKey, Option<StorageValue>)>,
     {
+        let mut iter = storage_entries.into_iter();
+
+        let Some((first_key, first_value)) = iter.next() else {
+            return;
+        };
+
         let account_cache = self.storage_cache.get(&address).unwrap_or_default();
 
-        for (key, value) in storage_entries {
+        account_cache.insert_storage(first_key, first_value);
+        for (key, value) in iter {
             account_cache.insert_storage(key, value);
         }
 
