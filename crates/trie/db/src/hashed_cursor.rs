@@ -19,7 +19,10 @@ impl<T> DatabaseHashedCursorFactory<T> {
     }
 }
 
-impl<'a, TX> From<&'a TX> for DatabaseHashedCursorFactory<&'a TX> {
+impl<'a, TX> From<&'a TX> for DatabaseHashedCursorFactory<&'a TX>
+where
+    TX: DbTx,
+{
     fn from(tx: &'a TX) -> Self {
         Self::new(tx)
     }
