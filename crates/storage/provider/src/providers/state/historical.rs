@@ -60,7 +60,9 @@ pub enum HistoryInfo {
     MaybeInPlainState,
 }
 
-impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, Provider> {
+impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
+    HistoricalStateProviderRef<'b, Provider>
+{
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: &'b Provider, block_number: BlockNumber) -> Self {
         Self { provider, block_number, lowest_available_blocks: Default::default() }
@@ -133,7 +135,11 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
             );
         }
 
-        Ok(HashedPostState::from_reverts::<KeccakKeyHasher>(self.tx(), self.block_number..)?)
+        Ok(HashedPostState::from_reverts::<KeccakKeyHasher>(
+            self.provider,
+            self.tx(),
+            self.block_number..,
+        )?)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.
@@ -282,7 +288,7 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader> BlockHashReader
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> StateRootProvider
+impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StateRootProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
@@ -318,7 +324,7 @@ impl<Provider: DBProvider + BlockNumReader> StateRootProvider
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
+impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StorageRootProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     fn storage_root(
@@ -357,7 +363,7 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> StateProofProvider
+impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StateProofProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get account and storage proofs.
@@ -451,7 +457,7 @@ pub struct HistoricalStateProvider<Provider> {
     lowest_available_blocks: LowestAvailableBlocks,
 }
 
-impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
+impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> HistoricalStateProvider<Provider> {
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: Provider, block_number: BlockNumber) -> Self {
         Self { provider, block_number, lowest_available_blocks: Default::default() }

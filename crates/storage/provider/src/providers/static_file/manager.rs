@@ -1533,7 +1533,11 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
-        let Some(offset) = provider.user_header().changeset_offset(block_number) else {
+        let user_header = provider.user_header();
+        trace!(target: "provider::static_file", ?user_header, "Got user header");
+
+        let Some(offset) = user_header.changeset_offset(block_number) else {
+            trace!(target: "provider::static_file", ?block_number, ?address, "Returning None (no offset)");
             return Ok(None);
         };
 
@@ -1565,9 +1569,11 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
                 .get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
                 .filter(|change| change.address == address)
         {
+            trace!(target: "provider::static_file", ?block_number, ?address, ?change, "Returning change (end)");
             return Ok(Some(change));
         }
 
+        trace!(target: "provider::static_file", ?block_number, ?address, "Returning None (end)");
         Ok(None)
     }
 

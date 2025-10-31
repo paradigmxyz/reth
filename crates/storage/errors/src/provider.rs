@@ -122,6 +122,9 @@ pub enum ProviderError {
     /// Changeset static file is corrupted, and does not have offsets for changesets in each block
     #[error("changeset static file is corrupted, missing offsets for changesets in each block")]
     CorruptedChangeSetStaticFile,
+    /// Error when constructing hashed post state reverts
+    #[error("Unbounded start is unsupported in from_reverts")]
+    UnboundedStartUnsupported,
     /// Static File Provider was initialized as read-only.
     #[error("cannot get a writer on a read-only environment.")]
     ReadOnlyStaticFileAccess,
