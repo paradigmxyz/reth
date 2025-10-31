@@ -907,9 +907,6 @@ where
     /// 2. Extend the `TrieInputSorted` with the contents of these in-memory blocks (from oldest to
     ///    newest) to build the overlay state and trie updates that sit on top of the database view
     ///    anchored at `block_hash`.
-    ///
-    /// The in-memory blocks are already sorted, so we can directly append them without expensive
-    /// sorting operations.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",
