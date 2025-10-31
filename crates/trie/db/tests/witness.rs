@@ -51,7 +51,10 @@ fn includes_empty_node_preimage() {
         )]))
         .unwrap();
 
-    let witness = TrieWitness::<DatabaseTrieCursorFactory<'_, _>, DatabaseHashedCursorFactory<'_, _>>::from_tx(provider.tx_ref())
+    let witness =
+        TrieWitness::<DatabaseTrieCursorFactory<_>, DatabaseHashedCursorFactory<_>>::from_tx(
+            provider.tx_ref(),
+        )
         .compute(HashedPostState {
             accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
             storages: HashMap::from_iter([(
