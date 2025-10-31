@@ -136,11 +136,14 @@ impl Decoder for ECIESCodec {
                     }
 
                     let mut data = buf.split_to(self.ecies.body_len());
-                    let mut ret = BytesMut::new();
-                    ret.extend_from_slice(self.ecies.read_body(&mut data)?);
+                    let size = {
+                        let slice = self.ecies.read_body(&mut data)?;
+                        slice.len()
+                    };
+                    data.truncate(size);
 
                     self.state = ECIESState::Header;
-                    return Ok(Some(IngressECIESValue::Message(ret)))
+                    return Ok(Some(IngressECIESValue::Message(data)))
                 }
             }
         }
