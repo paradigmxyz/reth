@@ -175,7 +175,9 @@ impl OpNode {
             )
             .executor(OpExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::new(
-                OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
+                OpPayloadBuilder::new(compute_pending_block)
+                    .with_da_config(self.da_config.clone())
+                    .with_gas_limit_config(self.gas_limit_config.clone()),
             ))
             .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
             .consensus(OpConsensusBuilder::default())
@@ -187,6 +189,7 @@ impl OpNode {
             .with_sequencer(self.args.sequencer.clone())
             .with_sequencer_headers(self.args.sequencer_headers.clone())
             .with_da_config(self.da_config.clone())
+            .with_gas_limit_config(self.gas_limit_config.clone())
             .with_enable_tx_conditional(self.args.enable_tx_conditional)
             .with_min_suggested_priority_fee(self.args.min_suggested_priority_fee)
             .with_historical_rpc(self.args.historical_rpc.clone())
@@ -728,6 +731,12 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
     /// Configure the data availability configuration for the OP builder.
     pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
         self.da_config = Some(da_config);
+        self
+    }
+
+    /// Configure the gas limit configuration for the OP payload builder.
+    pub fn with_gas_limit_config(mut self, gas_limit_config: OpGasLimitConfig) -> Self {
+        self.gas_limit_config = Some(gas_limit_config);
         self
     }
 
