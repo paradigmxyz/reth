@@ -147,17 +147,6 @@ where
             return Ok(false)
         }
 
-        #[cfg(feature = "metrics")]
-        self.metrics.checkpoint_delta.record((upper_bound - requested_block) as f64);
-
-        tracing::info!(
-            target: "providers::state::overlay",
-            requested_block,
-            upper_bound,
-            delta = upper_bound - requested_block,
-            "reverts_required: requested != checkpoint, REVERTS NEEDED"
-        );
-
         // Extract the lower bound from prune checkpoint if available
         // The prune checkpoint's block_number is the highest pruned block, so data is available
         // starting from the next block
@@ -178,6 +167,19 @@ where
                 available: available_range,
             });
         }
+
+        let checkpoint_delta = upper_bound - requested_block;
+
+        #[cfg(feature = "metrics")]
+        self.metrics.checkpoint_delta.record(checkpoint_delta as f64);
+
+        tracing::info!(
+            target: "providers::state::overlay",
+            requested_block,
+            upper_bound,
+            delta = checkpoint_delta,
+            "reverts_required: requested != checkpoint, REVERTS NEEDED"
+        );
 
         Ok(true)
     }
