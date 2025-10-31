@@ -112,12 +112,38 @@ impl BanList {
         self.banned_peers.contains_key(peer_id)
     }
 
+    /// NEW: Checks if IP is actively banned *at this moment* (ignoring stale expired bans).
+    #[inline]
+    pub fn is_banned_ip_at(&self, ip: &IpAddr, now: Instant) -> bool {
+        match self.banned_ips.get(ip) {
+            Some(Some(until)) => now <= *until,
+            Some(None) => true,
+            None => false,
+        }
+    }
+
+    /// NEW: Checks if peer is actively banned *at this moment*.
+    #[inline]
+    pub fn is_banned_peer_at(&self, peer_id: &PeerId, now: Instant) -> bool {
+        match self.banned_peers.get(peer_id) {
+            Some(Some(until)) => now <= *until,
+            Some(None) => true,
+            None => false,
+        }
+    }
+
+    /// NEW: Convenient combined check.
+    #[inline]
+    pub fn is_banned_at(&self, peer_id: &PeerId, ip: &IpAddr, now: Instant) -> bool {
+        self.is_banned_peer_at(peer_id, now) || self.is_banned_ip_at(ip, now)
+    }
+
     /// Unbans the ip address
     pub fn unban_ip(&mut self, ip: &IpAddr) {
         self.banned_ips.remove(ip);
     }
 
-    /// Unbans the ip address
+    /// Unbans the peer
     pub fn unban_peer(&mut self, peer_id: &PeerId) {
         self.banned_peers.remove(peer_id);
     }
