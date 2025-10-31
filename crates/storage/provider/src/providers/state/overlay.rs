@@ -216,8 +216,7 @@ where
             // Collect trie reverts
             let mut trie_reverts = {
                 #[cfg(feature = "metrics")]
-                let _trie_timer =
-                    OverlayMetricsTimer::start(&self.metrics.trie_reverts_duration);
+                let _trie_timer = OverlayMetricsTimer::start(&self.metrics.trie_reverts_duration);
                 provider.trie_reverts(from_block + 1)?
             };
 
