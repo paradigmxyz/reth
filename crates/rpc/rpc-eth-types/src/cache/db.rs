@@ -4,7 +4,7 @@
 
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
-use reth_revm::{database::StateProviderDatabase, db::bal::BalDatabaseError, DatabaseRef, State};
+use reth_revm::{database::StateProviderDatabase, DatabaseRef, State};
 use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::{
@@ -213,19 +213,19 @@ impl<'a> DatabaseRef for StateCacheDbRefMutWrapper<'a, '_> {
     type Error = <StateCacheDb<'a> as Database>::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.0.basic_ref(address).map_err(BalDatabaseError::Database)
+        self.0.basic_ref(address)
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.0.code_by_hash_ref(code_hash).map_err(BalDatabaseError::Database)
+        self.0.code_by_hash_ref(code_hash)
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.0.storage_ref(address, index).map_err(BalDatabaseError::Database)
+        self.0.storage_ref(address, index)
     }
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        self.0.block_hash_ref(number).map_err(BalDatabaseError::Database)
+        self.0.block_hash_ref(number)
     }
 }
 
