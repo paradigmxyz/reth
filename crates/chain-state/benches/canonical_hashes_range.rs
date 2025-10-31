@@ -2,7 +2,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use reth_chain_state::{
-    test_utils::TestBlockBuilder, ExecutedBlockWithTrieUpdates, MemoryOverlayStateProviderRef,
+    test_utils::TestBlockBuilder, ExecutedBlock, MemoryOverlayStateProviderRef,
 };
 use reth_ethereum_primitives::EthPrimitives;
 use reth_storage_api::{noop::NoopProvider, BlockHashReader};
@@ -84,10 +84,7 @@ fn bench_canonical_hashes_range(c: &mut Criterion) {
 
 fn setup_provider_with_blocks(
     num_blocks: usize,
-) -> (
-    MemoryOverlayStateProviderRef<'static, EthPrimitives>,
-    Vec<ExecutedBlockWithTrieUpdates<EthPrimitives>>,
-) {
+) -> (MemoryOverlayStateProviderRef<'static, EthPrimitives>, Vec<ExecutedBlock<EthPrimitives>>) {
     let mut builder = TestBlockBuilder::<EthPrimitives>::default();
 
     let blocks: Vec<_> = builder.get_executed_blocks(1000..1000 + num_blocks as u64).collect();

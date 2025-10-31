@@ -242,7 +242,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Updates the pending block with the given block.
     ///
     /// Note: This assumes that the parent block of the pending block is canonical.
-    pub fn set_pending_block(&self, pending: ExecutedBlockWithTrieUpdates<N>) {
+    pub fn set_pending_block(&self, pending: ExecutedBlock<N>) {
         // fetch the state of the pending block's parent block
         let parent = self.state_by_hash(pending.recovered_block().parent_hash());
         let pending = BlockState::with_parent(pending, parent);
@@ -258,7 +258,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// them to their parent blocks.
     fn update_blocks<I, R>(&self, new_blocks: I, reorged: R)
     where
-        I: IntoIterator<Item = ExecutedBlockWithTrieUpdates<N>>,
+        I: IntoIterator<Item = ExecutedBlock<N>>,
         R: IntoIterator<Item = ExecutedBlock<N>>,
     {
         {
@@ -568,22 +568,19 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     /// The executed block that determines the state after this block has been executed.
-    block: ExecutedBlockWithTrieUpdates<N>,
+    block: ExecutedBlock<N>,
     /// The block's parent block if it exists.
-    parent: Option<Arc<BlockState<N>>>,
+    parent: Option<Arc<Self>>,
 }
 
 impl<N: NodePrimitives> BlockState<N> {
     /// [`BlockState`] constructor.
-    pub const fn new(block: ExecutedBlockWithTrieUpdates<N>) -> Self {
+    pub const fn new(block: ExecutedBlock<N>) -> Self {
         Self { block, parent: None }
     }
 
     /// [`BlockState`] constructor with parent.
-    pub const fn with_parent(
-        block: ExecutedBlockWithTrieUpdates<N>,
-        parent: Option<Arc<Self>>,
-    ) -> Self {
+    pub const fn with_parent(block: ExecutedBlock<N>, parent: Option<Arc<Self>>) -> Self {
         Self { block, parent }
     }
 
@@ -597,12 +594,12 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Returns the executed block that determines the state.
-    pub fn block(&self) -> ExecutedBlockWithTrieUpdates<N> {
+    pub fn block(&self) -> ExecutedBlock<N> {
         self.block.clone()
     }
 
     /// Returns a reference to the executed block that determines the state.
-    pub const fn block_ref(&self) -> &ExecutedBlockWithTrieUpdates<N> {
+    pub const fn block_ref(&self) -> &ExecutedBlock<N> {
         &self.block
     }
 
@@ -730,6 +727,8 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
     /// Block's hashed state.
     pub hashed_state: Arc<HashedPostState>,
+    /// Trie updates that result from calculating the state root for the block.
+    pub trie_updates: Arc<TrieUpdates>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -738,6 +737,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
             recovered_block: Default::default(),
             execution_output: Default::default(),
             hashed_state: Default::default(),
+            trie_updates: Default::default(),
         }
     }
 }
@@ -767,113 +767,16 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         &self.hashed_state
     }
 
+    /// Returns a reference to the trie updates resulting from the execution outcome
+    #[inline]
+    pub fn trie_updates(&self) -> &TrieUpdates {
+        &self.trie_updates
+    }
+
     /// Returns a [`BlockNumber`] of the block.
     #[inline]
     pub fn block_number(&self) -> BlockNumber {
         self.recovered_block.header().number()
-    }
-}
-
-/// Trie updates that result from calculating the state root for the block.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ExecutedTrieUpdates {
-    /// Trie updates present. State root was calculated, and the trie updates can be applied to the
-    /// database.
-    Present(Arc<TrieUpdates>),
-    /// Trie updates missing. State root was calculated, but the trie updates cannot be applied to
-    /// the current database state. To apply the updates, the state root must be recalculated, and
-    /// new trie updates must be generated.
-    ///
-    /// This can happen when processing fork chain blocks that are building on top of the
-    /// historical database state. Since we don't store the historical trie state, we cannot
-    /// generate the trie updates for it.
-    Missing,
-}
-
-impl ExecutedTrieUpdates {
-    /// Creates a [`ExecutedTrieUpdates`] with present but empty trie updates.
-    pub fn empty() -> Self {
-        Self::Present(Arc::default())
-    }
-
-    /// Sets the trie updates to the provided value as present.
-    pub fn set_present(&mut self, updates: Arc<TrieUpdates>) {
-        *self = Self::Present(updates);
-    }
-
-    /// Takes the present trie updates, leaving the state as missing.
-    pub fn take_present(&mut self) -> Option<Arc<TrieUpdates>> {
-        match self {
-            Self::Present(updates) => {
-                let updates = core::mem::take(updates);
-                *self = Self::Missing;
-                Some(updates)
-            }
-            Self::Missing => None,
-        }
-    }
-
-    /// Returns a reference to the trie updates if present.
-    #[allow(clippy::missing_const_for_fn)] // false positive
-    pub fn as_ref(&self) -> Option<&TrieUpdates> {
-        match self {
-            Self::Present(updates) => Some(updates),
-            Self::Missing => None,
-        }
-    }
-
-    /// Returns `true` if the trie updates are present.
-    pub const fn is_present(&self) -> bool {
-        matches!(self, Self::Present(_))
-    }
-
-    /// Returns `true` if the trie updates are missing.
-    pub const fn is_missing(&self) -> bool {
-        matches!(self, Self::Missing)
-    }
-}
-
-/// An [`ExecutedBlock`] with its [`TrieUpdates`].
-///
-/// We store it as separate type because [`TrieUpdates`] are only available for blocks stored in
-/// memory and can't be obtained for canonical persisted blocks.
-#[derive(
-    Clone, Debug, PartialEq, Eq, derive_more::Deref, derive_more::DerefMut, derive_more::Into,
-)]
-pub struct ExecutedBlockWithTrieUpdates<N: NodePrimitives = EthPrimitives> {
-    /// Inner [`ExecutedBlock`].
-    #[deref]
-    #[deref_mut]
-    #[into]
-    pub block: ExecutedBlock<N>,
-    /// Trie updates that result from calculating the state root for the block.
-    ///
-    /// If [`ExecutedTrieUpdates::Missing`], the trie updates should be computed when persisting
-    /// the block **on top of the canonical parent**.
-    pub trie: ExecutedTrieUpdates,
-}
-
-impl<N: NodePrimitives> ExecutedBlockWithTrieUpdates<N> {
-    /// [`ExecutedBlock`] constructor.
-    pub const fn new(
-        recovered_block: Arc<RecoveredBlock<N::Block>>,
-        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
-        hashed_state: Arc<HashedPostState>,
-        trie: ExecutedTrieUpdates,
-    ) -> Self {
-        Self { block: ExecutedBlock { recovered_block, execution_output, hashed_state }, trie }
-    }
-
-    /// Returns a reference to the trie updates for the block, if present.
-    #[inline]
-    pub fn trie_updates(&self) -> Option<&TrieUpdates> {
-        self.trie.as_ref()
-    }
-
-    /// Converts the value into [`SealedBlock`].
-    pub fn into_sealed_block(self) -> SealedBlock<N::Block> {
-        let block = Arc::unwrap_or_clone(self.block.recovered_block);
-        block.into_sealed_block()
     }
 }
 
@@ -883,18 +786,14 @@ pub enum NewCanonicalChain<N: NodePrimitives = EthPrimitives> {
     /// A simple append to the current canonical head
     Commit {
         /// all blocks that lead back to the canonical head
-        new: Vec<ExecutedBlockWithTrieUpdates<N>>,
+        new: Vec<ExecutedBlock<N>>,
     },
     /// A reorged chain consists of two chains that trace back to a shared ancestor block at which
     /// point they diverge.
     Reorg {
         /// All blocks of the _new_ chain
-        new: Vec<ExecutedBlockWithTrieUpdates<N>>,
+        new: Vec<ExecutedBlock<N>>,
         /// All blocks of the _old_ chain
-        ///
-        /// These are not [`ExecutedBlockWithTrieUpdates`] because we don't always have the trie
-        /// updates for the old canonical chain. For example, in case of node being restarted right
-        /// before the reorg [`TrieUpdates`] can't be fetched from database.
         old: Vec<ExecutedBlock<N>>,
     },
 }
@@ -1257,7 +1156,7 @@ mod tests {
             block1.recovered_block().hash()
         );
 
-        let chain = NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1.block] };
+        let chain = NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1] };
         state.update_chain(chain);
         assert_eq!(
             state.head_state().unwrap().block_ref().recovered_block().hash(),
@@ -1380,8 +1279,7 @@ mod tests {
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_empty() {
         let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
-        let chain: Vec<_> = state.canonical_chain().collect();
-        assert!(chain.is_empty());
+        assert!(state.canonical_chain().next().is_none());
     }
 
     #[test]
@@ -1540,7 +1438,7 @@ mod tests {
         // Test reorg notification
         let chain_reorg = NewCanonicalChain::Reorg {
             new: vec![block1a.clone(), block2a.clone()],
-            old: vec![block1.block.clone(), block2.block.clone()],
+            old: vec![block1.clone(), block2.clone()],
         };
 
         assert_eq!(

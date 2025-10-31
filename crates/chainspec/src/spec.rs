@@ -3,9 +3,14 @@ use alloy_evm::eth::spec::EthExecutorSpec;
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
-    holesky, hoodi, mainnet, sepolia, EthChainSpec,
+    ethereum::SEPOLIA_PARIS_TTD,
+    holesky, hoodi,
+    mainnet::{MAINNET_PARIS_BLOCK, MAINNET_PARIS_TTD},
+    sepolia,
+    sepolia::SEPOLIA_PARIS_BLOCK,
+    EthChainSpec,
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
@@ -100,7 +105,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         genesis,
         // <https://etherscan.io/block/15537394>
         paris_block_and_final_difficulty: Some((
-            15537394,
+            MAINNET_PARIS_BLOCK,
             U256::from(58_750_003_716_598_352_816_469u128),
         )),
         hardforks,
@@ -108,10 +113,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         deposit_contract: Some(MAINNET_DEPOSIT_CONTRACT),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
-        blob_params: BlobScheduleBlobParams::default().with_scheduled([
-            (mainnet::MAINNET_BPO1_TIMESTAMP, BlobParams::bpo1()),
-            (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
-        ]),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -130,7 +132,10 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         ),
         genesis,
         // <https://sepolia.etherscan.io/block/1450409>
-        paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
+        paris_block_and_final_difficulty: Some((
+            SEPOLIA_PARIS_BLOCK,
+            U256::from(17_000_018_015_853_232u128),
+        )),
         hardforks,
         // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
         deposit_contract: Some(DepositContract::new(
@@ -266,7 +271,7 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
-impl core::ops::Deref for ChainSpec {
+impl<H: BlockHeader> core::ops::Deref for ChainSpec<H> {
     type Target = ChainHardforks;
 
     fn deref(&self) -> &Self::Target {
@@ -435,7 +440,26 @@ impl<H: BlockHeader> ChainSpec<H> {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(self.hardforks.forks_iter())
+        // Create an iterator with hardfork, condition, and optional blob metadata
+        let hardforks_with_meta = self.hardforks.forks_iter().map(|(fork, condition)| {
+            // Generate blob metadata for timestamp-based hardforks that have blob params
+            let metadata = match condition {
+                ForkCondition::Timestamp(timestamp) => {
+                    // Try to get blob params for this timestamp
+                    // This automatically handles all hardforks with blob support
+                    EthChainSpec::blob_params_at_timestamp(self, timestamp).map(|params| {
+                        format!(
+                            "blob: (target: {}, max: {}, fraction: {})",
+                            params.target_blob_count, params.max_blob_count, params.update_fraction
+                        )
+                    })
+                }
+                _ => None,
+            };
+            (fork, condition, metadata)
+        });
+
+        DisplayHardforks::with_meta(hardforks_with_meta)
     }
 
     /// Get the fork id for the given hardfork.
@@ -681,26 +705,50 @@ impl From<Genesis> for ChainSpec {
         // We expect no new networks to be configured with the merge, so we ignore the TTD field
         // and merge netsplit block from external genesis files. All existing networks that have
         // merged should have a static ChainSpec already (namely mainnet and sepolia).
-        let paris_block_and_final_difficulty =
-            if let Some(ttd) = genesis.config.terminal_total_difficulty {
-                hardforks.push((
-                    EthereumHardfork::Paris.boxed(),
-                    ForkCondition::TTD {
-                        // NOTE: this will not work properly if the merge is not activated at
-                        // genesis, and there is no merge netsplit block
-                        activation_block_number: genesis
-                            .config
-                            .merge_netsplit_block
-                            .unwrap_or_default(),
-                        total_difficulty: ttd,
-                        fork_block: genesis.config.merge_netsplit_block,
-                    },
-                ));
+        let paris_block_and_final_difficulty = if let Some(ttd) =
+            genesis.config.terminal_total_difficulty
+        {
+            hardforks.push((
+                EthereumHardfork::Paris.boxed(),
+                ForkCondition::TTD {
+                    // NOTE: this will not work properly if the merge is not activated at
+                    // genesis, and there is no merge netsplit block
+                    activation_block_number: genesis
+                        .config
+                        .merge_netsplit_block
+                        .or_else(|| {
+                            // due to this limitation we can't determine the merge block,
+                            // this is the case for perfnet testing for example
+                            // at the time of this fix, only two networks transitioned: MAINNET +
+                            // SEPOLIA and this parsing from genesis is used for shadowforking, so
+                            // we can reasonably assume that if the TTD and the chainid matches
+                            // those networks we use the activation
+                            // blocks of those networks
+                            match genesis.config.chain_id {
+                                1 => {
+                                    if ttd == MAINNET_PARIS_TTD {
+                                        return Some(MAINNET_PARIS_BLOCK)
+                                    }
+                                }
+                                11155111 => {
+                                    if ttd == SEPOLIA_PARIS_TTD {
+                                        return Some(SEPOLIA_PARIS_BLOCK)
+                                    }
+                                }
+                                _ => {}
+                            };
+                            None
+                        })
+                        .unwrap_or_default(),
+                    total_difficulty: ttd,
+                    fork_block: genesis.config.merge_netsplit_block,
+                },
+            ));
 
-                genesis.config.merge_netsplit_block.map(|block| (block, ttd))
-            } else {
-                None
-            };
+            genesis.config.merge_netsplit_block.map(|block| (block, ttd))
+        } else {
+            None
+        };
 
         // Time-based hardforks
         let time_hardfork_opts = [
@@ -854,7 +902,7 @@ impl ChainSpecBuilder {
 
     /// Remove the given fork from the spec.
     pub fn without_fork<H: Hardfork>(mut self, fork: H) -> Self {
-        self.hardforks.remove(fork);
+        self.hardforks.remove(&fork);
         self
     }
 
@@ -1033,7 +1081,7 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     }
 }
 
-impl EthExecutorSpec for ChainSpec {
+impl<H: BlockHeader> EthExecutorSpec for ChainSpec<H> {
     fn deposit_contract_address(&self) -> Option<Address> {
         self.deposit_contract.map(|deposit_contract| deposit_contract.address)
     }
@@ -1128,11 +1176,8 @@ Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-- Cancun                           @1710338135
-- Prague                           @1746612311
-- Osaka                            @1764798551
-- Bpo1                             @1765978199
-- Bpo2                             @1767747671"
+- Cancun                           @1710338135          blob: (target: 3, max: 6, fraction: 3338477)
+- Prague                           @1746612311          blob: (target: 6, max: 9, fraction: 5007716)"
         );
     }
 
@@ -1376,10 +1421,7 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     EthereumHardfork::Prague,
-                    ForkId {
-                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
-                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
-                    },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -1523,22 +1565,12 @@ Post-merge hard forks (timestamp based):
                 // First Prague block
                 (
                     Head { number: 20000002, timestamp: 1746612311, ..Default::default() },
-                    ForkId {
-                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
-                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
-                    },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
-                // Osaka block
+                // Future Prague block
                 (
-                    Head {
-                        number: 20000002,
-                        timestamp: mainnet::MAINNET_OSAKA_TIMESTAMP,
-                        ..Default::default()
-                    },
-                    ForkId {
-                        hash: ForkHash(hex!("0x5167e2a6")),
-                        next: mainnet::MAINNET_BPO1_TIMESTAMP,
-                    },
+                    Head { number: 20000002, timestamp: 2000000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -1847,22 +1879,11 @@ Post-merge hard forks (timestamp based):
                 ), // First Prague block
                 (
                     Head { number: 20000004, timestamp: 1746612311, ..Default::default() },
-                    ForkId {
-                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
-                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
-                    },
-                ),
-                // Osaka block
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                ), // Future Prague block
                 (
-                    Head {
-                        number: 20000004,
-                        timestamp: mainnet::MAINNET_OSAKA_TIMESTAMP,
-                        ..Default::default()
-                    },
-                    ForkId {
-                        hash: ForkHash(hex!("0x5167e2a6")),
-                        next: mainnet::MAINNET_BPO1_TIMESTAMP,
-                    },
+                    Head { number: 20000004, timestamp: 2000000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -2519,8 +2540,10 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn latest_eth_mainnet_fork_id() {
-        // BPO2
-        assert_eq!(ForkId { hash: ForkHash(hex!("0xfd414558")), next: 0 }, MAINNET.latest_fork_id())
+        assert_eq!(
+            ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+            MAINNET.latest_fork_id()
+        )
     }
 
     #[test]
@@ -2674,5 +2697,72 @@ Post-merge hard forks (timestamp based):
             ..Default::default()
         };
         assert_eq!(hardfork_params, expected);
+    }
+
+    #[test]
+    fn parse_perf_net_genesis() {
+        let s = r#"{
+    "config": {
+        "chainId": 1,
+        "homesteadBlock": 1150000,
+        "daoForkBlock": 1920000,
+        "daoForkSupport": true,
+        "eip150Block": 2463000,
+        "eip150Hash": "0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0",
+        "eip155Block": 2675000,
+        "eip158Block": 2675000,
+        "byzantiumBlock": 4370000,
+        "constantinopleBlock": 7280000,
+        "petersburgBlock": 7280000,
+        "istanbulBlock": 9069000,
+        "muirGlacierBlock": 9200000,
+        "berlinBlock": 12244000,
+        "londonBlock": 12965000,
+        "arrowGlacierBlock": 13773000,
+        "grayGlacierBlock": 15050000,
+        "terminalTotalDifficulty": 58750000000000000000000,
+        "terminalTotalDifficultyPassed": true,
+        "shanghaiTime": 1681338455,
+        "cancunTime": 1710338135,
+        "pragueTime": 1746612311,
+        "ethash": {},
+        "depositContractAddress": "0x00000000219ab540356cBB839Cbe05303d7705Fa",
+        "blobSchedule": {
+            "cancun": {
+                "target": 3,
+                "max": 6,
+                "baseFeeUpdateFraction": 3338477
+            },
+            "prague": {
+                "target": 6,
+                "max": 9,
+                "baseFeeUpdateFraction": 5007716
+            }
+        }
+    },
+    "nonce": "0x42",
+    "timestamp": "0x0",
+    "extraData": "0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa",
+    "gasLimit": "0x1388",
+    "difficulty": "0x400000000",
+    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "number": "0x0",
+    "gasUsed": "0x0",
+    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "baseFeePerGas": null
+}"#;
+
+        let genesis = serde_json::from_str::<Genesis>(s).unwrap();
+        let chainspec = ChainSpec::from_genesis(genesis);
+        let activation = chainspec.hardforks.fork(EthereumHardfork::Paris);
+        assert_eq!(
+            activation,
+            ForkCondition::TTD {
+                activation_block_number: MAINNET_PARIS_BLOCK,
+                total_difficulty: MAINNET_PARIS_TTD,
+                fork_block: None,
+            }
+        )
     }
 }

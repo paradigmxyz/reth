@@ -142,8 +142,8 @@ where
 
 impl<B, T> SignerRecoverable for Extended<B, T>
 where
-    B: SignedTransaction + IsTyped2718,
-    T: SignedTransaction,
+    B: SignerRecoverable,
+    T: SignerRecoverable,
 {
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         delegate!(self => tx.recover_signer())

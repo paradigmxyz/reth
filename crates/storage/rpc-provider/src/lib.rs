@@ -364,18 +364,6 @@ where
         Ok(Some(sealed_header.into_header()))
     }
 
-    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
-        let header = self.header(hash).map_err(ProviderError::other)?;
-
-        Ok(header.map(|b| b.difficulty()))
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        let header = self.header_by_number(number).map_err(ProviderError::other)?;
-
-        Ok(header.map(|b| b.difficulty()))
-    }
-
     fn headers_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
@@ -1674,14 +1662,6 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn header_td(&self, _hash: BlockHash) -> Result<Option<U256>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn header_td_by_number(&self, _number: BlockNumber) -> Result<Option<U256>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
     fn headers_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
@@ -1762,6 +1742,14 @@ where
         &self,
         _block_number: BlockNumber,
     ) -> Result<Vec<reth_db_api::models::AccountBeforeTx>, ProviderError> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn get_account_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<reth_db_api::models::AccountBeforeTx>> {
         Err(ProviderError::UnsupportedProvider)
     }
 }

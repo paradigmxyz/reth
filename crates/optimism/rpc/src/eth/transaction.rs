@@ -95,8 +95,8 @@ where
         let this = self.clone();
         let timeout_duration = self.send_raw_transaction_sync_timeout();
         async move {
-            let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
             let mut canonical_stream = this.provider().canonical_state_stream();
+            let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
             let flashblock_rx = this.pending_block_rx();
             let mut flashblock_stream = flashblock_rx.map(WatchStream::new);
 
@@ -127,7 +127,7 @@ where
                             }
                         } => {
                             // Check flashblocks for faster confirmation (Optimism-specific)
-                            if let Ok(Some(pending_block)) = this.pending_flashblock() {
+                            if let Ok(Some(pending_block)) = this.pending_flashblock().await {
                                 let block_and_receipts = pending_block.into_block_and_receipts();
                                 if block_and_receipts.block.body().contains_transaction(&hash)
                                     && let Some(receipt) = this.transaction_receipt(hash).await? {
@@ -168,7 +168,7 @@ where
 
             if tx_receipt.is_none() {
                 // if flashblocks are supported, attempt to find id from the pending block
-                if let Ok(Some(pending_block)) = this.pending_flashblock() {
+                if let Ok(Some(pending_block)) = this.pending_flashblock().await {
                     let block_and_receipts = pending_block.into_block_and_receipts();
                     if let Some((tx, receipt)) =
                         block_and_receipts.find_transaction_and_receipt_by_hash(hash)

@@ -117,9 +117,6 @@ impl EngineNodeLauncher {
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
-        // Try to expire pre-merge transaction history if configured
-        ctx.expire_pre_merge_transactions()?;
-
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
 
@@ -168,7 +165,7 @@ impl EngineNodeLauncher {
         }
         let pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
         let pruner_events = pruner.events();
-        info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
+        info!(target: "reth::cli", prune_config=?ctx.prune_config(), "Pruner initialized");
 
         let event_sender = EventSender::default();
 
@@ -228,6 +225,7 @@ impl EngineNodeLauncher {
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
+        #[allow(clippy::needless_continue)]
         let events = stream_select!(
             event_sender.new_listener().map(Into::into),
             pipeline_events.map(Into::into),
@@ -263,12 +261,16 @@ impl EngineNodeLauncher {
         let provider = ctx.blockchain_db().clone();
         let (exit, rx) = oneshot::channel();
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
+        let startup_sync_state_idle = ctx.node_config().debug.startup_sync_state_idle;
 
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
+                // network_handle's sync state is already initialized at Syncing
                 engine_service.orchestrator_mut().start_backfill_sync(initial_target);
+            } else if startup_sync_state_idle {
+                network_handle.update_sync_state(SyncState::Idle);
             }
 
             let mut res = Ok(());
@@ -290,6 +292,9 @@ impl EngineNodeLauncher {
                                 if terminate_after_backfill {
                                     debug!(target: "reth::cli", "Terminating after initial backfill");
                                     break
+                                }
+                                if startup_sync_state_idle {
+                                    network_handle.update_sync_state(SyncState::Idle);
                                 }
                             }
                             ChainEvent::BackfillSyncStarted => {

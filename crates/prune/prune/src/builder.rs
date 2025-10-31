@@ -1,13 +1,12 @@
 use crate::{segments::SegmentSet, Pruner};
 use alloy_eips::eip2718::Encodable2718;
-use reth_chainspec::MAINNET_PRUNE_DELETE_LIMIT;
 use reth_config::PruneConfig;
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_exex_types::FinishedExExHeight;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderFactory,
-    NodePrimitivesProvider, PruneCheckpointReader, PruneCheckpointWriter,
+    providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
+    DatabaseProviderFactory, NodePrimitivesProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
@@ -30,9 +29,6 @@ pub struct PrunerBuilder {
 }
 
 impl PrunerBuilder {
-    /// Default timeout for a prune run.
-    pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(100);
-
     /// Creates a new [`PrunerBuilder`] from the given [`PruneConfig`].
     pub fn new(pruner_config: PruneConfig) -> Self {
         Self::default()
@@ -47,7 +43,7 @@ impl PrunerBuilder {
     }
 
     /// Sets the configuration for every part of the data that can be pruned.
-    pub fn segments(mut self, segments: PruneModes) -> Self {
+    pub const fn segments(mut self, segments: PruneModes) -> Self {
         self.segments = segments;
         self
     }
@@ -83,6 +79,7 @@ impl PrunerBuilder {
                 ProviderRW: PruneCheckpointWriter
                                 + PruneCheckpointReader
                                 + BlockReader<Transaction: Encodable2718>
+                                + ChainStateBlockReader
                                 + StaticFileProviderFactory<
                     Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
                 >,
@@ -113,6 +110,7 @@ impl PrunerBuilder {
                 Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
             > + DBProvider<Tx: DbTxMut>
             + BlockReader<Transaction: Encodable2718>
+            + ChainStateBlockReader
             + PruneCheckpointWriter
             + PruneCheckpointReader,
     {
@@ -132,8 +130,8 @@ impl Default for PrunerBuilder {
     fn default() -> Self {
         Self {
             block_interval: 5,
-            segments: PruneModes::none(),
-            delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
+            segments: PruneModes::default(),
+            delete_limit: usize::MAX,
             timeout: None,
             finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,
         }

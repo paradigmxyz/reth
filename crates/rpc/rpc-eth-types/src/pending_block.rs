@@ -9,22 +9,20 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockHash, B256};
 use derive_more::Constructor;
-use reth_chain_state::{
-    BlockState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
-};
+use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_ethereum_primitives::Receipt;
-use reth_evm::EvmEnv;
+use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{
     Block, BlockTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader,
 };
 
-/// Configured [`EvmEnv`] for a pending block.
+/// Configured [`reth_evm::EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
-pub struct PendingBlockEnv<B: Block, R, Spec> {
-    /// Configured [`EvmEnv`] for the pending block.
-    pub evm_env: EvmEnv<Spec>,
+pub struct PendingBlockEnv<Evm: ConfigureEvm> {
+    /// Configured [`reth_evm::EvmEnv`] for the pending block.
+    pub evm_env: EvmEnvFor<Evm>,
     /// Origin block for the config
-    pub origin: PendingBlockEnvOrigin<B, R>,
+    pub origin: PendingBlockEnvOrigin<BlockTy<Evm::Primitives>, ReceiptTy<Evm::Primitives>>,
 }
 
 /// The origin for a configured [`PendingBlockEnv`]
@@ -135,11 +133,6 @@ impl<N: NodePrimitives> PendingBlock<N> {
 
 impl<N: NodePrimitives> From<PendingBlock<N>> for BlockState<N> {
     fn from(pending_block: PendingBlock<N>) -> Self {
-        Self::new(ExecutedBlockWithTrieUpdates::<N>::new(
-            pending_block.executed_block.recovered_block,
-            pending_block.executed_block.execution_output,
-            pending_block.executed_block.hashed_state,
-            ExecutedTrieUpdates::Missing,
-        ))
+        Self::new(pending_block.executed_block)
     }
 }
