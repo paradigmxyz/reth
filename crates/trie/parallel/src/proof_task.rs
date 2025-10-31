@@ -206,14 +206,14 @@ impl ProofWorkerHandle {
         }
     }
 
-    /// Returns true if there are available storage workers to process tasks.
-    pub fn has_available_storage_workers(&self) -> bool {
-        self.storage_available_workers.load(Ordering::Relaxed) > 0
+    /// Returns how many storage workers are currently available/idle.
+    pub fn available_storage_workers(&self) -> usize {
+        self.storage_available_workers.load(Ordering::Relaxed)
     }
 
-    /// Returns true if there are available account workers to process tasks.
-    pub fn has_available_account_workers(&self) -> bool {
-        self.account_available_workers.load(Ordering::Relaxed) > 0
+    /// Returns how many account workers are currently available/idle.
+    pub fn available_account_workers(&self) -> usize {
+        self.account_available_workers.load(Ordering::Relaxed)
     }
 
     /// Returns the number of pending storage tasks in the queue.
@@ -240,16 +240,14 @@ impl ProofWorkerHandle {
     ///
     /// This is calculated as total workers minus available workers.
     pub fn active_storage_workers(&self) -> usize {
-        self.storage_worker_count
-            .saturating_sub(self.storage_available_workers.load(Ordering::Relaxed))
+        self.storage_worker_count.saturating_sub(self.available_storage_workers())
     }
 
     /// Returns the number of account workers currently processing tasks.
     ///
     /// This is calculated as total workers minus available workers.
     pub fn active_account_workers(&self) -> usize {
-        self.account_worker_count
-            .saturating_sub(self.account_available_workers.load(Ordering::Relaxed))
+        self.account_worker_count.saturating_sub(self.available_account_workers())
     }
 
     /// Dispatch a storage proof computation to storage worker pool
