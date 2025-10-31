@@ -1444,7 +1444,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         range: core::ops::Range<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         let mut changesets = Vec::new();
-        let mut in_memory_blocks = Vec::new();
         let database_start = range.start;
         let mut database_end = range.end;
 
@@ -1471,7 +1470,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 for changeset in block_changesets {
                     changesets.push((state.number(), changeset));
                 }
-                in_memory_blocks.push(state.number());
             }
         }
 

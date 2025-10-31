@@ -1384,7 +1384,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         &self.static_files_tx_index
     }
 
-    /// Get account changesets for a range of blocks, checking both static files and database.
+    /// Get account changesets for a range of blocks, fetching from static files if they exist, and
+    /// otherwise fetching from the database.
     pub fn get_account_changesets_range<FD>(
         &self,
         block_range: Range<BlockNumber>,
@@ -1400,7 +1401,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             self.get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
         if let Some(highest) = highest_static_block {
-            // Get from static files for blocks that are available
             let static_end = block_range.end.min(highest + 1);
             if block_range.start < static_end {
                 for block in block_range.start..static_end {
@@ -1409,12 +1409,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         changesets.push((block, changeset));
                     }
                 }
-            }
-
-            // Get remaining from database
-            if block_range.end > highest + 1 {
-                let db_range = (highest + 1)..block_range.end;
-                changesets.extend(fetch_from_database(db_range)?);
             }
         } else {
             // All from database
