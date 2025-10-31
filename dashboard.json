@@ -4888,7 +4888,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Total time spent in database_provider_ro() method. This is the complete overhead of creating an overlay state provider with reverts.",
+      "description": "**Total Duration**: Complete time to create an overlay state provider with reverts.\n\nThis includes:\n- Base provider creation (DB connection)\n- Block hash lookup (if block_hash is set)\n- Reverts validation (checking changeset availability)\n- Trie reverts fetch (if needed)\n- State reverts fetch (if needed)\n\n**When to investigate**: Values >500ms indicate performance issues. Check child panels to identify bottleneck.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4996,7 +4996,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Time to create the underlying database provider. High values indicate database connection pool contention.",
+      "description": "**Provider Creation**: Time to acquire a read-only database provider from the connection pool.\n\n**Normal range**: <10ms\n**High values (>50ms)**: Database connection pool contention or slow DB init.\n\n**Action**: If consistently high, increase DB connection pool size or investigate DB performance.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5104,7 +5104,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Time to convert block hash to block number. High values indicate slow block number index lookups.",
+      "description": "**Block Hash Lookup**: Time to convert block hash to block number for revert collection.\n\n**Only measured when**: block_hash is set (not None)\n**Normal range**: <10ms\n**High values (>50ms)**: Slow BlockHashNumbers table lookups or missing index.\n\n**Action**: Check DB index health on BlockHashNumbers table.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5212,7 +5212,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Time to validate Merkle changeset availability before collecting reverts.",
+      "description": "**Reverts Validation**: Time to check if MerkleChangeSets data is available for the requested block range.\n\n**What it does**:\n- Checks MerkleChangeSets stage checkpoint (upper bound)\n- Checks MerkleChangeSets prune checkpoint (lower bound)\n- Validates requested block is within available range\n- Determines if reverts are needed (checkpoint == requested block)\n\n**Normal range**: <10ms\n**High values (>50ms)**: Slow checkpoint table reads.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5320,7 +5320,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Time to fetch trie reverts from database. High values indicate slow trie changeset queries.",
+      "description": "**Trie Reverts Fetch**: Time to fetch trie structure changes from MerkleChangeSets table.\n\n**Only executed when**: reverts_required is true (requested block != checkpoint)\n**Normal range**: <100ms for few blocks, <500ms for many blocks\n**High values (>500ms)**: Large changeset range or slow DB I/O\n\n**What affects duration**:\n- Checkpoint delta (blocks behind): Higher = more data to fetch\n- Block activity: More trie changes = longer fetch\n\n**Optimization**: If 'Checkpoint Delta' shows high values, investigate why checkpoint is lagging.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5428,7 +5428,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Time spent materializing hashed state reverts via `HashedPostState::from_reverts`. High values indicate slow account/storage changeset queries.",
+      "description": "**State Reverts (from_reverts)**: Time to materialize account/storage state changes via HashedPostState::from_reverts().\n\n**Only executed when**: reverts_required is true (requested block != checkpoint)\n**What it fetches**: Account changes + Storage changes from AccountChangeSets and StorageChangeSets tables\n**Normal range**: <100ms\n**High values (>100ms)**: Large number of state changes or slow DB I/O\n\n**What affects duration**:\n- Checkpoint delta: More blocks behind = more changes\n- Transaction activity: High gas blocks = more state changes\n\n**Note**: Usually faster than Trie Reverts because state changes are more localized.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5536,7 +5536,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Shows which code path is being taken: block_hash not set (fast path), reverts not required (optimization skip), or reverts required (fetch path)",
+      "description": "**Reverts Decision Breakdown**: Shows which of 3 mutually exclusive code paths is being taken.\n\n**1. block_hash not set (fast path)**: \n- block_hash parameter is None\n- No reverts collected, uses overlays directly\n- Fastest path, no DB queries\n\n**2. reverts not required (optimization)**:\n- block_hash is set BUT requested block == MerkleChangeSets checkpoint\n- Optimization skip introduced in PR #19412\n- Avoids fetching reverts when at DB tip\n\n**3. reverts required (fetch path)**:\n- block_hash is set AND requested block != checkpoint\n- Expensive: fetches trie + state reverts\n- Should be 0 in reth-bench!\n\n**Investigation**: If 'reverts required' > 0 in reth-bench, check 'Checkpoint Delta' to see why checkpoint is lagging.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5629,7 +5629,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Shows empty vs non-empty fetches. High empty rates indicate wasted queries.",
+      "description": "**Fetch Efficiency**: Tracks whether revert fetches return data or are empty (wasted queries).\n\n**Metrics tracked**:\n- **trie reverts empty (wasted)**: Fetched trie reverts but got 0 results\n- **trie reverts non-empty (legitimate)**: Fetched trie reverts and got data\n- **state reverts empty (wasted)**: Fetched state reverts but got 0 results  \n- **state reverts non-empty (legitimate)**: Fetched state reverts and got data\n\n**Ideal**: 0 empty fetches (all fetches return data)\n**Problem**: High empty rates mean wasting 100-500ms on queries that return nothing\n\n**Root cause of empty fetches**: Requesting reverts for blocks with no trie/state changes (rare on mainnet)\n\n**Action**: If consistently high empty rates, consider skipping fetch entirely for those cases.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5743,7 +5743,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Distribution of checkpoint delta (how far behind the checkpoint is). If consistently >0, checkpoint is lagging.",
+      "description": "**Checkpoint Delta**: Distance (in blocks) between requested block and MerkleChangeSets checkpoint.\n\n**Calculation**: checkpoint_delta = upper_bound (checkpoint) - requested_block\n\n**Only recorded when**: reverts_required is true (reverts are being fetched)\n\n**Interpretation**:\n- **Delta = 0**: Impossible (would trigger optimization skip)\n- **Delta = 1-10 blocks**: Slight lag, acceptable\n- **Delta > 10 blocks**: Checkpoint significantly behind, investigate!\n- **Delta > 100 blocks**: Major issue with checkpoint updates\n\n**Why it matters**: Higher delta = more changeset data to fetch = slower Trie/State Reverts\n\n**Root causes of high delta**:\n1. MerkleChangeSets stage not running/slow\n2. Backfilling not keeping up with chain tip\n3. Database write bottleneck\n\n**Action**: If consistently >0 in reth-bench, this explains unexpected reverts. Check why checkpoint isn't advancing.",
       "fieldConfig": {
         "defaults": {
           "color": {
