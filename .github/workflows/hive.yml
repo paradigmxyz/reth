@@ -70,7 +70,7 @@ jobs:
           chmod +x hive
 
       - name: Upload hive assets
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: hive_assets
           path: ./hive_assets
@@ -139,10 +139,10 @@ jobs:
               # - debug_
 
           # consume-engine
-          - sim: ethereum/eels/consume-engine
+          - sim: ethereum/eest/consume-engine
             limit: .*tests/amsterdam.*
-          # - sim: ethereum/eels/consume-engine
-          #   limit: .*tests/osaka.*
+          # - sim: ethereum/eest/consume-engine
+          #   limit: .*tests/prague.*
           # - sim: ethereum/eest/consume-engine
           #   limit: .*tests/cancun.*
           # - sim: ethereum/eest/consume-engine
@@ -157,7 +157,7 @@ jobs:
           #   limit: .*tests/frontier.*
 
           # consume-rlp
-          - sim: ethereum/eels/consume-rlp
+          - sim: ethereum/eest/consume-rlp
             limit: .*tests/amsterdam.*
           # - sim: ethereum/eest/consume-rlp
           #   limit: .*tests/prague.*
@@ -186,13 +186,13 @@ jobs:
           fetch-depth: 0
 
       - name: Download hive assets
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v5
         with:
           name: hive_assets
           path: /tmp
 
       - name: Download reth image
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v5
         with:
           name: artifacts
           path: /tmp
