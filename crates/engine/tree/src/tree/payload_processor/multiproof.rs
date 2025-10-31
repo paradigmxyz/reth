@@ -764,10 +764,11 @@ impl MultiProofTask {
         // Process proof targets in chunks.
         let mut chunks = 0;
 
-        // Only chunk if account or storage workers are available to take advantage of parallelism.
-        let should_chunk =
-            self.multiproof_manager.proof_worker_handle.has_available_account_workers() ||
-                self.multiproof_manager.proof_worker_handle.has_available_storage_workers();
+        // Only chunk if multiple account or storage workers are available to take advantage of
+        // parallelism.
+        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
+            1 ||
+            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
 
         let mut dispatch = |proof_targets| {
             self.multiproof_manager.dispatch(
@@ -904,10 +905,11 @@ impl MultiProofTask {
 
         let mut spawned_proof_targets = MultiProofTargets::default();
 
-        // Only chunk if account or storage workers are available to take advantage of parallelism.
-        let should_chunk =
-            self.multiproof_manager.proof_worker_handle.has_available_account_workers() ||
-                self.multiproof_manager.proof_worker_handle.has_available_storage_workers();
+        // Only chunk if multiple account or storage workers are available to take advantage of
+        // parallelism.
+        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
+            1 ||
+            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
 
         let mut dispatch = |hashed_state_update| {
             let proof_targets = get_proof_targets(
