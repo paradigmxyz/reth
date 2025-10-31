@@ -208,12 +208,12 @@ impl ProofWorkerHandle {
 
     /// Returns true if there are available storage workers to process tasks.
     pub fn has_available_storage_workers(&self) -> bool {
-        self.storage_available_workers.load(Ordering::Relaxed) > 0
+        self.storage_available_workers.load(Ordering::Relaxed) > 1
     }
 
     /// Returns true if there are available account workers to process tasks.
     pub fn has_available_account_workers(&self) -> bool {
-        self.account_available_workers.load(Ordering::Relaxed) > 0
+        self.account_available_workers.load(Ordering::Relaxed) > 1
     }
 
     /// Returns the number of pending storage tasks in the queue.
