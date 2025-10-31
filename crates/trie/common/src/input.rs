@@ -171,13 +171,6 @@ impl TrieInputSorted {
             prefix_sets: input.prefix_sets,
         }
     }
-
-    /// Clears all data, reusing allocations if possible via `Arc::make_mut`.
-    pub fn clear(&mut self) {
-        Arc::make_mut(&mut self.nodes).clear();
-        Arc::make_mut(&mut self.state).clear();
-        self.prefix_sets.clear();
-    }
 }
 
 #[cfg(test)]
