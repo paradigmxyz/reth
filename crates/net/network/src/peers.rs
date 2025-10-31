@@ -715,7 +715,7 @@ impl PeersManager {
     pub(crate) fn set_discovered_fork_id(&mut self, peer_id: PeerId, fork_id: ForkId) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             trace!(target: "net::peers", ?peer_id, ?fork_id, "set discovered fork id");
-            peer.fork_id = Some(fork_id);
+            peer.fork_id = Some(Box::new(fork_id));
         }
     }
 
@@ -757,7 +757,7 @@ impl PeersManager {
             Entry::Occupied(mut entry) => {
                 let peer = entry.get_mut();
                 peer.kind = kind;
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
 
                 if peer.state.is_incoming() {
@@ -770,7 +770,7 @@ impl PeersManager {
             Entry::Vacant(entry) => {
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "discovered new node");
                 let mut peer = Peer::with_kind(addr, kind);
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
@@ -838,7 +838,7 @@ impl PeersManager {
             Entry::Occupied(mut entry) => {
                 let peer = entry.get_mut();
                 peer.kind = kind;
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
 
                 if peer.state == PeerConnectionState::Idle {
@@ -853,7 +853,7 @@ impl PeersManager {
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "connects new node");
                 let mut peer = Peer::with_kind(addr, kind);
                 peer.state = PeerConnectionState::PendingOut;
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 entry.insert(peer);
                 self.connection_info.inc_pending_out();
                 self.queued_actions

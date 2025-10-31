@@ -13,10 +13,8 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{InsertBlockError, InsertBlockFatalError};
-use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
-    MemoryOverlayStateProvider, NewCanonicalChain,
+    CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -31,14 +29,11 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
-    providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, ProviderError, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, TransactionVariant,
+    BlockReader, DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StateProviderBox,
+    StateProviderFactory, StateReader, TransactionVariant, TrieReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_trie::{HashedPostState, TrieInput};
-use reth_trie_db::DatabaseHashedPostState;
 use revm::state::EvmState;
 use state::TreeState;
 use std::{
@@ -78,7 +73,6 @@ pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
-use reth_trie::KeccakKeyHasher;
 
 pub mod state;
 
@@ -101,7 +95,7 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
     /// The historical block hash to fetch state from.
     historical: B256,
     /// The blocks that form the chain from historical to target and are in memory.
-    overlay: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
+    overlay: Option<Vec<ExecutedBlock<N>>>,
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
@@ -110,7 +104,7 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     pub const fn new(
         provider_factory: P,
         historical: B256,
-        overlay: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
+        overlay: Option<Vec<ExecutedBlock<N>>>,
     ) -> Self {
         Self { provider_factory, historical, overlay }
     }
@@ -318,6 +312,7 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + HashedPostStateProvider
+        + TrieReader
         + Clone
         + 'static,
     <P as DatabaseProviderFactory>::Provider:
@@ -500,7 +495,12 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
-    #[instrument(level = "trace", skip_all, fields(block_hash = %payload.block_hash(), block_num = %payload.block_number(),), target = "engine::tree")]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree",
+        skip_all,
+        fields(block_hash = %payload.block_hash(), block_num = %payload.block_number()),
+    )]
     fn on_new_payload(
         &mut self,
         payload: T::ExecutionData,
@@ -581,6 +581,7 @@ where
     /// - `Valid`: Payload successfully validated and inserted
     /// - `Syncing`: Parent missing, payload buffered for later
     /// - Error status: Payload is invalid
+    #[instrument(level = "debug", target = "engine::tree", skip_all)]
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
@@ -823,7 +824,7 @@ where
 
         for block_num in (new_head_number + 1)..=current_head_number {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(block_num) {
-                let executed_block = block_state.block_ref().block.clone();
+                let executed_block = block_state.block_ref().clone();
                 old_blocks.push(executed_block);
                 debug!(
                     target: "engine::tree",
@@ -855,14 +856,9 @@ where
         // Try to load the canonical ancestor's block
         match self.canonical_block_by_hash(new_head_hash)? {
             Some(executed_block) => {
-                let block_with_trie = ExecutedBlockWithTrieUpdates {
-                    block: executed_block,
-                    trie: ExecutedTrieUpdates::Missing,
-                };
-
                 // Perform the reorg to properly handle the unwind
                 self.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
-                    new: vec![block_with_trie],
+                    new: vec![executed_block],
                     old: old_blocks,
                 });
 
@@ -915,13 +911,8 @@ where
 
         // Try to load the block from storage
         if let Some(executed_block) = self.canonical_block_by_hash(block_hash)? {
-            let block_with_trie = ExecutedBlockWithTrieUpdates {
-                block: executed_block,
-                trie: ExecutedTrieUpdates::Missing,
-            };
-
             self.canonical_in_memory_state
-                .update_chain(NewCanonicalChain::Commit { new: vec![block_with_trie] });
+                .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
 
             debug!(
                 target: "engine::tree",
@@ -976,29 +967,6 @@ where
         Ok(true)
     }
 
-    /// Returns the persisting kind for the input block.
-    fn persisting_kind_for(&self, block: BlockWithParent) -> PersistingKind {
-        // Check that we're currently persisting.
-        let Some(action) = self.persistence_state.current_action() else {
-            return PersistingKind::NotPersisting
-        };
-        // Check that the persistince action is saving blocks, not removing them.
-        let CurrentPersistenceAction::SavingBlocks { highest } = action else {
-            return PersistingKind::PersistingNotDescendant
-        };
-
-        // The block being validated can only be a descendant if its number is higher than
-        // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.block.number > highest.number &&
-            self.state.tree_state.is_descendant(*highest, block)
-        {
-            return PersistingKind::PersistingDescendant
-        }
-
-        // In all other cases, the block is not a descendant.
-        PersistingKind::PersistingNotDescendant
-    }
-
     /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
     /// to resolve chain forks and ensure that the Execution Layer is working with the latest valid
     /// chain.
@@ -1007,7 +975,7 @@ where
     /// `engine_forkchoiceUpdated`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1).
     ///
     /// Returns an error if an internal error occurred like a database error.
-    #[instrument(level = "trace", skip_all, fields(head = % state.head_block_hash, safe = % state.safe_block_hash,finalized = % state.finalized_block_hash), target = "engine::tree")]
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(head = % state.head_block_hash, safe = % state.safe_block_hash,finalized = % state.finalized_block_hash))]
     fn on_forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
@@ -1305,7 +1273,7 @@ where
 
     /// Helper method to save blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're saving blocks.
-    fn persist_blocks(&mut self, blocks_to_persist: Vec<ExecutedBlockWithTrieUpdates<N>>) {
+    fn persist_blocks(&mut self, blocks_to_persist: Vec<ExecutedBlock<N>>) {
         if blocks_to_persist.is_empty() {
             debug!(target: "engine::tree", "Returned empty set of blocks to persist");
             return
@@ -1318,7 +1286,7 @@ where
             .map(|b| b.recovered_block().num_hash())
             .expect("Checked non-empty persisting blocks");
 
-        debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
+        debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
         let (tx, rx) = oneshot::channel();
         let _ = self.persistence.save_blocks(blocks_to_persist, tx);
 
@@ -1606,6 +1574,32 @@ where
             return Ok(())
         };
 
+        // Check if there are more blocks to sync between current head and FCU target
+        if let Some(lowest_buffered) =
+            self.state.buffer.lowest_ancestor(&sync_target_state.head_block_hash)
+        {
+            let current_head_num = self.state.tree_state.current_canonical_head.number;
+            let target_head_num = lowest_buffered.number();
+
+            if let Some(distance) = self.distance_from_local_tip(current_head_num, target_head_num)
+            {
+                // There are blocks between current head and FCU target, download them
+                debug!(
+                    target: "engine::tree",
+                    %current_head_num,
+                    %target_head_num,
+                    %distance,
+                    "Backfill complete, downloading remaining blocks to reach FCU target"
+                );
+
+                self.emit_event(EngineApiEvent::Download(DownloadRequest::BlockRange(
+                    lowest_buffered.parent_hash(),
+                    distance,
+                )));
+                return Ok(());
+            }
+        }
+
         // try to close the gap by executing buffered blocks that are child blocks of the new head
         self.try_connect_buffered_blocks(self.state.tree_state.current_canonical_head)
     }
@@ -1696,17 +1690,9 @@ where
     /// Returns a batch of consecutive canonical blocks to persist in the range
     /// `(last_persisted_number .. canonical_head - threshold]`. The expected
     /// order is oldest -> newest.
-    ///
-    /// If any blocks are missing trie updates, all blocks are persisted, not taking `threshold`
-    /// into account.
-    ///
-    /// For those blocks that didn't have the trie updates calculated, runs the state root
-    /// calculation, and saves the trie updates.
-    ///
-    /// Returns an error if the state root calculation fails.
     fn get_canonical_blocks_to_persist(
-        &mut self,
-    ) -> Result<Vec<ExecutedBlockWithTrieUpdates<N>>, AdvancePersistenceError> {
+        &self,
+    ) -> Result<Vec<ExecutedBlock<N>>, AdvancePersistenceError> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
         debug_assert!(!self.persistence_state.in_progress());
@@ -1715,27 +1701,16 @@ where
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
-        let all_blocks_have_trie_updates = self
-            .state
-            .tree_state
-            .blocks_by_hash
-            .values()
-            .all(|block| block.trie_updates().is_some());
 
-        let target_number = if all_blocks_have_trie_updates {
-            // Persist only up to block buffer target if all blocks have trie updates
-            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
-        } else {
-            // Persist all blocks if any block is missing trie updates
-            canonical_head_number
-        };
+        // Persist only up to block buffer target
+        let target_number =
+            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
 
         debug!(
             target: "engine::tree",
             ?current_hash,
             ?last_persisted_number,
             ?canonical_head_number,
-            ?all_blocks_have_trie_updates,
             ?target_number,
             "Returning canonical blocks to persist"
         );
@@ -1753,48 +1728,6 @@ where
 
         // Reverse the order so that the oldest block comes first
         blocks_to_persist.reverse();
-
-        // Calculate missing trie updates
-        for block in &mut blocks_to_persist {
-            if block.trie.is_present() {
-                continue
-            }
-
-            debug!(
-                target: "engine::tree",
-                block = ?block.recovered_block().num_hash(),
-                "Calculating trie updates before persisting"
-            );
-
-            let provider = self
-                .state_provider_builder(block.recovered_block().parent_hash())?
-                .ok_or(AdvancePersistenceError::MissingAncestor(
-                    block.recovered_block().parent_hash(),
-                ))?
-                .build()?;
-
-            let mut trie_input = self.compute_trie_input(
-                self.persisting_kind_for(block.recovered_block.block_with_parent()),
-                self.provider.database_provider_ro()?,
-                block.recovered_block().parent_hash(),
-                None,
-            )?;
-            // Extend with block we are generating trie updates for.
-            trie_input.append_ref(block.hashed_state());
-            let (_root, updates) = provider.state_root_from_nodes_with_updates(trie_input)?;
-            debug_assert_eq!(_root, block.recovered_block().state_root());
-
-            // Update trie updates in both tree state and blocks to persist that we return
-            let trie_updates = Arc::new(updates);
-            let tree_state_block = self
-                .state
-                .tree_state
-                .blocks_by_hash
-                .get_mut(&block.recovered_block().hash())
-                .expect("blocks to persist are constructed from tree state blocks");
-            tree_state_block.trie.set_present(trie_updates.clone());
-            block.trie.set_present(trie_updates);
-        }
 
         Ok(blocks_to_persist)
     }
@@ -1834,7 +1767,7 @@ where
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
         if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
-            return Ok(Some(block.block.clone()))
+            return Ok(Some(block.clone()))
         }
 
         let (block, senders) = self
@@ -1847,11 +1780,13 @@ where
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
         let hashed_state = self.provider.hashed_post_state(execution_output.state());
+        let trie_updates = self.provider.get_block_trie_updates(block.number())?;
 
         Ok(Some(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
             execution_output: Arc::new(execution_output),
             hashed_state: Arc::new(hashed_state),
+            trie_updates: Arc::new(trie_updates.into()),
         }))
     }
 
@@ -2068,7 +2003,7 @@ where
     }
 
     /// Attempts to connect any buffered blocks that are connected to the given parent hash.
-    #[instrument(level = "trace", skip(self), target = "engine::tree")]
+    #[instrument(level = "debug", target = "engine::tree", skip(self))]
     fn try_connect_buffered_blocks(
         &mut self,
         parent: BlockNumHash,
@@ -2289,25 +2224,7 @@ where
 
             self.update_reorg_metrics(old.len());
             self.reinsert_reorged_blocks(new.clone());
-            // Try reinserting the reorged canonical chain. This is only possible if we have
-            // `persisted_trie_updates` for those blocks.
-            let old = old
-                .iter()
-                .filter_map(|block| {
-                    let trie = self
-                        .state
-                        .tree_state
-                        .persisted_trie_updates
-                        .get(&block.recovered_block.hash())?
-                        .1
-                        .clone();
-                    Some(ExecutedBlockWithTrieUpdates {
-                        block: block.clone(),
-                        trie: ExecutedTrieUpdates::Present(trie),
-                    })
-                })
-                .collect::<Vec<_>>();
-            self.reinsert_reorged_blocks(old);
+            self.reinsert_reorged_blocks(old.clone());
         }
 
         // update the tracked in-memory state with the new chain
@@ -2334,7 +2251,7 @@ where
     }
 
     /// This reinserts any blocks in the new chain that do not already exist in the tree
-    fn reinsert_reorged_blocks(&mut self, new_chain: Vec<ExecutedBlockWithTrieUpdates<N>>) {
+    fn reinsert_reorged_blocks(&mut self, new_chain: Vec<ExecutedBlock<N>>) {
         for block in new_chain {
             if self
                 .state
@@ -2395,7 +2312,7 @@ where
     /// Returns an event with the appropriate action to take, such as:
     ///  - download more missing blocks
     ///  - try to canonicalize the target if the `block` is the tracked target (head) block.
-    #[instrument(level = "trace", skip_all, fields(block_hash = %block.hash(), block_num = %block.number(),), target = "engine::tree")]
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
     fn on_downloaded_block(
         &mut self,
         block: RecoveredBlock<N::Block>,
@@ -2501,15 +2418,12 @@ where
     /// Returns `InsertPayloadOk::Inserted(BlockStatus::Valid)` on successful execution,
     /// `InsertPayloadOk::AlreadySeen` if the block already exists, or
     /// `InsertPayloadOk::Inserted(BlockStatus::Disconnected)` if parent state is missing.
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_id))]
     fn insert_block_or_payload<Input, Err>(
         &mut self,
         block_id: BlockWithParent,
         input: Input,
-        execute: impl FnOnce(
-            &mut V,
-            Input,
-            TreeCtx<'_, N>,
-        ) -> Result<ExecutedBlockWithTrieUpdates<N>, Err>,
+        execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ExecutedBlock<N>, Err>,
         convert_to_block: impl FnOnce(&mut Self, Input) -> Result<RecoveredBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
@@ -2570,8 +2484,7 @@ where
             Ok(is_fork) => is_fork,
         };
 
-        let ctx =
-            TreeCtx::new(&mut self.state, &self.persistence_state, &self.canonical_in_memory_state);
+        let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
 
         let start = Instant::now();
 
@@ -2602,109 +2515,6 @@ where
             .record(block_insert_start.elapsed().as_secs_f64());
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
-    }
-
-    /// Computes the trie input at the provided parent hash.
-    ///
-    /// The goal of this function is to take in-memory blocks and generate a [`TrieInput`] that
-    /// serves as an overlay to the database blocks.
-    ///
-    /// It works as follows:
-    /// 1. Collect in-memory blocks that are descendants of the provided parent hash using
-    ///    [`TreeState::blocks_by_hash`].
-    /// 2. If the persistence is in progress, and the block that we're computing the trie input for
-    ///    is a descendant of the currently persisting blocks, we need to be sure that in-memory
-    ///    blocks are not overlapping with the database blocks that may have been already persisted.
-    ///    To do that, we're filtering out in-memory blocks that are lower than the highest database
-    ///    block.
-    /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
-    ///    [`HashedPostState`] from them.
-    fn compute_trie_input<TP: DBProvider + BlockNumReader>(
-        &self,
-        persisting_kind: PersistingKind,
-        provider: TP,
-        parent_hash: B256,
-        allocated_trie_input: Option<TrieInput>,
-    ) -> ProviderResult<TrieInput> {
-        // get allocated trie input or use a default trie input
-        let mut input = allocated_trie_input.unwrap_or_default();
-
-        let best_block_number = provider.best_block_number()?;
-
-        let (mut historical, mut blocks) = self
-            .state
-            .tree_state
-            .blocks_by_hash(parent_hash)
-            .map_or_else(|| (parent_hash.into(), vec![]), |(hash, blocks)| (hash.into(), blocks));
-
-        // If the current block is a descendant of the currently persisting blocks, then we need to
-        // filter in-memory blocks, so that none of them are already persisted in the database.
-        if persisting_kind.is_descendant() {
-            // Iterate over the blocks from oldest to newest.
-            while let Some(block) = blocks.last() {
-                let recovered_block = block.recovered_block();
-                if recovered_block.number() <= best_block_number {
-                    // Remove those blocks that lower than or equal to the highest database
-                    // block.
-                    blocks.pop();
-                } else {
-                    // If the block is higher than the best block number, stop filtering, as it's
-                    // the first block that's not in the database.
-                    break
-                }
-            }
-
-            historical = if let Some(block) = blocks.last() {
-                // If there are any in-memory blocks left after filtering, set the anchor to the
-                // parent of the oldest block.
-                (block.recovered_block().number() - 1).into()
-            } else {
-                // Otherwise, set the anchor to the original provided parent hash.
-                parent_hash.into()
-            };
-        }
-
-        if blocks.is_empty() {
-            debug!(target: "engine::tree", %parent_hash, "Parent found on disk");
-        } else {
-            debug!(target: "engine::tree", %parent_hash, %historical, blocks = blocks.len(), "Parent found in memory");
-        }
-
-        // Convert the historical block to the block number.
-        let block_number = provider
-            .convert_hash_or_number(historical)?
-            .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
-
-        // Retrieve revert state for historical block.
-        let revert_state = if block_number == best_block_number {
-            // We do not check against the `last_block_number` here because
-            // `HashedPostState::from_reverts` only uses the database tables, and not static files.
-            debug!(target: "engine::tree", block_number, best_block_number, "Empty revert state");
-            HashedPostState::default()
-        } else {
-            let revert_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
-                provider.tx_ref(),
-                block_number + 1..,
-            )
-            .map_err(ProviderError::from)?;
-            debug!(
-                target: "engine::tree",
-                block_number,
-                best_block_number,
-                accounts = revert_state.accounts.len(),
-                storages = revert_state.storages.len(),
-                "Non-empty revert state"
-            );
-            revert_state
-        };
-        input.append(revert_state);
-
-        // Extend with contents of parent in-memory blocks.
-        input.extend_with_blocks(
-            blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())),
-        );
-
-        Ok(input)
     }
 
     /// Handles an error that occurred while inserting a block.
@@ -2805,7 +2615,9 @@ where
                     // we're also persisting the finalized block on disk so we can reload it on
                     // restart this is required by optimism which queries the finalized block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
                     let _ = self.persistence.save_finalized_block_number(finalized.number());
-                    self.canonical_in_memory_state.set_finalized(finalized);
+                    self.canonical_in_memory_state.set_finalized(finalized.clone());
+                    // Update finalized block height metric
+                    self.metrics.tree.finalized_block_height.set(finalized.number() as f64);
                 }
             }
             Err(err) => {
@@ -2833,7 +2645,9 @@ where
                     // we're also persisting the safe block on disk so we can reload it on
                     // restart this is required by optimism which queries the safe block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
                     let _ = self.persistence.save_safe_block_number(safe.number());
-                    self.canonical_in_memory_state.set_safe(safe);
+                    self.canonical_in_memory_state.set_safe(safe.clone());
+                    // Update safe block height metric
+                    self.metrics.tree.safe_block_height.set(safe.number() as f64);
                 }
             }
             Err(err) => {
@@ -3012,31 +2826,4 @@ pub enum InsertPayloadOk {
     AlreadySeen(BlockStatus),
     /// The payload was valid and inserted into the tree.
     Inserted(BlockStatus),
-}
-
-/// Whether or not the blocks are currently persisting and the input block is a descendant.
-#[derive(Debug, Clone, Copy)]
-pub enum PersistingKind {
-    /// The blocks are not currently persisting.
-    NotPersisting,
-    /// The blocks are currently persisting but the input block is not a descendant.
-    PersistingNotDescendant,
-    /// The blocks are currently persisting and the input block is a descendant.
-    PersistingDescendant,
-}
-
-impl PersistingKind {
-    /// Returns true if the parallel state root can be run.
-    ///
-    /// We only run the parallel state root if we are not currently persisting any blocks or
-    /// persisting blocks that are all ancestors of the one we are calculating the state root for.
-    pub const fn can_run_parallel_state_root(&self) -> bool {
-        matches!(self, Self::NotPersisting | Self::PersistingDescendant)
-    }
-
-    /// Returns true if the blocks are currently being persisted and the input block is a
-    /// descendant.
-    pub const fn is_descendant(&self) -> bool {
-        matches!(self, Self::PersistingDescendant)
-    }
 }

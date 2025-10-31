@@ -4,7 +4,6 @@
 //! requested address.
 #[allow(dead_code)]
 use alloy_primitives::{Address, U256};
-use clap::Parser;
 use futures::TryStreamExt;
 use jsonrpsee::{
     core::SubscriptionResult, proc_macros::rpc, tracing, PendingSubscriptionSink,
@@ -166,14 +165,8 @@ async fn my_exex<Node: FullNodeComponents>(
     Ok(())
 }
 
-#[derive(Parser, Debug)]
-struct Args {
-    #[arg(long)]
-    enable_ext: bool,
-}
-
 fn main() -> eyre::Result<()> {
-    reth_ethereum::cli::Cli::parse_args().run(|builder, _args| async move {
+    reth_ethereum::cli::Cli::parse_args().run(|builder, _| async move {
         let (subscriptions_tx, subscriptions_rx) = mpsc::unbounded_channel::<SubscriptionRequest>();
 
         let rpc = StorageWatcherRpc::new(subscriptions_tx.clone());

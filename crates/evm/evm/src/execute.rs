@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
@@ -203,7 +203,8 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     /// Configuration of EVM used when executing the block.
     ///
     /// Contains context relevant to EVM such as [`revm::context::BlockEnv`].
-    pub evm_env: EvmEnv<<F::EvmFactory as EvmFactory>::Spec>,
+    pub evm_env:
+        EvmEnv<<F::EvmFactory as EvmFactory>::Spec, <F::EvmFactory as EvmFactory>::BlockEnv>,
     /// [`BlockExecutorFactory::ExecutionCtx`] used to execute the block.
     pub execution_ctx: F::ExecutionCtx<'a>,
     /// Parent block header.
@@ -225,7 +226,10 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
     /// Creates a new [`BlockAssemblerInput`].
     #[expect(clippy::too_many_arguments)]
     pub fn new(
-        evm_env: EvmEnv<<F::EvmFactory as EvmFactory>::Spec>,
+        evm_env: EvmEnv<
+            <F::EvmFactory as EvmFactory>::Spec,
+            <F::EvmFactory as EvmFactory>::BlockEnv,
+        >,
         execution_ctx: F::ExecutionCtx<'a>,
         parent: &'a SealedHeader<H>,
         transactions: Vec<F::Transaction>,
@@ -443,7 +447,7 @@ impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Trans
 impl<T, Executor> ExecutorTx<Executor>
     for WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>
 where
-    T: ExecutorTx<Executor>,
+    T: ExecutorTx<Executor> + Clone,
     Executor: BlockExecutor,
     <<Executor as BlockExecutor>::Evm as Evm>::Tx: Clone,
     Self: RecoveredTx<Executor::Transaction>,
@@ -453,7 +457,7 @@ where
     }
 
     fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        self.tx.into_recovered()
+        Arc::unwrap_or_clone(self.tx).into_recovered()
     }
 }
 
@@ -465,6 +469,7 @@ where
         Evm: Evm<
             Spec = <F::EvmFactory as EvmFactory>::Spec,
             HaltReason = <F::EvmFactory as EvmFactory>::HaltReason,
+            BlockEnv = <F::EvmFactory as EvmFactory>::BlockEnv,
             DB = &'a mut State<DB>,
         >,
         Transaction = N::SignedTx,
@@ -636,7 +641,7 @@ pub struct WithTxEnv<TxEnv, T> {
     /// The transaction environment for EVM.
     pub tx_env: TxEnv,
     /// The recovered transaction.
-    pub tx: T,
+    pub tx: Arc<T>,
 }
 
 impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {

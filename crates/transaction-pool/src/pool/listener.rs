@@ -29,6 +29,11 @@ pub struct TransactionEvents {
 }
 
 impl TransactionEvents {
+    /// Create a new instance of this stream.
+    pub const fn new(hash: TxHash, events: UnboundedReceiver<TransactionEvent>) -> Self {
+        Self { hash, events }
+    }
+
     /// The hash for this transaction
     pub const fn hash(&self) -> TxHash {
         self.hash

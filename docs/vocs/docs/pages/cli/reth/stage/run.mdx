@@ -70,6 +70,9 @@ Database:
       --db.max-readers <MAX_READERS>
           Maximum number of readers allowed to access the database concurrently
 
+      --db.sync-mode <SYNC_MODE>
+          Controls how aggressively the database synchronizes data to disk
+
       --metrics <SOCKET>
           Enable Prometheus metrics.
 
@@ -101,17 +104,18 @@ Database:
           The name of the stage to run
 
           Possible values:
-          - headers:         The headers stage within the pipeline
-          - bodies:          The bodies stage within the pipeline
-          - senders:         The senders stage within the pipeline
-          - execution:       The execution stage within the pipeline
-          - account-hashing: The account hashing stage within the pipeline
-          - storage-hashing: The storage hashing stage within the pipeline
-          - hashing:         The account and storage hashing stages within the pipeline
-          - merkle:          The merkle stage within the pipeline
-          - tx-lookup:       The transaction lookup stage within the pipeline
-          - account-history: The account history stage within the pipeline
-          - storage-history: The storage history stage within the pipeline
+          - headers:           The headers stage within the pipeline
+          - bodies:            The bodies stage within the pipeline
+          - senders:           The senders stage within the pipeline
+          - execution:         The execution stage within the pipeline
+          - account-hashing:   The account hashing stage within the pipeline
+          - storage-hashing:   The storage hashing stage within the pipeline
+          - hashing:           The account and storage hashing stages within the pipeline
+          - merkle:            The merkle stage within the pipeline
+          - merkle-changesets: The merkle changesets stage within the pipeline
+          - tx-lookup:         The transaction lookup stage within the pipeline
+          - account-history:   The account history stage within the pipeline
+          - storage-history:   The storage history stage within the pipeline
 
 Networking:
   -d, --disable-discovery
@@ -302,6 +306,9 @@ Networking:
       --required-block-hashes <REQUIRED_BLOCK_HASHES>
           Comma separated list of required block hashes. Peers that don't have these blocks will be filtered out
 
+      --network-id <NETWORK_ID>
+          Optional network ID to override the chain specification's network ID for P2P connections
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
@@ -366,7 +373,7 @@ Logging:
 
           Possible values:
           - always: Colors on
-          - auto:   Colors on
+          - auto:   Auto-detect
           - never:  Colors off
 
           [default: always]
@@ -388,16 +395,32 @@ Tracing:
       --tracing-otlp[=<URL>]
           Enable `Opentelemetry` tracing export to an OTLP endpoint.
 
-          If no value provided, defaults to `http://localhost:4318/v1/traces`.
+          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
 
-      --tracing-otlp-level <LEVEL>
-          Set the minimum log level for OTLP traces.
+          [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
 
-          Valid values: ERROR, WARN, INFO, DEBUG, TRACE
+      --tracing-otlp-protocol <PROTOCOL>
+          OTLP transport protocol to use for exporting traces.
+
+          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
+
+          Defaults to HTTP if not specified.
+
+          Possible values:
+          - http: HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
+          - grpc: gRPC transport, port 4317
+
+          [env: OTEL_EXPORTER_OTLP_PROTOCOL=]
+          [default: http]
+
+      --tracing-otlp.filter <FILTER>
+          Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
+
+          Example: --tracing-otlp.filter=info,reth=debug,hyper_util=off
 
           Defaults to TRACE if not specified.
 
-          [default: TRACE]
+          [default: debug]
 ```

@@ -284,9 +284,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
         // folds size based on expected response size  and adds selected hashes to the request
         // list and the other hashes to the surplus list
-        loop {
-            let Some((hash, metadata)) = hashes_from_announcement_iter.next() else { break };
-
+        for (hash, metadata) in hashes_from_announcement_iter.by_ref() {
             let Some((_ty, size)) = metadata else {
                 unreachable!("this method is called upon reception of an eth68 announcement")
             };
@@ -413,7 +411,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             if let (_, Some(evicted_hash)) = self.hashes_pending_fetch.insert_and_get_evicted(hash)
             {
                 self.hashes_fetch_inflight_and_pending_fetch.remove(&evicted_hash);
-                self.hashes_pending_fetch.remove(&evicted_hash);
             }
         }
     }
