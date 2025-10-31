@@ -6,11 +6,10 @@ use crate::tree::{
     executor::WorkloadExecutor,
     instrumented_state::InstrumentedStateProvider,
     payload_processor::{multiproof::MultiProofConfig, PayloadProcessor},
-    persistence_state::CurrentPersistenceAction,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, PersistenceState,
-    PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
+    StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
@@ -51,8 +50,6 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 pub struct TreeCtx<'a, N: NodePrimitives> {
     /// The engine API tree state
     state: &'a mut EngineApiTreeState<N>,
-    /// Information about the current persistence state
-    persistence: &'a PersistenceState,
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
 }
@@ -61,7 +58,6 @@ impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TreeCtx")
             .field("state", &"EngineApiTreeState")
-            .field("persistence_info", &self.persistence)
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .finish()
     }
@@ -71,10 +67,9 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     /// Creates a new tree context
     pub const fn new(
         state: &'a mut EngineApiTreeState<N>,
-        persistence: &'a PersistenceState,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
     ) -> Self {
-        Self { state, persistence, canonical_in_memory_state }
+        Self { state, canonical_in_memory_state }
     }
 
     /// Returns a reference to the engine tree state
@@ -87,42 +82,9 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         self.state
     }
 
-    /// Returns a reference to the persistence info
-    pub const fn persistence(&self) -> &PersistenceState {
-        self.persistence
-    }
-
     /// Returns a reference to the canonical in-memory state
     pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
         self.canonical_in_memory_state
-    }
-
-    /// Determines the persisting kind for the given block based on persistence info.
-    ///
-    /// Based on the given header it returns whether any conflicting persistence operation is
-    /// currently in progress.
-    ///
-    /// This is adapted from the `persisting_kind_for` method in `EngineApiTreeHandler`.
-    pub fn persisting_kind_for(&self, block: BlockWithParent) -> PersistingKind {
-        // Check that we're currently persisting.
-        let Some(action) = self.persistence().current_action() else {
-            return PersistingKind::NotPersisting
-        };
-        // Check that the persistince action is saving blocks, not removing them.
-        let CurrentPersistenceAction::SavingBlocks { highest } = action else {
-            return PersistingKind::PersistingNotDescendant
-        };
-
-        // The block being validated can only be a descendant if its number is higher than
-        // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.block.number > highest.number &&
-            self.state().tree_state.is_descendant(*highest, block)
-        {
-            return PersistingKind::PersistingDescendant
-        }
-
-        // In all other cases, the block is not a descendant.
-        PersistingKind::PersistingNotDescendant
     }
 }
 
@@ -955,14 +917,11 @@ where
     ///
     /// It works as follows:
     /// 1. Collect in-memory blocks that are descendants of the provided parent hash using
-    ///    [`crate::tree::TreeState::blocks_by_hash`].
-    /// 2. If the persistence is in progress, and the block that we're computing the trie input for
-    ///    is a descendant of the currently persisting blocks, we need to be sure that in-memory
-    ///    blocks are not overlapping with the database blocks that may have been already persisted.
-    ///    To do that, we're filtering out in-memory blocks that are lower than the highest database
-    ///    block.
-    /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
-    ///    [`HashedPostState`] from them.
+    ///    [`crate::tree::TreeState::blocks_by_hash`]. This returns the highest persisted ancestor
+    ///    hash (`block_hash`) and the list of in-memory descendant blocks.
+    /// 2. Extend the `TrieInput` with the contents of these in-memory blocks (from oldest to
+    ///    newest) to build the overlay state and trie updates that sit on top of the database view
+    ///    anchored at `block_hash`.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",

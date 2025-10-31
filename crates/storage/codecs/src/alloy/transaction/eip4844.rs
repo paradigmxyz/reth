@@ -68,7 +68,8 @@ impl Compact for AlloyTxEip4844 {
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (tx, _) = TxEip4844::from_compact(buf, len);
+        // Return the remaining slice from the inner from_compact to advance the cursor correctly.
+        let (tx, remaining) = TxEip4844::from_compact(buf, len);
         let alloy_tx = Self {
             chain_id: tx.chain_id,
             nonce: tx.nonce,
@@ -82,7 +83,7 @@ impl Compact for AlloyTxEip4844 {
             max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
             input: tx.input,
         };
-        (alloy_tx, buf)
+        (alloy_tx, remaining)
     }
 }
 

@@ -1,6 +1,6 @@
 use alloy_primitives::{BlockNumber, B256};
 use reth_db_api::DatabaseError;
-use reth_errors::ProviderError;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
@@ -71,7 +71,7 @@ impl<F> OverlayStateProviderFactory<F> {
 impl<F> OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: TrieReader + StageCheckpointReader + PruneCheckpointReader,
+    F::Provider: TrieReader + StageCheckpointReader + PruneCheckpointReader + BlockNumReader,
 {
     /// Validates that there are sufficient changesets to revert to the requested block number.
     ///
@@ -82,7 +82,7 @@ where
         &self,
         provider: &F::Provider,
         requested_block: BlockNumber,
-    ) -> Result<(), ProviderError> {
+    ) -> ProviderResult<()> {
         // Get the MerkleChangeSets stage and prune checkpoints.
         let stage_checkpoint = provider.get_stage_checkpoint(StageId::MerkleChangeSets)?;
         let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::MerkleChangeSets)?;
@@ -96,19 +96,22 @@ where
                 }
             })?;
 
-        // Extract a possible lower bound from stage checkpoint if available
-        let stage_lower_bound = stage_checkpoint.as_ref().and_then(|chk| {
-            chk.merkle_changesets_stage_checkpoint().map(|stage_chk| stage_chk.block_range.from)
-        });
+        // If the requested block is the DB tip (determined by the MerkleChangeSets stage
+        // checkpoint) then there won't be any reverts necessary, and we can simply return Ok.
+        if upper_bound == requested_block {
+            return Ok(())
+        }
 
-        // Extract a possible lower bound from prune checkpoint if available
+        // Extract the lower bound from prune checkpoint if available
         // The prune checkpoint's block_number is the highest pruned block, so data is available
         // starting from the next block
-        let prune_lower_bound =
-            prune_checkpoint.and_then(|chk| chk.block_number.map(|block| block + 1));
-
-        // Use the higher of the two lower bounds. If neither is available assume unbounded.
-        let lower_bound = stage_lower_bound.max(prune_lower_bound).unwrap_or(0);
+        let lower_bound = prune_checkpoint
+            .and_then(|chk| chk.block_number)
+            .map(|block_number| block_number + 1)
+            .ok_or_else(|| ProviderError::InsufficientChangesets {
+                requested: requested_block,
+                available: 0..=upper_bound,
+            })?;
 
         let available_range = lower_bound..=upper_bound;
 
@@ -132,7 +135,7 @@ where
     type Provider = OverlayStateProvider<F::Provider>;
 
     /// Create a read-only [`OverlayStateProvider`].
-    fn database_provider_ro(&self) -> Result<OverlayStateProvider<F::Provider>, ProviderError> {
+    fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
         // Get a read-only provider
         let provider = self.factory.database_provider_ro()?;
 
@@ -147,34 +150,50 @@ where
             self.validate_changesets_availability(&provider, from_block)?;
 
             // Collect trie reverts
-            let mut trie_updates_mut = provider.trie_reverts(from_block + 1)?;
+            let mut trie_reverts = provider.trie_reverts(from_block + 1)?;
 
-            // Collect state reverts using HashedPostState::from_reverts
-            let reverted_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
+            // Collect state reverts
+            //
+            // TODO(mediocregopher) make from_reverts return sorted
+            // https://github.com/paradigmxyz/reth/issues/19382
+            let mut hashed_state_reverts = HashedPostState::from_reverts::<KeccakKeyHasher>(
                 provider.tx_ref(),
                 from_block + 1..,
-            )?;
-            let mut hashed_state_mut = reverted_state.into_sorted();
+            )?
+            .into_sorted();
 
-            // Extend with overlays if provided
-            if let Some(trie_overlay) = &self.trie_overlay {
-                trie_updates_mut.extend_ref(trie_overlay);
-            }
+            // Extend with overlays if provided. If the reverts are empty we should just use the
+            // overlays directly, because `extend_ref` will actually clone the overlay.
+            let trie_updates = match self.trie_overlay.as_ref() {
+                Some(trie_overlay) if trie_reverts.is_empty() => Arc::clone(trie_overlay),
+                Some(trie_overlay) => {
+                    trie_reverts.extend_ref(trie_overlay);
+                    Arc::new(trie_reverts)
+                }
+                None => Arc::new(trie_reverts),
+            };
 
-            if let Some(hashed_state_overlay) = &self.hashed_state_overlay {
-                hashed_state_mut.extend_ref(hashed_state_overlay);
-            }
+            let hashed_state_updates = match self.hashed_state_overlay.as_ref() {
+                Some(hashed_state_overlay) if hashed_state_reverts.is_empty() => {
+                    Arc::clone(hashed_state_overlay)
+                }
+                Some(hashed_state_overlay) => {
+                    hashed_state_reverts.extend_ref(hashed_state_overlay);
+                    Arc::new(hashed_state_reverts)
+                }
+                None => Arc::new(hashed_state_reverts),
+            };
 
             debug!(
                 target: "providers::state::overlay",
                 ?block_hash,
                 ?from_block,
-                num_trie_updates = ?trie_updates_mut.total_len(),
-                num_state_updates = ?hashed_state_mut.total_len(),
+                num_trie_updates = ?trie_updates.total_len(),
+                num_state_updates = ?hashed_state_updates.total_len(),
                 "Reverted to target block",
             );
 
-            (Arc::new(trie_updates_mut), Arc::new(hashed_state_mut))
+            (trie_updates, hashed_state_updates)
         } else {
             // If no block_hash, use overlays directly or defaults
             let trie_updates =

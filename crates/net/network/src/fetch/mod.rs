@@ -29,7 +29,7 @@ use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H>>>;
-type InflightBodiesRequest<B> = Request<Vec<B256>, PeerRequestResult<Vec<B>>>;
+type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
 
 /// Manages data fetching operations.
 ///
@@ -237,7 +237,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 })
             }
             DownloadRequest::GetBlockBodies { request, response, .. } => {
-                let inflight = Request { request: request.clone(), response };
+                let inflight = Request { request: (), response };
                 self.inflight_bodies_requests.insert(peer_id, inflight);
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
             }
