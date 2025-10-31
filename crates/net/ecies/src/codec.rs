@@ -58,7 +58,7 @@ impl Decoder for ECIESCodec {
     type Item = IngressECIESValue;
     type Error = ECIESError;
 
-    #[instrument(level = "trace", skip_all, fields(peer=?self.ecies.remote_id, state=?self.state))]
+    #[instrument(level = "trace", target = "net::ecies", skip_all, fields(peer=?self.ecies.remote_id, state=?self.state))]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         loop {
             match self.state {
@@ -150,7 +150,7 @@ impl Decoder for ECIESCodec {
 impl Encoder<EgressECIESValue> for ECIESCodec {
     type Error = io::Error;
 
-    #[instrument(level = "trace", skip(self, buf), fields(peer=?self.ecies.remote_id, state=?self.state))]
+    #[instrument(level = "trace", target = "net::ecies", skip(self, buf), fields(peer=?self.ecies.remote_id, state=?self.state))]
     fn encode(&mut self, item: EgressECIESValue, buf: &mut BytesMut) -> Result<(), Self::Error> {
         match item {
             EgressECIESValue::Auth => {

@@ -1,6 +1,6 @@
 use crate::segments::{
-    AccountHistory, MerkleChangeSets, Segment, SenderRecovery, StorageHistory, TransactionLookup,
-    UserReceipts,
+    AccountHistory, Bodies, MerkleChangeSets, Segment, SenderRecovery, StorageHistory,
+    TransactionLookup, UserReceipts,
 };
 use alloy_eips::eip2718::Encodable2718;
 use reth_db_api::{table::Value, transaction::DbTxMut};
@@ -10,8 +10,6 @@ use reth_provider::{
     PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
-
-use super::{StaticFileHeaders, StaticFileReceipts, StaticFileTransactions};
 
 /// Collection of [`Segment`]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
@@ -58,7 +56,7 @@ where
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].
     pub fn from_components(
-        static_file_provider: StaticFileProvider<Provider::Primitives>,
+        _static_file_provider: StaticFileProvider<Provider::Primitives>,
         prune_modes: PruneModes,
     ) -> Self {
         #[expect(deprecated)]
@@ -68,18 +66,14 @@ where
             receipts,
             account_history,
             storage_history,
-            bodies_history: _,
+            bodies_history,
             merkle_changesets,
             receipts_log_filter: (),
         } = prune_modes;
 
         Self::default()
-            // Static file headers
-            .segment(StaticFileHeaders::new(static_file_provider.clone()))
-            // Static file transactions
-            .segment(StaticFileTransactions::new(static_file_provider.clone()))
-            // Static file receipts
-            .segment(StaticFileReceipts::new(static_file_provider))
+            // Bodies - run first since file deletion is fast
+            .segment_opt(bodies_history.map(Bodies::new))
             // Merkle changesets
             .segment(MerkleChangeSets::new(merkle_changesets))
             // Account history

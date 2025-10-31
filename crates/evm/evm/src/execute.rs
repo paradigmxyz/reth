@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
@@ -447,7 +447,7 @@ impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Trans
 impl<T, Executor> ExecutorTx<Executor>
     for WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>
 where
-    T: ExecutorTx<Executor>,
+    T: ExecutorTx<Executor> + Clone,
     Executor: BlockExecutor,
     <<Executor as BlockExecutor>::Evm as Evm>::Tx: Clone,
     Self: RecoveredTx<Executor::Transaction>,
@@ -457,7 +457,7 @@ where
     }
 
     fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        self.tx.into_recovered()
+        Arc::unwrap_or_clone(self.tx).into_recovered()
     }
 }
 
@@ -647,7 +647,7 @@ pub struct WithTxEnv<TxEnv, T> {
     /// The transaction environment for EVM.
     pub tx_env: TxEnv,
     /// The recovered transaction.
-    pub tx: T,
+    pub tx: Arc<T>,
 }
 
 impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {

@@ -8,8 +8,8 @@ use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodePrimitives, NodeTypes,
-    NodeTypesWithDBAdapter, PayloadAttributesBuilder, PayloadTypes,
+    FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypes, NodeTypesWithDBAdapter,
+    PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use reth_tasks::TaskManager;
@@ -146,12 +146,6 @@ where
             >,
         > + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-            Primitives: NodePrimitives<
-                BlockHeader = alloy_consensus::Header,
-                BlockBody = alloy_consensus::BlockBody<
-                    <Self::Primitives as NodePrimitives>::SignedTx,
-                >,
-            >,
             ComponentsBuilder: NodeComponentsBuilder<
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
                 Components: NodeComponents<
@@ -180,12 +174,6 @@ where
             >,
         > + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-            Primitives: NodePrimitives<
-                BlockHeader = alloy_consensus::Header,
-                BlockBody = alloy_consensus::BlockBody<
-                    <Self::Primitives as NodePrimitives>::SignedTx,
-                >,
-            >,
             ComponentsBuilder: NodeComponentsBuilder<
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
                 Components: NodeComponents<

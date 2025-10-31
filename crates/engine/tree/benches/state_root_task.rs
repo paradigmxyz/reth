@@ -20,11 +20,10 @@ use reth_evm::OnStateHook;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{Account as RethAccount, Recovered, StorageEntry};
 use reth_provider::{
-    providers::{BlockchainProvider, ConsistentDbView},
+    providers::{BlockchainProvider, OverlayStateProviderFactory},
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
     AccountReader, ChainSpecProvider, HashingWriter, ProviderFactory,
 };
-use reth_trie::TrieInput;
 use revm_primitives::{HashMap, U256};
 use revm_state::{Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
 use std::{hint::black_box, sync::Arc};
@@ -240,8 +239,7 @@ fn bench_state_root(c: &mut Criterion) {
                                         >,
                                     >(),
                                     StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                                    ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-                                    TrieInput::default(),
+                                    OverlayStateProviderFactory::new(provider),
                                     &TreeConfig::default(),
                                 )
                                 .map_err(|(err, ..)| err)

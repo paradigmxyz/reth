@@ -78,7 +78,6 @@ impl<C: ChainSpecParser> Command<C> {
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
                 tx.clear::<tables::Transactions<TxTy<N>>>()?;
-                reset_prune_checkpoint(tx, PruneSegment::Transactions)?;
 
                 tx.clear::<tables::TransactionBlocks>()?;
                 tx.clear::<tables::BlockOmmers<HeaderTy<N>>>()?;
