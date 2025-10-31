@@ -20,7 +20,9 @@ use reth_chainspec::EthChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_payload_builder::{EthPayloadBuilderAttributes, PayloadBuilderError};
-use reth_payload_primitives::{BuildNextEnv, BuiltPayload, BuiltPayloadExecutedBlock, PayloadBuilderAttributes};
+use reth_payload_primitives::{
+    BuildNextEnv, BuiltPayload, BuiltPayloadExecutedBlock, PayloadBuilderAttributes,
+};
 use reth_primitives_traits::{
     NodePrimitives, SealedBlock, SealedHeader, SignedTransaction, WithEncoded,
 };
