@@ -326,12 +326,6 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 
-[profile.reproducible]
-inherits = "release"
-panic = "abort"
-codegen-units = 1
-incremental = false
-
 [workspace.dependencies]
 # reth
 op-reth = { path = "crates/optimism/bin" }
