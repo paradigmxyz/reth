@@ -40,7 +40,6 @@ pub struct DownloadDefaults {
 }
 
 impl DownloadDefaults {
-
     /// Initialize the global download defaults with this configuration
     pub fn try_init(self) -> Result<(), Self> {
         DOWNLOAD_DEFAULTS.set(self)
