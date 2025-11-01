@@ -72,7 +72,7 @@ pub struct OtlpConfig {
     /// Transport protocol, HTTP or gRPC
     protocol: OtlpProtocol,
     /// Optional sampling ratio, from 0.0 to 1.0
-    pub sample_ratio: Option<f64>,
+    sample_ratio: Option<f64>,
 }
 
 impl OtlpConfig {
@@ -84,6 +84,26 @@ impl OtlpConfig {
         sample_ratio: Option<f64>,
     ) -> Self {
         Self { service_name: service_name.into(), endpoint, protocol, sample_ratio }
+    }
+
+    /// Returns the service name.
+    pub fn service_name(&self) -> &str {
+        &self.service_name
+    }
+
+    /// Returns the OTLP endpoint URL.
+    pub fn endpoint(&self) -> &Url {
+        &self.endpoint
+    }
+
+    /// Returns the transport protocol.
+    pub fn protocol(&self) -> OtlpProtocol {
+        self.protocol
+    }
+
+    /// Returns the sampling ratio.
+    pub fn sample_ratio(&self) -> Option<f64> {
+        self.sample_ratio
     }
 }
 
