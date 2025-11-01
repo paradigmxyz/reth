@@ -65,19 +65,35 @@ where
     }
 }
 
-pub trait HashedPostStateValue: Copy + Clone + std::fmt::Debug {
-    type Wrapper: HashedPostStateCursorValue<Self> + Copy + Clone;
+/// Trait linking value types to their wrapper representation in post state.
+///
+/// This trait associates each value type (`Account`, `U256`) with a wrapper type
+/// that can represent both present values and deletions without using `Option<V>`:
+/// - `Account` uses `Option<Account>` (deletion = `None`)
+/// - `U256` uses `U256` directly (deletion = `U256::ZERO`)
+///
+/// This design avoids the memory overhead of `Option<U256>` while maintaining
+/// uniform handling of deletions across different value types.
+pub trait HashedPostStateValue: Copy + std::fmt::Debug {
+    /// The wrapper type used to represent both present and deleted values.
+    type Wrapper: HashedPostStateCursorValue<Self> + Copy;
 }
 
 impl HashedPostStateValue for U256 {
-    type Wrapper = U256;
+    type Wrapper = Self;
 }
 
 impl HashedPostStateValue for Account {
-    type Wrapper = Option<Account>;
+    type Wrapper = Option<Self>;
 }
 
+/// Trait for wrapper types that can be converted to `Option<&V>`.
+///
+/// This enables uniform handling of deletions across different wrapper types:
+/// - `Option<Account>`: `None` indicates deletion
+/// - `U256`: `U256::ZERO` indicates deletion (maps to `None`)
 pub trait HashedPostStateCursorValue<V> {
+    /// Returns `Some(&V)` if the value is present, `None` if deleted.
     fn as_option(&self) -> Option<&V>;
 }
 
@@ -87,9 +103,9 @@ impl HashedPostStateCursorValue<Account> for Option<Account> {
     }
 }
 
-impl HashedPostStateCursorValue<U256> for U256 {
-    fn as_option(&self) -> Option<&U256> {
-        (*self != U256::ZERO).then_some(self)
+impl HashedPostStateCursorValue<Self> for U256 {
+    fn as_option(&self) -> Option<&Self> {
+        (*self != Self::ZERO).then_some(self)
     }
 }
 
@@ -184,10 +200,19 @@ where
                     match wrapped_value.as_option() {
                         None => {
                             // Overlay has a removed node
-                            if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key < db_key) {
-                                // DB cursor is exhausted or ahead of in-memory cursor, skip deleted entry
+                            if self
+                                .cursor_entry
+                                .as_ref()
+                                .is_none_or(|(db_key, _)| &mem_key < db_key)
+                            {
+                                // DB cursor is exhausted or ahead of in-memory cursor, skip deleted
+                                // entry
                                 self.post_state_cursor.first_after(&mem_key);
-                            } else if self.cursor_entry.as_ref().is_some_and(|(db_key, _)| &mem_key == db_key) {
+                            } else if self
+                                .cursor_entry
+                                .as_ref()
+                                .is_some_and(|(db_key, _)| &mem_key == db_key)
+                            {
                                 // Removed node matches DB entry, move both cursors
                                 self.post_state_cursor.first_after(&mem_key);
                                 self.cursor_next()?;
@@ -198,13 +223,18 @@ where
                         }
                         Some(value) => {
                             // Overlay has a value
-                            if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key <= db_key) {
-                                // Return the overlay's value (prior to or equal to DB's node, or DB is exhausted)
+                            if self
+                                .cursor_entry
+                                .as_ref()
+                                .is_none_or(|(db_key, _)| &mem_key <= db_key)
+                            {
+                                // Return the overlay's value (prior to or equal to DB's node, or DB
+                                // is exhausted)
                                 return Ok(Some((mem_key, *value)))
-                            } else {
-                                // mem_key > db_key, return db entry
-                                return Ok(self.cursor_entry)
                             }
+
+                            // mem_key > db_key, return db entry
+                            return Ok(self.cursor_entry)
                         }
                     }
                 }

@@ -425,10 +425,7 @@ impl HashedStorage {
 
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
-        let mut storage_slots: Vec<_> = self
-            .storage
-            .into_iter()
-            .collect();
+        let mut storage_slots: Vec<_> = self.storage.into_iter().collect();
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
 
         HashedStorageSorted { storage_slots, wiped: self.wiped }
