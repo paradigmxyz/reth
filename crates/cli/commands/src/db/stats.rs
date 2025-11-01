@@ -194,7 +194,7 @@ impl Command {
             for (block_range, tx_range) in &ranges {
                 let fixed_block_range = static_file_provider.find_fixed_range(block_range.start());
                 let jar_provider = static_file_provider
-                    .get_segment_provider(segment, || Some(fixed_block_range), None)?
+                    .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
                     .ok_or_else(|| {
                         eyre::eyre!("Failed to get segment provider for segment: {}", segment)
                     })?;

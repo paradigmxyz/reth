@@ -336,7 +336,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             for (block_range, _) in &ranges {
                 let fixed_block_range = self.find_fixed_range(block_range.start());
                 let jar_provider = self
-                    .get_segment_provider(segment, || Some(fixed_block_range), None)?
+                    .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
                     .ok_or_else(|| {
                         ProviderError::MissingStaticFileBlock(segment, block_range.start())
                     })?;
@@ -365,14 +365,28 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
+    /// Gets the [`StaticFileJarProvider`] of the requested segment and start index that can be
+    /// either block or transaction.
+    pub fn get_segment_provider(
+        &self,
+        segment: StaticFileSegment,
+        start: u64,
+    ) -> ProviderResult<StaticFileJarProvider<'_, N>> {
+        if segment.is_block_based() {
+            self.get_segment_provider_for_block(segment, start, None)
+        } else {
+            self.get_segment_provider_for_transaction(segment, start, None)
+        }
+    }
+
     /// Gets the [`StaticFileJarProvider`] of the requested segment and block.
-    pub fn get_segment_provider_from_block(
+    pub fn get_segment_provider_for_block(
         &self,
         segment: StaticFileSegment,
         block: BlockNumber,
         path: Option<&Path>,
     ) -> ProviderResult<StaticFileJarProvider<'_, N>> {
-        self.get_segment_provider(
+        self.get_segment_provider_for_range(
             segment,
             || self.get_segment_ranges_from_block(segment, block),
             path,
@@ -381,13 +395,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and transaction.
-    pub fn get_segment_provider_from_transaction(
+    pub fn get_segment_provider_for_transaction(
         &self,
         segment: StaticFileSegment,
         tx: TxNumber,
         path: Option<&Path>,
     ) -> ProviderResult<StaticFileJarProvider<'_, N>> {
-        self.get_segment_provider(
+        self.get_segment_provider_for_range(
             segment,
             || self.get_segment_ranges_from_transaction(segment, tx),
             path,
@@ -398,7 +412,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Gets the [`StaticFileJarProvider`] of the requested segment and block or transaction.
     ///
     /// `fn_range` should make sure the range goes through `find_fixed_range`.
-    pub fn get_segment_provider(
+    pub fn get_segment_provider_for_range(
         &self,
         segment: StaticFileSegment,
         fn_range: impl Fn() -> Option<SegmentRangeInclusive>,
@@ -1142,13 +1156,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         /// If the static file is missing, the `result` is returned.
         macro_rules! get_provider {
             ($number:expr) => {{
-                let provider = if segment.is_block_based() {
-                    self.get_segment_provider_from_block(segment, $number, None)
-                } else {
-                    self.get_segment_provider_from_transaction(segment, $number, None)
-                };
-
-                match provider {
+                match self.get_segment_provider(segment, $number) {
                     Ok(provider) => provider,
                     Err(
                         ProviderError::MissingStaticFileBlock(_, _) |
@@ -1213,15 +1221,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         F: Fn(&mut StaticFileCursor<'_>, u64) -> ProviderResult<Option<T>> + 'a,
         T: std::fmt::Debug,
     {
-        let get_provider = move |start: u64| {
-            if segment.is_block_based() {
-                self.get_segment_provider_from_block(segment, start, None)
-            } else {
-                self.get_segment_provider_from_transaction(segment, start, None)
-            }
-        };
-
-        let mut provider = Some(get_provider(range.start)?);
+        let mut provider = Some(self.get_segment_provider(segment, range.start)?);
         Ok(range.filter_map(move |number| {
             match get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose() {
                 Some(result) => Some(result),
@@ -1231,7 +1231,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     // we don't drop the current provider before requesting the
                     // next one.
                     provider.take();
-                    provider = Some(get_provider(number).ok()?);
+                    provider = Some(self.get_segment_provider(segment, number).ok()?);
                     get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose()
                 }
             }
@@ -1418,7 +1418,7 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvide
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
-        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
+        self.get_segment_provider_for_block(StaticFileSegment::Headers, num, None)
             .and_then(|provider| provider.header_by_number(num))
             .or_else(|err| {
                 if let ProviderError::MissingStaticFileBlock(_, _) = err {
@@ -1445,7 +1445,7 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvide
         &self,
         num: BlockNumber,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
+        self.get_segment_provider_for_block(StaticFileSegment::Headers, num, None)
             .and_then(|provider| provider.sealed_header(num))
             .or_else(|err| {
                 if let ProviderError::MissingStaticFileBlock(_, _) = err {
@@ -1476,7 +1476,7 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvide
 
 impl<N: NodePrimitives> BlockHashReader for StaticFileProvider<N> {
     fn block_hash(&self, num: u64) -> ProviderResult<Option<B256>> {
-        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
+        self.get_segment_provider_for_block(StaticFileSegment::Headers, num, None)
             .and_then(|provider| provider.block_hash(num))
             .or_else(|err| {
                 if let ProviderError::MissingStaticFileBlock(_, _) = err {
@@ -1507,7 +1507,7 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> Rec
     type Receipt = N::Receipt;
 
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
-        self.get_segment_provider_from_transaction(StaticFileSegment::Receipts, num, None)
+        self.get_segment_provider_for_transaction(StaticFileSegment::Receipts, num, None)
             .and_then(|provider| provider.receipt(num))
             .or_else(|err| {
                 if let ProviderError::MissingStaticFileTx(_, _) = err {
@@ -1636,7 +1636,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-        self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)
+        self.get_segment_provider_for_transaction(StaticFileSegment::Transactions, num, None)
             .and_then(|provider| provider.transaction_by_id(num))
             .or_else(|err| {
                 if let ProviderError::MissingStaticFileTx(_, _) = err {
@@ -1651,7 +1651,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         &self,
         num: TxNumber,
     ) -> ProviderResult<Option<Self::Transaction>> {
-        self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)
+        self.get_segment_provider_for_transaction(StaticFileSegment::Transactions, num, None)
             .and_then(|provider| provider.transaction_by_id_unhashed(num))
             .or_else(|err| {
                 if let ProviderError::MissingStaticFileTx(_, _) = err {

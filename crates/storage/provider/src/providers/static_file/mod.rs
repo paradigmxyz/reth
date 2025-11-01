@@ -126,7 +126,7 @@ mod tests {
             let db_provider = factory.provider().unwrap();
             let manager = db_provider.static_file_provider();
             let jar_provider = manager
-                .get_segment_provider_from_block(StaticFileSegment::Headers, 0, Some(&static_file))
+                .get_segment_provider_for_block(StaticFileSegment::Headers, 0, Some(&static_file))
                 .unwrap();
 
             assert!(!headers.is_empty());
@@ -371,7 +371,7 @@ mod tests {
         block_ranges.iter().zip(expected_tx_ranges).for_each(|(block_range, expected_tx_range)| {
             assert_eq!(
                 sf_rw
-                    .get_segment_provider_from_block(segment, block_range.start, None)
+                    .get_segment_provider_for_block(segment, block_range.start, None)
                     .unwrap()
                     .user_header()
                     .tx_range(),
