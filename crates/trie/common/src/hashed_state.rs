@@ -332,17 +332,8 @@ impl HashedPostState {
     }
 
     /// Converts hashed post state into [`HashedPostStateSorted`].
-    pub fn into_sorted(self) -> HashedPostStateSorted {
-        let mut accounts: Vec<_> = self.accounts.into_iter().collect();
-        accounts.sort_unstable_by_key(|(address, _)| *address);
-
-        let storages = self
-            .storages
-            .into_iter()
-            .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
-            .collect();
-
-        HashedPostStateSorted { accounts, storages }
+    pub fn into_sorted(mut self) -> HashedPostStateSorted {
+        self.drain_into_sorted()
     }
 
     /// Converts hashed post state into [`HashedPostStateSorted`], but keeping the maps allocated by

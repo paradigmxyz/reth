@@ -192,10 +192,8 @@ where
     /// Otherwise, retrieve the next entries that are greater than or equal to the key from the
     /// database and the post state. The two entries are compared and the lowest is returned.
     ///
-    /// The returned key is memoized and the cursor remains positioned at that key until
-    /// [`HashedCursor::next`] is called.
-    ///
-    /// Note: `seek` can be called multiple times by `TrieNodeIter`
+    /// The returned account key is memoized and the cursor remains positioned at that key until
+    /// [`HashedCursor::seek`] or [`HashedCursor::next`] are called.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         self.cursor_seek(key)?;
         self.post_state_cursor.seek(&key);
