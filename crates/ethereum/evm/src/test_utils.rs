@@ -19,7 +19,7 @@ use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{BlockTy, SealedBlock, SealedHeader};
 use revm::{
     context::result::{ExecutionResult, Output, ResultAndState, SuccessReason},
-    database::State,
+    database::{bal::BalDatabase, State},
     Inspector,
 };
 
@@ -58,12 +58,13 @@ impl BlockExecutorFactory for MockEvmConfig {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: EthEvm<&'a mut State<DB>, I, PrecompilesMap>,
+        evm: EthEvm<&'a mut BalDatabase<State<DB>>, I, PrecompilesMap>,
         _ctx: Self::ExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
         DB: Database + 'a,
-        I: Inspector<<Self::EvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
+        I: Inspector<<Self::EvmFactory as EvmFactory>::Context<&'a mut BalDatabase<State<DB>>>>
+            + 'a,
     {
         MockExecutor { result: self.exec_results.lock().pop().unwrap(), evm, hook: None }
     }
@@ -73,15 +74,15 @@ impl BlockExecutorFactory for MockEvmConfig {
 #[derive(derive_more::Debug)]
 pub struct MockExecutor<'a, DB: Database, I> {
     result: ExecutionOutcome,
-    evm: EthEvm<&'a mut State<DB>, I, PrecompilesMap>,
+    evm: EthEvm<&'a mut BalDatabase<State<DB>>, I, PrecompilesMap>,
     #[debug(skip)]
     hook: Option<Box<dyn reth_evm::OnStateHook>>,
 }
 
-impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExecutor
+impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut BalDatabase<State<DB>>>>> BlockExecutor
     for MockExecutor<'a, DB, I>
 {
-    type Evm = EthEvm<&'a mut State<DB>, I, PrecompilesMap>;
+    type Evm = EthEvm<&'a mut BalDatabase<State<DB>>, I, PrecompilesMap>;
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
 
