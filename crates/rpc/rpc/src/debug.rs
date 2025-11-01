@@ -655,10 +655,6 @@ where
                     .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)?;
 
-                // Apply pre-execution changes to ensure correct state setup, especially for pruned
-                // nodes
-                this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
-
                 let block_executor = this.eth_api().evm_config().executor(db);
 
                 let mut witness_record = ExecutionWitnessRecord::default();
