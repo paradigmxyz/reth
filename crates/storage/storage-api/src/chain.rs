@@ -167,8 +167,6 @@ where
         let chain_spec = provider.chain_spec();
 
         let mut withdrawals_cursor = provider.tx_ref().cursor_read::<tables::BlockWithdrawals>()?;
-        let mut block_access_lists_cursor =
-            provider.tx_ref().cursor_read::<tables::BlockAccessLists>()?;
 
         let mut bodies = Vec::with_capacity(inputs.len());
 
@@ -188,6 +186,8 @@ where
             // even if empty
             let block_access_list =
                 if chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) {
+                    let mut block_access_lists_cursor =
+                        provider.tx_ref().cursor_read::<tables::BlockAccessLists>()?;
                     block_access_lists_cursor
                         .seek_exact(header.number())?
                         .map(|(_, b)| b.block_access_list)
