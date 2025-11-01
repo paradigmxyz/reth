@@ -1,7 +1,7 @@
 //! Core traits for working with execution payloads.
 
 use crate::PayloadBuilderError;
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     eip7685::Requests,
@@ -9,8 +9,36 @@ use alloy_eips::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
-use reth_chain_state::ExecutedBlock;
-use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
+use reth_execution_types::ExecutionOutcome;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+
+/// Represents an executed block for payload building purposes.
+///
+/// This type captures the complete execution state of a built block,
+/// including the recovered block, execution outcome, hashed state, and trie updates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
+    /// Recovered Block
+    pub recovered_block: Arc<RecoveredBlock<N::Block>>,
+    /// Block's execution outcome.
+    pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+    /// Block's hashed state.
+    pub hashed_state: Arc<HashedPostState>,
+    /// Trie updates that result from calculating the state root for the block.
+    pub trie_updates: Arc<TrieUpdates>,
+}
+
+impl<N: NodePrimitives> From<BuiltPayloadExecutedBlock<N>> for reth_chain_state::ExecutedBlock<N> {
+    fn from(block: BuiltPayloadExecutedBlock<N>) -> Self {
+        Self {
+            recovered_block: block.recovered_block,
+            execution_output: block.execution_output,
+            hashed_state: block.hashed_state,
+            trie_updates: block.trie_updates,
+        }
+    }
+}
 
 /// Represents a successfully built execution payload (block).
 ///
@@ -30,7 +58,7 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
     /// Returns the complete execution result including state updates.
     ///
     /// Returns `None` if execution data is not available or not tracked.
-    fn executed_block(&self) -> Option<ExecutedBlock<Self::Primitives>> {
+    fn executed_block(&self) -> Option<BuiltPayloadExecutedBlock<Self::Primitives>> {
         None
     }
 

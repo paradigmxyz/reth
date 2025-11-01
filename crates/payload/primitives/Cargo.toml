@@ -17,6 +17,8 @@ reth-primitives-traits.workspace = true
 reth-chainspec.workspace = true
 reth-errors.workspace = true
 reth-chain-state.workspace = true
+reth-execution-types.workspace = true
+reth-trie-common.workspace = true
 
 # alloy
 alloy-eips.workspace = true

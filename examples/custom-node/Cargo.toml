@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 # reth
-reth-chain-state.workspace = true
 reth-codecs.workspace = true
 reth-network-peers.workspace = true
 reth-node-builder.workspace = true
