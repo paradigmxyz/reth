@@ -155,7 +155,7 @@ where
         let mut offsets = Vec::<i64>::with_capacity(block_count);
         let mut position = VERSION_ENTRY_SIZE as i64;
         let mut blocks_written = 0;
-        let mut final_header_data = Vec::new();
+        let mut final_header_hash: Option<[u8; 32]> = None;
 
         for (i, header) in headers.into_iter().enumerate() {
             let expected_block_number = start_block + i as u64;
@@ -167,9 +167,11 @@ where
                 &mut total_difficulty,
             )?;
 
-            // Save last block's header data for accumulator
-            if expected_block_number == end_block {
-                final_header_data = compressed_header.data.clone();
+            // Save last block's header hash for accumulator (only first 32 bytes needed)
+            if expected_block_number == end_block && compressed_header.data.len() >= 32 {
+                let mut hash_bytes = [0u8; 32];
+                hash_bytes.copy_from_slice(&compressed_header.data[0..32]);
+                final_header_hash = Some(hash_bytes);
             }
 
             let difficulty = TotalDifficulty::new(total_difficulty);
@@ -207,8 +209,7 @@ where
             }
         }
         if blocks_written > 0 {
-            let accumulator_hash =
-                B256::from_slice(&final_header_data[0..32.min(final_header_data.len())]);
+            let accumulator_hash = final_header_hash.map(B256::from).unwrap_or_else(|| B256::ZERO);
             let accumulator = Accumulator::new(accumulator_hash);
             let block_index = BlockIndex::new(start_block, offsets);
 
