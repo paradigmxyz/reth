@@ -7,9 +7,10 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_fs_util as fs;
 use std::{
+    borrow::Cow,
     io::{self, Read, Write},
     path::Path,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 use tar::Archive;
@@ -22,24 +23,110 @@ const MERKLE_BASE_URL: &str = "https://downloads.merkle.io";
 const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
 const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
 
+/// Global static download defaults
+static DOWNLOAD_DEFAULTS: OnceLock<DownloadDefaults> = OnceLock::new();
+
+/// Download configuration defaults
+///
+/// Global defaults can be set via [`DownloadDefaults::try_init`].
+#[derive(Debug, Clone)]
+pub struct DownloadDefaults {
+    /// List of available snapshot sources
+    pub available_snapshots: Vec<Cow<'static, str>>,
+    /// Default base URL for snapshots
+    pub default_base_url: Cow<'static, str>,
+    /// Optional custom long help text that overrides the generated help
+    pub long_help: Option<String>,
+}
+
+impl DownloadDefaults {
+
+    /// Initialize the global download defaults with this configuration
+    pub fn try_init(self) -> Result<(), Self> {
+        DOWNLOAD_DEFAULTS.set(self)
+    }
+
+    /// Get a reference to the global download defaults
+    pub fn get_global() -> &'static DownloadDefaults {
+        DOWNLOAD_DEFAULTS.get_or_init(DownloadDefaults::default_download_defaults)
+    }
+
+    /// Default download configuration with defaults from merkle.io and publicnode
+    pub fn default_download_defaults() -> Self {
+        Self {
+            available_snapshots: vec![
+                Cow::Borrowed("https://www.merkle.io/snapshots (default, mainnet archive)"),
+                Cow::Borrowed("https://publicnode.com/snapshots (full nodes & testnets)"),
+            ],
+            default_base_url: Cow::Borrowed(MERKLE_BASE_URL),
+            long_help: None,
+        }
+    }
+
+    /// Generates the long help text for the download URL argument using these defaults.
+    ///
+    /// If a custom long_help is set, it will be returned. Otherwise, help text is generated
+    /// from the available_snapshots list.
+    pub fn long_help(&self) -> String {
+        if let Some(ref custom_help) = self.long_help {
+            return custom_help.clone();
+        }
+
+        let mut help = String::from(
+            "Specify a snapshot URL or let the command propose a default one.\n\nAvailable snapshot sources:\n",
+        );
+
+        for source in &self.available_snapshots {
+            help.push_str("- ");
+            help.push_str(source);
+            help.push('\n');
+        }
+
+        help.push_str(
+            "\nIf no URL is provided, the latest mainnet archive snapshot\nwill be proposed for download from ",
+        );
+        help.push_str(self.default_base_url.as_ref());
+        help
+    }
+
+    /// Add a snapshot source to the list
+    pub fn with_snapshot(mut self, source: impl Into<Cow<'static, str>>) -> Self {
+        self.available_snapshots.push(source.into());
+        self
+    }
+
+    /// Replace all snapshot sources
+    pub fn with_snapshots(mut self, sources: Vec<Cow<'static, str>>) -> Self {
+        self.available_snapshots = sources;
+        self
+    }
+
+    /// Set the default base URL, e.g. `https://downloads.merkle.io`.
+    pub fn with_base_url(mut self, url: impl Into<Cow<'static, str>>) -> Self {
+        self.default_base_url = url.into();
+        self
+    }
+
+    /// Builder: Set custom long help text, overriding the generated help
+    pub fn with_long_help(mut self, help: impl Into<String>) -> Self {
+        self.long_help = Some(help.into());
+        self
+    }
+}
+
+impl Default for DownloadDefaults {
+    fn default() -> Self {
+        Self::default_download_defaults()
+    }
+}
+
 #[derive(Debug, Parser)]
 pub struct DownloadCommand<C: ChainSpecParser> {
     #[command(flatten)]
     env: EnvironmentArgs<C>,
 
-    #[arg(
-        long,
-        short,
-        help = "Custom URL to download the snapshot from",
-        long_help = "Specify a snapshot URL or let the command propose a default one.\n\
-        \n\
-        Available snapshot sources:\n\
-        - https://www.merkle.io/snapshots (default, mainnet archive)\n\
-        - https://publicnode.com/snapshots (full nodes & testnets)\n\
-        \n\
-        If no URL is provided, the latest mainnet archive snapshot\n\
-        will be proposed for download from merkle.io"
-    )]
+    /// Custom URL to download the snapshot from
+    #[arg(long, short, long_help = DownloadDefaults::get_global().long_help())]
     url: Option<String>,
 }
 
@@ -207,9 +294,10 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-// Builds default URL for latest mainnet archive  snapshot
+// Builds default URL for latest mainnet archive snapshot using configured defaults
 async fn get_latest_snapshot_url() -> Result<String> {
-    let latest_url = format!("{MERKLE_BASE_URL}/latest.txt");
+    let base_url = &DownloadDefaults::get_global().default_base_url;
+    let latest_url = format!("{base_url}/latest.txt");
     let filename = Client::new()
         .get(latest_url)
         .send()
@@ -220,5 +308,64 @@ async fn get_latest_snapshot_url() -> Result<String> {
         .trim()
         .to_string();
 
-    Ok(format!("{MERKLE_BASE_URL}/{filename}"))
+    Ok(format!("{base_url}/{filename}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_download_defaults_builder() {
+        let defaults = DownloadDefaults::default()
+            .with_snapshot("https://example.com/snapshots (example)")
+            .with_base_url("https://example.com");
+
+        assert_eq!(defaults.default_base_url, "https://example.com");
+        assert_eq!(defaults.available_snapshots.len(), 3); // 2 defaults + 1 added
+    }
+
+    #[test]
+    fn test_download_defaults_replace_snapshots() {
+        let defaults = DownloadDefaults::default().with_snapshots(vec![
+            Cow::Borrowed("https://custom1.com"),
+            Cow::Borrowed("https://custom2.com"),
+        ]);
+
+        assert_eq!(defaults.available_snapshots.len(), 2);
+        assert_eq!(defaults.available_snapshots[0], "https://custom1.com");
+    }
+
+    #[test]
+    fn test_long_help_generation() {
+        let defaults = DownloadDefaults::default();
+        let help = defaults.long_help();
+
+        assert!(help.contains("Available snapshot sources:"));
+        assert!(help.contains("merkle.io"));
+        assert!(help.contains("publicnode.com"));
+    }
+
+    #[test]
+    fn test_long_help_override() {
+        let custom_help = "This is custom help text for downloading snapshots.";
+        let defaults = DownloadDefaults::default().with_long_help(custom_help);
+
+        let help = defaults.long_help();
+        assert_eq!(help, custom_help);
+        assert!(!help.contains("Available snapshot sources:"));
+    }
+
+    #[test]
+    fn test_builder_chaining() {
+        let defaults = DownloadDefaults::default()
+            .with_base_url("https://custom.example.com")
+            .with_snapshot("https://snapshot1.com")
+            .with_snapshot("https://snapshot2.com")
+            .with_long_help("Custom help for snapshots");
+
+        assert_eq!(defaults.default_base_url, "https://custom.example.com");
+        assert_eq!(defaults.available_snapshots.len(), 4); // 2 defaults + 2 added
+        assert_eq!(defaults.long_help, Some("Custom help for snapshots".to_string()));
+    }
 }
