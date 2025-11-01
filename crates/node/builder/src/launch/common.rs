@@ -469,7 +469,7 @@ where
             self.right().clone(),
             self.chain_spec(),
             StaticFileProvider::read_write(self.data_dir().static_files())?,
-        )
+        )?
         .with_prune_modes(self.prune_modes())
         .with_static_files_metrics();
 
