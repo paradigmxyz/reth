@@ -40,7 +40,7 @@ reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-ethereum-primitives.workspace = true
-reth-node-ethereum = { workspace = true, features = ["js-tracer"] }
+reth-node-ethereum.workspace = true
 reth-node-builder.workspace = true
 reth-node-metrics.workspace = true
 reth-consensus.workspace = true
@@ -67,11 +67,17 @@ backon.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc", "otlp", "reth-revm/portable"]
+default = ["jemalloc", "otlp", "reth-revm/portable", "js-tracer"]
 
 otlp = [
     "reth-ethereum-cli/otlp",
     "reth-node-core/otlp",
+]
+js-tracer = [
+	"reth-node-builder/js-tracer",
+	"reth-node-ethereum/js-tracer",
+	"reth-rpc/js-tracer",
+	"reth-rpc-eth-types/js-tracer"
 ]
 
 dev = ["reth-ethereum-cli/dev"]

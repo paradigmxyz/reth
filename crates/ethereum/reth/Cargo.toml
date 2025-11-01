@@ -144,7 +144,13 @@ rpc = [
     "dep:alloy-rpc-types-engine",
 ]
 tasks = ["dep:reth-tasks"]
-js-tracer = ["rpc", "reth-rpc/js-tracer"]
+js-tracer = [
+	"rpc",
+	"reth-rpc/js-tracer",
+	"reth-node-builder?/js-tracer",
+	"reth-node-ethereum?/js-tracer",
+	"reth-rpc-eth-types?/js-tracer"
+]
 network = ["dep:reth-network", "tasks", "dep:reth-network-api", "dep:reth-eth-wire"]
 provider = ["storage-api", "tasks", "dep:reth-provider", "dep:reth-db", "dep:reth-codecs"]
 storage-api = ["dep:reth-storage-api"]

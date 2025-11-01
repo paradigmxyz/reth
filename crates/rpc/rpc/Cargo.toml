@@ -106,4 +106,8 @@ rand.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
 
 [features]
-js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
+js-tracer = [
+	"revm-inspectors/js-tracer",
+	"reth-rpc-eth-types/js-tracer",
+	"reth-rpc-eth-api/js-tracer"
+]
