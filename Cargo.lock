@@ -7473,6 +7473,7 @@ dependencies = [
  "reth-evm",
  "reth-exex",
  "reth-fs-util",
+ "reth-libmdbx",
  "reth-net-nat",
  "reth-network",
  "reth-network-p2p",

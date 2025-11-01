@@ -18,7 +18,7 @@ pub use debug::{DebugArgs, InvalidBlockHookType, InvalidBlockSelection};
 
 /// DatabaseArgs struct for configuring the database
 mod database;
-pub use database::DatabaseArgs;
+pub use database::{parse_byte_size, ByteSize, DatabaseArgs};
 
 /// LogArgs struct for configuring the logger
 mod log;
