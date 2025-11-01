@@ -14,7 +14,7 @@ use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNo
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
 use reth_tracing::{FileWorkerGuard, Layers};
-use reth_tracing_otlp::OtlpProtocol;
+use reth_tracing_otlp::{OtlpConfig, OtlpProtocol};
 use std::{fmt, sync::Arc};
 use tracing::info;
 use url::Url;
@@ -141,31 +141,19 @@ where
         endpoint: &Url,
         runner: &CliRunner,
     ) -> Result<()> {
-        let endpoint = endpoint.clone();
         let protocol = self.cli.traces.protocol;
         let filter_level = self.cli.traces.otlp_filter.clone();
         let sample_ratio = self.cli.traces.sample_ratio;
 
+        let otlp_config =
+            OtlpConfig::new("reth".to_string(), endpoint.clone(), protocol, sample_ratio);
+
         match protocol {
             OtlpProtocol::Grpc => {
-                runner.block_on(async {
-                    layers.with_span_layer(
-                        "reth".to_string(),
-                        endpoint,
-                        filter_level,
-                        protocol,
-                        sample_ratio,
-                    )
-                })?;
+                runner.block_on(async { layers.with_span_layer(otlp_config, filter_level) })?;
             }
             OtlpProtocol::Http => {
-                layers.with_span_layer(
-                    "reth".to_string(),
-                    endpoint,
-                    filter_level,
-                    protocol,
-                    sample_ratio,
-                )?;
+                layers.with_span_layer(otlp_config, filter_level)?;
             }
         }
 

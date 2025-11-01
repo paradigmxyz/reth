@@ -26,8 +26,7 @@ tracing-logfmt.workspace = true
 clap = { workspace = true, features = ["derive"] }
 eyre.workspace = true
 rolling-file.workspace = true
-url = { workspace = true, optional = true }
 
 [features]
 default = ["otlp"]
-otlp = ["reth-tracing-otlp", "dep:url"]
+otlp = ["reth-tracing-otlp"]

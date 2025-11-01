@@ -29,27 +29,26 @@ const HTTP_TRACE_ENDPOINT: &str = "/v1/traces";
 ///
 /// This layer can be added to a [`tracing_subscriber::Registry`] to enable `OpenTelemetry` tracing
 /// with OTLP export to an url.
-pub fn span_layer<S>(
-    service_name: impl Into<Value>,
-    endpoint: &Url,
-    protocol: OtlpProtocol,
-    sample_ratio: Option<f64>,
-) -> eyre::Result<OpenTelemetryLayer<S, SdkTracer>>
+pub fn span_layer<S>(otlp_config: OtlpConfig) -> eyre::Result<OpenTelemetryLayer<S, SdkTracer>>
 where
     for<'span> S: Subscriber + LookupSpan<'span>,
 {
     global::set_text_map_propagator(TraceContextPropagator::new());
 
-    let resource = build_resource(service_name);
+    let resource = build_resource(otlp_config.service_name);
 
     let span_builder = SpanExporter::builder();
 
-    let span_exporter = match protocol {
-        OtlpProtocol::Http => span_builder.with_http().with_endpoint(endpoint.as_str()).build()?,
-        OtlpProtocol::Grpc => span_builder.with_tonic().with_endpoint(endpoint.as_str()).build()?,
+    let span_exporter = match otlp_config.protocol {
+        OtlpProtocol::Http => {
+            span_builder.with_http().with_endpoint(otlp_config.endpoint.as_str()).build()?
+        }
+        OtlpProtocol::Grpc => {
+            span_builder.with_tonic().with_endpoint(otlp_config.endpoint.as_str()).build()?
+        }
     };
 
-    let sampler = build_sampler_ratio(sample_ratio)?;
+    let sampler = build_sampler_ratio(otlp_config.sample_ratio)?;
 
     let tracer_provider = SdkTracerProvider::builder()
         .with_resource(resource)
@@ -61,6 +60,31 @@ where
 
     let tracer = tracer_provider.tracer("reth");
     Ok(tracing_opentelemetry::layer().with_tracer(tracer))
+}
+
+/// Configuration for OTLP trace export.
+#[derive(Debug, Clone)]
+pub struct OtlpConfig {
+    /// Service name for trace identification
+    service_name: String,
+    /// Otlp endpoint URL
+    endpoint: Url,
+    /// Transport protocol, HTTP or gRPC
+    protocol: OtlpProtocol,
+    /// Optional sampling ratio, from 0.0 to 1.0
+    pub sample_ratio: Option<f64>,
+}
+
+impl OtlpConfig {
+    /// Creates a new OTLP configuration.
+    pub fn new(
+        service_name: impl Into<String>,
+        endpoint: Url,
+        protocol: OtlpProtocol,
+        sample_ratio: Option<f64>,
+    ) -> Self {
+        Self { service_name: service_name.into(), endpoint, protocol, sample_ratio }
+    }
 }
 
 // Builds OTLP resource with service information.
