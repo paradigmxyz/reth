@@ -8,9 +8,10 @@ use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress, BlockNumberAddressRange},
     tables,
     transaction::DbTx,
-    DatabaseError,
 };
 use reth_execution_errors::StateRootError;
+use reth_storage_api::{BlockNumReader, ChangeSetReader};
+use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot,
@@ -18,7 +19,7 @@ use reth_trie::{
 };
 use std::{
     collections::HashMap,
-    ops::{RangeBounds, RangeInclusive},
+    ops::{Bound, RangeBounds, RangeInclusive},
 };
 use tracing::{debug, instrument};
 
@@ -129,10 +130,13 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
 pub trait DatabaseHashedPostState<TX>: Sized {
     /// Initializes [`HashedPostState`] from reverts. Iterates over state reverts in the specified
     /// range and aggregates them into hashed state in reverse.
+    ///
+    /// Requires a start bound in the range, otherwise this will return an error.
     fn from_reverts<KH: KeyHasher>(
+        provider: impl ChangeSetReader + BlockNumReader,
         tx: &TX,
         range: impl RangeBounds<BlockNumber>,
-    ) -> Result<Self, DatabaseError>;
+    ) -> Result<Self, ProviderError>;
 }
 
 impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
@@ -226,17 +230,35 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
 }
 
 impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
-    #[instrument(target = "trie::db", skip(tx), fields(range))]
+    #[instrument(target = "trie::db", skip(tx, provider), fields(range))]
     fn from_reverts<KH: KeyHasher>(
+        provider: impl ChangeSetReader + BlockNumReader,
         tx: &TX,
         range: impl RangeBounds<BlockNumber>,
-    ) -> Result<Self, DatabaseError> {
+    ) -> Result<Self, ProviderError> {
+        // We have to provide a concrete range to `account_changesets_range`. But the changeset read
+        // operations in the DB take either a `Range` or `RangeFrom`, using `RangeBounds` to create
+        // something iterable. It does this using `RangeWalker` which is not compatible with static
+        // files.
+        //
+        // To make this work with static file changesets, we get the highest block number and
+        // disallow lack of a start bound.
+        //
+        // TODO: resolve the API difference somehow
+        let Bound::Included(start) = range.start_bound() else {
+            return Err(ProviderError::UnboundedStartUnsupported);
+        };
+
+        let end = match range.end_bound() {
+            Bound::Included(n) => *n + 1,
+            Bound::Excluded(n) => *n,
+            Bound::Unbounded => provider.best_block_number()? + 1,
+        };
+
         // Iterate over account changesets and record value before first occurring account change.
-        let account_range = (range.start_bound(), range.end_bound()); // to avoid cloning
         let mut accounts = HashMap::new();
-        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
-        for entry in account_changesets_cursor.walk_range(account_range)? {
-            let (_, AccountBeforeTx { address, info }) = entry?;
+        for entry in provider.account_changesets_range(*start..end)? {
+            let (_, AccountBeforeTx { address, info }) = entry;
             accounts.entry(address).or_insert(info);
         }
 

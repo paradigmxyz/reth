@@ -96,7 +96,8 @@ where
                     Receipt: Value + Compact,
                 >,
             > + StageCheckpointReader
-                          + BlockReader,
+                          + BlockReader
+                          + reth_provider::ChangeSetReader,
         >,
 {
     /// Listen for events on the `static_file_producer`.

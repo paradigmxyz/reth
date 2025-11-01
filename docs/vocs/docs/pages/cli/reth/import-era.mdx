@@ -73,6 +73,13 @@ Database:
       --db.sync-mode <SYNC_MODE>
           Controls how aggressively the database synchronizes data to disk
 
+      --db.enable-v2-static-files
+          Explicitly enabled static file writers.
+
+          For release / backwards compatibility purposes, some static file writers are disabled by default. See `read_only_segments` in `StaticFileProviderInner`.
+
+          This flag enables writing for these static file segments.
+
       --path <IMPORT_ERA_PATH>
           The path to a directory for import.
 

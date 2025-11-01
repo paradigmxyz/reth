@@ -32,10 +32,10 @@ use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
-    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
-    StateRootProvider, TrieReader,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
+    StateProviderFactory, StateReader, StateRootProvider, TrieReader,
 };
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
@@ -129,8 +129,15 @@ impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
-            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            Provider: BlockReader
+                          + TrieReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
+        + ChangeSetReader
+        + BlockNumReader
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
@@ -1029,10 +1036,17 @@ pub trait EngineValidator<
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
     P: DatabaseProviderFactory<
-            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            Provider: BlockReader
+                          + TrieReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
+        + ChangeSetReader
+        + BlockNumReader
         + HashedPostStateProvider
         + Clone
         + 'static,

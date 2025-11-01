@@ -12,7 +12,9 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
-use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{
+    b256, keccak256, map::HashSet, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
+};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
@@ -40,7 +42,7 @@ use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
     DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
-use reth_storage_api::{BlockBodyIndicesProvider, DBProvider};
+use reth_storage_api::{BlockBodyIndicesProvider, ChangeSetReader, DBProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
@@ -98,8 +100,13 @@ impl<N> Clone for StaticFileProvider<N> {
 
 impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Creates a new [`StaticFileProvider`] with the given [`StaticFileAccess`].
-    fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
-        let provider = Self(Arc::new(StaticFileProviderInner::new(path, access)?));
+    fn new(
+        path: impl AsRef<Path>,
+        access: StaticFileAccess,
+        enable_v2_static_files: bool,
+    ) -> ProviderResult<Self> {
+        let provider =
+            Self(Arc::new(StaticFileProviderInner::new(path, access, enable_v2_static_files)?));
         provider.initialize_index()?;
         Ok(provider)
     }
@@ -114,7 +121,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// See also [`StaticFileProvider::watch_directory`].
     pub fn read_only(path: impl AsRef<Path>, watch_directory: bool) -> ProviderResult<Self> {
-        let provider = Self::new(path, StaticFileAccess::RO)?;
+        let provider = Self::new(path, StaticFileAccess::RO, false)?;
 
         if watch_directory {
             provider.watch_directory();
@@ -124,8 +131,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Creates a new [`StaticFileProvider`] with read-write access.
-    pub fn read_write(path: impl AsRef<Path>) -> ProviderResult<Self> {
-        Self::new(path, StaticFileAccess::RW)
+    pub fn read_write(
+        path: impl AsRef<Path>,
+        enable_v2_static_files: bool,
+    ) -> ProviderResult<Self> {
+        Self::new(path, StaticFileAccess::RW, enable_v2_static_files)
     }
 
     /// Watches the directory for changes and updates the in-memory index when modifications
@@ -260,6 +270,10 @@ pub struct StaticFileProviderInner<N> {
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Access rights of the provider.
     access: StaticFileAccess,
+    /// Whether or not to write to specific segments.
+    ///
+    /// Writers will not be returned for these segments.
+    read_only_segments: HashSet<StaticFileSegment>,
     /// Number of blocks per file.
     blocks_per_file: u64,
     /// Write lock for when access is [`StaticFileAccess::RW`].
@@ -270,11 +284,22 @@ pub struct StaticFileProviderInner<N> {
 
 impl<N: NodePrimitives> StaticFileProviderInner<N> {
     /// Creates a new [`StaticFileProviderInner`].
-    fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
+    fn new(
+        path: impl AsRef<Path>,
+        access: StaticFileAccess,
+        enable_v2_static_files: bool,
+    ) -> ProviderResult<Self> {
         let _lock_file = if access.is_read_write() {
             StorageLock::try_acquire(path.as_ref()).map_err(ProviderError::other)?.into()
         } else {
             None
+        };
+
+        // do not set read only segments if v2 is enabled
+        let read_only_segments = if enable_v2_static_files {
+            Default::default()
+        } else {
+            HashSet::from_iter([StaticFileSegment::AccountChangeSets])
         };
 
         let provider = Self {
@@ -287,6 +312,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             path: path.as_ref().to_path_buf(),
             metrics: None,
             access,
+            read_only_segments,
             blocks_per_file: DEFAULT_BLOCKS_PER_STATIC_FILE,
             _lock_file,
             _pd: Default::default(),
@@ -797,6 +823,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         for segment in StaticFileSegment::iter() {
+            // Skip AccountChangeSets if no static files exist for it yet (backward compatibility)
+            if segment == StaticFileSegment::AccountChangeSets &&
+                self.get_highest_static_file_block(segment).is_none()
+            {
+                continue
+            }
+
             if has_receipt_pruning && segment.is_receipts() {
                 // Pruned nodes (including full node) do not store receipts as static files.
                 continue
@@ -903,6 +936,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         highest_tx,
                         highest_block,
                     )?,
+                StaticFileSegment::AccountChangeSets => self
+                    .ensure_invariants::<_, tables::AccountChangeSets>(
+                        provider,
+                        segment,
+                        highest_tx,
+                        highest_block,
+                    )?,
             } {
                 update_unwind_target(unwind);
             }
@@ -988,7 +1028,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .get_stage_checkpoint(match segment {
                 StaticFileSegment::Headers => StageId::Headers,
                 StaticFileSegment::Transactions => StageId::Bodies,
-                StaticFileSegment::Receipts => StageId::Execution,
+                StaticFileSegment::Receipts | StaticFileSegment::AccountChangeSets => {
+                    StageId::Execution
+                }
             })?
             .unwrap_or_default()
             .block_number;
@@ -1020,6 +1062,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             if segment.is_headers() {
                 // TODO(joshie): is_block_meta
                 writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
+            } else if segment.is_account_changesets() {
+                // For account changesets, prune to the target block
+                writer.prune_account_changesets(checkpoint_block_number)?;
             } else if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
                 // todo joshie: is querying block_body_indices a potential issue once bbi is moved
                 // to sf as well
@@ -1338,6 +1383,40 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
         &self.static_files_tx_index
     }
+
+    /// Get account changesets for a range of blocks, fetching from static files if they exist, and
+    /// otherwise fetching from the database.
+    pub fn get_account_changesets_range<FD>(
+        &self,
+        block_range: Range<BlockNumber>,
+        mut fetch_from_database: FD,
+    ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>>
+    where
+        FD: FnMut(
+            Range<BlockNumber>,
+        ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>>,
+    {
+        let mut changesets = Vec::new();
+        let highest_static_block =
+            self.get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+
+        if let Some(highest) = highest_static_block {
+            let static_end = block_range.end.min(highest + 1);
+            if block_range.start < static_end {
+                for block in block_range.start..static_end {
+                    let block_changesets = self.account_block_changeset(block)?;
+                    for changeset in block_changesets {
+                        changesets.push((block, changeset));
+                    }
+                }
+            }
+        } else {
+            // All from database
+            changesets = fetch_from_database(block_range)?;
+        }
+
+        Ok(changesets)
+    }
 }
 
 /// Helper trait to manage different [`StaticFileProviderRW`] of an `Arc<StaticFileProvider`
@@ -1374,7 +1453,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         block: BlockNumber,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
-        if self.access.is_read_only() {
+        if self.access.is_read_only() || self.read_only_segments.contains(&segment) {
             return Err(ProviderError::ReadOnlyStaticFileAccess)
         }
 
@@ -1397,6 +1476,115 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
 
     fn has_unwind_queued(&self) -> bool {
         self.writers.has_unwind_queued()
+    }
+}
+
+impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
+    fn account_block_changeset(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<Vec<reth_db::models::AccountBeforeTx>> {
+        let provider = match self.get_segment_provider_from_block(
+            StaticFileSegment::AccountChangeSets,
+            block_number,
+            None,
+        ) {
+            Ok(provider) => provider,
+            Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(Vec::new()),
+            Err(err) => return Err(err),
+        };
+
+        if let Some(offset) = provider.user_header().changeset_offset(block_number) {
+            let mut cursor = provider.cursor()?;
+            let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
+
+            for i in offset.changeset_range() {
+                if let Some(change) =
+                    cursor.get_one::<reth_db::static_file::AccountChangesetMask>(i.into())?
+                {
+                    changeset.push(change)
+                }
+            }
+            Ok(changeset)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    fn get_account_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<reth_db::models::AccountBeforeTx>> {
+        trace!(target: "provider::static_file", ?block_number, ?address, "Getting account before block");
+        let provider = match self.get_segment_provider_from_block(
+            StaticFileSegment::AccountChangeSets,
+            block_number,
+            None,
+        ) {
+            Ok(provider) => provider,
+            Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+
+        let user_header = provider.user_header();
+        trace!(target: "provider::static_file", ?user_header, "Got user header");
+
+        let Some(offset) = user_header.changeset_offset(block_number) else {
+            trace!(target: "provider::static_file", ?block_number, ?address, "Returning None (no offset)");
+            return Ok(None);
+        };
+
+        let mut cursor = provider.cursor()?;
+        let range = offset.changeset_range();
+        let mut low = range.start;
+        let mut high = range.end;
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if let Some(change) =
+                cursor.get_one::<reth_db::static_file::AccountChangesetMask>(mid.into())?
+            {
+                if change.address < address {
+                    low = mid + 1;
+                } else {
+                    high = mid;
+                }
+            } else {
+                // This is not expected but means we are out of the range / file somehow, and can't
+                // continue
+                low = range.end;
+                break;
+            }
+        }
+
+        if low < range.end &&
+            let Some(change) = cursor
+                .get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
+                .filter(|change| change.address == address)
+        {
+            trace!(target: "provider::static_file", ?block_number, ?address, ?change, "Returning change (end)");
+            return Ok(Some(change));
+        }
+
+        trace!(target: "provider::static_file", ?block_number, ?address, "Returning None (end)");
+        Ok(None)
+    }
+
+    fn account_changesets_range(
+        &self,
+        range: core::ops::Range<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>> {
+        let mut changesets = Vec::new();
+
+        for block_num in range {
+            let block_changesets = self.account_block_changeset(block_num)?;
+            for changeset in block_changesets {
+                changesets.push((block_num, changeset));
+            }
+        }
+
+        Ok(changesets)
     }
 }
 
