@@ -56,10 +56,14 @@ impl<T, H> TrieWitness<T, H> {
         }
     }
 
-    /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> TrieWitness<TF, H> {
+    /// Applies given operation on and sets the trie cursor factory.
+    pub fn with_trie_cursor_factory<TF, F>(self, f: F) -> TrieWitness<TF, H>
+    where
+        F: FnOnce(T) -> TF,
+        TF: TrieCursorFactory,
+    {
         TrieWitness {
-            trie_cursor_factory,
+            trie_cursor_factory: f(self.trie_cursor_factory),
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             always_include_root_node: self.always_include_root_node,
@@ -67,11 +71,15 @@ impl<T, H> TrieWitness<T, H> {
         }
     }
 
-    /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> TrieWitness<T, HF> {
+    /// Applies given operation on and sets the hashed cursor factory.
+    pub fn with_hashed_cursor_factory<HF, F>(self, f: F) -> TrieWitness<T, HF>
+    where
+        F: FnOnce(H) -> HF,
+        HF: HashedCursorFactory,
+    {
         TrieWitness {
             trie_cursor_factory: self.trie_cursor_factory,
-            hashed_cursor_factory,
+            hashed_cursor_factory: f(self.hashed_cursor_factory),
             prefix_sets: self.prefix_sets,
             always_include_root_node: self.always_include_root_node,
             witness: self.witness,
@@ -90,6 +98,25 @@ impl<T, H> TrieWitness<T, H> {
     pub const fn always_include_root_node(mut self) -> Self {
         self.always_include_root_node = true;
         self
+    }
+
+    /// Returns reference to [`TrieCursorFactory`] type.
+    pub const fn trie_cursor_factory(&self) -> &T {
+        &self.trie_cursor_factory
+    }
+
+    /// Returns reference to [`HashedCursorFactory`] type.
+    pub const fn hashed_cursor_factory(&self) -> &H {
+        &self.hashed_cursor_factory
+    }
+
+    /// Constructs a new instance from given database transaction.
+    pub fn from_tx<'a, TX>(tx: &'a TX) -> Self
+    where
+        T: From<&'a TX>,
+        H: From<&'a TX>,
+    {
+        Self::new(T::from(tx), H::from(tx))
     }
 }
 

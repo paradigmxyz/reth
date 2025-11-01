@@ -19,6 +19,15 @@ impl<T> DatabaseHashedCursorFactory<T> {
     }
 }
 
+impl<'a, TX> From<&'a TX> for DatabaseHashedCursorFactory<&'a TX>
+where
+    TX: DbTx,
+{
+    fn from(tx: &'a TX) -> Self {
+        Self::new(tx)
+    }
+}
+
 impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&TX> {
     type AccountCursor<'a>
         = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>
