@@ -96,9 +96,9 @@ reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 [features]
 default = []
 js-tracer = [
-	"reth-rpc/js-tracer",
-	"reth-node-ethereum/js-tracer",
-	"reth-rpc-eth-types/js-tracer"
+    "reth-rpc/js-tracer",
+    "reth-node-ethereum/js-tracer",
+    "reth-rpc-eth-types/js-tracer",
 ]
 test-utils = [
     "reth-db/test-utils",

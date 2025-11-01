@@ -74,10 +74,10 @@ otlp = [
     "reth-node-core/otlp",
 ]
 js-tracer = [
-	"reth-node-builder/js-tracer",
-	"reth-node-ethereum/js-tracer",
-	"reth-rpc/js-tracer",
-	"reth-rpc-eth-types/js-tracer"
+    "reth-node-builder/js-tracer",
+    "reth-node-ethereum/js-tracer",
+    "reth-rpc/js-tracer",
+    "reth-rpc-eth-types/js-tracer",
 ]
 
 dev = ["reth-ethereum-cli/dev"]
