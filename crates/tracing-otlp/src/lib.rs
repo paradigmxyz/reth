@@ -92,17 +92,17 @@ impl OtlpConfig {
     }
 
     /// Returns the OTLP endpoint URL.
-    pub fn endpoint(&self) -> &Url {
+    pub const fn endpoint(&self) -> &Url {
         &self.endpoint
     }
 
     /// Returns the transport protocol.
-    pub fn protocol(&self) -> OtlpProtocol {
+    pub const fn protocol(&self) -> OtlpProtocol {
         self.protocol
     }
 
     /// Returns the sampling ratio.
-    pub fn sample_ratio(&self) -> Option<f64> {
+    pub const fn sample_ratio(&self) -> Option<f64> {
         self.sample_ratio
     }
 }
