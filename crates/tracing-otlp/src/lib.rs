@@ -35,7 +35,7 @@ where
 {
     global::set_text_map_propagator(TraceContextPropagator::new());
 
-    let resource = build_resource(otlp_config.service_name);
+    let resource = build_resource(otlp_config.service_name.clone());
 
     let span_builder = SpanExporter::builder();
 
@@ -58,7 +58,7 @@ where
 
     global::set_tracer_provider(tracer_provider.clone());
 
-    let tracer = tracer_provider.tracer("reth");
+    let tracer = tracer_provider.tracer(otlp_config.service_name);
     Ok(tracing_opentelemetry::layer().with_tracer(tracer))
 }
 
