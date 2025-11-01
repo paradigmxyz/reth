@@ -448,12 +448,14 @@ mod tests {
                     nonce: account.nonce,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
+                    storage_id: None,
                 }),
                 original_info: (i == 0).then(|| AccountInfo {
                     balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
                     nonce: 0,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
+                    storage_id: None,
                 }),
                 storage,
                 status: AccountStatus::default(),
@@ -839,6 +841,7 @@ mod tests {
                 receipts: vec![],
                 requests: Requests::default(),
                 gas_used: 0,
+                block_access_list: Default::default(),
                 blob_gas_used: 0,
             },
         };

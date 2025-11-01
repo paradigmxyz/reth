@@ -314,6 +314,7 @@ mod tests {
                     receipts: vec![],
                     requests: Requests::default(),
                     gas_used: 1000,
+                    block_access_list: None,
                     blob_gas_used: 0,
                 },
             ))
@@ -407,10 +408,12 @@ mod tests {
                         nonce: 10,
                         code_hash: B256::random(),
                         code: Default::default(),
+                        storage_id: None,
                     },
                     storage,
                     status: AccountStatus::default(),
                     transaction_id: 0,
+                    ..Default::default()
                 },
             );
             state
