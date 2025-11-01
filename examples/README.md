@@ -49,7 +49,7 @@ See examples in a [dedicated repository](https://github.com/paradigmxyz/reth-exe
 | Example                                        | Description                                                                                                                |
 | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | [Trace pending transactions](./txpool-tracing) | Illustrates how to trace pending transactions as they arrive in the mempool                                                |
-| [Standalone txpool](./network-txpool)          | Illustrates how to use the network as a standalone component together with a transaction pool with a custom pool validator |
+| [Standalone txpool](./network-txpool)          | Illustrates how to use a transaction pool with a custom pool validator integrated with the network component |
 
 ## P2P
 
