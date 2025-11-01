@@ -141,10 +141,11 @@ impl Layers {
         endpoint_exporter: Url,
         filter: EnvFilter,
         otlp_protocol: OtlpProtocol,
+        sample_ratio: Option<f64>,
     ) -> eyre::Result<()> {
         // Create the span provider
 
-        let span_layer = span_layer(service_name, &endpoint_exporter, otlp_protocol)
+        let span_layer = span_layer(service_name, &endpoint_exporter, otlp_protocol, sample_ratio)
             .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?
             .with_filter(filter);
 

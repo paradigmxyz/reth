@@ -148,4 +148,13 @@ Tracing:
           Defaults to TRACE if not specified.
 
           [default: debug]
+
+      --tracing-otlp-sampler-ratio <SAMPLE_RATIO>
+          Trace sampling ratio to control the percentage of traces to export.
+
+          Valid range: 0.0 to 1.0 - 1.0, default: Sample all traces - 0.01: Sample 1% of traces - 0.0: Disable sampling
+
+          Example: --tracing-otlp-sampler-ratio=0.0.
+
+          [env: OTEL_TRACES_SAMPLER_ARG=]
 ```

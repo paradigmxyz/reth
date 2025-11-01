@@ -1,7 +1,7 @@
 //! Opentelemetry tracing configuration through CLI args.
 
 use clap::Parser;
-use eyre::WrapErr;
+use eyre::{ensure, WrapErr};
 use reth_tracing::tracing_subscriber::EnvFilter;
 use reth_tracing_otlp::OtlpProtocol;
 use url::Url;
@@ -61,6 +61,23 @@ pub struct TraceArgs {
         help_heading = "Tracing"
     )]
     pub otlp_filter: EnvFilter,
+
+    /// Trace sampling ratio to control the percentage of traces to export.
+    ///
+    /// Valid range: 0.0 to 1.0
+    /// - 1.0, default: Sample all traces
+    /// - 0.01: Sample 1% of traces
+    /// - 0.0: Disable sampling
+    ///
+    /// Example: --tracing-otlp-sampler-ratio=0.0.
+    #[arg(
+        long = "tracing-otlp-sampler-ratio",
+        env = "OTEL_TRACES_SAMPLER_ARG",
+        global = true,
+        value_name = "SAMPLE_RATIO",
+        help_heading = "Tracing"
+    )]
+    pub sample_ratio: Option<f64>,
 }
 
 impl Default for TraceArgs {
@@ -69,6 +86,7 @@ impl Default for TraceArgs {
             otlp: None,
             protocol: OtlpProtocol::Http,
             otlp_filter: EnvFilter::from_default_env(),
+            sample_ratio: None,
         }
     }
 }
@@ -78,6 +96,14 @@ impl TraceArgs {
     pub fn validate(&mut self) -> eyre::Result<()> {
         if let Some(url) = &mut self.otlp {
             self.protocol.validate_endpoint(url)?;
+        }
+
+        if let Some(ratio) = &mut self.sample_ratio {
+            ensure!(
+                (0.0..=1.0).contains(ratio),
+                "Sample ratio must be between 0.0 and 1.0, got: {}",
+                ratio
+            )
         }
         Ok(())
     }

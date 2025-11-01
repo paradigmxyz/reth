@@ -12,7 +12,7 @@ use opentelemetry::{global, trace::TracerProvider, KeyValue, Value};
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{
     propagation::TraceContextPropagator,
-    trace::{SdkTracer, SdkTracerProvider},
+    trace::{Sampler, SdkTracer, SdkTracerProvider},
     Resource,
 };
 use opentelemetry_semantic_conventions::{attribute::SERVICE_VERSION, SCHEMA_URL};
@@ -33,6 +33,7 @@ pub fn span_layer<S>(
     service_name: impl Into<Value>,
     endpoint: &Url,
     protocol: OtlpProtocol,
+    sample_ratio: Option<f64>,
 ) -> eyre::Result<OpenTelemetryLayer<S, SdkTracer>>
 where
     for<'span> S: Subscriber + LookupSpan<'span>,
@@ -48,8 +49,11 @@ where
         OtlpProtocol::Grpc => span_builder.with_tonic().with_endpoint(endpoint.as_str()).build()?,
     };
 
+    let sampler = build_sampler_ratio(sample_ratio)?;
+
     let tracer_provider = SdkTracerProvider::builder()
         .with_resource(resource)
+        .with_sampler(sampler)
         .with_batch_exporter(span_exporter)
         .build();
 
@@ -65,6 +69,18 @@ fn build_resource(service_name: impl Into<Value>) -> Resource {
         .with_service_name(service_name)
         .with_schema_url([KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION"))], SCHEMA_URL)
         .build()
+}
+
+/// Builds the appropriate sampler based on the sample ratio.
+fn build_sampler_ratio(sample_ratio: Option<f64>) -> eyre::Result<Sampler> {
+    match sample_ratio {
+        // Default behavior: sample all traces
+        None | Some(1.0) => Ok(Sampler::ParentBased(Box::new(Sampler::AlwaysOn))),
+        // Don't sample anything
+        Some(0.0) => Ok(Sampler::ParentBased(Box::new(Sampler::AlwaysOff))),
+        // Sample based on trace ID ratio
+        Some(ratio) => Ok(Sampler::ParentBased(Box::new(Sampler::TraceIdRatioBased(ratio)))),
+    }
 }
 
 /// OTLP transport protocol type
