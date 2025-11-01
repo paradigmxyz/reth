@@ -175,14 +175,19 @@ impl SegmentHeader {
         self.segment
     }
 
+    /// Returns the expected block range.
+    pub const fn expected_block_range(&self) -> SegmentRangeInclusive {
+        self.expected_block_range
+    }
+
     /// Returns the block range.
-    pub const fn block_range(&self) -> Option<&SegmentRangeInclusive> {
-        self.block_range.as_ref()
+    pub const fn block_range(&self) -> Option<SegmentRangeInclusive> {
+        self.block_range
     }
 
     /// Returns the transaction range.
-    pub const fn tx_range(&self) -> Option<&SegmentRangeInclusive> {
-        self.tx_range.as_ref()
+    pub const fn tx_range(&self) -> Option<SegmentRangeInclusive> {
+        self.tx_range
     }
 
     /// The expected block start of the segment.
@@ -330,10 +335,19 @@ impl SegmentRangeInclusive {
         self.end
     }
 
+    /// Checks if the value is within the inclusive range.
+    pub const fn contains(&self, value: u64) -> bool {
+        value >= self.start && value <= self.end
+    }
+
     /// Returns the length of the inclusive range.
-    #[allow(clippy::len_without_is_empty)]
     pub const fn len(&self) -> u64 {
         self.end.saturating_sub(self.start).saturating_add(1)
+    }
+
+    /// Returns true if the range is empty.
+    pub const fn is_empty(&self) -> bool {
+        self.start > self.end
     }
 }
 
