@@ -48,7 +48,7 @@ where
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        static EMPTY_UPDATES: Vec<(B256, Option<U256>)> = Vec::new();
+        static EMPTY_UPDATES: Vec<(B256, U256)> = Vec::new();
 
         let post_state_storage = self.post_state.as_ref().storages.get(&hashed_address);
         let (storage_slots, wiped) = post_state_storage
@@ -65,16 +65,47 @@ where
     }
 }
 
+pub trait HashedPostStateValue: Copy + Clone + std::fmt::Debug {
+    type Wrapper: HashedPostStateCursorValue<Self> + Copy + Clone;
+}
+
+impl HashedPostStateValue for U256 {
+    type Wrapper = U256;
+}
+
+impl HashedPostStateValue for Account {
+    type Wrapper = Option<Account>;
+}
+
+pub trait HashedPostStateCursorValue<V> {
+    fn as_option(&self) -> Option<&V>;
+}
+
+impl HashedPostStateCursorValue<Account> for Option<Account> {
+    fn as_option(&self) -> Option<&Account> {
+        self.as_ref()
+    }
+}
+
+impl HashedPostStateCursorValue<U256> for U256 {
+    fn as_option(&self) -> Option<&U256> {
+        (*self != U256::ZERO).then_some(self)
+    }
+}
+
 /// A cursor to iterate over state updates and corresponding database entries.
 /// It will always give precedence to the data from the post state updates.
 #[derive(Debug)]
-pub struct HashedPostStateCursor<'a, C, V> {
+pub struct HashedPostStateCursor<'a, C, V>
+where
+    V: HashedPostStateValue,
+{
     /// The underlying `database_cursor`. If None then it is assumed there is no DB data.
     cursor: Option<C>,
     /// Entry that `database_cursor` is currently pointing to.
     cursor_entry: Option<(B256, V)>,
     /// Forward-only in-memory cursor over underlying V.
-    post_state_cursor: ForwardInMemoryCursor<'a, B256, Option<V>>,
+    post_state_cursor: ForwardInMemoryCursor<'a, B256, V::Wrapper>,
     /// The last hashed key that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_key: Option<B256>,
@@ -86,7 +117,8 @@ pub struct HashedPostStateCursor<'a, C, V> {
 impl<'a, C, V> HashedPostStateCursor<'a, C, V>
 where
     C: HashedCursor<Value = V>,
-    V: Copy + Clone + std::fmt::Debug,
+    V: HashedPostStateValue,
+    // W: HashedPostStateCursorValue<V> + Copy + Clone,
 {
     /// Creates a new post state cursor which combines a DB cursor and in-memory post state updates.
     ///
@@ -96,7 +128,7 @@ where
     ///   - For storage: Wiped storage (e.g., via `SELFDESTRUCT` - all previous storage destroyed)
     /// - `updates`: Pre-sorted post state updates where `Some(value)` indicates an update and
     ///   `None` indicates a deletion (destroyed account or zero-valued storage slot)
-    pub const fn new(cursor: Option<C>, updates: &'a [(B256, Option<V>)]) -> Self {
+    pub const fn new(cursor: Option<C>, updates: &'a [(B256, V::Wrapper)]) -> Self {
         Self {
             cursor,
             cursor_entry: None,
@@ -147,33 +179,37 @@ where
     /// node.
     fn choose_next_entry(&mut self) -> Result<Option<(B256, V)>, DatabaseError> {
         loop {
-            match (self.post_state_cursor.current().copied(), &self.cursor_entry) {
-                (Some((mem_key, None)), _)
-                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key < db_key) =>
-                {
-                    // If overlay has a removed node but DB cursor is exhausted or ahead of the
-                    // in-memory cursor then move ahead in-memory, as there might be further
-                    // non-removed overlay nodes.
-                    self.post_state_cursor.first_after(&mem_key);
+            match self.post_state_cursor.current().copied() {
+                Some((mem_key, wrapped_value)) => {
+                    match wrapped_value.as_option() {
+                        None => {
+                            // Overlay has a removed node
+                            if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key < db_key) {
+                                // DB cursor is exhausted or ahead of in-memory cursor, skip deleted entry
+                                self.post_state_cursor.first_after(&mem_key);
+                            } else if self.cursor_entry.as_ref().is_some_and(|(db_key, _)| &mem_key == db_key) {
+                                // Removed node matches DB entry, move both cursors
+                                self.post_state_cursor.first_after(&mem_key);
+                                self.cursor_next()?;
+                            } else {
+                                // mem_key > db_key, return db entry
+                                return Ok(self.cursor_entry)
+                            }
+                        }
+                        Some(value) => {
+                            // Overlay has a value
+                            if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key <= db_key) {
+                                // Return the overlay's value (prior to or equal to DB's node, or DB is exhausted)
+                                return Ok(Some((mem_key, *value)))
+                            } else {
+                                // mem_key > db_key, return db entry
+                                return Ok(self.cursor_entry)
+                            }
+                        }
+                    }
                 }
-                (Some((mem_key, None)), Some((db_key, _))) if &mem_key == db_key => {
-                    // If overlay has a removed node which is returned from DB then move both
-                    // cursors ahead to the next key.
-                    self.post_state_cursor.first_after(&mem_key);
-                    self.cursor_next()?;
-                }
-                (Some((mem_key, Some(node))), _)
-                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key <= db_key) =>
-                {
-                    // If overlay returns a node prior to the DB's node, or the DB is exhausted,
-                    // then we return the overlay's node.
-                    return Ok(Some((mem_key, node)))
-                }
-                // All other cases:
-                // - mem_key > db_key
-                // - overlay is exhausted
-                // Return the db_entry. If DB is also exhausted then this returns None.
-                _ => return Ok(self.cursor_entry),
+                // Overlay is exhausted, return db_entry
+                None => return Ok(self.cursor_entry),
             }
         }
     }
@@ -182,7 +218,7 @@ where
 impl<C, V> HashedCursor for HashedPostStateCursor<'_, C, V>
 where
     C: HashedCursor<Value = V>,
-    V: Copy + Clone + std::fmt::Debug,
+    V: HashedPostStateValue,
 {
     type Value = V;
 
@@ -241,7 +277,7 @@ where
 impl<C, V> HashedStorageCursor for HashedPostStateCursor<'_, C, V>
 where
     C: HashedStorageCursor<Value = V>,
-    V: Copy + Clone + std::fmt::Debug,
+    V: HashedPostStateValue,
 {
     /// Returns `true` if the account has no storage entries.
     ///
@@ -249,7 +285,7 @@ where
     /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         // Storage is not empty if it has non-zero slots.
-        if self.post_state_cursor.has_any(|(_, value)| value.is_some()) {
+        if self.post_state_cursor.has_any(|(_, value)| value.as_option().is_some()) {
             return Ok(false);
         }
 

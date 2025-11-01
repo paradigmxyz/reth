@@ -1813,8 +1813,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
 
             for (hashed_slot, value) in storage.storage_slots_ref() {
-                let v = value.unwrap_or(U256::ZERO);
-                let entry = StorageEntry { key: *hashed_slot, value: v };
+                let entry = StorageEntry { key: *hashed_slot, value: *value };
 
                 if let Some(db_entry) =
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&

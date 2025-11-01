@@ -428,7 +428,6 @@ impl HashedStorage {
         let mut storage_slots: Vec<_> = self
             .storage
             .into_iter()
-            .map(|(hashed_slot, value)| (hashed_slot, (!value.is_zero()).then_some(value)))
             .collect();
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
 
@@ -508,7 +507,7 @@ impl AsRef<Self> for HashedPostStateSorted {
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct HashedStorageSorted {
     /// Sorted collection of updated storage slots, None indicates zero valued.
-    pub storage_slots: Vec<(B256, Option<U256>)>,
+    pub storage_slots: Vec<(B256, U256)>,
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,
 }
@@ -520,7 +519,7 @@ impl HashedStorageSorted {
     }
 
     /// Returns reference to updated storage slots.
-    pub fn storage_slots_ref(&self) -> &[(B256, Option<U256>)] {
+    pub fn storage_slots_ref(&self) -> &[(B256, U256)] {
         &self.storage_slots
     }
 
@@ -1128,19 +1127,19 @@ mod tests {
         // Test normal extension
         let mut storage1 = HashedStorageSorted {
             storage_slots: vec![
-                (B256::from([1; 32]), Some(U256::from(10))),
-                (B256::from([3; 32]), Some(U256::from(30))),
-                (B256::from([5; 32]), None),
+                (B256::from([1; 32]), U256::from(10)),
+                (B256::from([3; 32]), U256::from(30)),
+                (B256::from([5; 32]), U256::ZERO),
             ],
             wiped: false,
         };
 
         let storage2 = HashedStorageSorted {
             storage_slots: vec![
-                (B256::from([2; 32]), Some(U256::from(20))),
-                (B256::from([3; 32]), Some(U256::from(300))), // Override
-                (B256::from([4; 32]), Some(U256::from(40))),
-                (B256::from([6; 32]), None),
+                (B256::from([2; 32]), U256::from(20)),
+                (B256::from([3; 32]), U256::from(300)), // Override
+                (B256::from([4; 32]), U256::from(40)),
+                (B256::from([6; 32]), U256::ZERO),
             ],
             wiped: false,
         };
@@ -1149,32 +1148,32 @@ mod tests {
 
         assert_eq!(storage1.storage_slots.len(), 6);
         assert_eq!(storage1.storage_slots[0].0, B256::from([1; 32]));
-        assert_eq!(storage1.storage_slots[0].1, Some(U256::from(10)));
+        assert_eq!(storage1.storage_slots[0].1, U256::from(10));
         assert_eq!(storage1.storage_slots[1].0, B256::from([2; 32]));
-        assert_eq!(storage1.storage_slots[1].1, Some(U256::from(20)));
+        assert_eq!(storage1.storage_slots[1].1, U256::from(20));
         assert_eq!(storage1.storage_slots[2].0, B256::from([3; 32]));
-        assert_eq!(storage1.storage_slots[2].1, Some(U256::from(300))); // Should have storage2's value
+        assert_eq!(storage1.storage_slots[2].1, U256::from(300)); // Should have storage2's value
         assert_eq!(storage1.storage_slots[3].0, B256::from([4; 32]));
-        assert_eq!(storage1.storage_slots[3].1, Some(U256::from(40)));
+        assert_eq!(storage1.storage_slots[3].1, U256::from(40));
         assert_eq!(storage1.storage_slots[4].0, B256::from([5; 32]));
-        assert_eq!(storage1.storage_slots[4].1, None);
+        assert_eq!(storage1.storage_slots[4].1, U256::ZERO);
         assert_eq!(storage1.storage_slots[5].0, B256::from([6; 32]));
-        assert_eq!(storage1.storage_slots[5].1, None);
+        assert_eq!(storage1.storage_slots[5].1, U256::ZERO);
         assert!(!storage1.wiped);
 
         // Test wiped storage
         let mut storage3 = HashedStorageSorted {
             storage_slots: vec![
-                (B256::from([1; 32]), Some(U256::from(10))),
-                (B256::from([2; 32]), None),
+                (B256::from([1; 32]), U256::from(10)),
+                (B256::from([2; 32]), U256::ZERO),
             ],
             wiped: false,
         };
 
         let storage4 = HashedStorageSorted {
             storage_slots: vec![
-                (B256::from([3; 32]), Some(U256::from(30))),
-                (B256::from([4; 32]), None),
+                (B256::from([3; 32]), U256::from(30)),
+                (B256::from([4; 32]), U256::ZERO),
             ],
             wiped: true,
         };
@@ -1185,9 +1184,9 @@ mod tests {
         // When wiped, should only have storage4's values
         assert_eq!(storage3.storage_slots.len(), 2);
         assert_eq!(storage3.storage_slots[0].0, B256::from([3; 32]));
-        assert_eq!(storage3.storage_slots[0].1, Some(U256::from(30)));
+        assert_eq!(storage3.storage_slots[0].1, U256::from(30));
         assert_eq!(storage3.storage_slots[1].0, B256::from([4; 32]));
-        assert_eq!(storage3.storage_slots[1].1, None);
+        assert_eq!(storage3.storage_slots[1].1, U256::ZERO);
     }
 
     #[test]
