@@ -48,7 +48,7 @@ where
         }
     };
 
-    let sampler = build_sampler_ratio(otlp_config.sample_ratio)?;
+    let sampler = build_sampler(otlp_config.sample_ratio)?;
 
     let tracer_provider = SdkTracerProvider::builder()
         .with_resource(resource)
@@ -96,7 +96,7 @@ fn build_resource(service_name: impl Into<Value>) -> Resource {
 }
 
 /// Builds the appropriate sampler based on the sample ratio.
-fn build_sampler_ratio(sample_ratio: Option<f64>) -> eyre::Result<Sampler> {
+fn build_sampler(sample_ratio: Option<f64>) -> eyre::Result<Sampler> {
     match sample_ratio {
         // Default behavior: sample all traces
         None | Some(1.0) => Ok(Sampler::ParentBased(Box::new(Sampler::AlwaysOn))),
