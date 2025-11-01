@@ -1,9 +1,10 @@
 //! `eth_` `Filter` RPC handler implementation
 
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockId;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
-    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
+    BlockNumHash, BlockNumberOrTag, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
@@ -17,6 +18,7 @@ use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
+    helpers::{EthBlocks, LoadReceipt},
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
     RpcNodeCoreExt, RpcTransaction,
 };
@@ -48,7 +50,11 @@ use tracing::{debug, error, trace};
 
 impl<Eth> EngineEthFilter for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt<Provider: BlockIdReader> + 'static,
+    Eth: FullEthApiTypes
+        + RpcNodeCoreExt<Provider: BlockIdReader>
+        + LoadReceipt
+        + EthBlocks
+        + 'static,
 {
     /// Returns logs matching given filter object, no query limits
     fn logs(
@@ -193,7 +199,11 @@ where
 
 impl<Eth> EthFilter<Eth>
 where
-    Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader> + RpcNodeCoreExt + 'static,
+    Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader>
+        + RpcNodeCoreExt
+        + LoadReceipt
+        + EthBlocks
+        + 'static,
 {
     /// Access the underlying provider.
     fn provider(&self) -> &Eth::Provider {
@@ -315,7 +325,7 @@ where
 #[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt + 'static,
+    Eth: FullEthApiTypes + RpcNodeCoreExt + LoadReceipt + EthBlocks + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -434,6 +444,8 @@ impl<Eth> EthFilterInner<Eth>
 where
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
         + EthApiTypes<NetworkTypes: reth_rpc_eth_api::types::RpcTypes>
+        + LoadReceipt
+        + EthBlocks
         + 'static,
 {
     /// Access the underlying provider.
@@ -487,10 +499,34 @@ where
                 Ok(all_logs)
             }
             FilterBlockOption::Range { from_block, to_block } => {
-                // compute the range
-                let info = self.provider().chain_info()?;
+                // Handle special case where from block is pending
+                if from_block.is_some_and(|b| matches!(b, BlockNumberOrTag::Pending)) {
+                    let mut all_logs = Vec::new();
 
-                // we start at the most recent block if unset in filter
+                    // Try to get pending block and receipts
+                    if let Ok(Some((block_arc, receipts_arc))) =
+                        self.eth_api.load_block_and_receipts(BlockId::pending()).await
+                    {
+                        let block_num_hash =
+                            BlockNumHash::new(block_arc.number(), block_arc.hash());
+                        let block_timestamp = block_arc.timestamp();
+
+                        append_matching_block_logs(
+                            &mut all_logs,
+                            ProviderOrBlock::<Eth::Provider>::Block(block_arc),
+                            &filter,
+                            block_num_hash,
+                            &receipts_arc,
+                            false, // removed = false for pending blocks
+                            block_timestamp,
+                        )?;
+                    }
+
+                    return Ok(all_logs);
+                }
+
+                // Original logic for non-pending ranges
+                let info = self.provider().chain_info()?;
                 let start_block = info.best_number;
                 let from = from_block
                     .map(|num| self.provider().convert_block_number(num))
@@ -912,7 +948,11 @@ where
 
 /// Represents different modes for processing block ranges when filtering logs
 enum RangeMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+        + EthApiTypes
+        + LoadReceipt
+        + EthBlocks
+        + 'static,
 > {
     /// Use cache-based processing for recent blocks
     Cached(CachedMode<Eth>),
@@ -921,7 +961,11 @@ enum RangeMode<
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+            + EthApiTypes
+            + LoadReceipt
+            + EthBlocks
+            + 'static,
     > RangeMode<Eth>
 {
     /// Creates a new `RangeMode`.
@@ -993,14 +1037,22 @@ impl<
 
 /// Mode for processing blocks using cache optimization for recent blocks
 struct CachedMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+        + EthApiTypes
+        + LoadReceipt
+        + EthBlocks
+        + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
     headers_iter: std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+            + EthApiTypes
+            + LoadReceipt
+            + EthBlocks
+            + 'static,
     > CachedMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
@@ -1027,7 +1079,11 @@ type ReceiptFetchFuture<P> =
 
 /// Mode for processing blocks using range queries for older blocks
 struct RangeBlockMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+        + EthApiTypes
+        + LoadReceipt
+        + EthBlocks
+        + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
     iter: Peekable<std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
@@ -1038,7 +1094,11 @@ struct RangeBlockMode<
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+            + EthApiTypes
+            + LoadReceipt
+            + EthBlocks
+            + 'static,
     > RangeBlockMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
