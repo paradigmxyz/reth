@@ -520,7 +520,7 @@ mod tests {
         fetcher.on_pending_disconnect(&first_peer);
         // first_peer now isn't idle, so we should get other peer
         let second_peer = fetcher.next_best_peer().unwrap();
-        assert!(first_peer == peer1 || first_peer == peer2);
+        assert!(second_peer == peer1 || second_peer == peer2);
         assert_ne!(first_peer, second_peer);
         // without idle peers, returns None
         fetcher.on_pending_disconnect(&second_peer);
