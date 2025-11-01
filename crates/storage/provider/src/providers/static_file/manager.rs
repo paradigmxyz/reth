@@ -1184,16 +1184,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         func: impl Fn(StaticFileJarProvider<'_, N>) -> ProviderResult<Option<T>>,
     ) -> ProviderResult<Option<T>> {
-        if let Some(highest_block) = self.get_highest_static_file_block(segment) {
-            let mut range = self.find_fixed_range(segment, highest_block);
-            while range.end() > 0 {
-                if let Some(res) = func(self.get_or_create_jar_provider(segment, &range)?)? {
+        if let Some(ranges) = self.static_files_expected_block_index.read().get(&segment) {
+            // Iterate through all ranges in reverse order (highest to lowest)
+            for range in ranges.values().rev() {
+                if let Some(res) = func(self.get_or_create_jar_provider(segment, range)?)? {
                     return Ok(Some(res))
                 }
-                range = SegmentRangeInclusive::new(
-                    range.start().saturating_sub(self.blocks_per_file),
-                    range.end().saturating_sub(self.blocks_per_file),
-                );
             }
         }
 
