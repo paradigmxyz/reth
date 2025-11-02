@@ -1,5 +1,6 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, U256};
+use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
@@ -9,10 +10,12 @@ use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{BundleState, State},
+    witness::ExecutionWitnessRecord,
 };
 use reth_rpc_api::DebugApiClient;
+use reth_storage_api::HeaderProvider;
 use reth_tracing::tracing::warn;
-use reth_trie::{updates::TrieUpdates, HashedStorage};
+use reth_trie::updates::TrieUpdates;
 use revm::state::AccountInfo;
 use revm_bytecode::Bytecode;
 use revm_database::{
@@ -22,8 +25,7 @@ use revm_database::{
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
-type CollectionResult =
-    (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
+type CollectionResult = (ExecutionWitnessRecord, BundleState);
 
 /// Serializable version of `BundleState` for deterministic comparison
 #[derive(Debug, PartialEq, Eq)]
@@ -112,61 +114,15 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
     }
 }
 
-/// Extracts execution data including codes, preimages, and hashed state from database
+/// Extracts execution data using `ExecutionWitnessRecord` for unified witness generation
 fn collect_execution_data(
     mut db: State<StateProviderDatabase<Box<dyn StateProvider>>>,
 ) -> eyre::Result<CollectionResult> {
+    // ExecutionWitnessRecord reads from db.bundle_state.contracts, so we must call
+    // from_executed_state before take_bundle()
+    let witness_record = ExecutionWitnessRecord::from_executed_state(&db);
     let bundle_state = db.take_bundle();
-    let mut codes = BTreeMap::new();
-    let mut preimages = BTreeMap::new();
-    let mut hashed_state = db.database.hashed_post_state(&bundle_state);
-
-    // Collect codes
-    db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
-        let code_bytes = code.original_bytes();
-        codes.insert(keccak256(&code_bytes), code_bytes);
-    });
-
-    // Collect preimages
-    for (address, account) in db.cache.accounts {
-        let hashed_address = keccak256(address);
-        hashed_state
-            .accounts
-            .insert(hashed_address, account.account.as_ref().map(|a| a.info.clone().into()));
-
-        if let Some(account_data) = account.account {
-            preimages.insert(hashed_address, alloy_rlp::encode(address).into());
-            let storage = hashed_state
-                .storages
-                .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
-
-            for (slot, value) in account_data.storage {
-                let slot_bytes = B256::from(slot);
-                let hashed_slot = keccak256(slot_bytes);
-                storage.storage.insert(hashed_slot, value);
-                preimages.insert(hashed_slot, alloy_rlp::encode(slot_bytes).into());
-            }
-        }
-    }
-
-    Ok((codes, preimages, hashed_state, bundle_state))
-}
-
-/// Generates execution witness from collected codes, preimages, and hashed state
-fn generate(
-    codes: BTreeMap<B256, Bytes>,
-    preimages: BTreeMap<B256, Bytes>,
-    hashed_state: reth_trie::HashedPostState,
-    state_provider: Box<dyn StateProvider>,
-) -> eyre::Result<ExecutionWitness> {
-    let state = state_provider.witness(Default::default(), hashed_state)?;
-    Ok(ExecutionWitness {
-        state,
-        codes: codes.into_values().collect(),
-        keys: preimages.into_values().collect(),
-        ..Default::default()
-    })
+    Ok((witness_record, bundle_state))
 }
 
 /// Hook for generating execution witnesses when invalid blocks are detected.
@@ -200,7 +156,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
 
 impl<P, E, N> InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + Send + Sync + 'static,
+    P: StateProviderFactory + HeaderProvider + Send + Sync + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
     N: NodePrimitives,
 {
@@ -216,10 +172,38 @@ where
 
         executor.execute_one(block)?;
         let db = executor.into_state();
-        let (codes, preimages, hashed_state, bundle_state) = collect_execution_data(db)?;
+        let (witness_record, bundle_state) = collect_execution_data(db)?;
 
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        let witness = generate(codes, preimages, hashed_state, state_provider)?;
+        let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
+            witness_record;
+        let state = state_provider.witness(Default::default(), hashed_state)?;
+
+        let mut witness = ExecutionWitness { state, codes, keys, ..Default::default() };
+
+        // Collect headers for BLOCKHASH opcode support (matching DebugApi behavior)
+        let block_number = block.number();
+        let smallest = match lowest_block_number {
+            Some(smallest) => smallest,
+            None => {
+                // Return only the parent header, if there were no calls to the BLOCKHASH opcode.
+                block_number.saturating_sub(1)
+            }
+        };
+
+        let range = smallest..block_number;
+        // Attempt to collect headers if provider supports it, otherwise leave empty
+        // This matches DebugApi::debug_execution_witness_for_block behavior
+        if let Ok(headers) = self.provider.headers_range(range) {
+            witness.headers = headers
+                .into_iter()
+                .map(|header| {
+                    let mut serialized_header = Vec::new();
+                    header.encode(&mut serialized_header);
+                    serialized_header.into()
+                })
+                .collect();
+        }
 
         Ok((witness, bundle_state))
     }
@@ -345,7 +329,6 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
-        // TODO(alexey): unify with `DebugApi::debug_execution_witness`
         let (witness, bundle_state) = self.re_execute_block(parent_header, block)?;
 
         let block_prefix = format!("{}_{}", block.number(), block.hash());
@@ -389,7 +372,7 @@ where
 
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + Send + Sync + 'static,
+    P: StateProviderFactory + HeaderProvider + Send + Sync + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(
@@ -549,11 +532,11 @@ mod tests {
         // Verify the function returns successfully
         assert!(result.is_ok());
 
-        let (codes, _preimages, _hashed_state, returned_bundle_state) = result.unwrap();
+        let (witness_record, returned_bundle_state) = result.unwrap();
 
         // Verify that the returned data contains expected values
         // Since we used the fixture data, we should have some codes and state
-        assert!(!codes.is_empty(), "Expected some bytecode entries");
+        assert!(!witness_record.codes.is_empty(), "Expected some bytecode entries");
         assert!(!returned_bundle_state.state.is_empty(), "Expected some state entries");
 
         // Verify the bundle state structure matches our fixture
@@ -667,49 +650,31 @@ mod tests {
     }
 
     #[test]
-    fn test_proof_generator_generate() {
-        // Use existing MockEthProvider
-        let mock_provider = MockEthProvider::default();
-        let state_provider: Box<dyn StateProvider> = Box::new(mock_provider);
+    fn test_execution_witness_record_generation() {
+        // Test ExecutionWitnessRecord generation using from_executed_state
+        let state_provider = StateProviderTest::default();
+        let mut state = State::builder()
+            .with_database(StateProviderDatabase::new(
+                Box::new(state_provider) as Box<dyn StateProvider>
+            ))
+            .with_bundle_update()
+            .build();
 
-        // Mock Data
-        let mut codes = BTreeMap::new();
-        codes.insert(B256::from([1u8; 32]), Bytes::from("contract_code_1"));
-        codes.insert(B256::from([2u8; 32]), Bytes::from("contract_code_2"));
+        // Add some contracts to bundle state
+        let contract_hash = B256::from([1u8; 32]);
+        state
+            .bundle_state
+            .contracts
+            .insert(contract_hash, Bytecode::new_raw(Bytes::from("contract_code_1")));
 
-        let mut preimages = BTreeMap::new();
-        preimages.insert(B256::from([3u8; 32]), Bytes::from("preimage_1"));
-        preimages.insert(B256::from([4u8; 32]), Bytes::from("preimage_2"));
+        // Generate witness record
+        let witness_record = ExecutionWitnessRecord::from_executed_state(&state);
 
-        let hashed_state = reth_trie::HashedPostState::default();
-
-        // Call generate function
-        let result = generate(codes.clone(), preimages.clone(), hashed_state, state_provider);
-
-        // Verify result
-        assert!(result.is_ok(), "generate function should succeed");
-        let execution_witness = result.unwrap();
-
-        assert!(execution_witness.state.is_empty(), "State should be empty from MockEthProvider");
-
-        let expected_codes: Vec<Bytes> = codes.into_values().collect();
-        assert_eq!(
-            execution_witness.codes.len(),
-            expected_codes.len(),
-            "Codes length should match"
+        // Verify that codes were collected
+        assert!(
+            witness_record.codes.iter().any(|c| c == &Bytes::from("contract_code_1")),
+            "Codes should contain expected bytecode"
         );
-        for code in &expected_codes {
-            assert!(
-                execution_witness.codes.contains(code),
-                "Codes should contain expected bytecode"
-            );
-        }
-
-        let expected_keys: Vec<Bytes> = preimages.into_values().collect();
-        assert_eq!(execution_witness.keys.len(), expected_keys.len(), "Keys length should match");
-        for key in &expected_keys {
-            assert!(execution_witness.keys.contains(key), "Keys should contain expected preimage");
-        }
     }
 
     #[test]
