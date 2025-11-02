@@ -19,7 +19,8 @@ reth-engine-primitives.workspace = true
 reth-evm.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
-reth-revm = { workspace = true, features = ["serde"] }
+reth-revm = { workspace = true, features = ["serde", "witness"] }
+reth-storage-api.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-tracing.workspace = true
 reth-trie.workspace = true
