@@ -29,7 +29,7 @@ pub enum MiningMode<Pool: TransactionPool + Unpin> {
     /// In this mode a block is built as soon as
     /// a valid transaction reaches the pool.
     /// If `max_transactions` is set, a block is built when that many transactions have
-    /// accumulated.
+    /// accumulated in the pool.
     Instant {
         /// The transaction pool.
         pool: Pool,
@@ -38,8 +38,6 @@ pub enum MiningMode<Pool: TransactionPool + Unpin> {
         /// Maximum number of transactions to accumulate before mining a block.
         /// If None, mine immediately when any transaction arrives.
         max_transactions: Option<usize>,
-        /// Counter for accumulated transactions (only used when `max_transactions` is set).
-        accumulated: usize,
     },
     /// In this mode a block is built at a fixed interval.
     Interval(Interval),
@@ -49,7 +47,7 @@ impl<Pool: TransactionPool + Unpin> MiningMode<Pool> {
     /// Constructor for a [`MiningMode::Instant`]
     pub fn instant(pool: Pool, max_transactions: Option<usize>) -> Self {
         let rx = pool.pending_transactions_listener();
-        Self::Instant { pool, rx: ReceiverStream::new(rx).fuse(), max_transactions, accumulated: 0 }
+        Self::Instant { pool, rx: ReceiverStream::new(rx).fuse(), max_transactions }
     }
 
     /// Constructor for a [`MiningMode::Interval`]
@@ -65,17 +63,19 @@ impl<Pool: TransactionPool + Unpin> Future for MiningMode<Pool> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         match this {
-            Self::Instant { pool, rx, max_transactions, accumulated } => {
+            Self::Instant { pool, rx, max_transactions } => {
                 // Poll for new transaction notifications
                 while let Poll::Ready(Some(_)) = rx.poll_next_unpin(cx) {
-                    if pool.pending_and_queued_txn_count().0 == 0 {
+                    let (pending, queued) = pool.pending_and_queued_txn_count();
+                    let total_tx_count = pending + queued;
+
+                    if total_tx_count == 0 {
                         continue;
                     }
+
                     if let Some(max_tx) = max_transactions {
-                        *accumulated += 1;
-                        // If we've reached the max transactions threshold, mine a block
-                        if *accumulated >= *max_tx {
-                            *accumulated = 0; // Reset counter for next block
+                        // Check if we've reached the max transactions threshold
+                        if total_tx_count >= *max_tx {
                             return Poll::Ready(());
                         }
                     } else {
