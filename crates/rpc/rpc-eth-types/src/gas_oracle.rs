@@ -230,7 +230,7 @@ where
         let base_fee_per_gas = block.base_fee_per_gas();
         let parent_hash = block.parent_hash();
 
-        // sort the functions by ascending effective tip first
+        // sort the transactions by ascending effective tip first
         let sorted_transactions = block.transactions_recovered().sorted_by_cached_key(|tx| {
             if let Some(base_fee) = base_fee_per_gas {
                 (*tx).effective_tip_per_gas(base_fee)
