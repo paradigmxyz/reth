@@ -10,7 +10,7 @@ use alloy_eips::{
 use alloy_primitives::{TxHash, B256};
 use parking_lot::{Mutex, RwLock};
 use schnellru::{ByLength, LruMap};
-use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, fmt, fs, io, path::PathBuf, str::FromStr, sync::Arc};
 use tracing::{debug, trace};
 
 /// How many [`BlobTransactionSidecarVariant`] to cache in memory.
@@ -40,12 +40,20 @@ impl DiskFileBlobStore {
         opts: DiskFileBlobStoreConfig,
     ) -> Result<Self, DiskFileBlobStoreError> {
         let blob_dir = blob_dir.into();
-        let DiskFileBlobStoreConfig { max_cached_entries, .. } = opts;
+        let DiskFileBlobStoreConfig { max_cached_entries, open } = opts;
         let inner = DiskFileBlobStoreInner::new(blob_dir, max_cached_entries);
 
         // initialize the blob store
-        inner.delete_all()?;
-        inner.create_blob_dir()?;
+        match open {
+            OpenDiskFileBlobStore::Clear => {
+                inner.delete_all()?;
+                inner.create_blob_dir()?;
+            }
+            OpenDiskFileBlobStore::ReIndex => {
+                inner.create_blob_dir()?;
+                inner.reindex()?;
+            }
+        }
 
         Ok(Self { inner: Arc::new(inner) })
     }
@@ -507,6 +515,77 @@ impl DiskFileBlobStoreInner {
         res
     }
 
+    /// Rebuilds in-memory state from on-disk blob files without populating the blob cache.
+    ///
+    /// This scans the blob directory, updates the size tracker and rebuilds the
+    /// `versioned_hashes_to_txhash` mapping so that lookups by versioned hash work
+    /// across restarts.
+    fn reindex(&self) -> Result<(), DiskFileBlobStoreError> {
+        let _lock = self.file_lock.read();
+        let entries = fs::read_dir(&self.blob_dir)
+            .map_err(|e| DiskFileBlobStoreError::Open(self.blob_dir.clone(), e))?;
+
+        let mut added_size = 0usize;
+        let mut added_num = 0usize;
+
+        for entry in entries {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(err) => {
+                    debug!(target:"txpool::blob", %err, "Failed to read entry during reindex");
+                    continue;
+                }
+            };
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let Some(name_os) = path.file_name() else { continue };
+            let Some(name) = name_os.to_str() else { continue };
+
+            let tx = match B256::from_str(name) {
+                Ok(tx) => tx,
+                Err(_) => {
+                    debug!(target:"txpool::blob", file=%name, "Skipping non-hex blob filename during reindex");
+                    continue;
+                }
+            };
+
+            let data = match fs::read(&path) {
+                Ok(d) => d,
+                Err(err) => {
+                    debug!(target:"txpool::blob", %err, ?path, "Failed to read blob file during reindex");
+                    continue;
+                }
+            };
+
+            added_size += data.len();
+            added_num += 1;
+
+            match BlobTransactionSidecarVariant::rlp_decode_fields(&mut data.as_slice()) {
+                Ok(sidecar) => {
+                    let mut map = self.versioned_hashes_to_txhash.lock();
+                    sidecar.versioned_hashes().for_each(|vh| {
+                        map.insert(vh, tx);
+                    });
+                }
+                Err(err) => {
+                    debug!(target:"txpool::blob", %err, ?path, "Failed to decode blob sidecar during reindex");
+                }
+            }
+        }
+
+        if added_size > 0 {
+            self.size_tracker.add_size(added_size);
+        }
+        if added_num > 0 {
+            self.size_tracker.inc_len(added_num);
+        }
+
+        Ok(())
+    }
+
     /// Writes the blob data for the given transaction hash to the disk.
     #[inline]
     fn write_one_encoded(&self, tx: B256, data: &[u8]) -> Result<usize, DiskFileBlobStoreError> {
@@ -850,5 +929,38 @@ mod tests {
         let stat = store.cleanup();
         assert_eq!(stat.delete_succeed, 3);
         assert_eq!(stat.delete_failed, 0);
+    }
+
+    #[test]
+    fn disk_reindex_preserves_blobs() {
+        let dir = tempfile::tempdir().unwrap();
+        // first open: clear by default
+        let store = DiskFileBlobStore::open(dir.path(), Default::default()).unwrap();
+
+        let blobs = rng_blobs(4);
+        let txs: Vec<_> = blobs.iter().map(|(tx, _)| *tx).collect();
+        store.insert_all(blobs.clone()).unwrap();
+
+        // ensure we wrote something
+        assert!(store.data_size_hint().unwrap() > 0);
+        assert_eq!(store.blobs_len(), 4);
+
+        drop(store);
+
+        // reopen with ReIndex and verify state is reconstructed without cache
+        let cfg =
+            DiskFileBlobStoreConfig { open: OpenDiskFileBlobStore::ReIndex, ..Default::default() };
+        let store2 = DiskFileBlobStore::open(dir.path(), cfg).unwrap();
+
+        // size and count are restored based on files on disk
+        assert!(store2.data_size_hint().unwrap() > 0);
+        assert_eq!(store2.blobs_len(), 4);
+
+        // can read blobs back lazily from disk
+        for tx in txs {
+            assert!(store2.contains(tx).unwrap());
+            let got = store2.get(tx).unwrap();
+            assert!(got.is_some());
+        }
     }
 }
