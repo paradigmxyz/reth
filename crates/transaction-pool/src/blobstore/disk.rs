@@ -939,7 +939,7 @@ mod tests {
 
         let blobs = rng_blobs(4);
         let txs: Vec<_> = blobs.iter().map(|(tx, _)| *tx).collect();
-        store.insert_all(blobs.clone()).unwrap();
+        store.insert_all(blobs).unwrap();
 
         // ensure we wrote something
         assert!(store.data_size_hint().unwrap() > 0);
