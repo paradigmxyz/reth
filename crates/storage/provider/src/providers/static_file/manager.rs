@@ -229,7 +229,7 @@ pub struct StaticFileProviderInner<N> {
     map: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
     /// Min static file range for each segment.
     /// This index is initialized on launch to keep track of the lowest, non-expired static file
-    /// per segment.
+    /// per segment and gets updated on `Self::update_index()`.
     ///
     /// This tracks the lowest static file per segment together with the block range in that
     /// file. E.g. static file is batched in 500k block intervals then the lowest static file
@@ -627,10 +627,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 max_block.insert(segment, segment_max_block);
                 let fixed_range = self.find_fixed_range(segment_max_block);
 
-                let path = self.path.join(segment.filename(&fixed_range));
-                let jar = NippyJar::<SegmentHeader>::load(&path).inspect_err(|e| {
-                    warn!(target: "provider::static_file", ?path, %e, "Failed to load static file jar");
-                }).map_err(ProviderError::other)?;
+                let jar = NippyJar::<SegmentHeader>::load(
+                    &self.path.join(segment.filename(&fixed_range)),
+                )
+                .map_err(ProviderError::other)?;
 
                 // Update min_block to track the lowest block range of the segment.
                 // This is initially set by initialize_index() on node startup, but must be updated
@@ -645,7 +645,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 // Example progression:
                 // 1. Node starts, initialize_index() sets min_block = [0..=0]
                 // 2. Sync to block 100, this update sets min_block = [0..=100]
-                // 3. Pruner calls get_lowest_static_file_block() -> returns 100 (correct) Without
+                // 3. Pruner calls get_lowest_static_file_block() -> returns 100 (correct). Without
                 //    this update, it would incorrectly return 0 (stale)
                 if let Some(current_block_range) = jar.user_header().block_range().copied() {
                     min_block
