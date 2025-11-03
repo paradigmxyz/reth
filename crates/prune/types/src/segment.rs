@@ -2,6 +2,7 @@
 
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
+use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
 
@@ -52,6 +53,14 @@ impl Default for PruneSegment {
 }
 
 impl PruneSegment {
+    /// Returns an iterator over all variants of [`PruneSegment`].
+    ///
+    /// Excludes deprecated variants that are no longer used, but can still be found in the
+    /// database.
+    pub fn variants() -> impl Iterator<Item = Self> {
+        Self::iter()
+    }
+
     /// Returns minimum number of blocks to keep in the database for this segment.
     pub const fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
         match self {
@@ -112,11 +121,10 @@ pub enum PruneSegmentError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strum::IntoEnumIterator;
 
     #[test]
     fn test_prune_segment_iter_excludes_deprecated() {
-        let segments: Vec<PruneSegment> = PruneSegment::iter().collect();
+        let segments: Vec<PruneSegment> = PruneSegment::variants().collect();
 
         // Verify deprecated variants are not included derived iter
         #[expect(deprecated)]
