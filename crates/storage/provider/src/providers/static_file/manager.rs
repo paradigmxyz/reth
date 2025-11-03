@@ -45,7 +45,6 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
     fmt::Debug,
-    marker::PhantomData,
     ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::{atomic::AtomicU64, mpsc, Arc},
@@ -96,12 +95,79 @@ impl<N> Clone for StaticFileProvider<N> {
     }
 }
 
+/// Builder for [`StaticFileProvider`] that allows configuration before initialization.
+#[derive(Debug)]
+pub struct StaticFileProviderBuilder<N> {
+    inner: StaticFileProviderInner<N>,
+}
+
+impl<N: NodePrimitives> StaticFileProviderBuilder<N> {
+    /// Creates a new builder from a [`StaticFileProviderInner`].
+    const fn new(inner: StaticFileProviderInner<N>) -> Self {
+        Self { inner }
+    }
+
+    /// Set a custom number of blocks per file for all segments.
+    pub fn with_blocks_per_file(mut self, blocks_per_file: u64) -> Self {
+        for segment in StaticFileSegment::iter() {
+            self.inner.blocks_per_file.insert(segment, blocks_per_file);
+        }
+        self
+    }
+
+    /// Set a custom number of blocks per file for a specific segment.
+    pub fn with_blocks_per_file_for_segment(
+        mut self,
+        segment: StaticFileSegment,
+        blocks_per_file: u64,
+    ) -> Self {
+        self.inner.blocks_per_file.insert(segment, blocks_per_file);
+        self
+    }
+
+    /// Enables metrics on the [`StaticFileProvider`].
+    pub fn with_metrics(mut self) -> Self {
+        self.inner.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
+        self
+    }
+
+    /// Builds the final [`StaticFileProvider`] and initializes the index.
+    pub fn build(self) -> ProviderResult<StaticFileProvider<N>> {
+        let provider = StaticFileProvider(Arc::new(self.inner));
+        provider.initialize_index()?;
+        Ok(provider)
+    }
+}
+
 impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Creates a new [`StaticFileProvider`] with the given [`StaticFileAccess`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
         let provider = Self(Arc::new(StaticFileProviderInner::new(path, access)?));
         provider.initialize_index()?;
         Ok(provider)
+    }
+
+    /// Creates a builder for configuring a [`StaticFileProvider`] with the given
+    /// [`StaticFileAccess`].
+    fn builder(
+        path: impl AsRef<Path>,
+        access: StaticFileAccess,
+    ) -> ProviderResult<StaticFileProviderBuilder<N>> {
+        Ok(StaticFileProviderBuilder::new(StaticFileProviderInner::new(path, access)?))
+    }
+
+    /// Creates a builder for a read-only [`StaticFileProvider`].
+    pub fn builder_read_only(
+        path: impl AsRef<Path>,
+    ) -> ProviderResult<StaticFileProviderBuilder<N>> {
+        Self::builder(path, StaticFileAccess::RO)
+    }
+
+    /// Creates a builder for a read-write [`StaticFileProvider`].
+    pub fn builder_read_write(
+        path: impl AsRef<Path>,
+    ) -> ProviderResult<StaticFileProviderBuilder<N>> {
+        Self::builder(path, StaticFileAccess::RW)
     }
 
     /// Creates a new [`StaticFileProvider`] with read-only access.
@@ -315,37 +381,6 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
 }
 
 impl<N: NodePrimitives> StaticFileProvider<N> {
-    /// Set a custom number of blocks per file for all segments.
-    #[cfg(any(test, feature = "test-utils"))]
-    pub fn with_blocks_per_file(self, blocks_per_file: u64) -> Self {
-        let mut provider =
-            Arc::try_unwrap(self.0).expect("should be called when initializing only");
-        for segment in StaticFileSegment::iter() {
-            provider.blocks_per_file.insert(segment, blocks_per_file);
-        }
-        Self(Arc::new(provider))
-    }
-
-    /// Set a custom number of blocks per file for a specific segment.
-    pub fn with_blocks_per_file_for_segment(
-        self,
-        segment: StaticFileSegment,
-        blocks_per_file: u64,
-    ) -> Self {
-        let mut provider =
-            Arc::try_unwrap(self.0).expect("should be called when initializing only");
-        provider.blocks_per_file.insert(segment, blocks_per_file);
-        Self(Arc::new(provider))
-    }
-
-    /// Enables metrics on the [`StaticFileProvider`].
-    pub fn with_metrics(self) -> Self {
-        let mut provider =
-            Arc::try_unwrap(self.0).expect("should be called when initializing only");
-        provider.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
-        Self(Arc::new(provider))
-    }
-
     /// Reports metrics for the static files.
     pub fn report_metrics(&self) -> ProviderResult<()> {
         let Some(metrics) = &self.metrics else { return Ok(()) };

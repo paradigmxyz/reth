@@ -465,13 +465,14 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = ProviderFactory::new(
-            self.right().clone(),
-            self.chain_spec(),
-            StaticFileProvider::read_write(self.data_dir().static_files())?,
-        )
-        .with_prune_modes(self.prune_modes())
-        .with_static_files_metrics();
+        let static_file_provider =
+            StaticFileProvider::builder_read_write(self.data_dir().static_files())?
+                .with_metrics()
+                .build()?;
+
+        let factory =
+            ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)
+                .with_prune_modes(self.prune_modes());
 
         let has_receipt_pruning = self.toml_config().prune.has_receipts_pruning();
 
