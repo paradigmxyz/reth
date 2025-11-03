@@ -43,6 +43,7 @@ std = [
     "serde?/std",
     "serde_json/std",
     "thiserror/std",
+    "strum/std"
 ]
 test-utils = [
     "std",
