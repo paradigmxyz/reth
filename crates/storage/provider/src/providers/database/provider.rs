@@ -3005,10 +3005,13 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(self
-            .tx
-            .cursor_read::<tables::PruneCheckpoints>()?
-            .walk(None)?
+        Ok(PruneSegment::variants()
+            .filter_map(|segment| {
+                self.tx
+                    .get::<tables::PruneCheckpoints>(segment)
+                    .transpose()
+                    .map(|chk| chk.map(|chk| (segment, chk)))
+            })
             .collect::<Result<_, _>>()?)
     }
 }

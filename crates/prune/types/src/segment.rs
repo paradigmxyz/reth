@@ -1,9 +1,10 @@
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
+use strum::{EnumIter, IntoEnumIterator};
 use thiserror::Error;
 
 /// Segment of the data that can be pruned.
-#[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, EnumIter)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
@@ -37,6 +38,14 @@ impl Default for PruneSegment {
 }
 
 impl PruneSegment {
+    /// Returns an iterator over all variants of [`PruneSegment`].
+    ///
+    /// Excludes deprecated variants that are no longer used, but can still be found in the
+    /// database.
+    pub fn variants() -> impl Iterator<Item = Self> {
+        Self::iter()
+    }
+
     /// Returns minimum number of blocks to keep in the database for this segment.
     pub const fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
         match self {

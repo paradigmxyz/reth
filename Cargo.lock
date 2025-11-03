@@ -9820,6 +9820,7 @@ dependencies = [
  "reth-codecs",
  "serde",
  "serde_json",
+ "strum 0.27.2",
  "test-fuzz",
  "thiserror 2.0.16",
  "toml",
