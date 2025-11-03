@@ -144,7 +144,7 @@ where
     }
 
     /// Notifies all subscribers about the received flashblock
-    fn notifiy_received_flashblock(&self, flashblock: &FlashBlock) {
+    fn notify_received_flashblock(&self, flashblock: &FlashBlock) {
         if self.received_flashblocks_tx.receiver_count() > 0 {
             let _ = self.received_flashblocks_tx.send(Arc::new(flashblock.clone()));
         }
@@ -297,7 +297,7 @@ where
             while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
                 match result {
                     Ok(flashblock) => {
-                        this.notifiy_received_flashblock(&flashblock);
+                        this.notify_received_flashblock(&flashblock);
                         if flashblock.index == 0 {
                             this.metrics.last_flashblock_length.record(this.blocks.count() as f64);
                         }
