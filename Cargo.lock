@@ -3430,6 +3430,9 @@ dependencies = [
 name = "example-custom-index"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
+ "eyre",
+ "jsonrpsee",
  "reth-ethereum",
  "serde",
 ]

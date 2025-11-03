@@ -1,7 +1,7 @@
 use reth_ethereum::{
     chainspec::EthereumHardforks,
     evm::revm::primitives::{
-        alloy_primitives::{BlockNumber, TxNumber},
+        alloy_primitives::{BlockNumber, TxNonce, TxNumber},
         bytes::{self},
         Address,
     },
@@ -17,6 +17,7 @@ use reth_ethereum::{
         providers::{ChainStorage, NodeTypesForProvider},
         ChainSpecProvider, DatabaseProvider, ExecutionOutcome, ProviderError, ProviderResult,
     },
+    rpc::eth::primitives::TransactionTrait,
     storage::{
         BlockBodyIndicesProvider, ChainStorageReader, ChainStorageWriter, DBProvider, EthStorage,
         TransactionsProvider,
@@ -26,8 +27,8 @@ use reth_ethereum::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SenderTransaction {
-    /// How many transactions sender have sent before that one.
-    pub sender_tx_index: TxNumber,
+    /// Nonce of the sender.
+    pub nonce: TxNonce,
     /// Global index of this transaction in database.
     pub global_tx_index: TxNumber,
 }
@@ -36,7 +37,7 @@ impl Compress for SenderTransaction {
     type Compressed = Vec<u8>;
 
     fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
-        buf.put_slice(&self.sender_tx_index.to_be_bytes());
+        buf.put_slice(&self.nonce.to_be_bytes());
         buf.put_slice(&self.global_tx_index.to_be_bytes());
     }
 }
@@ -46,7 +47,7 @@ impl Decompress for SenderTransaction {
         let sender_tx_index = u64::from_be_bytes(buf[..8].try_into().unwrap());
         let global_tx_index = u64::from_be_bytes(buf[8..16].try_into().unwrap());
 
-        Ok(Self { sender_tx_index, global_tx_index })
+        Ok(Self { nonce: sender_tx_index, global_tx_index })
     }
 }
 
@@ -55,7 +56,7 @@ tables! {
     table SenderTransactions {
         type Key = Address;
         type Value = SenderTransaction;
-        type SubKey = TxNumber;
+        type SubKey = TxNonce;
     }
 }
 
@@ -124,19 +125,18 @@ where
             .ok_or(ProviderError::BlockBodyIndicesNotFound(last_block))?
             .last_tx_num();
 
-        let mut cursor = provider.tx_ref().cursor_dup_write::<SenderTransactions>()?;
+        let db = provider.tx_ref();
 
-        for (sender, global_tx_index) in
-            provider.senders_by_tx_range(first_tx..=last_tx)?.into_iter().zip(first_tx..=last_tx)
+        for ((sender, tx), global_tx_index) in provider
+            .senders_by_tx_range(first_tx..=last_tx)?
+            .into_iter()
+            .zip(provider.transactions_by_tx_range(first_tx..=last_tx)?)
+            .zip(first_tx..=last_tx)
         {
-            cursor.seek_by_key_subkey(sender, TxNumber::MAX)?;
-            let sender_tx_index = cursor
-                .prev()?
-                .filter(|(s, _)| *s == sender)
-                .map(|(_, value)| value.sender_tx_index + 1)
-                .unwrap_or(0);
-
-            cursor.upsert(sender, &SenderTransaction { sender_tx_index, global_tx_index })?;
+            db.put::<SenderTransactions>(
+                sender,
+                SenderTransaction { nonce: tx.nonce(), global_tx_index },
+            )?;
         }
 
         Ok(())
@@ -165,10 +165,10 @@ where
         for (sender, global_tx_index) in
             provider.senders_by_tx_range(first_tx..=last_tx)?.into_iter().zip(first_tx..=last_tx)
         {
-            cursor.seek_by_key_subkey(sender, TxNumber::MAX)?;
-            let sender_tx_index = cursor.prev()?;
+            cursor.seek_by_key_subkey(sender, TxNonce::MAX)?;
+            let last_sender_tx = cursor.prev()?;
 
-            if sender_tx_index.is_none_or(|(_, value)| value.global_tx_index != global_tx_index) {
+            if last_sender_tx.is_none_or(|(_, value)| value.global_tx_index != global_tx_index) {
                 return Err(ProviderError::StateAtBlockPruned(first_block))
             }
 

@@ -9,4 +9,7 @@ license.workspace = true
 # reth
 reth-ethereum = { workspace = true, features = ["full"] }
 
+async-trait.workspace = true
+eyre.workspace = true
+jsonrpsee.workspace = true
 serde.workspace = true
