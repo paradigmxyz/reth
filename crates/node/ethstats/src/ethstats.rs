@@ -118,7 +118,7 @@ where
                     "Successfully connected to EthStats server at {}", self.credentials.host
                 );
                 let conn: ConnWrapper = ConnWrapper::new(ws_stream);
-                *self.conn.write().await = Some(conn.clone());
+                *self.conn.write().await = Some(conn);
                 self.login().await?;
                 Ok(())
             }
