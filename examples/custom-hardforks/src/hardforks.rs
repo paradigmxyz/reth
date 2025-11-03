@@ -5,8 +5,8 @@
 
 use alloy_eip2124::ForkFilterKey;
 use reth_chainspec::{hardfork, ForkCondition, Hardfork, Hardforks};
-use std::any::Any;
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 
 // Define custom hardfork variants using Reth's `hardfork!` macro.
 // Each variant represents a protocol upgrade (e.g., enabling new features).
@@ -42,12 +42,14 @@ impl Hardforks for CustomHardforkConfig {
     fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
         if let Some(hardfork) = (&fork as &dyn Any).downcast_ref::<CustomHardfork>() {
             match hardfork {
-                CustomHardfork::BasicUpgrade => {
-                    self.basic_upgrade_block.map(ForkCondition::Block).unwrap_or(ForkCondition::Never)
-                }
-                CustomHardfork::AdvancedUpgrade => {
-                    self.advanced_upgrade_block.map(ForkCondition::Block).unwrap_or(ForkCondition::Never)
-                }
+                CustomHardfork::BasicUpgrade => self
+                    .basic_upgrade_block
+                    .map(ForkCondition::Block)
+                    .unwrap_or(ForkCondition::Never),
+                CustomHardfork::AdvancedUpgrade => self
+                    .advanced_upgrade_block
+                    .map(ForkCondition::Block)
+                    .unwrap_or(ForkCondition::Never),
             }
         } else {
             ForkCondition::Never
@@ -56,9 +58,16 @@ impl Hardforks for CustomHardforkConfig {
 
     fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         [
-            (&CustomHardfork::BasicUpgrade as &dyn Hardfork, self.fork(CustomHardfork::BasicUpgrade)),
-            (&CustomHardfork::AdvancedUpgrade as &dyn Hardfork, self.fork(CustomHardfork::AdvancedUpgrade)),
-        ].into_iter()
+            (
+                &CustomHardfork::BasicUpgrade as &dyn Hardfork,
+                self.fork(CustomHardfork::BasicUpgrade),
+            ),
+            (
+                &CustomHardfork::AdvancedUpgrade as &dyn Hardfork,
+                self.fork(CustomHardfork::AdvancedUpgrade),
+            ),
+        ]
+        .into_iter()
     }
 
     fn fork_id(&self, head: &reth_chainspec::Head) -> reth_chainspec::ForkId {
@@ -71,7 +80,12 @@ impl Hardforks for CustomHardforkConfig {
     }
 
     fn fork_filter(&self, head: reth_chainspec::Head) -> reth_chainspec::ForkFilter {
-        reth_chainspec::ForkFilter::new(head, head.hash, head.timestamp, self.forks_iter().filter_map(|(_, c)| c.block_number().map(ForkFilterKey::Block)))
+        reth_chainspec::ForkFilter::new(
+            head,
+            head.hash,
+            head.timestamp,
+            self.forks_iter().filter_map(|(_, c)| c.block_number().map(ForkFilterKey::Block)),
+        )
     }
 }
 

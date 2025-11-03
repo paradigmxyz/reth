@@ -34,10 +34,16 @@ impl CustomChainSpec {
             .frontier_activated()
             .homestead_activated();
         if let Some(block) = config.basic_upgrade_block {
-            builder = builder.with_fork(crate::hardforks::CustomHardfork::BasicUpgrade, ForkCondition::Block(block));
+            builder = builder.with_fork(
+                crate::hardforks::CustomHardfork::BasicUpgrade,
+                ForkCondition::Block(block),
+            );
         }
         if let Some(block) = config.advanced_upgrade_block {
-            builder = builder.with_fork(crate::hardforks::CustomHardfork::AdvancedUpgrade, ForkCondition::Block(block));
+            builder = builder.with_fork(
+                crate::hardforks::CustomHardfork::AdvancedUpgrade,
+                ForkCondition::Block(block),
+            );
         }
         let inner = builder.build();
         Self { inner }
