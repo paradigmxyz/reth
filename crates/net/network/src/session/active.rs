@@ -738,11 +738,11 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
 
         while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
             // check for timed out requests
-            if this.check_timed_out_requests(Instant::now()) {
-                if let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx) {
-                    let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
-                    this.pending_message_to_session = Some(msg);
-                }
+            if this.check_timed_out_requests(Instant::now()) &&
+                let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx)
+            {
+                let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
+                this.pending_message_to_session = Some(msg);
             }
         }
 

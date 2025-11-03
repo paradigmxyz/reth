@@ -5,9 +5,10 @@
 
 use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor, CommitChanges, ExecutableTx},
+    block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
     eth::{EthBlockExecutionCtx, EthBlockExecutor},
     precompiles::PrecompilesMap,
+    revm::context::result::ResultAndState,
     EthEvm, EthEvmFactory,
 };
 use alloy_sol_macro::sol;
@@ -22,7 +23,7 @@ use reth_ethereum::{
             NextBlockEnvAttributes, OnStateHook,
         },
         revm::{
-            context::{result::ExecutionResult, TxEnv},
+            context::TxEnv,
             db::State,
             primitives::{address, hardfork::SpecId, Address},
             DatabaseCommit,
@@ -134,7 +135,7 @@ impl ConfigureEvm for CustomEvmConfig {
         self.inner.block_assembler()
     }
 
-    fn evm_env(&self, header: &Header) -> EvmEnv<SpecId> {
+    fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
         self.inner.evm_env(header)
     }
 
@@ -146,7 +147,10 @@ impl ConfigureEvm for CustomEvmConfig {
         self.inner.next_evm_env(parent, attributes)
     }
 
-    fn context_for_block<'a>(&self, block: &'a SealedBlock<Block>) -> EthBlockExecutionCtx<'a> {
+    fn context_for_block<'a>(
+        &self,
+        block: &'a SealedBlock<Block>,
+    ) -> Result<EthBlockExecutionCtx<'a>, Self::Error> {
         self.inner.context_for_block(block)
     }
 
@@ -154,7 +158,7 @@ impl ConfigureEvm for CustomEvmConfig {
         &self,
         parent: &SealedHeader,
         attributes: Self::NextBlockEnvCtx,
-    ) -> EthBlockExecutionCtx<'_> {
+    ) -> Result<EthBlockExecutionCtx<'_>, Self::Error> {
         self.inner.context_for_next_block(parent, attributes)
     }
 }
@@ -191,12 +195,19 @@ where
         self.inner.apply_pre_execution_changes()
     }
 
-    fn execute_transaction_with_commit_condition(
+    fn execute_transaction_without_commit(
         &mut self,
         tx: impl ExecutableTx<Self>,
-        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
-    ) -> Result<Option<u64>, BlockExecutionError> {
-        self.inner.execute_transaction_with_commit_condition(tx, f)
+    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+        self.inner.execute_transaction_without_commit(tx)
+    }
+
+    fn commit_transaction(
+        &mut self,
+        output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        self.inner.commit_transaction(output, tx)
     }
 
     fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), BlockExecutionError> {

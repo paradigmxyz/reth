@@ -27,7 +27,7 @@ use reth_ethereum::{
             interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
         },
     },
-    node::{builder::NodeHandle, EthereumNode},
+    node::{builder::FullNodeFor, EthereumNode},
     pool::TransactionPool,
     rpc::api::eth::helpers::Call,
 };
@@ -36,8 +36,10 @@ fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
-            let NodeHandle { node, node_exit_future } =
-                builder.node(EthereumNode::default()).launch().await?;
+            let handle = builder.node(EthereumNode::default()).launch().await?;
+
+            let node: FullNodeFor<EthereumNode> = handle.node;
+            let node_exit_future = handle.node_exit_future;
 
             // create a new subscription to pending transactions
             let mut pending_transactions = node.pool.new_pending_pool_transactions_listener();
@@ -54,43 +56,43 @@ fn main() {
                     let tx = event.transaction;
                     println!("Transaction received: {tx:?}");
 
-                    if let Some(recipient) = tx.to() {
-                        if args.is_match(&recipient) {
-                            // convert the pool transaction
-                            let call_request =
-                                TransactionRequest::from_recovered_transaction(tx.to_consensus());
+                    if let Some(recipient) = tx.to() &&
+                        args.is_match(&recipient)
+                    {
+                        // convert the pool transaction
+                        let call_request =
+                            TransactionRequest::from_recovered_transaction(tx.to_consensus());
 
-                            let evm_config = node.evm_config.clone();
+                        let evm_config = node.evm_config.clone();
 
-                            let result = eth_api
-                                .spawn_with_call_at(
-                                    call_request,
-                                    BlockNumberOrTag::Latest.into(),
-                                    EvmOverrides::default(),
-                                    move |db, evm_env, tx_env| {
-                                        let mut dummy_inspector = DummyInspector::default();
-                                        let mut evm = evm_config.evm_with_env_and_inspector(
-                                            db,
-                                            evm_env,
-                                            &mut dummy_inspector,
-                                        );
-                                        // execute the transaction on a blocking task and await
-                                        // the
-                                        // inspector result
-                                        let _ = evm.transact(tx_env)?;
-                                        Ok(dummy_inspector)
-                                    },
-                                )
-                                .await;
+                        let result = eth_api
+                            .spawn_with_call_at(
+                                call_request,
+                                BlockNumberOrTag::Latest.into(),
+                                EvmOverrides::default(),
+                                move |db, evm_env, tx_env| {
+                                    let mut dummy_inspector = DummyInspector::default();
+                                    let mut evm = evm_config.evm_with_env_and_inspector(
+                                        db,
+                                        evm_env,
+                                        &mut dummy_inspector,
+                                    );
+                                    // execute the transaction on a blocking task and await
+                                    // the
+                                    // inspector result
+                                    let _ = evm.transact(tx_env)?;
+                                    Ok(dummy_inspector)
+                                },
+                            )
+                            .await;
 
-                            if let Ok(ret_val) = result {
-                                let hash = tx.hash();
-                                println!(
-                                    "Inspector result for transaction {}: \n {}",
-                                    hash,
-                                    ret_val.ret_val.join("\n")
-                                );
-                            }
+                        if let Ok(ret_val) = result {
+                            let hash = tx.hash();
+                            println!(
+                                "Inspector result for transaction {}: \n {}",
+                                hash,
+                                ret_val.ret_val.join("\n")
+                            );
                         }
                     }
                 }

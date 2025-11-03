@@ -14,7 +14,7 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::Decodable2718;
-use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
+use alloy_evm::{EvmFactory, FromRecoveredTx, FromTxWithEncoded};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_primitives::U256;
 use core::fmt::Debug;
@@ -23,7 +23,8 @@ use op_alloy_rpc_types_engine::OpExecutionData;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
 use reth_evm::{
-    ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
+    precompiles::PrecompilesMap, ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor,
+    ExecutableTxIterator, ExecutionCtxFor, TransactionEnv,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -60,15 +61,19 @@ pub struct OpEvmConfig<
     ChainSpec = OpChainSpec,
     N: NodePrimitives = OpPrimitives,
     R = OpRethReceiptBuilder,
+    EvmFactory = OpEvmFactory,
 > {
     /// Inner [`OpBlockExecutorFactory`].
-    pub executor_factory: OpBlockExecutorFactory<R, Arc<ChainSpec>>,
+    pub executor_factory: OpBlockExecutorFactory<R, Arc<ChainSpec>, EvmFactory>,
     /// Optimism block assembler.
     pub block_assembler: OpBlockAssembler<ChainSpec>,
-    _pd: core::marker::PhantomData<N>,
+    #[doc(hidden)]
+    pub _pd: core::marker::PhantomData<N>,
 }
 
-impl<ChainSpec, N: NodePrimitives, R: Clone> Clone for OpEvmConfig<ChainSpec, N, R> {
+impl<ChainSpec, N: NodePrimitives, R: Clone, EvmFactory: Clone> Clone
+    for OpEvmConfig<ChainSpec, N, R, EvmFactory>
+{
     fn clone(&self) -> Self {
         Self {
             executor_factory: self.executor_factory.clone(),
@@ -98,14 +103,20 @@ impl<ChainSpec: OpHardforks, N: NodePrimitives, R> OpEvmConfig<ChainSpec, N, R> 
             _pd: core::marker::PhantomData,
         }
     }
+}
 
+impl<ChainSpec, N, R, EvmFactory> OpEvmConfig<ChainSpec, N, R, EvmFactory>
+where
+    ChainSpec: OpHardforks,
+    N: NodePrimitives,
+{
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         self.executor_factory.spec()
     }
 }
 
-impl<ChainSpec, N, R> ConfigureEvm for OpEvmConfig<ChainSpec, N, R>
+impl<ChainSpec, N, R, EvmF> ConfigureEvm for OpEvmConfig<ChainSpec, N, R, EvmF>
 where
     ChainSpec: EthChainSpec<Header = Header> + OpHardforks,
     N: NodePrimitives<
@@ -117,12 +128,19 @@ where
     >,
     OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
     R: OpReceiptBuilder<Receipt: DepositReceipt, Transaction: SignedTransaction>,
+    EvmF: EvmFactory<
+            Tx: FromRecoveredTx<R::Transaction>
+                    + FromTxWithEncoded<R::Transaction>
+                    + TransactionEnv,
+            Precompiles = PrecompilesMap,
+            Spec = OpSpecId,
+        > + Debug,
     Self: Send + Sync + Unpin + Clone + 'static,
 {
     type Primitives = N;
     type Error = EIP1559ParamError;
     type NextBlockEnvCtx = OpNextBlockEnvAttributes;
-    type BlockExecutorFactory = OpBlockExecutorFactory<R, Arc<ChainSpec>>;
+    type BlockExecutorFactory = OpBlockExecutorFactory<R, Arc<ChainSpec>, EvmF>;
     type BlockAssembler = OpBlockAssembler<ChainSpec>;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
@@ -133,7 +151,7 @@ where
         &self.block_assembler
     }
 
-    fn evm_env(&self, header: &Header) -> EvmEnv<OpSpecId> {
+    fn evm_env(&self, header: &Header) -> Result<EvmEnv<OpSpecId>, Self::Error> {
         let spec = config::revm_spec(self.chain_spec(), header);
 
         let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
@@ -163,7 +181,7 @@ where
             blob_excess_gas_and_price,
         };
 
-        EvmEnv { cfg_env, block_env }
+        Ok(EvmEnv { cfg_env, block_env })
     }
 
     fn next_evm_env(
@@ -204,24 +222,27 @@ where
         Ok(EvmEnv { cfg_env, block_env })
     }
 
-    fn context_for_block(&self, block: &'_ SealedBlock<N::Block>) -> OpBlockExecutionCtx {
-        OpBlockExecutionCtx {
+    fn context_for_block(
+        &self,
+        block: &'_ SealedBlock<N::Block>,
+    ) -> Result<OpBlockExecutionCtx, Self::Error> {
+        Ok(OpBlockExecutionCtx {
             parent_hash: block.header().parent_hash(),
             parent_beacon_block_root: block.header().parent_beacon_block_root(),
             extra_data: block.header().extra_data().clone(),
-        }
+        })
     }
 
     fn context_for_next_block(
         &self,
         parent: &SealedHeader<N::BlockHeader>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> OpBlockExecutionCtx {
-        OpBlockExecutionCtx {
+    ) -> Result<OpBlockExecutionCtx, Self::Error> {
+        Ok(OpBlockExecutionCtx {
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             extra_data: attributes.extra_data,
-        }
+        })
     }
 }
 
@@ -341,7 +362,8 @@ mod tests {
         // Header, and total difficulty
         let EvmEnv { cfg_env, .. } =
             OpEvmConfig::optimism(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
-                .evm_env(&header);
+                .evm_env(&header)
+                .unwrap();
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec

@@ -192,7 +192,7 @@ pub fn build_import_pipeline_impl<N, C, E>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
     evm_config: E,
-) -> eyre::Result<(Pipeline<N>, impl futures::Stream<Item = NodeEvent<N::Primitives>>)>
+) -> eyre::Result<(Pipeline<N>, impl futures::Stream<Item = NodeEvent<N::Primitives>> + use<N, C, E>)>
 where
     N: ProviderNodeTypes,
     C: FullConsensus<N::Primitives, Error = reth_consensus::ConsensusError> + 'static,

@@ -286,7 +286,6 @@ fn calculate_state_root(
         state.accounts.into_iter().sorted_unstable_by_key(|(addr, _)| *addr)
     {
         let nibbles = Nibbles::unpack(hashed_address);
-        let account = account.unwrap_or_default();
 
         // Determine which storage root should be used for this account
         let storage_root = if let Some(storage_trie) = trie.storage_trie_mut(&hashed_address) {
@@ -298,12 +297,12 @@ fn calculate_state_root(
         };
 
         // Decide whether to remove or update the account leaf
-        if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
-            trie.remove_account_leaf(&nibbles, &provider_factory)?;
-        } else {
+        if let Some(account) = account {
             account_rlp_buf.clear();
             account.into_trie_account(storage_root).encode(&mut account_rlp_buf);
             trie.update_account_leaf(nibbles, account_rlp_buf.clone(), &provider_factory)?;
+        } else {
+            trie.remove_account_leaf(&nibbles, &provider_factory)?;
         }
     }
 

@@ -249,6 +249,10 @@ impl NodeState {
             }
             ConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed) => {
                 let block = executed.sealed_block();
+                let mut full = block.gas_used() as f64 * 100.0 / block.gas_limit() as f64;
+                if full.is_nan() {
+                    full = 0.0;
+                }
                 info!(
                     number=block.number(),
                     hash=?block.hash(),
@@ -257,7 +261,7 @@ impl NodeState {
                     gas_used=%format_gas(block.gas_used()),
                     gas_throughput=%format_gas_throughput(block.gas_used(), elapsed),
                     gas_limit=%format_gas(block.gas_limit()),
-                    full=%format!("{:.1}%", block.gas_used() as f64 * 100.0 / block.gas_limit() as f64),
+                    full=%format!("{:.1}%", full),
                     base_fee=%format!("{:.2}Gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
                     blobs=block.blob_gas_used().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     excess_blobs=block.excess_blob_gas().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,

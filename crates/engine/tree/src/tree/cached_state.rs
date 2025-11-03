@@ -1,4 +1,4 @@
-//! Implements a state provider that has a shared cache in front of it.
+//! Execution cache implementation for block processing.
 use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use metrics::Gauge;
 use mini_moka::sync::CacheBuilder;
@@ -15,7 +15,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::map::DefaultHashBuilder;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tracing::trace;
 
 pub(crate) type Cache<K, V> =
@@ -27,7 +27,7 @@ pub(crate) struct CachedStateProvider<S> {
     state_provider: S,
 
     /// The caches used for the provider
-    caches: ProviderCaches,
+    caches: ExecutionCache,
 
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
@@ -37,11 +37,11 @@ impl<S> CachedStateProvider<S>
 where
     S: StateProvider,
 {
-    /// Creates a new [`CachedStateProvider`] from a [`ProviderCaches`], state provider, and
+    /// Creates a new [`CachedStateProvider`] from an [`ExecutionCache`], state provider, and
     /// [`CachedStateMetrics`].
     pub(crate) const fn new_with_caches(
         state_provider: S,
-        caches: ProviderCaches,
+        caches: ExecutionCache,
         metrics: CachedStateMetrics,
     ) -> Self {
         Self { state_provider, caches, metrics }
@@ -128,14 +128,14 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     }
 }
 
-/// Represents the status of a storage slot in the cache
+/// Represents the status of a storage slot in the cache.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SlotStatus {
-    /// The account's storage cache doesn't exist
+    /// The account's storage cache doesn't exist.
     NotCached,
-    /// The storage slot is empty (either not in cache or explicitly None)
+    /// The storage slot exists in cache and is empty (value is zero).
     Empty,
-    /// The storage slot has a value
+    /// The storage slot exists in cache and has a specific non-zero value.
     Value(StorageValue),
 }
 
@@ -248,6 +248,18 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
         self.state_provider.storage_proof(address, slot, hashed_storage)
     }
 
+    /// Generate a storage multiproof for multiple storage slots.
+    ///
+    /// A **storage multiproof** is a cryptographic proof that can verify the values
+    /// of multiple storage slots for a single account in a single verification step.
+    /// Instead of generating separate proofs for each slot (which would be inefficient),
+    /// a multiproof bundles the necessary trie nodes to prove all requested slots.
+    ///
+    /// ## How it works:
+    /// 1. Takes an account address and a list of storage slot keys
+    /// 2. Traverses the account's storage trie to collect proof nodes
+    /// 3. Returns a [`StorageMultiProof`] containing the minimal set of trie nodes needed to verify
+    ///    all the requested storage slots
     fn storage_multiproof(
         &self,
         address: Address,
@@ -278,20 +290,25 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider
     }
 }
 
-/// The set of caches that are used in the [`CachedStateProvider`].
+/// Execution cache used during block processing.
+///
+/// Optimizes state access by maintaining in-memory copies of frequently accessed
+/// accounts, storage slots, and bytecode. Works in conjunction with prewarming
+/// to reduce database I/O during block execution.
 #[derive(Debug, Clone)]
-pub(crate) struct ProviderCaches {
-    /// The cache for bytecode
+pub(crate) struct ExecutionCache {
+    /// Cache for contract bytecode, keyed by code hash.
     code_cache: Cache<B256, Option<Bytecode>>,
 
-    /// The cache for storage, organized hierarchically by account
+    /// Per-account storage cache: outer cache keyed by Address, inner cache tracks that account’s
+    /// storage slots.
     storage_cache: Cache<Address, AccountStorageCache>,
 
-    /// The cache for basic accounts
+    /// Cache for basic account information (nonce, balance, code hash).
     account_cache: Cache<Address, Option<Account>>,
 }
 
-impl ProviderCaches {
+impl ExecutionCache {
     /// Get storage value from hierarchical cache.
     ///
     /// Returns a `SlotStatus` indicating whether:
@@ -330,18 +347,24 @@ impl ProviderCaches {
         self.storage_cache.iter().map(|addr| addr.len()).sum()
     }
 
-    /// Inserts the [`BundleState`] entries into the cache.
+    /// Inserts the post-execution state changes into the cache.
     ///
-    /// Entries are inserted in the following order:
-    /// 1. Bytecodes
-    /// 2. Storage slots
-    /// 3. Accounts
+    /// This method is called after transaction execution to update the cache with
+    /// the touched and modified state. The insertion order is critical:
     ///
-    /// The order is important, because the access patterns are Account -> Bytecode and Account ->
-    /// Storage slot. If we update the account first, it may point to a code hash that doesn't have
-    /// the associated bytecode anywhere yet.
+    /// 1. Bytecodes: Insert contract code first
+    /// 2. Storage slots: Update storage values for each account
+    /// 3. Accounts: Update account info (nonce, balance, code hash)
     ///
-    /// Returns an error if the state can't be cached and should be discarded.
+    /// ## Why This Order Matters
+    ///
+    /// Account information references bytecode via code hash. If we update accounts
+    /// before bytecode, we might create cache entries pointing to non-existent code.
+    /// The current order ensures cache consistency.
+    ///
+    /// ## Error Handling
+    ///
+    /// Returns an error if the state updates are inconsistent and should be discarded.
     pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
         // Insert bytecodes
         for (code_hash, bytecode) in &state_updates.contracts {
@@ -388,9 +411,9 @@ impl ProviderCaches {
     }
 }
 
-/// A builder for [`ProviderCaches`].
+/// A builder for [`ExecutionCache`].
 #[derive(Debug)]
-pub(crate) struct ProviderCacheBuilder {
+pub(crate) struct ExecutionCacheBuilder {
     /// Code cache entries
     code_cache_entries: u64,
 
@@ -401,9 +424,9 @@ pub(crate) struct ProviderCacheBuilder {
     account_cache_entries: u64,
 }
 
-impl ProviderCacheBuilder {
-    /// Build a [`ProviderCaches`] struct, so that provider caches can be easily cloned.
-    pub(crate) fn build_caches(self, total_cache_size: u64) -> ProviderCaches {
+impl ExecutionCacheBuilder {
+    /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
+    pub(crate) fn build_caches(self, total_cache_size: u64) -> ExecutionCache {
         let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
         let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
         let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
@@ -464,11 +487,11 @@ impl ProviderCacheBuilder {
             .time_to_idle(TIME_TO_IDLE)
             .build_with_hasher(DefaultHashBuilder::default());
 
-        ProviderCaches { code_cache, storage_cache, account_cache }
+        ExecutionCache { code_cache, storage_cache, account_cache }
     }
 }
 
-impl Default for ProviderCacheBuilder {
+impl Default for ExecutionCacheBuilder {
     fn default() -> Self {
         // With weigher and max_capacity in place, these numbers represent
         // the maximum number of entries that can be stored, not the actual
@@ -493,20 +516,20 @@ pub(crate) struct SavedCache {
     hash: B256,
 
     /// The caches used for the provider.
-    caches: ProviderCaches,
+    caches: ExecutionCache,
 
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
+
+    /// A guard to track in-flight usage of this cache.
+    /// The cache is considered available if the strong count is 1.
+    usage_guard: Arc<()>,
 }
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub(super) const fn new(
-        hash: B256,
-        caches: ProviderCaches,
-        metrics: CachedStateMetrics,
-    ) -> Self {
-        Self { hash, caches, metrics }
+    pub(super) fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
+        Self { hash, caches, metrics, usage_guard: Arc::new(()) }
     }
 
     /// Returns the hash for this cache
@@ -515,16 +538,26 @@ impl SavedCache {
     }
 
     /// Splits the cache into its caches and metrics, consuming it.
-    pub(crate) fn split(self) -> (ProviderCaches, CachedStateMetrics) {
+    pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics) {
         (self.caches, self.metrics)
     }
 
-    /// Returns the [`ProviderCaches`] belonging to the tracked hash.
-    pub(crate) const fn cache(&self) -> &ProviderCaches {
+    /// Returns true if the cache is available for use (no other tasks are currently using it).
+    pub(crate) fn is_available(&self) -> bool {
+        Arc::strong_count(&self.usage_guard) == 1
+    }
+
+    /// Returns the [`ExecutionCache`] belonging to the tracked hash.
+    pub(crate) const fn cache(&self) -> &ExecutionCache {
         &self.caches
     }
 
-    /// Updates the metrics for the [`ProviderCaches`].
+    /// Returns the metrics associated with this cache.
+    pub(crate) const fn metrics(&self) -> &CachedStateMetrics {
+        &self.metrics
+    }
+
+    /// Updates the metrics for the [`ExecutionCache`].
     pub(crate) fn update_metrics(&self) {
         self.metrics.storage_cache_size.set(self.caches.total_storage_slots() as f64);
         self.metrics.account_cache_size.set(self.caches.account_cache.entry_count() as f64);
@@ -532,10 +565,20 @@ impl SavedCache {
     }
 }
 
-/// Cache for an account's storage slots
+#[cfg(test)]
+impl SavedCache {
+    fn clone_guard_for_test(&self) -> Arc<()> {
+        self.usage_guard.clone()
+    }
+}
+
+/// Cache for an individual account's storage slots.
+///
+/// This represents the second level of the hierarchical storage cache.
+/// Each account gets its own `AccountStorageCache` to store accessed storage slots.
 #[derive(Debug, Clone)]
 pub(crate) struct AccountStorageCache {
-    /// The storage slots for this account
+    /// Map of storage keys to their cached values.
     slots: Cache<StorageKey, Option<StorageValue>>,
 }
 
@@ -621,7 +664,7 @@ mod tests {
 
         unsafe impl GlobalAlloc for TrackingAllocator {
             unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-                let ret = self.inner.alloc(layout);
+                let ret = unsafe { self.inner.alloc(layout) };
                 if !ret.is_null() {
                     self.allocated.fetch_add(layout.size(), Ordering::SeqCst);
                     self.total_allocated.fetch_add(layout.size(), Ordering::SeqCst);
@@ -631,7 +674,7 @@ mod tests {
 
             unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
                 self.allocated.fetch_sub(layout.size(), Ordering::SeqCst);
-                self.inner.dealloc(ptr, layout)
+                unsafe { self.inner.dealloc(ptr, layout) }
             }
         }
     }
@@ -692,7 +735,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
-        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder::default().build_caches(1000);
         let state_provider =
             CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
 
@@ -715,7 +758,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
-        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder::default().build_caches(1000);
         let state_provider =
             CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
 
@@ -733,7 +776,7 @@ mod tests {
         let storage_value = U256::from(1);
 
         // insert into caches directly
-        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder::default().build_caches(1000);
         caches.insert_storage(address, storage_key, Some(storage_value));
 
         // check that the storage is empty
@@ -748,7 +791,7 @@ mod tests {
         let address = Address::random();
 
         // just create empty caches
-        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder::default().build_caches(1000);
 
         // check that the storage is empty
         let slot_status = caches.get_storage(&address, &storage_key);
@@ -763,11 +806,52 @@ mod tests {
         let storage_key = StorageKey::random();
 
         // insert into caches directly
-        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder::default().build_caches(1000);
         caches.insert_storage(address, storage_key, None);
 
         // check that the storage is empty
         let slot_status = caches.get_storage(&address, &storage_key);
         assert_eq!(slot_status, SlotStatus::Empty);
+    }
+
+    // Tests for SavedCache locking mechanism
+    #[test]
+    fn test_saved_cache_is_available() {
+        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let cache = SavedCache::new(B256::ZERO, execution_cache, CachedStateMetrics::zeroed());
+
+        // Initially, the cache should be available (only one reference)
+        assert!(cache.is_available(), "Cache should be available initially");
+
+        // Clone the usage guard (simulating it being handed out)
+        let _guard = cache.clone_guard_for_test();
+
+        // Now the cache should not be available (two references)
+        assert!(!cache.is_available(), "Cache should not be available with active guard");
+    }
+
+    #[test]
+    fn test_saved_cache_multiple_references() {
+        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let cache =
+            SavedCache::new(B256::from([2u8; 32]), execution_cache, CachedStateMetrics::zeroed());
+
+        // Create multiple references to the usage guard
+        let guard1 = cache.clone_guard_for_test();
+        let guard2 = cache.clone_guard_for_test();
+        let guard3 = guard1.clone();
+
+        // Cache should not be available with multiple guards
+        assert!(!cache.is_available());
+
+        // Drop guards one by one
+        drop(guard1);
+        assert!(!cache.is_available()); // Still not available
+
+        drop(guard2);
+        assert!(!cache.is_available()); // Still not available
+
+        drop(guard3);
+        assert!(cache.is_available()); // Now available
     }
 }

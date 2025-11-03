@@ -139,7 +139,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 command.execute(provider_factory)?;
             }
             Subcommands::RepairTrie(command) => {
-                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+                let access_rights =
+                    if command.dry_run { AccessRights::RO } else { AccessRights::RW };
+                let Environment { provider_factory, .. } = self.env.init::<N>(access_rights)?;
                 command.execute(provider_factory)?;
             }
             Subcommands::Version => {

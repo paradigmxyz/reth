@@ -627,10 +627,10 @@ impl Discv4Service {
 
     /// Sets the external Ip to the configured external IP if [`NatResolver::ExternalIp`].
     fn resolve_external_ip(&mut self) {
-        if let Some(r) = &self.resolve_external_ip_interval {
-            if let Some(external_ip) = r.resolver().as_external_ip() {
-                self.set_external_ip_addr(external_ip);
-            }
+        if let Some(r) = &self.resolve_external_ip_interval &&
+            let Some(external_ip) = r.resolver().as_external_ip()
+        {
+            self.set_external_ip_addr(external_ip);
         }
     }
 
@@ -904,10 +904,10 @@ impl Discv4Service {
 
     /// Check if the peer has an active bond.
     fn has_bond(&self, remote_id: PeerId, remote_ip: IpAddr) -> bool {
-        if let Some(timestamp) = self.received_pongs.last_pong(remote_id, remote_ip) {
-            if timestamp.elapsed() < self.config.bond_expiration {
-                return true
-            }
+        if let Some(timestamp) = self.received_pongs.last_pong(remote_id, remote_ip) &&
+            timestamp.elapsed() < self.config.bond_expiration
+        {
+            return true
         }
         false
     }
@@ -3048,12 +3048,11 @@ mod tests {
         loop {
             tokio::select! {
                 Some(update) = updates.next() => {
-                    if let DiscoveryUpdate::Added(record) = update {
-                        if record.id == peerid_1 {
+                    if let DiscoveryUpdate::Added(record) = update
+                        && record.id == peerid_1 {
                             bootnode_appeared = true;
                             break;
                         }
-                    }
                 }
                 _ = &mut timeout => break,
             }

@@ -145,10 +145,7 @@ where
         block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
-    ) -> eyre::Result<()>
-    where
-        N: NodePrimitives,
-    {
+    ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
         let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
