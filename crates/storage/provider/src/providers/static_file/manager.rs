@@ -630,11 +630,21 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 )
                 .map_err(ProviderError::other)?;
 
-                // When the node is first started from scratch this min_block is set but needs to be
-                // updated as we progress the chain. Examples:
-                // - init: None -> [0..=100]
-                // - init: [0..=0], update with [0..=100] (eg. `op-reth node` after `reth
-                //   init-state`)
+                // Update min_block to track the lowest block range of the segment.
+                // This is initially set by initialize_index() on node startup, but must be updated
+                // as the file grows to prevent stale values.
+                //
+                // Without this update, min_block can remain at genesis (e.g. Some([0..=0]) or None)
+                // even after syncing to higher blocks (e.g. [0..=100]). A stale
+                // min_block causes get_lowest_static_file_block() to return the
+                // wrong end value, which breaks pruning logic that relies on it for
+                // safety checks.
+                //
+                // Example progression:
+                // 1. Node starts, initialize_index() sets min_block = [0..=0]
+                // 2. Sync to block 100, this update sets min_block = [0..=100]
+                // 3. Pruner calls get_lowest_static_file_block() -> returns 100 (correct) Without
+                //    this update, it would incorrectly return 0 (stale)
                 if let Some(current_block_range) = jar.user_header().block_range().copied() {
                     min_block
                         .entry(segment)
