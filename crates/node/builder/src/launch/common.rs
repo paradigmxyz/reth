@@ -67,7 +67,7 @@ use reth_node_metrics::{
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
     BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderFactory,
+    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -466,7 +466,7 @@ where
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let static_file_provider =
-            StaticFileProvider::builder_read_write(self.data_dir().static_files())?
+            StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
                 .with_metrics()
                 .build()?;
 

@@ -102,9 +102,14 @@ pub struct StaticFileProviderBuilder<N> {
 }
 
 impl<N: NodePrimitives> StaticFileProviderBuilder<N> {
-    /// Creates a new builder from a [`StaticFileProviderInner`].
-    const fn new(inner: StaticFileProviderInner<N>) -> Self {
-        Self { inner }
+    /// Creates a new builder with read-write access.
+    pub fn read_write(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        StaticFileProviderInner::new(path, StaticFileAccess::RW).map(|inner| Self { inner })
+    }
+
+    /// Creates a new builder with read-only access.
+    pub fn read_only(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        StaticFileProviderInner::new(path, StaticFileAccess::RO).map(|inner| Self { inner })
     }
 
     /// Set a custom number of blocks per file for all segments.
@@ -140,36 +145,6 @@ impl<N: NodePrimitives> StaticFileProviderBuilder<N> {
 }
 
 impl<N: NodePrimitives> StaticFileProvider<N> {
-    /// Creates a new [`StaticFileProvider`] with the given [`StaticFileAccess`].
-    fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
-        let provider = Self(Arc::new(StaticFileProviderInner::new(path, access)?));
-        provider.initialize_index()?;
-        Ok(provider)
-    }
-
-    /// Creates a builder for configuring a [`StaticFileProvider`] with the given
-    /// [`StaticFileAccess`].
-    fn builder(
-        path: impl AsRef<Path>,
-        access: StaticFileAccess,
-    ) -> ProviderResult<StaticFileProviderBuilder<N>> {
-        Ok(StaticFileProviderBuilder::new(StaticFileProviderInner::new(path, access)?))
-    }
-
-    /// Creates a builder for a read-only [`StaticFileProvider`].
-    pub fn builder_read_only(
-        path: impl AsRef<Path>,
-    ) -> ProviderResult<StaticFileProviderBuilder<N>> {
-        Self::builder(path, StaticFileAccess::RO)
-    }
-
-    /// Creates a builder for a read-write [`StaticFileProvider`].
-    pub fn builder_read_write(
-        path: impl AsRef<Path>,
-    ) -> ProviderResult<StaticFileProviderBuilder<N>> {
-        Self::builder(path, StaticFileAccess::RW)
-    }
-
     /// Creates a new [`StaticFileProvider`] with read-only access.
     ///
     /// Set `watch_directory` to `true` to track the most recent changes in static files. Otherwise,
@@ -180,7 +155,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// See also [`StaticFileProvider::watch_directory`].
     pub fn read_only(path: impl AsRef<Path>, watch_directory: bool) -> ProviderResult<Self> {
-        let provider = Self::new(path, StaticFileAccess::RO)?;
+        let provider = StaticFileProviderBuilder::read_only(path)?.build()?;
 
         if watch_directory {
             provider.watch_directory();
@@ -191,7 +166,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Creates a new [`StaticFileProvider`] with read-write access.
     pub fn read_write(path: impl AsRef<Path>) -> ProviderResult<Self> {
-        Self::new(path, StaticFileAccess::RW)
+        StaticFileProviderBuilder::read_write(path)?.build()
     }
 
     /// Watches the directory for changes and updates the in-memory index when modifications
