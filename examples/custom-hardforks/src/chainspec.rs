@@ -10,7 +10,6 @@ use reth_chainspec::{
 };
 use reth_ethereum::chainspec::EthereumHardfork;
 use reth_network_peers::NodeRecord;
-use serde_json;
 
 // Custom chain spec wrapping Reth's `ChainSpec` with our hardforks.
 #[derive(Debug, Clone)]

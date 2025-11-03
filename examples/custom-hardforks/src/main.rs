@@ -6,7 +6,6 @@
 use crate::chainspec::CustomChainSpec;
 use alloy_genesis::Genesis;
 use reth_chainspec::Hardforks;
-use serde_json;
 use std::{fs, sync::Arc};
 
 mod chainspec;
