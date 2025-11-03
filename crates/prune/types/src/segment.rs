@@ -29,9 +29,11 @@ pub enum PruneSegment {
     /// Prune segment responsible for the `StorageChangeSets` and `StoragesHistory` tables.
     StorageHistory,
     #[deprecated = "Variant indexes cannot be changed"]
+    #[strum(disabled)]
     /// Prune segment responsible for the `CanonicalHeaders`, `Headers` tables.
     Headers,
     #[deprecated = "Variant indexes cannot be changed"]
+    #[strum(disabled)]
     /// Prune segment responsible for the `Transactions` table.
     Transactions,
     /// Prune segment responsible for all rows in `AccountsTrieChangeSets` and
@@ -105,4 +107,22 @@ pub enum PruneSegmentError {
     /// Invalid configuration of a prune segment.
     #[error("the configuration provided for {0} is invalid")]
     Configuration(PruneSegment),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn test_prune_segment_iter_excludes_deprecated() {
+        let segments: Vec<PruneSegment> = PruneSegment::iter().collect();
+
+        // Verify deprecated variants are not included derived iter
+        #[expect(deprecated)]
+        {
+            assert!(!segments.contains(&PruneSegment::Headers));
+            assert!(!segments.contains(&PruneSegment::Transactions));
+        }
+    }
 }
