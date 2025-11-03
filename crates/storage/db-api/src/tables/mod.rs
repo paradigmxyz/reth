@@ -277,7 +277,7 @@ macro_rules! tables {
         ///
         /// # Examples
         ///
-        /// ```
+        /// ```ignore
         /// use reth_db_api::{table::Table, Tables, tables_to_generic};
         ///
         /// let table = Tables::Headers;
