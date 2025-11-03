@@ -628,8 +628,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 let fixed_range = self.find_fixed_range(segment_max_block);
 
                 let path = self.path.join(segment.filename(&fixed_range));
-                let jar = NippyJar::<SegmentHeader>::load(&path)
-                    .map_err(|e| ProviderError::other(format!("Failed to load {path:?}: {e}")))?;
+                let jar = NippyJar::<SegmentHeader>::load(&path).inspect_err(|e| {
+                    warn!(target: "provider::static_file", ?path, %e, "Failed to load static file jar");
+                }).map_err(ProviderError::other)?;
 
                 // Update min_block to track the lowest block range of the segment.
                 // This is initially set by initialize_index() on node startup, but must be updated
