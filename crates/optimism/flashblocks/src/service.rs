@@ -109,12 +109,14 @@ where
     }
 
     /// Returns the sender half to the received flashblocks.
-    pub fn flashblocks_broadcaster(&self) -> &tokio::sync::broadcast::Sender<Arc<FlashBlock>> {
+    pub const fn flashblocks_broadcaster(
+        &self,
+    ) -> &tokio::sync::broadcast::Sender<Arc<FlashBlock>> {
         &self.received_flashblocks_tx
     }
 
     /// Returns the sender half to the flashblock sequence.
-    pub fn block_sequence_broadcaster(
+    pub const fn block_sequence_broadcaster(
         &self,
     ) -> &tokio::sync::broadcast::Sender<FlashBlockCompleteSequence> {
         self.blocks.block_sequence_broadcaster()

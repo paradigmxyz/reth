@@ -39,7 +39,9 @@ where
     }
 
     /// Returns the sender half of the [`FlashBlockCompleteSequence`] channel.
-    pub fn block_sequence_broadcaster(&self) -> &broadcast::Sender<FlashBlockCompleteSequence> {
+    pub const fn block_sequence_broadcaster(
+        &self,
+    ) -> &broadcast::Sender<FlashBlockCompleteSequence> {
         &self.block_broadcaster
     }
 
