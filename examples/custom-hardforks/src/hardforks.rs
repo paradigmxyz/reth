@@ -3,7 +3,9 @@
 //! This module demonstrates defining hardfork variants, implementing the `Hardfork` trait,
 //! and providing a configuration structure for activation settings.
 
-use reth_chainspec::hardfork;
+use alloy_eip2124::ForkFilterKey;
+use reth_chainspec::{hardfork, ForkCondition, Hardfork, Hardforks};
+use std::any::Any;
 use serde::{Deserialize, Serialize};
 
 // Define custom hardfork variants using Reth's `hardfork!` macro.
@@ -27,7 +29,8 @@ hardfork!(
 
 // Configuration for hardfork activation.
 // This struct holds settings like activation blocks and is serializable for config files.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct CustomHardforkConfig {
     /// Block number to activate BasicUpgrade.
     pub basic_upgrade_block: Option<u64>,
@@ -35,51 +38,50 @@ pub struct CustomHardforkConfig {
     pub advanced_upgrade_block: Option<u64>,
 }
 
-impl Default for CustomHardforkConfig {
-    fn default() -> Self {
-        Self {
-            basic_upgrade_block: Some(10), // Activate at block 10 for demo
-            advanced_upgrade_block: Some(20),
+impl Hardforks for CustomHardforkConfig {
+    fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
+        if let Some(hardfork) = (&fork as &dyn Any).downcast_ref::<CustomHardfork>() {
+            match hardfork {
+                CustomHardfork::BasicUpgrade => {
+                    self.basic_upgrade_block.map(ForkCondition::Block).unwrap_or(ForkCondition::Never)
+                }
+                CustomHardfork::AdvancedUpgrade => {
+                    self.advanced_upgrade_block.map(ForkCondition::Block).unwrap_or(ForkCondition::Never)
+                }
+            }
+        } else {
+            ForkCondition::Never
         }
     }
-}
 
-impl CustomHardforkConfig {
-    /// Converts the config into a `ChainHardforks` for integration.
-    /// This builds the hardfork list with activation conditions.
-    pub fn into_hardforks(self) -> reth_chainspec::ChainHardforks {
-        let mut hardforks = reth_chainspec::ChainHardforks::default();
-        if let Some(block) = self.basic_upgrade_block {
-            hardforks
-                .insert(CustomHardfork::BasicUpgrade, reth_chainspec::ForkCondition::Block(block));
-        }
-        if let Some(block) = self.advanced_upgrade_block {
-            hardforks.insert(
-                CustomHardfork::AdvancedUpgrade,
-                reth_chainspec::ForkCondition::Block(block),
-            );
-        }
-        hardforks
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
+        [
+            (&CustomHardfork::BasicUpgrade as &dyn Hardfork, self.fork(CustomHardfork::BasicUpgrade)),
+            (&CustomHardfork::AdvancedUpgrade as &dyn Hardfork, self.fork(CustomHardfork::AdvancedUpgrade)),
+        ].into_iter()
+    }
+
+    fn fork_id(&self, head: &reth_chainspec::Head) -> reth_chainspec::ForkId {
+        // Simplified, in practice you'd compute based on active forks
+        reth_chainspec::ForkId { hash: head.hash.into(), next: 0 }
+    }
+
+    fn latest_fork_id(&self) -> reth_chainspec::ForkId {
+        reth_chainspec::ForkId { hash: revm_primitives::B256::ZERO.into(), next: 0 }
+    }
+
+    fn fork_filter(&self, head: reth_chainspec::Head) -> reth_chainspec::ForkFilter {
+        reth_chainspec::ForkFilter::new(head, head.hash, head.timestamp, self.forks_iter().filter_map(|(_, c)| c.block_number().map(ForkFilterKey::Block)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chainspec::ForkCondition;
 
     #[test]
     fn hardfork_names() {
         assert_eq!(CustomHardfork::BasicUpgrade.name(), "BasicUpgrade");
         assert_eq!(CustomHardfork::AdvancedUpgrade.name(), "AdvancedUpgrade");
-    }
-
-    #[test]
-    fn config_to_hardforks() {
-        let config =
-            CustomHardforkConfig { basic_upgrade_block: Some(5), advanced_upgrade_block: Some(15) };
-        let hardforks = config.into_hardforks();
-        assert_eq!(hardforks.fork(CustomHardfork::BasicUpgrade), ForkCondition::Block(5));
-        assert_eq!(hardforks.fork(CustomHardfork::AdvancedUpgrade), ForkCondition::Block(15));
     }
 }

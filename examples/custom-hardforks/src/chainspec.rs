@@ -10,6 +10,7 @@ use reth_chainspec::{
 };
 use reth_ethereum::chainspec::EthereumHardfork;
 use reth_network_peers::NodeRecord;
+use serde_json;
 
 // Custom chain spec wrapping Reth's `ChainSpec` with our hardforks.
 #[derive(Debug, Clone)]
@@ -18,21 +19,27 @@ pub struct CustomChainSpec {
 }
 
 impl CustomChainSpec {
-    /// Creates a new custom chain spec with default hardfork config.
-    pub fn new() -> Self {
-        let config = CustomHardforkConfig::default();
-        Self::with_config(config)
-    }
-
-    /// Creates a custom chain spec with provided hardfork config.
-    pub fn with_config(config: CustomHardforkConfig) -> Self {
-        let inner = ChainSpec::builder()
+    /// Creates a custom chain spec from a genesis file.
+    pub fn from_genesis(genesis: Genesis) -> Self {
+        let config: CustomHardforkConfig = genesis
+            .config
+            .extra_fields
+            .get("customHardforks")
+            .cloned()
+            .and_then(|val| serde_json::from_value(val).ok())
+            .unwrap_or_default();
+        let mut builder = ChainSpec::builder()
             .chain(Chain::mainnet())
-            .genesis(Genesis::default())
+            .genesis(genesis)
             .frontier_activated()
-            .homestead_activated()
-            .with_forks(config.into_hardforks())
-            .build();
+            .homestead_activated();
+        if let Some(block) = config.basic_upgrade_block {
+            builder = builder.with_fork(crate::hardforks::CustomHardfork::BasicUpgrade, ForkCondition::Block(block));
+        }
+        if let Some(block) = config.advanced_upgrade_block {
+            builder = builder.with_fork(crate::hardforks::CustomHardfork::AdvancedUpgrade, ForkCondition::Block(block));
+        }
+        let inner = builder.build();
         Self { inner }
     }
 }
