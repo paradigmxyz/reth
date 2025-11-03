@@ -615,6 +615,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         segment_max_block: Option<BlockNumber>,
     ) -> ProviderResult<()> {
+        let mut min_block = self.static_files_min_block.write();
         let mut max_block = self.static_files_max_block.write();
         let mut tx_index = self.static_files_tx_index.write();
 
@@ -628,6 +629,22 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     &self.path.join(segment.filename(&fixed_range)),
                 )
                 .map_err(ProviderError::other)?;
+
+                // When the node is first started from scratch this min_block is set but needs to be
+                // updated as we progress the chain. Examples:
+                // - init: None -> [0..=100]
+                // - init: [0..=0], update with [0..=100] (eg. `op-reth node` after `reth
+                //   init-state`)
+                if let Some(current_block_range) = jar.user_header().block_range().copied() {
+                    min_block
+                        .entry(segment)
+                        .and_modify(|current_min| {
+                            if current_block_range.start() == current_min.start() {
+                                *current_min = current_block_range;
+                            }
+                        })
+                        .or_insert(current_block_range);
+                }
 
                 // Updates the tx index by first removing all entries which have a higher
                 // block_start than our current static file.
@@ -678,6 +695,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             None => {
                 tx_index.remove(&segment);
                 max_block.remove(&segment);
+                min_block.remove(&segment);
             }
         };
 
