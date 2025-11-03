@@ -72,3 +72,7 @@ __pycache__/
 # direnv
 .envrc
 .direnv/
+
+# Optimism test artifacts
+crates/optimism/tests/proofs/contracts/artifacts
+crates/optimism/tests/proofs/contracts/cache
