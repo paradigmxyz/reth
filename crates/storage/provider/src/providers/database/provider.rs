@@ -83,6 +83,7 @@ use std::{
     ops::{Deref, DerefMut, Not, Range, RangeBounds, RangeFrom, RangeInclusive},
     sync::Arc,
 };
+use strum::IntoEnumIterator;
 use tracing::{debug, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
@@ -3024,8 +3025,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(PRUNE_SEGMENTS
-            .iter()
+        Ok(PruneSegment::iter()
             .filter_map(|segment| {
                 self.tx
                     .get::<tables::PruneCheckpoints>(*segment)

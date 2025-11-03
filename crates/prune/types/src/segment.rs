@@ -2,6 +2,7 @@
 
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
+use strum::EnumIter;
 use thiserror::Error;
 
 /// Segment of the data that can be pruned.
@@ -9,7 +10,7 @@ use thiserror::Error;
 /// VERY IMPORTANT NOTE: new variants must be added to the end of this enum, and old variants which
 /// are no longer used must not be removed from this enum. The variant index is encoded directly
 /// when writing to the `PruneCheckpoint` table, so changing the order here will corrupt the table.
-#[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, EnumIter)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
@@ -39,18 +40,6 @@ pub enum PruneSegment {
     /// Prune segment responsible for bodies (transactions in static files).
     Bodies,
 }
-
-/// Array of [`PruneSegment`]s actively in use.
-pub const PRUNE_SEGMENTS: [PruneSegment; 8] = [
-    PruneSegment::SenderRecovery,
-    PruneSegment::TransactionLookup,
-    PruneSegment::Receipts,
-    PruneSegment::ContractLogs,
-    PruneSegment::AccountHistory,
-    PruneSegment::StorageHistory,
-    PruneSegment::MerkleChangeSets,
-    PruneSegment::Bodies,
-];
 
 #[cfg(test)]
 #[allow(clippy::derivable_impls)]
