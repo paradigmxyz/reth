@@ -1375,6 +1375,8 @@ mod tests {
         // After wipe, old storage should be cleared and only new storage remains
         assert_eq!(storage.storage.len(), 1);
         assert_eq!(storage.storage.get(&slot2), Some(&U256::from(200)));
+    }
+
     #[test]
     fn test_hashed_post_state_chunking_length() {
         let addr1 = B256::from([1; 32]);
