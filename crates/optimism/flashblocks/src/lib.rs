@@ -50,7 +50,7 @@ pub type InProgressFlashBlockRx = tokio::sync::watch::Receiver<Option<FlashBlock
 
 /// Container for all flashblocks-related listeners.
 ///
-/// Groups together the three receivers that provide flashblock-related updates.
+/// Groups together the channels for flashblock-related updates.
 #[derive(Debug)]
 pub struct FlashblocksListeners<N: NodePrimitives> {
     /// Receiver of the most recent executed [`PendingFlashBlock`] built out of [`FlashBlock`]s.
