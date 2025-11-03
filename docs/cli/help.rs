@@ -38,7 +38,7 @@ macro_rules! regex {
     }};
 }
 
-/// Generate markdown files from help output of commands
+/// Generate markdown files from the help output of commands
 #[derive(Parser, Debug)]
 #[command(about, long_about = None)]
 struct Args {
@@ -268,11 +268,6 @@ fn preprocess_help(s: &str) -> Cow<'_, str> {
             (
                 r"(rpc.max-tracing-requests <COUNT>\n.*\n.*\n.*\n.*\n.*)\[default: \d+\]",
                 r"$1[default: <NUM CPU CORES-2>]",
-            ),
-            // Handle engine.max-proof-task-concurrency dynamic default
-            (
-                r"(engine\.max-proof-task-concurrency.*)\[default: \d+\]",
-                r"$1[default: <DYNAMIC: CPU cores * 8>]",
             ),
             // Handle engine.reserved-cpu-cores dynamic default
             (

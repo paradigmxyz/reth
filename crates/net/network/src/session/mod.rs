@@ -571,6 +571,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     range_info: None,
                     local_range_info: self.local_range_info.clone(),
                     range_update_interval,
+                    last_sent_latest_block: None,
                 };
 
                 self.spawn(session);
@@ -904,7 +905,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 }
 
 /// Starts the authentication process for a connection initiated by a remote peer.
-#[instrument(skip_all, fields(%remote_addr, peer_id), target = "net")]
+#[instrument(level = "trace", target = "net::network", skip_all, fields(%remote_addr, peer_id))]
 #[expect(clippy::too_many_arguments)]
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,

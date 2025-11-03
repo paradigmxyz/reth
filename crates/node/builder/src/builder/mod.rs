@@ -21,8 +21,7 @@ use reth_network::{
     NetworkPrimitives,
 };
 use reth_node_api::{
-    FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
-    NodeTypesWithDBAdapter,
+    FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
@@ -332,6 +331,11 @@ impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>> {
     pub const fn config(&self) -> &NodeConfig<ChainSpec> {
         self.builder.config()
     }
+
+    /// Returns a mutable reference to the node builder's config.
+    pub const fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+        self.builder.config_mut()
+    }
 }
 
 impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>>
@@ -397,7 +401,6 @@ where
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
         >,
-        N::Primitives: FullNodePrimitives,
         EngineNodeLauncher: LaunchNode<
             NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
         >,
@@ -452,6 +455,11 @@ where
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
         &self.builder.config
+    }
+
+    /// Returns a mutable reference to the node builder's config.
+    pub const fn config_mut(&mut self) -> &mut NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
+        &mut self.builder.config
     }
 
     /// Returns a reference to node's database.
@@ -662,9 +670,9 @@ where
     ///
     /// This is equivalent to [`WithLaunchContext::launch`], but will enable the debugging features,
     /// if they are configured.
-    pub async fn launch_with_debug_capabilities(
+    pub fn launch_with_debug_capabilities(
         self,
-    ) -> eyre::Result<<DebugNodeLauncher as LaunchNode<NodeBuilderWithComponents<T, CB, AO>>>::Node>
+    ) -> <DebugNodeLauncher as LaunchNode<NodeBuilderWithComponents<T, CB, AO>>>::Future
     where
         T::Types: DebugNode<NodeAdapter<T, CB::Components>>,
         DebugNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
@@ -678,7 +686,7 @@ where
             builder.config.datadir(),
             engine_tree_config,
         ));
-        builder.launch_with(launcher).await
+        builder.launch_with(launcher)
     }
 
     /// Returns an [`EngineNodeLauncher`] that can be used to launch the node with engine API
@@ -729,6 +737,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the config of the node.
     pub const fn config(&self) -> &NodeConfig<<Node::Types as NodeTypes>::ChainSpec> {
         &self.config_container.config
+    }
+
+    /// Returns a mutable reference to the config of the node.
+    pub const fn config_mut(&mut self) -> &mut NodeConfig<<Node::Types as NodeTypes>::ChainSpec> {
+        &mut self.config_container.config
     }
 
     /// Returns the loaded reh.toml config.

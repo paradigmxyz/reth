@@ -1,4 +1,4 @@
-use std::cmp::max;
+use std::{cmp::max, time::Duration};
 
 /// The default port for the http server
 pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
@@ -60,6 +60,9 @@ pub const DEFAULT_TX_FEE_CAP_WEI: u128 = 1_000_000_000_000_000_000u128;
 /// Maximum eth historical proof window. Equivalent to roughly 6 months of data on a 12
 /// second block time, and a month on a 2 second block time.
 pub const MAX_ETH_PROOF_WINDOW: u64 = 28 * 24 * 60 * 60 / 2;
+
+/// Default timeout for send raw transaction sync in seconds.
+pub const RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS: Duration = Duration::from_secs(30);
 
 /// GPO specific constants
 pub mod gas_oracle {

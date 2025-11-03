@@ -54,7 +54,7 @@ pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
                 match table.as_str() {
                     $(
                         stringify!($table_type) => {
-                            println!("Generating test vectors for {} <{}>.", stringify!($table_or_dup), tables::$table_type$(::<$($generic),+>)?::NAME);
+                            tracing::info!(target: "reth::cli", "Generating test vectors for {} <{}>.", stringify!($table_or_dup), tables::$table_type$(::<$($generic),+>)?::NAME);
 
                             generate_vector!($table_type$(<$($generic),+>)?, $per_table, $table_or_dup);
                         },
@@ -69,7 +69,6 @@ pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
 
     generate!([
         (CanonicalHeaders, PER_TABLE, TABLE),
-        (HeaderTerminalDifficulties, PER_TABLE, TABLE),
         (HeaderNumbers, PER_TABLE, TABLE),
         (Headers<Header>, PER_TABLE, TABLE),
         (BlockBodyIndices, PER_TABLE, TABLE),

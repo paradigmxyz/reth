@@ -89,6 +89,11 @@ impl MultiProofTargets {
     pub fn chunks(self, size: usize) -> ChunkedMultiProofTargets {
         ChunkedMultiProofTargets::new(self, size)
     }
+
+    /// Returns the number of items that will be considered during chunking in `[Self::chunks]`.
+    pub fn chunking_length(&self) -> usize {
+        self.values().map(|slots| 1 + slots.len().saturating_sub(1)).sum::<usize>()
+    }
 }
 
 /// An iterator that yields chunks of the proof targets of at most `size` account and storage
@@ -229,18 +234,16 @@ impl MultiProof {
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
         // then the node contains the encoded trie account.
         let info = 'info: {
-            if let Some(last) = proof.last() {
-                if let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? {
-                    if nibbles.ends_with(&leaf.key) {
-                        let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                        break 'info Some(Account {
-                            balance: account.balance,
-                            nonce: account.nonce,
-                            bytecode_hash: (account.code_hash != KECCAK_EMPTY)
-                                .then_some(account.code_hash),
-                        })
-                    }
-                }
+            if let Some(last) = proof.last() &&
+                let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? &&
+                nibbles.ends_with(&leaf.key)
+            {
+                let account = TrieAccount::decode(&mut &leaf.value[..])?;
+                break 'info Some(Account {
+                    balance: account.balance,
+                    nonce: account.nonce,
+                    bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
+                })
             }
             None
         };
@@ -360,16 +363,15 @@ impl DecodedMultiProof {
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
         // then the node contains the encoded trie account.
         let info = 'info: {
-            if let Some(TrieNode::Leaf(leaf)) = proof.last() {
-                if nibbles.ends_with(&leaf.key) {
-                    let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                    break 'info Some(Account {
-                        balance: account.balance,
-                        nonce: account.nonce,
-                        bytecode_hash: (account.code_hash != KECCAK_EMPTY)
-                            .then_some(account.code_hash),
-                    })
-                }
+            if let Some(TrieNode::Leaf(leaf)) = proof.last() &&
+                nibbles.ends_with(&leaf.key)
+            {
+                let account = TrieAccount::decode(&mut &leaf.value[..])?;
+                break 'info Some(Account {
+                    balance: account.balance,
+                    nonce: account.nonce,
+                    bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
+                })
             }
             None
         };
@@ -486,12 +488,11 @@ impl StorageMultiProof {
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
         // then the node contains the encoded slot value.
         let value = 'value: {
-            if let Some(last) = proof.last() {
-                if let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? {
-                    if nibbles.ends_with(&leaf.key) {
-                        break 'value U256::decode(&mut &leaf.value[..])?
-                    }
-                }
+            if let Some(last) = proof.last() &&
+                let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? &&
+                nibbles.ends_with(&leaf.key)
+            {
+                break 'value U256::decode(&mut &leaf.value[..])?
             }
             U256::ZERO
         };
@@ -539,10 +540,10 @@ impl DecodedStorageMultiProof {
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
         // then the node contains the encoded slot value.
         let value = 'value: {
-            if let Some(TrieNode::Leaf(leaf)) = proof.last() {
-                if nibbles.ends_with(&leaf.key) {
-                    break 'value U256::decode(&mut &leaf.value[..])?
-                }
+            if let Some(TrieNode::Leaf(leaf)) = proof.last() &&
+                nibbles.ends_with(&leaf.key)
+            {
+                break 'value U256::decode(&mut &leaf.value[..])?
             }
             U256::ZERO
         };
@@ -1070,5 +1071,34 @@ mod tests {
         acc.info.take();
         acc.storage_root = EMPTY_ROOT_HASH;
         assert_eq!(acc, inverse);
+    }
+
+    #[test]
+    fn test_multiproof_targets_chunking_length() {
+        let mut targets = MultiProofTargets::default();
+        targets.insert(B256::with_last_byte(1), B256Set::default());
+        targets.insert(
+            B256::with_last_byte(2),
+            B256Set::from_iter([B256::with_last_byte(10), B256::with_last_byte(20)]),
+        );
+        targets.insert(
+            B256::with_last_byte(3),
+            B256Set::from_iter([
+                B256::with_last_byte(30),
+                B256::with_last_byte(31),
+                B256::with_last_byte(32),
+            ]),
+        );
+
+        let chunking_length = targets.chunking_length();
+        for size in 1..=targets.clone().chunks(1).count() {
+            let chunk_count = targets.clone().chunks(size).count();
+            let expected_count = chunking_length.div_ceil(size);
+            assert_eq!(
+                chunk_count, expected_count,
+                "chunking_length: {}, size: {}",
+                chunking_length, size
+            );
+        }
     }
 }

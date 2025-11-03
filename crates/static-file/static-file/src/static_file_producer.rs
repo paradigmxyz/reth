@@ -30,7 +30,7 @@ pub type StaticFileProducerResult = ProviderResult<StaticFileTargets>;
 pub type StaticFileProducerWithResult<Provider> =
     (StaticFileProducer<Provider>, StaticFileProducerResult);
 
-/// Static File producer. It's a wrapper around [`StaticFileProducer`] that allows to share it
+/// Static File producer. It's a wrapper around [`StaticFileProducerInner`] that allows to share it
 /// between threads.
 #[derive(Debug)]
 pub struct StaticFileProducer<Provider>(Arc<Mutex<StaticFileProducerInner<Provider>>>);
@@ -131,12 +131,6 @@ where
         let mut segments =
             Vec::<(Box<dyn Segment<Provider::Provider>>, RangeInclusive<BlockNumber>)>::new();
 
-        if let Some(block_range) = targets.transactions.clone() {
-            segments.push((Box::new(segments::Transactions), block_range));
-        }
-        if let Some(block_range) = targets.headers.clone() {
-            segments.push((Box::new(segments::Headers), block_range));
-        }
         if let Some(block_range) = targets.receipts.clone() {
             segments.push((Box::new(segments::Receipts), block_range));
         }
@@ -178,16 +172,11 @@ where
     /// Returns highest block numbers for all static file segments.
     pub fn copy_to_static_files(&self) -> ProviderResult<HighestStaticFiles> {
         let provider = self.provider.database_provider_ro()?;
-        let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
-            .into_iter()
+        let stages_checkpoints = std::iter::once(StageId::Execution)
             .map(|stage| provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number)))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let highest_static_files = HighestStaticFiles {
-            headers: stages_checkpoints[0],
-            receipts: stages_checkpoints[1],
-            transactions: stages_checkpoints[2],
-        };
+        let highest_static_files = HighestStaticFiles { receipts: stages_checkpoints[0] };
         let targets = self.get_static_file_targets(highest_static_files)?;
         self.run(targets)?;
 
@@ -204,13 +193,8 @@ where
         let highest_static_files = self.provider.static_file_provider().get_highest_static_files();
 
         let targets = StaticFileTargets {
-            headers: finalized_block_numbers.headers.and_then(|finalized_block_number| {
-                self.get_static_file_target(highest_static_files.headers, finalized_block_number)
-            }),
             // StaticFile receipts only if they're not pruned according to the user configuration
-            receipts: if self.prune_modes.receipts.is_none() &&
-                self.prune_modes.receipts_log_filter.is_empty()
-            {
+            receipts: if self.prune_modes.receipts.is_none() {
                 finalized_block_numbers.receipts.and_then(|finalized_block_number| {
                     self.get_static_file_target(
                         highest_static_files.receipts,
@@ -220,12 +204,6 @@ where
             } else {
                 None
             },
-            transactions: finalized_block_numbers.transactions.and_then(|finalized_block_number| {
-                self.get_static_file_target(
-                    highest_static_files.transactions,
-                    finalized_block_number,
-                )
-            }),
         };
 
         trace!(
@@ -255,9 +233,8 @@ mod tests {
     use crate::static_file_producer::{
         StaticFileProducer, StaticFileProducerInner, StaticFileTargets,
     };
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::B256;
     use assert_matches::assert_matches;
-    use reth_db_api::{database::Database, transaction::DbTx};
     use reth_provider::{
         providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, ProviderError,
         ProviderFactory, StaticFileProviderFactory,
@@ -289,13 +266,9 @@ mod tests {
             .expect("get static file writer for headers");
         static_file_writer.prune_headers(blocks.len() as u64).unwrap();
         static_file_writer.commit().expect("prune headers");
+        drop(static_file_writer);
 
-        let tx = db.factory.db_ref().tx_mut().expect("init tx");
-        for block in &blocks {
-            TestStageDB::insert_header(None, &tx, block.sealed_header(), U256::ZERO)
-                .expect("insert block header");
-        }
-        tx.commit().expect("commit tx");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let mut receipts = Vec::new();
         for block in &blocks {
@@ -320,69 +293,36 @@ mod tests {
             StaticFileProducerInner::new(provider_factory.clone(), PruneModes::default());
 
         let targets = static_file_producer
-            .get_static_file_targets(HighestStaticFiles {
-                headers: Some(1),
-                receipts: Some(1),
-                transactions: Some(1),
-            })
+            .get_static_file_targets(HighestStaticFiles { receipts: Some(1) })
             .expect("get static file targets");
-        assert_eq!(
-            targets,
-            StaticFileTargets {
-                headers: Some(0..=1),
-                receipts: Some(0..=1),
-                transactions: Some(0..=1)
-            }
-        );
+        assert_eq!(targets, StaticFileTargets { receipts: Some(0..=1) });
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(1), receipts: Some(1), transactions: Some(1) }
+            HighestStaticFiles { receipts: Some(1) }
         );
 
         let targets = static_file_producer
-            .get_static_file_targets(HighestStaticFiles {
-                headers: Some(3),
-                receipts: Some(3),
-                transactions: Some(3),
-            })
+            .get_static_file_targets(HighestStaticFiles { receipts: Some(3) })
             .expect("get static file targets");
-        assert_eq!(
-            targets,
-            StaticFileTargets {
-                headers: Some(2..=3),
-                receipts: Some(2..=3),
-                transactions: Some(2..=3)
-            }
-        );
+        assert_eq!(targets, StaticFileTargets { receipts: Some(2..=3) });
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles { receipts: Some(3) }
         );
 
         let targets = static_file_producer
-            .get_static_file_targets(HighestStaticFiles {
-                headers: Some(4),
-                receipts: Some(4),
-                transactions: Some(4),
-            })
+            .get_static_file_targets(HighestStaticFiles { receipts: Some(4) })
             .expect("get static file targets");
-        assert_eq!(
-            targets,
-            StaticFileTargets {
-                headers: Some(4..=4),
-                receipts: Some(4..=4),
-                transactions: Some(4..=4)
-            }
-        );
+        assert_eq!(targets, StaticFileTargets { receipts: Some(4..=4) });
         assert_matches!(
             static_file_producer.run(targets),
             Err(ProviderError::BlockBodyIndicesNotFound(4))
         );
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles { receipts: Some(3) }
         );
     }
 
@@ -406,11 +346,7 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(100));
                 }
                 let targets = locked_producer
-                    .get_static_file_targets(HighestStaticFiles {
-                        headers: Some(1),
-                        receipts: Some(1),
-                        transactions: Some(1),
-                    })
+                    .get_static_file_targets(HighestStaticFiles { receipts: Some(1) })
                     .expect("get static file targets");
                 assert_matches!(locked_producer.run(targets.clone()), Ok(_));
                 tx.send(targets).unwrap();

@@ -48,7 +48,7 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
         long,
         value_name = "CHAIN_OR_PATH",
         long_help = C::help_message(),
-        default_value = C::SUPPORTED_CHAINS[0],
+        default_value = C::default_value(),
         value_parser = C::parser(),
         global = true
     )]
@@ -126,9 +126,8 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let has_receipt_pruning = config.prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
-        let prune_modes =
-            config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default();
+        let has_receipt_pruning = config.prune.has_receipts_pruning();
+        let prune_modes = config.prune.segments.clone();
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
             db,
             self.chain.clone(),

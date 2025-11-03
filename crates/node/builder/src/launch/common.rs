@@ -34,12 +34,11 @@ use crate::{
     hooks::OnComponentInitializedHook,
     BuilderContext, ExExLauncher, NodeAdapter, PrimitivesTy,
 };
-use alloy_consensus::BlockHeader as _;
 use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
-use reth_chainspec::{Chain, EthChainSpec, EthereumHardfork, EthereumHardforks};
+use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
@@ -67,9 +66,8 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, ProviderError,
-    ProviderFactory, ProviderResult, StageCheckpointReader, StateProviderFactory,
-    StaticFileProviderFactory,
+    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
+    StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -160,7 +158,7 @@ impl LaunchContext {
         let mut toml_config = reth_config::Config::from_path(&config_path)
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
-        Self::save_pruning_config_if_full_node(&mut toml_config, config, &config_path)?;
+        Self::save_pruning_config(&mut toml_config, config, &config_path)?;
 
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
@@ -170,8 +168,9 @@ impl LaunchContext {
         Ok(toml_config)
     }
 
-    /// Save prune config to the toml file if node is a full node.
-    fn save_pruning_config_if_full_node<ChainSpec>(
+    /// Save prune config to the toml file if node is a full node or has custom pruning CLI
+    /// arguments.
+    fn save_pruning_config<ChainSpec>(
         reth_config: &mut reth_config::Config,
         config: &NodeConfig<ChainSpec>,
         config_path: impl AsRef<std::path::Path>,
@@ -179,14 +178,14 @@ impl LaunchContext {
     where
         ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
     {
-        if reth_config.prune.is_none() {
-            if let Some(prune_config) = config.prune_config() {
-                reth_config.update_prune_config(prune_config);
+        if let Some(prune_config) = config.prune_config() {
+            if reth_config.prune != prune_config {
+                reth_config.set_prune_config(prune_config);
                 info!(target: "reth::cli", "Saving prune config to toml file");
                 reth_config.save(config_path.as_ref())?;
             }
-        } else if config.prune_config().is_none() {
-            warn!(target: "reth::cli", "Prune configs present in config file but --full not provided. Running as a Full node");
+        } else if !reth_config.prune.is_default() {
+            warn!(target: "reth::cli", "Pruning configuration is present in the config file, but no CLI arguments are provided. Using config from file.");
         }
         Ok(())
     }
@@ -402,18 +401,19 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     /// Returns the configured [`PruneConfig`]
     ///
     /// Any configuration set in CLI will take precedence over those set in toml
-    pub fn prune_config(&self) -> Option<PruneConfig>
+    pub fn prune_config(&self) -> PruneConfig
     where
         ChainSpec: reth_chainspec::EthereumHardforks,
     {
+        let toml_config = self.toml_config().prune.clone();
         let Some(mut node_prune_config) = self.node_config().prune_config() else {
             // No CLI config is set, use the toml config.
-            return self.toml_config().prune.clone();
+            return toml_config;
         };
 
         // Otherwise, use the CLI configuration and merge with toml config.
-        node_prune_config.merge(self.toml_config().prune.clone());
-        Some(node_prune_config)
+        node_prune_config.merge(toml_config);
+        node_prune_config
     }
 
     /// Returns the configured [`PruneModes`], returning the default if no config was available.
@@ -421,7 +421,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     where
         ChainSpec: reth_chainspec::EthereumHardforks,
     {
-        self.prune_config().map(|config| config.segments).unwrap_or_default()
+        self.prune_config().segments
     }
 
     /// Returns an initialized [`PrunerBuilder`] based on the configured [`PruneConfig`]
@@ -429,9 +429,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     where
         ChainSpec: reth_chainspec::EthereumHardforks,
     {
-        PrunerBuilder::new(self.prune_config().unwrap_or_default())
-            .delete_limit(self.chain_spec().prune_delete_limit())
-            .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
+        PrunerBuilder::new(self.prune_config())
     }
 
     /// Loads the JWT secret for the engine API
@@ -475,8 +473,7 @@ where
         .with_prune_modes(self.prune_modes())
         .with_static_files_metrics();
 
-        let has_receipt_pruning =
-            self.toml_config().prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
+        let has_receipt_pruning = self.toml_config().prune.has_receipts_pruning();
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
@@ -583,9 +580,8 @@ where
         // ensure recorder runs upkeep periodically
         install_prometheus_recorder().spawn_upkeep();
 
-        let listen_addr = self.node_config().metrics;
+        let listen_addr = self.node_config().metrics.prometheus;
         if let Some(addr) = listen_addr {
-            info!(target: "reth::cli", "Starting metrics endpoint at {}", addr);
             let config = MetricServerConfig::new(
                 addr,
                 VersionInfo {
@@ -612,7 +608,7 @@ where
                         }
                     })
                     .build(),
-            );
+            ).with_push_gateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval);
 
             MetricServer::new(config).serve().await?;
         }
@@ -947,39 +943,6 @@ where
         Ok(None)
     }
 
-    /// Expire the pre-merge transactions if the node is configured to do so and the chain has a
-    /// merge block.
-    ///
-    /// If the node is configured to prune pre-merge transactions and it has synced past the merge
-    /// block, it will delete the pre-merge transaction static files if they still exist.
-    pub fn expire_pre_merge_transactions(&self) -> eyre::Result<()>
-    where
-        T: FullNodeTypes<Provider: StaticFileProviderFactory>,
-    {
-        if self.node_config().pruning.bodies_pre_merge {
-            if let Some(merge_block) =
-                self.chain_spec().ethereum_fork_activation(EthereumHardfork::Paris).block_number()
-            {
-                // Ensure we only expire transactions after we synced past the merge block.
-                let Some(latest) = self.blockchain_db().latest_header()? else { return Ok(()) };
-                if latest.number() > merge_block {
-                    let provider = self.blockchain_db().static_file_provider();
-                    if provider
-                        .get_lowest_transaction_static_file_block()
-                        .is_some_and(|lowest| lowest < merge_block)
-                    {
-                        info!(target: "reth::cli", merge_block, "Expiring pre-merge transactions");
-                        provider.delete_transactions_below(merge_block)?;
-                    } else {
-                        debug!(target: "reth::cli", merge_block, "No pre-merge transactions to expire");
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     /// Returns the metrics sender.
     pub fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
         self.right().db_provider_container.metrics_sender.clone()
@@ -1064,19 +1027,6 @@ where
 
         Ok(())
     }
-}
-
-impl<T, CB>
-    LaunchContextWith<
-        Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
-    >
-where
-    T: FullNodeTypes<
-        Provider: StateProviderFactory + ChainSpecProvider,
-        Types: NodeTypesForProvider,
-    >,
-    CB: NodeComponentsBuilder<T>,
-{
 }
 
 /// Joins two attachments together, preserving access to both values.
@@ -1221,17 +1171,14 @@ mod tests {
                     storage_history_before: None,
                     bodies_pre_merge: false,
                     bodies_distance: None,
+                    #[expect(deprecated)]
                     receipts_log_filter: None,
                     bodies_before: None,
                 },
                 ..NodeConfig::test()
             };
-            LaunchContext::save_pruning_config_if_full_node(
-                &mut reth_config,
-                &node_config,
-                config_path,
-            )
-            .unwrap();
+            LaunchContext::save_pruning_config(&mut reth_config, &node_config, config_path)
+                .unwrap();
 
             let loaded_config = Config::from_path(config_path).unwrap();
 

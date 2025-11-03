@@ -12,13 +12,16 @@ use reth_cli_commands::{
     config_cmd, db, download, dump_genesis, export_era, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
     node::{self, NoArgs},
-    p2p, prune, re_execute, recover, stage,
+    p2p, prune, re_execute, stage,
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::{args::LogArgs, version::version_metadata};
+use reth_node_core::{
+    args::{LogArgs, TraceArgs},
+    version::version_metadata,
+};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 use reth_tracing::FileWorkerGuard;
@@ -42,6 +45,10 @@ pub struct Cli<
     /// The logging configuration for the CLI.
     #[command(flatten)]
     pub logs: LogArgs,
+
+    /// The tracing configuration for the CLI.
+    #[command(flatten)]
+    pub traces: TraceArgs,
 
     /// Type marker for the RPC module validator
     #[arg(skip)]
@@ -212,8 +219,11 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
     ///
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
+    /// If an OTLP endpoint is specified, it will export metrics to the configured collector.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let guard = self.logs.init_tracing()?;
+        let layers = reth_tracing::Layers::new();
+
+        let guard = self.logs.init_tracing_with_layers(layers)?;
         Ok(guard)
     }
 }
@@ -260,9 +270,6 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Write config to stdout
     #[command(name = "config")]
     Config(config_cmd::Command),
-    /// Scripts for node recovery
-    #[command(name = "recover")]
-    Recover(recover::Command<C>),
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
     Prune(prune::PruneCommand<C>),
@@ -289,7 +296,6 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
             #[cfg(feature = "dev")]
             Self::TestVectors(_) => None,
             Self::Config(_) => None,
-            Self::Recover(cmd) => cmd.chain_spec(),
             Self::Prune(cmd) => cmd.chain_spec(),
             Self::ReExecute(cmd) => cmd.chain_spec(),
         }
@@ -301,6 +307,7 @@ mod tests {
     use super::*;
     use crate::chainspec::SUPPORTED_CHAINS;
     use clap::CommandFactory;
+    use reth_chainspec::SEPOLIA;
     use reth_node_core::args::ColorMode;
 
     #[test]
@@ -466,5 +473,52 @@ mod tests {
             "Error should mention the module name: {}",
             err_msg
         );
+    }
+
+    #[test]
+    fn parse_unwind_chain() {
+        let cli = Cli::try_parse_args_from([
+            "reth", "stage", "unwind", "--chain", "sepolia", "to-block", "100",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Stage(cmd) => match cmd.command {
+                stage::Subcommands::Unwind(cmd) => {
+                    assert_eq!(cmd.chain_spec().unwrap().chain_id(), SEPOLIA.chain_id());
+                }
+                _ => panic!("Expected Unwind command"),
+            },
+            _ => panic!("Expected Stage command"),
+        };
+    }
+
+    #[test]
+    fn parse_empty_supported_chains() {
+        #[derive(Debug, Clone, Default)]
+        struct FileChainSpecParser;
+
+        impl ChainSpecParser for FileChainSpecParser {
+            type ChainSpec = ChainSpec;
+
+            const SUPPORTED_CHAINS: &'static [&'static str] = &[];
+
+            fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>> {
+                EthereumChainSpecParser::parse(s)
+            }
+        }
+
+        let cli = Cli::<FileChainSpecParser>::try_parse_from([
+            "reth", "stage", "unwind", "--chain", "sepolia", "to-block", "100",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Stage(cmd) => match cmd.command {
+                stage::Subcommands::Unwind(cmd) => {
+                    assert_eq!(cmd.chain_spec().unwrap().chain_id(), SEPOLIA.chain_id());
+                }
+                _ => panic!("Expected Unwind command"),
+            },
+            _ => panic!("Expected Stage command"),
+        };
     }
 }

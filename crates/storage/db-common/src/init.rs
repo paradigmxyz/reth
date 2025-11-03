@@ -9,13 +9,15 @@ use reth_config::config::EtlConfig;
 use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_execution_errors::StateRootError;
-use reth_primitives_traits::{Account, Bytecode, GotExpected, NodePrimitives, StorageEntry};
+use reth_primitives_traits::{
+    Account, Bytecode, GotExpected, NodePrimitives, SealedHeader, StorageEntry,
+};
 use reth_provider::{
-    errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
-    BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
-    DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
-    OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter,
-    StateWriter, StaticFileProviderFactory, StorageLocation, TrieWriter,
+    errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
+    BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
+    HashingWriter, HeaderProvider, HistoryWriter, OriginalValuesKnown, ProviderError, RevertsInit,
+    StageCheckpointReader, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
+    TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -154,17 +156,14 @@ where
         provider_rw.save_stage_checkpoint(stage, Default::default())?;
     }
 
-    let static_file_provider = provider_rw.static_file_provider();
     // Static file segments start empty, so we need to initialize the genesis block.
-    let segment = StaticFileSegment::Receipts;
-    static_file_provider.latest_writer(segment)?.increment_block(0)?;
-
-    let segment = StaticFileSegment::Transactions;
-    static_file_provider.latest_writer(segment)?.increment_block(0)?;
+    let static_file_provider = provider_rw.static_file_provider();
+    static_file_provider.latest_writer(StaticFileSegment::Receipts)?.increment_block(0)?;
+    static_file_provider.latest_writer(StaticFileSegment::Transactions)?.increment_block(0)?;
 
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
-    UnifiedStorageWriter::commit_unwind(provider_rw)?;
+    provider_rw.commit()?;
 
     Ok(hash)
 }
@@ -264,11 +263,7 @@ where
         Vec::new(),
     );
 
-    provider.write_state(
-        &execution_outcome,
-        OriginalValuesKnown::Yes,
-        StorageLocation::Database,
-    )?;
+    provider.write_state(&execution_outcome, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -352,9 +347,8 @@ where
 
     match static_file_provider.block_hash(0) {
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
-            let (difficulty, hash) = (header.difficulty(), block_hash);
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-            writer.append_header(header, difficulty, &hash)?;
+            writer.append_header(header, &block_hash)?;
         }
         Ok(Some(_)) => {}
         Err(e) => return Err(e),
@@ -396,13 +390,16 @@ where
     }
 
     let block = provider_rw.last_block_number()?;
+
     let hash = provider_rw
         .block_hash(block)?
         .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
-    let expected_state_root = provider_rw
+    let header = provider_rw
         .header_by_number(block)?
-        .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?
-        .state_root();
+        .map(SealedHeader::seal_slow)
+        .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?;
+
+    let expected_state_root = header.state_root();
 
     // first line can be state root
     let dump_state_root = parse_state_root(&mut reader)?;
@@ -410,6 +407,7 @@ where
         error!(target: "reth::cli",
             ?dump_state_root,
             ?expected_state_root,
+            header=?header.num_hash(),
             "State root from state dump does not match state root in current header."
         );
         return Err(InitStorageError::StateRootMismatch(GotExpected {
@@ -609,7 +607,7 @@ where
 
         match state_root.root_with_progress()? {
             StateRootProgress::Progress(state, _, updates) => {
-                let updated_len = provider.write_trie_updates(&updates)?;
+                let updated_len = provider.write_trie_updates(updates)?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
@@ -629,7 +627,7 @@ where
                 }
             }
             StateRootProgress::Complete(root, _, updates) => {
-                let updated_len = provider.write_trie_updates(&updates)?;
+                let updated_len = provider.write_trie_updates(updates)?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",

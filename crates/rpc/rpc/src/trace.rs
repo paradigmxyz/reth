@@ -20,7 +20,7 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
-use reth_revm::{database::StateProviderDatabase, db::CacheDB};
+use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
@@ -158,7 +158,8 @@ where
         self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 let mut calls = calls.into_iter().peekable();
 
@@ -490,14 +491,14 @@ where
         let mut maybe_traces =
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
-        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                traces.extend(self.extract_reward_traces(
-                    block.header(),
-                    block.body().ommers(),
-                    base_block_reward,
-                ));
-            }
+        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) &&
+            let Some(base_block_reward) = self.calculate_base_block_reward(block.header())?
+        {
+            traces.extend(self.extract_reward_traces(
+                block.header(),
+                block.body().ommers(),
+                base_block_reward,
+            ));
         }
 
         Ok(maybe_traces)

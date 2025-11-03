@@ -10,7 +10,7 @@ use reqwest::Url;
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
     DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_MAX_TRACE_FILTER_BLOCKS,
-    DEFAULT_PROOF_PERMITS,
+    DEFAULT_PROOF_PERMITS, RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
 };
 use serde::{Deserialize, Serialize};
 
@@ -93,6 +93,10 @@ pub struct EthConfig {
     pub pending_block_kind: PendingBlockKind,
     /// The raw transaction forwarder.
     pub raw_tx_forwarder: ForwardConfig,
+    /// Timeout duration for `send_raw_transaction_sync` RPC method.
+    pub send_raw_transaction_sync_timeout: Duration,
+    /// Maximum memory the EVM can allocate per RPC request.
+    pub rpc_evm_memory_limit: u64,
 }
 
 impl EthConfig {
@@ -123,6 +127,8 @@ impl Default for EthConfig {
             max_batch_size: 1,
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
+            send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
+            rpc_evm_memory_limit: (1 << 32) - 1,
         }
     }
 }
@@ -205,6 +211,18 @@ impl EthConfig {
         if let Some(tx_forwarder) = tx_forwarder {
             self.raw_tx_forwarder.tx_forwarder = Some(tx_forwarder);
         }
+        self
+    }
+
+    /// Configures the timeout duration for `send_raw_transaction_sync` RPC method.
+    pub const fn send_raw_transaction_sync_timeout(mut self, timeout: Duration) -> Self {
+        self.send_raw_transaction_sync_timeout = timeout;
+        self
+    }
+
+    /// Configures the maximum memory the EVM can allocate per RPC request.
+    pub const fn rpc_evm_memory_limit(mut self, memory_limit: u64) -> Self {
+        self.rpc_evm_memory_limit = memory_limit;
         self
     }
 }

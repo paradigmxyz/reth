@@ -73,6 +73,7 @@ reth-codec = [
     "dep:reth-zstd-compressors",
 ]
 arbitrary = [
+    "std",
     "dep:arbitrary",
     "alloy-consensus/arbitrary",
     "alloy-consensus/k256",

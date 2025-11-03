@@ -29,7 +29,7 @@ use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H>>>;
-type InflightBodiesRequest<B> = Request<Vec<B256>, PeerRequestResult<Vec<B>>>;
+type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
 
 /// Manages data fetching operations.
 ///
@@ -116,12 +116,12 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     ///
     /// Returns `true` if this a newer block
     pub(crate) fn update_peer_block(&mut self, peer_id: &PeerId, hash: B256, number: u64) -> bool {
-        if let Some(peer) = self.peers.get_mut(peer_id) {
-            if number > peer.best_number {
-                peer.best_hash = hash;
-                peer.best_number = number;
-                return true
-            }
+        if let Some(peer) = self.peers.get_mut(peer_id) &&
+            number > peer.best_number
+        {
+            peer.best_hash = hash;
+            peer.best_number = number;
+            return true
         }
         false
     }
@@ -237,7 +237,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 })
             }
             DownloadRequest::GetBlockBodies { request, response, .. } => {
-                let inflight = Request { request: request.clone(), response };
+                let inflight = Request { request: (), response };
                 self.inflight_bodies_requests.insert(peer_id, inflight);
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
             }

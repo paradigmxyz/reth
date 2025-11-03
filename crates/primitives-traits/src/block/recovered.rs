@@ -458,9 +458,7 @@ impl<B: Block> Eq for RecoveredBlock<B> {}
 
 impl<B: Block> PartialEq for RecoveredBlock<B> {
     fn eq(&self, other: &Self) -> bool {
-        self.hash_ref().eq(other.hash_ref()) &&
-            self.block.eq(&other.block) &&
-            self.senders.eq(&other.senders)
+        self.block.eq(&other.block) && self.senders.eq(&other.senders)
     }
 }
 
@@ -659,7 +657,8 @@ mod rpc_compat {
     use crate::{block::error::BlockRecoveryError, SealedHeader};
     use alloc::vec::Vec;
     use alloy_consensus::{
-        transaction::Recovered, Block as CBlock, BlockBody, BlockHeader, Sealable,
+        transaction::{Recovered, TxHashRef},
+        Block as CBlock, BlockBody, BlockHeader, Sealable,
     };
     use alloy_rpc_types_eth::{Block, BlockTransactions, BlockTransactionsKind, TransactionInfo};
 

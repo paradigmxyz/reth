@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256};
 use reth_chainspec::MAINNET;
 use reth_db::{
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
@@ -19,7 +19,7 @@ use reth_primitives_traits::{Account, SealedBlock, SealedHeader, StorageEntry};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     test_utils::MockNodeTypesWithDB,
-    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
+    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory, StatsReader,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
@@ -103,6 +103,11 @@ impl TestStageDB {
         })
     }
 
+    /// Return the number of entries in the table or static file segment
+    pub fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
+        self.factory.provider()?.count_entries::<T>()
+    }
+
     /// Check that there is no table entry above a given
     /// number by [`Table::Key`]
     pub fn ensure_no_entry_above<T, F>(&self, num: u64, mut selector: F) -> ProviderResult<()>
@@ -145,7 +150,6 @@ impl TestStageDB {
         writer: Option<&mut StaticFileProviderRWRefMut<'_, EthPrimitives>>,
         tx: &TX,
         header: &SealedHeader,
-        td: U256,
     ) -> ProviderResult<()> {
         if let Some(writer) = writer {
             // Backfill: some tests start at a forward block number, but static files require no
@@ -155,14 +159,13 @@ impl TestStageDB {
                 for block_number in 0..header.number {
                     let mut prev = header.clone_header();
                     prev.number = block_number;
-                    writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
+                    writer.append_header(&prev, &B256::ZERO)?;
                 }
             }
 
-            writer.append_header(header.header(), td, &header.hash())?;
+            writer.append_header(header.header(), &header.hash())?;
         } else {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-            tx.put::<tables::HeaderTerminalDifficulties>(header.number, td.into())?;
             tx.put::<tables::Headers>(header.number, header.header().clone())?;
         }
 
@@ -170,20 +173,16 @@ impl TestStageDB {
         Ok(())
     }
 
-    fn insert_headers_inner<'a, I, const TD: bool>(&self, headers: I) -> ProviderResult<()>
+    fn insert_headers_inner<'a, I>(&self, headers: I) -> ProviderResult<()>
     where
         I: IntoIterator<Item = &'a SealedHeader>,
     {
         let provider = self.factory.static_file_provider();
         let mut writer = provider.latest_writer(StaticFileSegment::Headers)?;
         let tx = self.factory.provider_rw()?.into_tx();
-        let mut td = U256::ZERO;
 
         for header in headers {
-            if TD {
-                td += header.difficulty;
-            }
-            Self::insert_header(Some(&mut writer), &tx, header, td)?;
+            Self::insert_header(Some(&mut writer), &tx, header)?;
         }
 
         writer.commit()?;
@@ -198,17 +197,7 @@ impl TestStageDB {
     where
         I: IntoIterator<Item = &'a SealedHeader>,
     {
-        self.insert_headers_inner::<I, false>(headers)
-    }
-
-    /// Inserts total difficulty of headers into the corresponding static file and tables.
-    ///
-    /// Superset functionality of [`TestStageDB::insert_headers`].
-    pub fn insert_headers_with_td<'a, I>(&self, headers: I) -> ProviderResult<()>
-    where
-        I: IntoIterator<Item = &'a SealedHeader>,
-    {
-        self.insert_headers_inner::<I, true>(headers)
+        self.insert_headers_inner::<I>(headers)
     }
 
     /// Insert ordered collection of [`SealedBlock`] into corresponding tables.
@@ -235,7 +224,7 @@ impl TestStageDB {
                 .then(|| provider.latest_writer(StaticFileSegment::Headers).unwrap());
 
             blocks.iter().try_for_each(|block| {
-                Self::insert_header(headers_writer.as_mut(), &tx, block.sealed_header(), U256::ZERO)
+                Self::insert_header(headers_writer.as_mut(), &tx, block.sealed_header())
             })?;
 
             if let Some(mut writer) = headers_writer {
