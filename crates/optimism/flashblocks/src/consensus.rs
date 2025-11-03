@@ -1,24 +1,27 @@
 use crate::FlashBlockCompleteSequenceRx;
 use alloy_primitives::B256;
+use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_optimism_payload_builder::OpPayloadTypes;
-use reth_payload_primitives::EngineApiMessageVersion;
+use reth_payload_primitives::{EngineApiMessageVersion, PayloadTypes};
 use tracing::*;
 
 /// Consensus client that sends FCUs and new payloads using blocks from a [`FlashBlockService`]
 ///
 /// [`FlashBlockService`]: crate::FlashBlockService
 #[derive(Debug)]
-pub struct FlashBlockConsensusClient {
+pub struct FlashBlockConsensusClient<
+    P: PayloadTypes<ExecutionData = OpExecutionData> = OpPayloadTypes,
+> {
     /// Handle to execution client.
-    engine_handle: ConsensusEngineHandle<OpPayloadTypes>,
+    engine_handle: ConsensusEngineHandle<P>,
     sequence_receiver: FlashBlockCompleteSequenceRx,
 }
 
-impl FlashBlockConsensusClient {
+impl<P: PayloadTypes<ExecutionData = OpExecutionData>> FlashBlockConsensusClient<P> {
     /// Create a new `FlashBlockConsensusClient` with the given Op engine and sequence receiver.
     pub const fn new(
-        engine_handle: ConsensusEngineHandle<OpPayloadTypes>,
+        engine_handle: ConsensusEngineHandle<P>,
         sequence_receiver: FlashBlockCompleteSequenceRx,
     ) -> eyre::Result<Self> {
         Ok(Self { engine_handle, sequence_receiver })

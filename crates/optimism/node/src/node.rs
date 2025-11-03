@@ -498,7 +498,10 @@ where
         Types: NodeTypes<
             ChainSpec: OpHardforks,
             Primitives: OpPayloadPrimitives,
-            Payload: PayloadTypes<PayloadBuilderAttributes = Attrs>,
+            Payload: PayloadTypes<
+                ExecutionData = OpExecutionData,
+                PayloadBuilderAttributes = Attrs,
+            >,
         >,
         Evm: ConfigureEvm<
             NextBlockEnvCtx: BuildNextEnv<
@@ -643,7 +646,10 @@ where
         Types: NodeTypes<
             ChainSpec: OpHardforks,
             Primitives: OpPayloadPrimitives,
-            Payload: PayloadTypes<PayloadBuilderAttributes = Attrs>,
+            Payload: PayloadTypes<
+                ExecutionData = OpExecutionData,
+                PayloadBuilderAttributes = Attrs,
+            >,
         >,
         Evm: ConfigureEvm<
             NextBlockEnvCtx: BuildNextEnv<
