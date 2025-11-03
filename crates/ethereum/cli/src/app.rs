@@ -147,7 +147,7 @@ where
 
         match protocol {
             OtlpProtocol::Grpc => {
-                runner.block_on(async {
+                runner.block_on(async move {
                     layers.with_span_layer("reth".to_string(), endpoint, filter_level, protocol)
                 })?;
             }
