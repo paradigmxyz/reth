@@ -51,8 +51,8 @@ metrics.workspace = true
 # errors
 eyre.workspace = true
 
-ringbuffer.workspace = true
 derive_more.workspace = true
+op-alloy-rpc-types-engine = "0.22.0"
 
 [dev-dependencies]
 test-case.workspace = true

@@ -20,6 +20,7 @@ pub use ws::{WsConnect, WsFlashBlockStream};
 
 mod consensus;
 pub use consensus::FlashBlockConsensusClient;
+mod convert;
 mod payload;
 pub use payload::PendingFlashBlock;
 mod sequence;

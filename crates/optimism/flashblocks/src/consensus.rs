@@ -3,8 +3,7 @@ use alloy_primitives::B256;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_optimism_payload_builder::OpPayloadTypes;
 use reth_payload_primitives::EngineApiMessageVersion;
-use ringbuffer::{AllocRingBuffer, RingBuffer};
-use tracing::warn;
+use tracing::*;
 
 /// Consensus client that sends FCUs and new payloads using blocks from a [`FlashBlockService`]
 ///
@@ -25,56 +24,87 @@ impl FlashBlockConsensusClient {
         Ok(Self { engine_handle, sequence_receiver })
     }
 
-    /// Get previous block hash using previous block hash buffer. If it isn't available (buffer
-    /// started more recently than `offset`), return default zero hash
-    fn get_previous_block_hash(
-        &self,
-        previous_block_hashes: &AllocRingBuffer<B256>,
-        offset: usize,
-    ) -> B256 {
-        *previous_block_hashes
-            .len()
-            .checked_sub(offset)
-            .and_then(|index| previous_block_hashes.get(index))
-            .unwrap_or_default()
-    }
-
     /// Spawn the client to start sending FCUs and new payloads by periodically fetching recent
     /// blocks.
     pub async fn run(mut self) {
-        let mut previous_block_hashes = AllocRingBuffer::new(64);
-
         loop {
             match self.sequence_receiver.recv().await {
                 Ok(sequence) => {
-                    let block_hash = sequence.payload_base().parent_hash;
-                    previous_block_hashes.push(block_hash);
+                    // Extract block information for logging
+                    let last_flashblock = sequence.last();
+                    let block_hash = last_flashblock.diff.block_hash;
+                    let block_number = sequence.payload_base().block_number;
+                    let tx_count = last_flashblock.diff.transactions.len();
+                    let gas_used = last_flashblock.diff.gas_used;
 
-                    if sequence.state_root().is_none() {
-                        warn!("Missing state root for the complete sequence")
+                    // Convert the flashblock sequence to execution payload
+                    let payload = sequence.to_execution_data();
+
+                    // Submit new payload to the engine
+                    match self.engine_handle.new_payload(payload).await {
+                        Ok(result) => {
+                            debug!(
+                                target: "optimism::flashblocks::consensus::flashblock-client",
+                                flashblock_count = sequence.count(),
+                                block_number,
+                                %block_hash,
+                                gas_used,
+                                ?result,
+                                "successfully submitted new payload"
+                            );
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: "optimism::flashblocks::consensus::flashblock-client",
+                                %err,
+                                block_number,
+                                %block_hash,
+                                tx_count,
+                                gas_used,
+                                "failed to submit new payload"
+                            );
+                        }
                     }
 
-                    // Load previous block hashes. We're using (head - 32) and (head - 64) as the
-                    // safe and finalized block hashes.
-                    let safe_block_hash = self.get_previous_block_hash(&previous_block_hashes, 32);
-                    let finalized_block_hash =
-                        self.get_previous_block_hash(&previous_block_hashes, 64);
-
-                    let state = alloy_rpc_types_engine::ForkchoiceState {
+                    // Update fork choice to make this block the head
+                    let forkchoice_state = alloy_rpc_types_engine::ForkchoiceState {
                         head_block_hash: block_hash,
-                        safe_block_hash,
-                        finalized_block_hash,
+                        safe_block_hash: B256::ZERO,
+                        finalized_block_hash: B256::ZERO,
                     };
 
-                    // Send FCU
-                    let _ = self
+                    match self
                         .engine_handle
-                        .fork_choice_updated(state, None, EngineApiMessageVersion::V3)
-                        .await;
+                        .fork_choice_updated(forkchoice_state, None, EngineApiMessageVersion::V3)
+                        .await
+                    {
+                        Ok(result) => {
+                            debug!(
+                                target: "optimism::flashblocks::consensus::flashblock-client",
+                                block_number,
+                                %block_hash,
+                                head_block_hash = %forkchoice_state.head_block_hash,
+                                safe_block_hash = %forkchoice_state.safe_block_hash,
+                                finalized_block_hash = %forkchoice_state.finalized_block_hash,
+                                ?result,
+                                "successfully updated fork choice"
+                            );
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: "optimism::flashblocks::consensus::flashblock-client",
+                                %err,
+                                block_number,
+                                %block_hash,
+                                head_block_hash = %forkchoice_state.head_block_hash,
+                                "failed to submit fork choice update"
+                            );
+                        }
+                    }
                 }
                 Err(err) => {
                     warn!(
-                        target: "consensus::flashblock-client",
+                        target: "optimism::flashblocks::consensus::flashblock-client",
                         %err,
                         "error while fetching flashblock completed sequence"
                     );

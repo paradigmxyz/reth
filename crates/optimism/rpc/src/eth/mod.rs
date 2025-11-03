@@ -73,6 +73,23 @@ pub struct OpEthApi<N: RpcNodeCore, Rpc: RpcConvert> {
     inner: Arc<OpEthApiInner<N, Rpc>>,
 }
 
+/// Trait for accessing flashblock related functions from an Eth API.
+pub trait FlashblockApi {
+    /// Returns a flashblock receiver, if any, by resubscribing to it.
+    fn flashblock_rx(&self) -> Option<FlashBlockCompleteSequenceRx>;
+}
+
+// Implement FlashblockApi for OpEthApi
+impl<N, Rpc> FlashblockApi for OpEthApi<N, Rpc>
+where
+    N: reth_rpc_eth_api::RpcNodeCore,
+    Rpc: reth_rpc_eth_api::RpcConvert,
+{
+    fn flashblock_rx(&self) -> Option<FlashBlockCompleteSequenceRx> {
+        self.flashblock_rx()
+    }
+}
+
 impl<N: RpcNodeCore, Rpc: RpcConvert> Clone for OpEthApi<N, Rpc> {
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone() }
