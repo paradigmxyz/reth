@@ -4,12 +4,13 @@ use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
-    ChainStateBlockReader, DBProvider, HeaderProvider, ProviderError, StageCheckpointReader,
-    TrieWriter,
+    ChainStateBlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, StageCheckpointReader, TrieWriter,
 };
+use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_stages_api::{
-    BlockErrorKind, CheckpointBlockRange, ExecInput, ExecOutput, MerkleChangeSetsCheckpoint, Stage,
-    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    BlockErrorKind, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, StateRoot, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, DatabaseStateRoot};
@@ -39,14 +40,28 @@ impl MerkleChangeSets {
 
     /// Returns the range of blocks which are already computed. Will return an empty range if none
     /// have been computed.
-    fn computed_range(checkpoint: Option<StageCheckpoint>) -> Range<BlockNumber> {
+    fn computed_range<Provider>(
+        provider: &Provider,
+        checkpoint: Option<StageCheckpoint>,
+    ) -> Result<Range<BlockNumber>, StageError>
+    where
+        Provider: PruneCheckpointReader,
+    {
         let to = checkpoint.map(|chk| chk.block_number).unwrap_or_default();
-        let from = checkpoint
-            .map(|chk| chk.merkle_changesets_stage_checkpoint().unwrap_or_default())
-            .unwrap_or_default()
-            .block_range
-            .to;
-        from..to + 1
+
+        // Get the prune checkpoint for MerkleChangeSets to use as the lower bound. If there's no
+        // prune checkpoint or if the pruned block number is None, return empty range
+        let Some(from) = provider
+            .get_prune_checkpoint(PruneSegment::MerkleChangeSets)?
+            .and_then(|chk| chk.block_number)
+            // prune checkpoint indicates the last block pruned, so the block after is the start of
+            // the computed data
+            .map(|block_number| block_number + 1)
+        else {
+            return Ok(0..0)
+        };
+
+        Ok(from..to + 1)
     }
 
     /// Determines the target range for changeset computation based on the checkpoint and provider
@@ -269,8 +284,13 @@ impl Default for MerkleChangeSets {
 
 impl<Provider> Stage<Provider> for MerkleChangeSets
 where
-    Provider:
-        StageCheckpointReader + TrieWriter + DBProvider + HeaderProvider + ChainStateBlockReader,
+    Provider: StageCheckpointReader
+        + TrieWriter
+        + DBProvider
+        + HeaderProvider
+        + ChainStateBlockReader
+        + PruneCheckpointReader
+        + PruneCheckpointWriter,
 {
     fn id(&self) -> StageId {
         StageId::MerkleChangeSets
@@ -291,7 +311,13 @@ where
 
         // Get the previously computed range. This will be updated to reflect the populating of the
         // target range.
-        let mut computed_range = Self::computed_range(input.checkpoint);
+        let mut computed_range = Self::computed_range(provider, input.checkpoint)?;
+        debug!(
+            target: "sync::stages::merkle_changesets",
+            ?computed_range,
+            ?target_range,
+            "Got computed and target ranges",
+        );
 
         // We want the target range to not include any data already computed previously, if
         // possible, so we start the target range from the end of the computed range if that is
@@ -315,9 +341,9 @@ where
         }
 
         // If target range is empty (target_start >= target_end), stage is already successfully
-        // executed
+        // executed.
         if target_range.start >= target_range.end {
-            return Ok(ExecOutput::done(input.checkpoint.unwrap_or_default()));
+            return Ok(ExecOutput::done(StageCheckpoint::new(target_range.end.saturating_sub(1))));
         }
 
         // If our target range is a continuation of the already computed range then we can keep the
@@ -336,16 +362,19 @@ where
         // Populate the target range with changesets
         Self::populate_range(provider, target_range)?;
 
-        let checkpoint_block_range = CheckpointBlockRange {
-            from: computed_range.start,
-            // CheckpointBlockRange is inclusive
-            to: computed_range.end.saturating_sub(1),
-        };
+        // Update the prune checkpoint to reflect that all data before `computed_range.start`
+        // is not available.
+        provider.save_prune_checkpoint(
+            PruneSegment::MerkleChangeSets,
+            PruneCheckpoint {
+                block_number: Some(computed_range.start.saturating_sub(1)),
+                tx_number: None,
+                prune_mode: PruneMode::Before(computed_range.start),
+            },
+        )?;
 
-        let checkpoint = StageCheckpoint::new(checkpoint_block_range.to)
-            .with_merkle_changesets_stage_checkpoint(MerkleChangeSetsCheckpoint {
-                block_range: checkpoint_block_range,
-            });
+        // `computed_range.end` is exclusive.
+        let checkpoint = StageCheckpoint::new(computed_range.end.saturating_sub(1));
 
         Ok(ExecOutput::done(checkpoint))
     }
@@ -358,22 +387,14 @@ where
         // Unwinding is trivial; just clear everything after the target block.
         provider.clear_trie_changesets_from(input.unwind_to + 1)?;
 
-        let mut computed_range = Self::computed_range(Some(input.checkpoint));
+        let mut computed_range = Self::computed_range(provider, Some(input.checkpoint))?;
         computed_range.end = input.unwind_to + 1;
         if computed_range.start > computed_range.end {
             computed_range.start = computed_range.end;
         }
 
-        let checkpoint_block_range = CheckpointBlockRange {
-            from: computed_range.start,
-            // computed_range.end is exclusive
-            to: computed_range.end.saturating_sub(1),
-        };
-
-        let checkpoint = StageCheckpoint::new(input.unwind_to)
-            .with_merkle_changesets_stage_checkpoint(MerkleChangeSetsCheckpoint {
-                block_range: checkpoint_block_range,
-            });
+        // `computed_range.end` is exclusive
+        let checkpoint = StageCheckpoint::new(computed_range.end.saturating_sub(1));
 
         Ok(UnwindOutput { checkpoint })
     }

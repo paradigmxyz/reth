@@ -326,12 +326,6 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 
-[profile.reproducible]
-inherits = "release"
-panic = "abort"
-codegen-units = 1
-incremental = false
-
 [workspace.dependencies]
 # reth
 op-reth = { path = "crates/optimism/bin" }
@@ -372,7 +366,7 @@ reth-era-utils = { path = "crates/era-utils" }
 reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
-reth-ethereum-cli = { path = "crates/ethereum/cli" }
+reth-ethereum-cli = { path = "crates/ethereum/cli", default-features = false }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus", default-features = false }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives", default-features = false }
 reth-ethereum-forks = { path = "crates/ethereum/hardforks", default-features = false }
@@ -413,7 +407,7 @@ reth-optimism-node = { path = "crates/optimism/node" }
 reth-node-types = { path = "crates/node/types" }
 reth-op = { path = "crates/optimism/reth", default-features = false }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec", default-features = false }
-reth-optimism-cli = { path = "crates/optimism/cli" }
+reth-optimism-cli = { path = "crates/optimism/cli", default-features = false }
 reth-optimism-consensus = { path = "crates/optimism/consensus", default-features = false }
 reth-optimism-forks = { path = "crates/optimism/hardforks", default-features = false }
 reth-optimism-payload-builder = { path = "crates/optimism/payload" }
@@ -474,7 +468,7 @@ revm-bytecode = { version = "7.0.2", default-features = false }
 revm-database = { version = "9.0.2", default-features = false }
 revm-state = { version = "8.0.2", default-features = false }
 revm-primitives = { version = "21.0.1", default-features = false }
-revm-interpreter = { version = "27.0.2", default-features = false }
+revm-interpreter = { version = "28.0.0", default-features = false }
 revm-inspector = { version = "11.1.2", default-features = false }
 revm-context = { version = "10.1.2", default-features = false }
 revm-context-interface = { version = "11.1.2", default-features = false }

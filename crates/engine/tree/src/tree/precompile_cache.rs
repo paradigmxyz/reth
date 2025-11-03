@@ -273,9 +273,9 @@ mod tests {
 
     #[test]
     fn test_precompile_cache_basic() {
-        let dyn_precompile: DynPrecompile = |_input: PrecompileInput<'_>| -> PrecompileResult {
+        let dyn_precompile: DynPrecompile = (|_input: PrecompileInput<'_>| -> PrecompileResult {
             Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::default(), reverted: false })
-        }
+        })
         .into();
 
         let cache =

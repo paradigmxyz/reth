@@ -582,7 +582,6 @@ where
 
         let listen_addr = self.node_config().metrics.prometheus;
         if let Some(addr) = listen_addr {
-            info!(target: "reth::cli", "Starting metrics endpoint at {}", addr);
             let config = MetricServerConfig::new(
                 addr,
                 VersionInfo {
