@@ -68,7 +68,7 @@ pub enum OpInvalidTransactionError {
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
     /// A deposit transaction halted post-regolith
-    #[error("deposit transaction halted after regolith")]
+    #[error("missing enveloped transaction bytes")]
     MissingEnvelopedTx,
     /// Transaction conditional errors.
     #[error(transparent)]
