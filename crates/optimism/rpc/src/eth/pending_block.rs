@@ -38,7 +38,28 @@ where
         self.inner.eth_api.pending_block_kind()
     }
 
-    /// Returns the locally built pending block
+    /// Returns a [`StateProviderBox`] on a mem-pool built pending block overlaying latest.
+    async fn local_pending_state(&self) -> Result<Option<StateProviderBox>, Self::Error>
+    where
+        Self: SpawnBlocking,
+    {
+        let Ok(Some(pending_block)) = self.pending_flashblock().await else {
+            return Ok(None);
+        };
+
+        let latest_historical = self
+            .provider()
+            .history_by_block_hash(pending_block.block().parent_hash())
+            .map_err(Self::Error::from_eth_err)?;
+
+        let state = BlockState::from(pending_block);
+
+        Ok(Some(Box::new(state.state_provider(latest_historical)) as StateProviderBox))
+    }
+
+    /// Returns the locally built pending block.
+    ///
+    /// This falls back to the latest block as its op convention.
     async fn local_pending_block(
         &self,
     ) -> Result<Option<BlockAndReceipts<Self::Primitives>>, Self::Error> {
@@ -65,22 +86,13 @@ where
         Ok(Some(BlockAndReceipts { block: Arc::new(block), receipts: Arc::new(receipts) }))
     }
 
-    /// Returns a [`StateProviderBox`] on a mem-pool built pending block overlaying latest.
-    async fn local_pending_state(&self) -> Result<Option<StateProviderBox>, Self::Error>
-    where
-        Self: SpawnBlocking,
-    {
-        let Ok(Some(pending_block)) = self.pending_flashblock().await else {
-            return Ok(None);
-        };
-
-        let latest_historical = self
-            .provider()
-            .history_by_block_hash(pending_block.block().parent_hash())
-            .map_err(Self::Error::from_eth_err)?;
-
-        let state = BlockState::from(pending_block);
-
-        Ok(Some(Box::new(state.state_provider(latest_historical)) as StateProviderBox))
+    /// Exclusively returns the pending flashblock if it exits.
+    async fn local_pending_block_exclusive(
+        &self,
+    ) -> Result<Option<BlockAndReceipts<Self::Primitives>>, Self::Error> {
+        if let Ok(Some(pending)) = self.pending_flashblock().await {
+            return Ok(Some(pending.into_block_and_receipts()));
+        }
+        Ok(None)
     }
 }

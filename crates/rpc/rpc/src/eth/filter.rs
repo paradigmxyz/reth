@@ -1,10 +1,9 @@
 //! `eth_` `Filter` RPC handler implementation
 
 use alloy_consensus::BlockHeader;
-use alloy_eips::BlockId;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
-    BlockNumHash, BlockNumberOrTag, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
+    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
@@ -366,8 +365,6 @@ where
             }
         };
 
-        //let filter = FilterKind::PendingTransaction(transaction_kind);
-
         // Install the filter and propagate any errors
         self.inner.install_filter(transaction_kind).await
     }
@@ -500,25 +497,23 @@ where
             }
             FilterBlockOption::Range { from_block, to_block } => {
                 // Handle special case where from block is pending
-                if from_block.is_some_and(|b| matches!(b, BlockNumberOrTag::Pending)) {
+                if from_block.is_some_and(|b| b.is_pending()) {
                     let mut all_logs = Vec::new();
 
                     // Try to get pending block and receipts
-                    if let Ok(Some((block_arc, receipts_arc))) =
-                        self.eth_api.load_block_and_receipts(BlockId::pending()).await
+                    if let Ok(Some(pending_block)) =
+                        self.eth_api.local_pending_block_exclusive().await
                     {
-                        let block_num_hash =
-                            BlockNumHash::new(block_arc.number(), block_arc.hash());
-                        let block_timestamp = block_arc.timestamp();
-
+                        let timestamp = pending_block.block.timestamp();
+                        let block_num_hash = pending_block.block.num_hash();
                         append_matching_block_logs(
                             &mut all_logs,
-                            ProviderOrBlock::<Eth::Provider>::Block(block_arc),
+                            ProviderOrBlock::<Eth::Provider>::Block(pending_block.block),
                             &filter,
                             block_num_hash,
-                            &receipts_arc,
+                            &pending_block.receipts,
                             false, // removed = false for pending blocks
-                            block_timestamp,
+                            timestamp,
                         )?;
                     }
 

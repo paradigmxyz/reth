@@ -109,6 +109,8 @@ pub trait LoadPendingBlock:
     }
 
     /// Returns a [`StateProviderBox`] on a mem-pool built pending block overlaying latest.
+    ///
+    /// If no local pending block is available, this falls back to the latest state.
     fn local_pending_state(
         &self,
     ) -> impl Future<Output = Result<Option<StateProviderBox>, Self::Error>> + Send
@@ -190,6 +192,8 @@ pub trait LoadPendingBlock:
     }
 
     /// Returns the locally built pending block
+    ///
+    /// Implementers can fallback to the latest block if no pending is available.
     fn local_pending_block(
         &self,
     ) -> impl Future<Output = Result<Option<BlockAndReceipts<Self::Primitives>>, Self::Error>> + Send
@@ -214,6 +218,22 @@ pub trait LoadPendingBlock:
                 }
             })
         }
+    }
+
+    /// Exclusively returns the local pending block.
+    ///
+    /// Implementers must not fallback to latest block and return `None`, if not pending block is
+    /// available. This is intended to be used to explicitly target the pending block (not
+    /// latest)
+    fn local_pending_block_exclusive(
+        &self,
+    ) -> impl Future<Output = Result<Option<BlockAndReceipts<Self::Primitives>>, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+        Self::Pool:
+            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
+    {
+        async move { self.local_pending_block().await }
     }
 
     /// Builds a pending block using the configured provider and pool.
