@@ -207,4 +207,121 @@ mod tests {
             run_prune_test(&factory, &finished_exex_height_rx, test_case, tip);
         }
     }
+
+    #[test]
+    fn min_block_updated_on_sync() {
+        // Regression test: update_index must update min_block to prevent stale values
+        // that can cause pruner to incorrectly delete static files when PruneMode::Before(0) is
+        // used.
+
+        struct MinBlockTestCase {
+            // Block range
+            initial_range: Option<SegmentRangeInclusive>,
+            updated_range: SegmentRangeInclusive,
+            // Min block
+            expected_before_update: Option<BlockNumber>,
+            expected_after_update: BlockNumber,
+            // Test delete_segment_below_block with this value
+            delete_below_block: BlockNumber,
+            // Expected number of deleted segments
+            expected_deleted: usize,
+        }
+
+        let test_cases = vec![
+            // Test 1: Empty initial state (None) -> syncs to block 100
+            MinBlockTestCase {
+                initial_range: None,
+                updated_range: SegmentRangeInclusive::new(0, 100),
+                expected_before_update: None,
+                expected_after_update: 100,
+                delete_below_block: 1,
+                expected_deleted: 0,
+            },
+            // Test 2: Genesis state [0..=0] -> syncs to block 100 (eg. op-reth node after op-reth
+            // init-state)
+            MinBlockTestCase {
+                initial_range: Some(SegmentRangeInclusive::new(0, 0)),
+                updated_range: SegmentRangeInclusive::new(0, 100),
+                expected_before_update: Some(0),
+                expected_after_update: 100,
+                delete_below_block: 1,
+                expected_deleted: 0,
+            },
+            // Test 3: Existing state [0..=50] -> syncs to block 200
+            MinBlockTestCase {
+                initial_range: Some(SegmentRangeInclusive::new(0, 50)),
+                updated_range: SegmentRangeInclusive::new(0, 200),
+                expected_before_update: Some(50),
+                expected_after_update: 200,
+                delete_below_block: 150,
+                expected_deleted: 0,
+            },
+        ];
+
+        for (
+            idx,
+            MinBlockTestCase {
+                initial_range,
+                updated_range,
+                expected_before_update,
+                expected_after_update,
+                delete_below_block,
+                expected_deleted,
+            },
+        ) in test_cases.into_iter().enumerate()
+        {
+            let factory = create_test_provider_factory();
+            let static_provider = factory.static_file_provider();
+
+            let mut writer =
+                static_provider.latest_writer(StaticFileSegment::Transactions).unwrap();
+
+            // Set up initial state if provided
+            if let Some(initial_range) = initial_range {
+                *writer.user_header_mut() = SegmentHeader::new(
+                    initial_range,
+                    Some(initial_range),
+                    Some(initial_range),
+                    StaticFileSegment::Transactions,
+                );
+                writer.inner().set_dirty();
+                writer.commit().unwrap();
+                static_provider.initialize_index().unwrap();
+            }
+
+            // Verify initial state
+            assert_eq!(
+                static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+                expected_before_update,
+                "Test case {}: Initial min_block mismatch",
+                idx
+            );
+
+            // Update to new range
+            *writer.user_header_mut() = SegmentHeader::new(
+                updated_range,
+                Some(updated_range),
+                Some(updated_range),
+                StaticFileSegment::Transactions,
+            );
+            writer.inner().set_dirty();
+            writer.commit().unwrap(); // update_index is called inside
+
+            // Verify min_block was updated (not stuck at stale value)
+            assert_eq!(
+                static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+                Some(expected_after_update),
+                "Test case {}: min_block should be updated to {} (not stuck at stale value)",
+                idx,
+                expected_after_update
+            );
+
+            // Verify delete_segment_below_block behaves correctly with updated min_block
+            let deleted = static_provider
+                .delete_segment_below_block(StaticFileSegment::Transactions, delete_below_block)
+                .unwrap();
+
+            assert_eq!(deleted.len(), expected_deleted);
+        }
+    }
 }
