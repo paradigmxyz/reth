@@ -3028,9 +3028,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
         Ok(PruneSegment::iter()
             .filter_map(|segment| {
                 self.tx
-                    .get::<tables::PruneCheckpoints>(*segment)
+                    .get::<tables::PruneCheckpoints>(segment)
                     .transpose()
-                    .map(|chk| chk.map(|chk| (*segment, chk)))
+                    .map(|chk| chk.map(|chk| (segment, chk)))
             })
             .collect::<Result<_, _>>()?)
     }
