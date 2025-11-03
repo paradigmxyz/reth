@@ -5,7 +5,7 @@ use super::{
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
     ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt,
+    TransactionsProviderExt, get_genesis_block_number, set_genesis_block_number
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -765,6 +765,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         }
 
         info!(target: "reth::cli", "Verifying storage consistency.");
+        set_genesis_block_number(provider.chain_spec().genesis().number.unwrap_or_default());
+
 
         let mut unwind_target: Option<BlockNumber> = None;
         let mut update_unwind_target = |new_target: BlockNumber| {
@@ -1356,7 +1358,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         &self,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
-        self.get_writer(self.get_highest_static_file_block(segment).unwrap_or_default(), segment)
+        self.get_writer(self.get_highest_static_file_block(segment).unwrap_or(get_genesis_block_number()), segment)
     }
 
     fn commit(&self) -> ProviderResult<()> {

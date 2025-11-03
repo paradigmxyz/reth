@@ -2,11 +2,12 @@
 
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, ChainSpecProvider};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_provider::BlockHashReader;
 use std::sync::Arc;
 use tracing::info;
+use alloy_consensus::BlockHeader;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
@@ -22,8 +23,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitComman
 
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
+        // Get the actual genesis block number from the chain spec
+        let genesis_block_number = provider_factory.chain_spec().genesis_header().number();
         let hash = provider_factory
-            .block_hash(0)?
+            .block_hash(genesis_block_number)?
             .ok_or_else(|| eyre::eyre!("Genesis hash not found."))?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");

@@ -68,6 +68,8 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         .then_some(EMPTY_REQUESTS_HASH);
 
     Header {
+        number: genesis.number.unwrap_or_default(),
+        parent_hash: genesis.parent_hash.unwrap_or_default(),
         gas_limit: genesis.gas_limit,
         difficulty: genesis.difficulty,
         nonce: genesis.nonce.into(),
