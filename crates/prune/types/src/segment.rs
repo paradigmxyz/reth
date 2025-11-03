@@ -2,7 +2,7 @@
 
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
-use strum::EnumIter;
+use strum_macros::EnumIter;
 use thiserror::Error;
 
 /// Segment of the data that can be pruned.

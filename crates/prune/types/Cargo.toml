@@ -17,6 +17,7 @@ reth-codecs = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 derive_more.workspace = true
 strum.workspace = true
+strum_macros.workspace = true
 thiserror.workspace = true
 
 modular-bitfield = { workspace = true, optional = true }
