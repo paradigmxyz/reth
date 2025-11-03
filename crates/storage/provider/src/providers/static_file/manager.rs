@@ -250,8 +250,17 @@ pub struct StaticFileProviderInner<N> {
     /// Max static file block for each segment
     static_files_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
     /// Expected on disk static file block ranges indexed by max expected blocks.
+    ///
+    /// For example, a static file for expected block range `0..=499_000` may have only block range
+    /// `0..=1000` contained in it, as it wasn't fully filled yet. This index maps the max expected
+    /// block to the expected range, i.e. block `499_000` to block range `0..=499_000`.
     static_files_expected_block_index: RwLock<SegmentRanges>,
     /// Available on disk static file block ranges indexed by max transactions.
+    ///
+    /// For example, a static file for block range `0..=499_000` may only have block range
+    /// `0..=1000` and transaction range `0..=2000` contained in it. This index maps the max
+    /// available transaction to the available block range, i.e. transaction `2000` to block range
+    /// `0..=1000`.
     static_files_tx_index: RwLock<SegmentRanges>,
     /// Directory where `static_files` are located
     path: PathBuf,
