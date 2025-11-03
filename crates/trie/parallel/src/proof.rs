@@ -19,13 +19,16 @@ use reth_trie::{
 use reth_trie_common::added_removed_keys::MultiAddedRemovedKeys;
 use std::{sync::Arc, time::Instant};
 use tracing::trace;
+use reth_provider::DatabaseProviderROFactory;
+use reth_trie::trie_cursor::TrieCursorFactory;
+use reth_trie::hashed_cursor::HashedCursorFactory;
 
 /// Parallel proof calculator.
 ///
 /// This can collect proof for many targets in parallel, spawning a task for each hashed address
 /// that has proof targets.
 #[derive(Debug)]
-pub struct ParallelProof {
+pub struct ParallelProof<Factory> {
     /// The collection of prefix sets for the computation.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
     /// Flag indicating whether to include branch node masks in the proof.
@@ -33,20 +36,26 @@ pub struct ParallelProof {
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the proof worker pools.
-    proof_worker_handle: ProofWorkerHandle,
+    proof_worker_handle: ProofWorkerHandle<Factory>,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
-
-impl ParallelProof {
+impl<Factory> ParallelProof<Factory>
+where
+    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
     /// Create new state proof generator.
     pub fn new(
         prefix_sets: Arc<TriePrefixSetsMut>,
         missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-        proof_worker_handle: ProofWorkerHandle,
+        proof_worker_handle: ProofWorkerHandle<Factory> ,
     ) -> Self {
         Self {
             prefix_sets,
