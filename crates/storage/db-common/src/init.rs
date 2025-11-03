@@ -98,6 +98,7 @@ where
         + HashingWriter
         + StateWriter
         + TrieWriter
+        + ChainSpecProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -106,9 +107,12 @@ where
     let genesis = chain.genesis();
     let hash = chain.genesis_hash();
 
+    // Get the genesis block number from the chain spec
+    let genesis_block_number = chain.genesis_header().number();
+
     // Check if we already have the genesis header or if we have the wrong one.
-    match factory.block_hash(0) {
-        Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {}
+    match factory.block_hash(genesis_block_number) {
+        Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, _)) => {}
         Ok(Some(block_hash)) => {
             if block_hash == hash {
                 // Some users will at times attempt to re-sync from scratch by just deleting the
@@ -151,15 +155,24 @@ where
     // compute state root to populate trie tables
     compute_state_root(&provider_rw, None)?;
 
-    // insert sync stage
+    // set stage checkpoint to genesis block number for all stages
+    let checkpoint = StageCheckpoint { block_number: genesis_block_number, ..Default::default() };
     for stage in StageId::ALL {
-        provider_rw.save_stage_checkpoint(stage, Default::default())?;
+        provider_rw.save_stage_checkpoint(stage, checkpoint)?;
     }
 
     // Static file segments start empty, so we need to initialize the genesis block.
     let static_file_provider = provider_rw.static_file_provider();
-    static_file_provider.latest_writer(StaticFileSegment::Receipts)?.increment_block(0)?;
-    static_file_provider.latest_writer(StaticFileSegment::Transactions)?.increment_block(0)?;
+
+    // For genesis blocks with non-zero block numbers, we need to use get_writer() instead of
+    // latest_writer() to ensure the genesis block is stored in the correct static file range.
+    let segment = StaticFileSegment::Receipts;
+    static_file_provider.get_writer(genesis_block_number, segment)?
+        .user_header_mut().set_block_range(genesis_block_number, genesis_block_number);
+
+    let segment = StaticFileSegment::Transactions;
+    static_file_provider.get_writer(genesis_block_number, segment)?
+        .user_header_mut().set_block_range(genesis_block_number, genesis_block_number);
 
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
@@ -178,9 +191,11 @@ where
         + DBProvider<Tx: DbTxMut>
         + HeaderProvider
         + StateWriter
+        + ChainSpecProvider
         + AsRef<Provider>,
 {
-    insert_state(provider, alloc, 0)
+    let genesis_block_number = provider.chain_spec().genesis_header().number();
+    insert_state(provider, alloc, genesis_block_number)
 }
 
 /// Inserts state at given block into database.
@@ -303,9 +318,10 @@ pub fn insert_genesis_history<'a, 'b, Provider>(
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
 ) -> ProviderResult<()>
 where
-    Provider: DBProvider<Tx: DbTxMut> + HistoryWriter,
+    Provider: DBProvider<Tx: DbTxMut> + HistoryWriter + ChainSpecProvider,
 {
-    insert_history(provider, alloc, 0)
+    let genesis_block_number = provider.chain_spec().genesis_header().number();
+    insert_history(provider, alloc, genesis_block_number)
 }
 
 /// Inserts history indices for genesis accounts and storage.
@@ -345,17 +361,33 @@ where
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
     let static_file_provider = provider.static_file_provider();
 
-    match static_file_provider.block_hash(0) {
-        Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
-            let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-            writer.append_header(header, &block_hash)?;
+    // Get the actual genesis block number from the header
+    let genesis_block_number = header.number();
+
+    match static_file_provider.block_hash(genesis_block_number) {
+        Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, _)) => {
+            let (difficulty, hash) = (header.difficulty(), block_hash);
+
+            // For genesis blocks with non-zero block numbers, we need to ensure they are stored
+            // in the correct static file range. We use get_writer() with the genesis block number
+            // to ensure the genesis block is stored in the correct static file range.
+            let mut writer = static_file_provider.get_writer(genesis_block_number, StaticFileSegment::Headers)?;
+
+            // For non-zero genesis blocks, we need to set block range to genesis_block_number and append header without increment block
+            if genesis_block_number > 0 {
+                writer.user_header_mut().set_block_range(genesis_block_number, genesis_block_number);
+                writer.append_header_direct(header, difficulty, &hash)?;
+            } else {
+                // For zero genesis blocks, use normal append_header
+                writer.append_header(header, &hash)?;
+            }
         }
         Ok(Some(_)) => {}
         Err(e) => return Err(e),
     }
 
-    provider.tx_ref().put::<tables::HeaderNumbers>(block_hash, 0)?;
-    provider.tx_ref().put::<tables::BlockBodyIndices>(0, Default::default())?;
+    provider.tx_ref().put::<tables::HeaderNumbers>(block_hash, genesis_block_number)?;
+    provider.tx_ref().put::<tables::BlockBodyIndices>(genesis_block_number, Default::default())?;
 
     Ok(())
 }
