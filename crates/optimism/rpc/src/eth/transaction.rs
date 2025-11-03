@@ -97,7 +97,7 @@ where
         async move {
             let mut canonical_stream = this.provider().canonical_state_stream();
             let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
-            let flashblock_rx = this.pending_block_rx();
+            let flashblock_rx = this.subscribe_received_flashblocks();
             let mut flashblock_stream = flashblock_rx.map(WatchStream::new);
 
             tokio::time::timeout(timeout_duration, async {
@@ -119,13 +119,15 @@ where
                             }
                         }
                         // check if the tx was preconfirmed in a new flashblock
-                        _flashblock_update = async {
+                        flashblock = async {
                             if let Some(ref mut stream) = flashblock_stream {
                                 stream.next().await
                             } else {
                                 futures::future::pending().await
                             }
                         } => {
+                            // TODO: use submitted tx and fetch OpReceipt from flashblock
+
                             // Check flashblocks for faster confirmation (Optimism-specific)
                             if let Ok(Some(pending_block)) = this.pending_flashblock().await {
                                 let block_and_receipts = pending_block.into_block_and_receipts();
