@@ -8,12 +8,13 @@
 //!
 //! - **State root errors**: [`StateRootError`] - High-level errors for state root computation,
 //!   includes [`StorageRootError`] as a variant.
-//! - **Storage root errors**: [`StorageRootError`] - Errors specific to storage trie root computation.
+//! - **Storage root errors**: [`StorageRootError`] - Errors specific to storage trie root
+//!   computation.
 //! - **State proof errors**: [`StateProofError`] - Errors encountered when generating or verifying
 //!   state proofs.
 //! - **Sparse trie errors**: [`SparseStateTrieError`] and [`SparseTrieError`] - Errors for sparse
-//!   trie operations, with [`SparseStateTrieError`] wrapping [`SparseStateTrieErrorKind`] which
-//!   can contain [`SparseTrieErrorKind`] via the `Sparse` variant.
+//!   trie operations, with [`SparseStateTrieError`] wrapping [`SparseStateTrieErrorKind`] which can
+//!   contain [`SparseTrieErrorKind`] via the `Sparse` variant.
 //! - **Trie witness errors**: [`TrieWitnessError`] - High-level errors that can occur during
 //!   witness operations, aggregating errors from proofs and sparse tries.
 
@@ -40,8 +41,8 @@ pub enum StateRootError {
 impl From<StateRootError> for DatabaseError {
     fn from(err: StateRootError) -> Self {
         match err {
-            StateRootError::Database(err)
-            | StateRootError::StorageRootError(StorageRootError::Database(err)) => err,
+            StateRootError::Database(err) |
+            StateRootError::StorageRootError(StorageRootError::Database(err)) => err,
         }
     }
 }
