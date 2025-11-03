@@ -1,4 +1,21 @@
 //! Errors when computing the state root.
+//!
+//! This module defines error types used during trie operations and state root computation.
+//!
+//! # Error hierarchy
+//!
+//! The error types form a hierarchical structure:
+//!
+//! - **State root errors**: [`StateRootError`] - High-level errors for state root computation,
+//!   includes [`StorageRootError`] as a variant.
+//! - **Storage root errors**: [`StorageRootError`] - Errors specific to storage trie root computation.
+//! - **State proof errors**: [`StateProofError`] - Errors encountered when generating or verifying
+//!   state proofs.
+//! - **Sparse trie errors**: [`SparseStateTrieError`] and [`SparseTrieError`] - Errors for sparse
+//!   trie operations, with [`SparseStateTrieError`] wrapping [`SparseStateTrieErrorKind`] which
+//!   can contain [`SparseTrieErrorKind`] via the `Sparse` variant.
+//! - **Trie witness errors**: [`TrieWitnessError`] - High-level errors that can occur during
+//!   witness operations, aggregating errors from proofs and sparse tries.
 
 use alloc::{boxed::Box, string::ToString};
 use alloy_primitives::{Bytes, B256};
@@ -6,7 +23,10 @@ use nybbles::Nibbles;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 use thiserror::Error;
 
-/// State root errors.
+/// Errors encountered during state root computation.
+///
+/// This is the high-level error type for state root operations. It includes storage root errors
+/// as a nested variant, allowing storage-specific errors to be propagated up.
 #[derive(Error, PartialEq, Eq, Clone, Debug)]
 pub enum StateRootError {
     /// Internal database error.
@@ -26,7 +46,11 @@ impl From<StateRootError> for DatabaseError {
     }
 }
 
-/// Storage root error.
+/// Errors encountered during storage root computation.
+///
+/// This error type is used when computing the root hash of the storage trie for a specific account.
+/// It can be nested within [`StateRootError`] when storage root computation fails during
+/// state root calculation.
 #[derive(Error, PartialEq, Eq, Clone, Debug)]
 pub enum StorageRootError {
     /// Internal database error.
@@ -42,7 +66,10 @@ impl From<StorageRootError> for DatabaseError {
     }
 }
 
-/// State proof errors.
+/// Errors encountered when generating or verifying state proofs.
+///
+/// Used during proof generation for accounts and storage slots, as well as when verifying
+/// the validity of provided proofs.
 #[derive(Error, PartialEq, Eq, Clone, Debug)]
 pub enum StateProofError {
     /// Internal database error.
@@ -65,7 +92,11 @@ impl From<StateProofError> for ProviderError {
 /// Result type with [`SparseStateTrieError`] as error.
 pub type SparseStateTrieResult<Ok> = Result<Ok, SparseStateTrieError>;
 
-/// Error encountered in `SparseStateTrie`.
+/// Errors encountered in sparse state trie operations.
+///
+/// This error wraps [`SparseStateTrieErrorKind`] which can contain errors from nested
+/// [`SparseTrieError`] operations via the `Sparse` variant. Use [`kind()`](Self::kind()) to
+/// inspect the underlying error kind.
 #[derive(Error, Debug)]
 #[error(transparent)]
 pub struct SparseStateTrieError(#[from] Box<SparseStateTrieErrorKind>);
@@ -96,7 +127,10 @@ impl SparseStateTrieError {
     }
 }
 
-/// Error encountered in `SparseStateTrie`.
+/// Error kinds for [`SparseStateTrieError`].
+///
+/// Can contain nested [`SparseTrieErrorKind`] errors via the `Sparse` variant when errors
+/// occur in underlying trie operations.
 #[derive(Error, Debug)]
 pub enum SparseStateTrieErrorKind {
     /// Encountered invalid root node.
@@ -121,7 +155,11 @@ pub enum SparseStateTrieErrorKind {
 /// Result type with [`SparseTrieError`] as error.
 pub type SparseTrieResult<Ok> = Result<Ok, SparseTrieError>;
 
-/// Error encountered in `SparseTrie`.
+/// Errors encountered in sparse trie operations.
+///
+/// This error wraps [`SparseTrieErrorKind`] and represents errors during sparse trie operations
+/// such as updates, reveals, or lookups. Use [`kind()`](Self::kind()) to inspect the underlying
+/// error kind.
 #[derive(Error, Debug)]
 #[error(transparent)]
 pub struct SparseTrieError(#[from] Box<SparseTrieErrorKind>);
@@ -181,7 +219,11 @@ pub enum SparseTrieErrorKind {
     Other(#[from] Box<dyn core::error::Error + Send>),
 }
 
-/// Trie witness errors.
+/// Errors encountered during trie witness operations.
+///
+/// This high-level error type aggregates errors from proof generation ([`StateProofError`])
+/// and sparse trie operations ([`SparseStateTrieError`]) that can occur when working with
+/// execution witnesses.
 #[derive(Error, Debug)]
 pub enum TrieWitnessError {
     /// Error gather proofs.
