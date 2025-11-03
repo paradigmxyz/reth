@@ -530,6 +530,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let header = jar.user_header().clone();
         jar.delete().map_err(ProviderError::other)?;
 
+        // SAFETY: this is currently necessary to ensure that certain indexes like
+        // `static_files_min_block` have the correct values after pruning.
         self.initialize_index()?;
 
         Ok(header)
@@ -649,6 +651,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     min_block
                         .entry(segment)
                         .and_modify(|current_min| {
+                            // delete_jar WILL ALWAYS re-initialize all indexes, so we are always
+                            // sure that current_min is always the lowest.
                             if current_block_range.start() == current_min.start() {
                                 *current_min = current_block_range;
                             }
