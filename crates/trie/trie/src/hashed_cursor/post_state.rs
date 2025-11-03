@@ -25,7 +25,7 @@ where
     T: AsRef<HashedPostStateSorted>,
 {
     type AccountCursor<'cursor>
-        = HashedPostStateCursor<'overlay, CF::AccountCursor<'cursor>, Account>
+        = HashedPostStateCursor<'overlay, CF::AccountCursor<'cursor>, Option<Account>>
     where
         Self: 'cursor;
     type StorageCursor<'cursor>
@@ -65,46 +65,36 @@ where
     }
 }
 
-/// Trait linking value types to their wrapper representation in post state.
-///
-/// This trait associates each value type (`Account`, `U256`) with a wrapper type
-/// that can represent both present values and deletions without using `Option<V>`:
-/// - `Account` uses `Option<Account>` (deletion = `None`)
-/// - `U256` uses `U256` directly (deletion = `U256::ZERO`)
-///
-/// This design avoids the memory overhead of `Option<U256>` while maintaining
-/// uniform handling of deletions across different value types.
-pub trait HashedPostStateValue: Copy + std::fmt::Debug {
-    /// The wrapper type used to represent both present and deleted values.
-    type Wrapper: HashedPostStateCursorValue<Self> + Copy;
-}
-
-impl HashedPostStateValue for U256 {
-    type Wrapper = Self;
-}
-
-impl HashedPostStateValue for Account {
-    type Wrapper = Option<Self>;
-}
-
-/// Trait for wrapper types that can be converted to `Option<&V>`.
+/// Trait for wrapper types that can be converted to `Option<NonZero>`.
 ///
 /// This enables uniform handling of deletions across different wrapper types:
 /// - `Option<Account>`: `None` indicates deletion
 /// - `U256`: `U256::ZERO` indicates deletion (maps to `None`)
-pub trait HashedPostStateCursorValue<V> {
-    /// Returns `Some(&V)` if the value is present, `None` if deleted.
-    fn as_option(&self) -> Option<&V>;
+///
+/// This design avoids the memory overhead of `Option<U256>` while maintaining
+/// uniform handling of deletions across different value types.
+pub trait HashedPostStateCursorValue: Copy {
+    /// The non-zero type returned by `as_option`.
+    /// For `Option<Account>`, this is `Account`.
+    /// For `U256`, this is `U256`.
+    type NonZero: Copy + std::fmt::Debug;
+
+    /// Returns `Some(&NonZero)` if the value is present, `None` if deleted.
+    fn as_option(&self) -> Option<&Self::NonZero>;
 }
 
-impl HashedPostStateCursorValue<Account> for Option<Account> {
-    fn as_option(&self) -> Option<&Account> {
+impl HashedPostStateCursorValue for Option<Account> {
+    type NonZero = Account;
+
+    fn as_option(&self) -> Option<&Self::NonZero> {
         self.as_ref()
     }
 }
 
-impl HashedPostStateCursorValue<Self> for U256 {
-    fn as_option(&self) -> Option<&Self> {
+impl HashedPostStateCursorValue for U256 {
+    type NonZero = Self;
+
+    fn as_option(&self) -> Option<&Self::NonZero> {
         (*self != Self::ZERO).then_some(self)
     }
 }
@@ -114,14 +104,14 @@ impl HashedPostStateCursorValue<Self> for U256 {
 #[derive(Debug)]
 pub struct HashedPostStateCursor<'a, C, V>
 where
-    V: HashedPostStateValue,
+    V: HashedPostStateCursorValue,
 {
     /// The underlying `database_cursor`. If None then it is assumed there is no DB data.
     cursor: Option<C>,
     /// Entry that `database_cursor` is currently pointing to.
-    cursor_entry: Option<(B256, V)>,
+    cursor_entry: Option<(B256, V::NonZero)>,
     /// Forward-only in-memory cursor over underlying V.
-    post_state_cursor: ForwardInMemoryCursor<'a, B256, V::Wrapper>,
+    post_state_cursor: ForwardInMemoryCursor<'a, B256, V>,
     /// The last hashed key that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_key: Option<B256>,
@@ -132,9 +122,8 @@ where
 
 impl<'a, C, V> HashedPostStateCursor<'a, C, V>
 where
-    C: HashedCursor<Value = V>,
-    V: HashedPostStateValue,
-    // W: HashedPostStateCursorValue<V> + Copy + Clone,
+    C: HashedCursor<Value = V::NonZero>,
+    V: HashedPostStateCursorValue,
 {
     /// Creates a new post state cursor which combines a DB cursor and in-memory post state updates.
     ///
@@ -144,7 +133,7 @@ where
     ///   - For storage: Wiped storage (e.g., via `SELFDESTRUCT` - all previous storage destroyed)
     /// - `updates`: Pre-sorted post state updates where `Some(value)` indicates an update and
     ///   `None` indicates a deletion (destroyed account or zero-valued storage slot)
-    pub const fn new(cursor: Option<C>, updates: &'a [(B256, V::Wrapper)]) -> Self {
+    pub const fn new(cursor: Option<C>, updates: &'a [(B256, V)]) -> Self {
         Self {
             cursor,
             cursor_entry: None,
@@ -156,7 +145,7 @@ where
 
     /// Asserts that the next entry to be returned from the cursor is not previous to the last entry
     /// returned.
-    fn set_last_key(&mut self, next_entry: &Option<(B256, V)>) {
+    fn set_last_key(&mut self, next_entry: &Option<(B256, V::NonZero)>) {
         self.last_key = next_entry.as_ref().map(|e| e.0);
     }
 
@@ -193,7 +182,7 @@ where
     ///
     /// This may consume and move forward the current entries when the overlay indicates a removed
     /// node.
-    fn choose_next_entry(&mut self) -> Result<Option<(B256, V)>, DatabaseError> {
+    fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
         loop {
             match self.post_state_cursor.current().copied() {
                 Some((mem_key, wrapped_value)) => {
@@ -247,10 +236,10 @@ where
 
 impl<C, V> HashedCursor for HashedPostStateCursor<'_, C, V>
 where
-    C: HashedCursor<Value = V>,
-    V: HashedPostStateValue,
+    C: HashedCursor<Value = V::NonZero>,
+    V: HashedPostStateCursorValue,
 {
-    type Value = V;
+    type Value = V::NonZero;
 
     /// Seek the next entry for a given hashed key.
     ///
@@ -306,8 +295,8 @@ where
 /// It will always give precedence to the data from the post state.
 impl<C, V> HashedStorageCursor for HashedPostStateCursor<'_, C, V>
 where
-    C: HashedStorageCursor<Value = V>,
-    V: HashedPostStateValue,
+    C: HashedStorageCursor<Value = V::NonZero>,
+    V: HashedPostStateCursorValue,
 {
     /// Returns `true` if the account has no storage entries.
     ///
@@ -339,10 +328,14 @@ mod tests {
 
         /// Merge `db_nodes` with `post_state_nodes`, applying the post state overlay.
         /// This properly handles deletions (ZERO values for U256, None for Account).
-        fn merge_with_overlay<V: HashedPostStateValue>(
-            db_nodes: Vec<(B256, V)>,
-            post_state_nodes: Vec<(B256, V::Wrapper)>,
-        ) -> Vec<(B256, V)> {
+        fn merge_with_overlay<V>(
+            db_nodes: Vec<(B256, V::NonZero)>,
+            post_state_nodes: Vec<(B256, V)>,
+        ) -> Vec<(B256, V::NonZero)>
+        where
+            V: HashedPostStateCursorValue,
+            V::NonZero: Copy,
+        {
             db_nodes
                 .into_iter()
                 .merge_join_by(post_state_nodes, |db_entry, mem_entry| db_entry.0.cmp(&mem_entry.0))
