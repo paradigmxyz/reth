@@ -90,26 +90,25 @@ where
     let healthy_node_rpc_client = get_healthy_node_client(config, chain_id).await?;
 
     let output_directory = data_dir.invalid_block_hooks();
-    let hooks = hook
-        .iter()
-        .copied()
-        .map(|hook| {
-            let output_directory = output_directory.join(hook.to_string());
-            std::fs::create_dir_all(&output_directory)?;
+    let mut hooks = Vec::new();
 
-            Ok(match hook {
-                InvalidBlockHookType::Witness => Box::new(InvalidBlockWitnessHook::new(
-                    provider.clone(),
-                    evm_config.clone(),
-                    output_directory,
-                    healthy_node_rpc_client.clone(),
-                )),
-                InvalidBlockHookType::PreState | InvalidBlockHookType::Opcode => {
-                    eyre::bail!("invalid block hook {hook:?} is not implemented yet")
-                }
-            } as Box<dyn InvalidBlockHook<_>>)
-        })
-        .collect::<Result<_, _>>()?;
+    for hook_type in hook.iter().copied() {
+        let output_directory = output_directory.join(hook_type.to_string());
+        std::fs::create_dir_all(&output_directory)?;
+
+        let hook: Box<dyn InvalidBlockHook<_>> = match hook_type {
+            InvalidBlockHookType::Witness => Box::new(InvalidBlockWitnessHook::new(
+                provider.clone(),
+                evm_config.clone(),
+                output_directory,
+                healthy_node_rpc_client.clone(),
+            )),
+            InvalidBlockHookType::PreState | InvalidBlockHookType::Opcode => {
+                eyre::bail!("invalid block hook {hook_type:?} is not implemented yet")
+            }
+        };
+        hooks.push(hook);
+    }
 
     Ok(Box::new(InvalidBlockHooks(hooks)))
 }
