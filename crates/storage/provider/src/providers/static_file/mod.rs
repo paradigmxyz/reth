@@ -159,7 +159,7 @@ mod tests {
         {
             let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
                 .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+                .with_blocks_per_file(blocks_per_file);
 
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers).unwrap();
 
@@ -253,7 +253,7 @@ mod tests {
         {
             let sf_rw = StaticFileProvider::read_write(&static_dir)
                 .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+                .with_blocks_per_file(blocks_per_file);
 
             assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), Some(tip));
             assert_eq!(
@@ -468,13 +468,13 @@ mod tests {
 
             let sf_rw = StaticFileProvider::read_write(&static_dir)
                 .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+                .with_blocks_per_file(blocks_per_file);
 
             setup_tx_based_scenario(&sf_rw, segment, blocks_per_file);
 
             let sf_rw = StaticFileProvider::read_write(&static_dir)
                 .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+                .with_blocks_per_file(blocks_per_file);
             let highest_tx = sf_rw.get_highest_static_file_tx(segment).unwrap();
 
             // Test cases

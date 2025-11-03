@@ -260,12 +260,10 @@ pub struct StaticFileProviderInner<N> {
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Access rights of the provider.
     access: StaticFileAccess,
-    /// Number of blocks per file.
-    blocks_per_file: u64,
+    /// Number of blocks per file, per segment.
+    blocks_per_file: HashMap<StaticFileSegment, u64>,
     /// Write lock for when access is [`StaticFileAccess::RW`].
     _lock_file: Option<StorageLock>,
-    /// Node primitives
-    _pd: PhantomData<N>,
 }
 
 impl<N: NodePrimitives> StaticFileProviderInner<N> {
@@ -277,6 +275,11 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             None
         };
 
+        let mut blocks_per_file = HashMap::new();
+        for segment in StaticFileSegment::iter() {
+            blocks_per_file.insert(segment, DEFAULT_BLOCKS_PER_STATIC_FILE);
+        }
+
         let provider = Self {
             map: Default::default(),
             writers: Default::default(),
@@ -287,9 +290,8 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             path: path.as_ref().to_path_buf(),
             metrics: None,
             access,
-            blocks_per_file: DEFAULT_BLOCKS_PER_STATIC_FILE,
+            blocks_per_file,
             _lock_file,
-            _pd: Default::default(),
         };
 
         Ok(provider)
@@ -301,18 +303,38 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
 
     /// Each static file has a fixed number of blocks. This gives out the range where the requested
     /// block is positioned.
-    pub const fn find_fixed_range(&self, block: BlockNumber) -> SegmentRangeInclusive {
-        find_fixed_range(block, self.blocks_per_file)
+    pub fn find_fixed_range(
+        &self,
+        segment: StaticFileSegment,
+        block: BlockNumber,
+    ) -> SegmentRangeInclusive {
+        let blocks_per_file =
+            self.blocks_per_file.get(&segment).copied().unwrap_or(DEFAULT_BLOCKS_PER_STATIC_FILE);
+        find_fixed_range(block, blocks_per_file)
     }
 }
 
 impl<N: NodePrimitives> StaticFileProvider<N> {
-    /// Set a custom number of blocks per file.
+    /// Set a custom number of blocks per file for all segments.
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn with_custom_blocks_per_file(self, blocks_per_file: u64) -> Self {
+    pub fn with_blocks_per_file(self, blocks_per_file: u64) -> Self {
         let mut provider =
             Arc::try_unwrap(self.0).expect("should be called when initializing only");
-        provider.blocks_per_file = blocks_per_file;
+        for segment in StaticFileSegment::iter() {
+            provider.blocks_per_file.insert(segment, blocks_per_file);
+        }
+        Self(Arc::new(provider))
+    }
+
+    /// Set a custom number of blocks per file for a specific segment.
+    pub fn with_blocks_per_file_for_segment(
+        self,
+        segment: StaticFileSegment,
+        blocks_per_file: u64,
+    ) -> Self {
+        let mut provider =
+            Arc::try_unwrap(self.0).expect("should be called when initializing only");
+        provider.blocks_per_file.insert(segment, blocks_per_file);
         Self(Arc::new(provider))
     }
 
@@ -334,7 +356,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let mut size = 0;
 
             for (block_range, _) in &ranges {
-                let fixed_block_range = self.find_fixed_range(block_range.start());
+                let fixed_block_range = self.find_fixed_range(segment, block_range.start());
                 let jar_provider = self
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
                     .ok_or_else(|| {
@@ -511,7 +533,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         block: BlockNumber,
     ) -> ProviderResult<SegmentHeader> {
-        let fixed_block_range = self.find_fixed_range(block);
+        let fixed_block_range = self.find_fixed_range(segment, block);
         let key = (fixed_block_range.end(), segment);
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
@@ -574,7 +596,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .read()
             .get(&segment)
             .filter(|max| **max >= block)
-            .map(|_| self.find_fixed_range(block))
+            .map(|_| self.find_fixed_range(segment, block))
     }
 
     /// Gets a static file segment's fixed block range from the provider inner
@@ -598,7 +620,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
             let tx_start = static_files_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
-                return Some(self.find_fixed_range(block_range.end()))
+                return Some(self.find_fixed_range(segment, block_range.end()))
             }
         }
         None
@@ -622,7 +644,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             Some(segment_max_block) => {
                 // Update the max block for the segment
                 max_block.insert(segment, segment_max_block);
-                let fixed_range = self.find_fixed_range(segment_max_block);
+                let fixed_range = self.find_fixed_range(segment, segment_max_block);
 
                 let jar = NippyJar::<SegmentHeader>::load(
                     &self.path.join(segment.filename(&fixed_range)),
@@ -915,8 +937,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Read-only.
     pub fn check_segment_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
         if let Some(latest_block) = self.get_highest_static_file_block(segment) {
-            let file_path =
-                self.directory().join(segment.filename(&self.find_fixed_range(latest_block)));
+            let file_path = self
+                .directory()
+                .join(segment.filename(&self.find_fixed_range(segment, latest_block)));
 
             let jar = NippyJar::<SegmentHeader>::load(&file_path).map_err(ProviderError::other)?;
 
@@ -1104,14 +1127,19 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         func: impl Fn(StaticFileJarProvider<'_, N>) -> ProviderResult<Option<T>>,
     ) -> ProviderResult<Option<T>> {
         if let Some(highest_block) = self.get_highest_static_file_block(segment) {
-            let mut range = self.find_fixed_range(highest_block);
+            let blocks_per_file = self
+                .blocks_per_file
+                .get(&segment)
+                .copied()
+                .unwrap_or(DEFAULT_BLOCKS_PER_STATIC_FILE);
+            let mut range = self.find_fixed_range(segment, highest_block);
             while range.end() > 0 {
                 if let Some(res) = func(self.get_or_create_jar_provider(segment, &range)?)? {
                     return Ok(Some(res))
                 }
                 range = SegmentRangeInclusive::new(
-                    range.start().saturating_sub(self.blocks_per_file),
-                    range.end().saturating_sub(self.blocks_per_file),
+                    range.start().saturating_sub(blocks_per_file),
+                    range.end().saturating_sub(blocks_per_file),
                 );
             }
         }
