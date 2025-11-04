@@ -9,13 +9,15 @@ use alloy_primitives::{
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use derive_more::derive::Deref;
-use metrics::{Gauge, Histogram};
+use metrics::Histogram;
 use reth_metrics::Metrics;
+use reth_provider::DatabaseProviderROFactory;
 use reth_revm::state::EvmState;
 use reth_trie::{
-    added_removed_keys::MultiAddedRemovedKeys, prefix_set::TriePrefixSetsMut,
-    updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState, HashedPostStateSorted,
-    HashedStorage, MultiProofTargets, TrieInput,
+    added_removed_keys::MultiAddedRemovedKeys, hashed_cursor::HashedCursorFactory,
+    prefix_set::TriePrefixSetsMut, trie_cursor::TrieCursorFactory, updates::TrieUpdatesSorted,
+    DecodedMultiProof, HashedPostState, HashedPostStateSorted, HashedStorage, MultiProofTargets,
+    TrieInput,
 };
 use reth_trie_parallel::{
     proof::ParallelProof,
@@ -137,7 +139,7 @@ impl ProofSequencer {
 
         // return early if we don't have the next expected proof
         if !self.pending_proofs.contains_key(&self.next_to_deliver) {
-            return Vec::new()
+            return Vec::new();
         }
 
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
@@ -318,9 +320,9 @@ impl MultiproofInput {
 /// 4. `MultiProofTask` consumes the message from the same channel and sequences it with
 ///    `ProofSequencer`.
 #[derive(Debug)]
-pub struct MultiproofManager {
+pub struct MultiproofManager<Factory> {
     /// Handle to the proof worker pools (storage and account).
-    proof_worker_handle: ProofWorkerHandle,
+    proof_worker_handle: ProofWorkerHandle<Factory>,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     ///
@@ -340,16 +342,23 @@ pub struct MultiproofManager {
     metrics: MultiProofTaskMetrics,
 }
 
-impl MultiproofManager {
+impl<Factory> MultiproofManager<Factory>
+where
+    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
     /// Creates a new [`MultiproofManager`].
     fn new(
         metrics: MultiProofTaskMetrics,
-        proof_worker_handle: ProofWorkerHandle,
+        proof_worker_handle: ProofWorkerHandle<Factory>,
         proof_result_tx: CrossbeamSender<ProofResultMessage>,
     ) -> Self {
-        // Initialize the max worker gauges with the worker pool sizes
-        metrics.max_storage_workers.set(proof_worker_handle.total_storage_workers() as f64);
-        metrics.max_account_workers.set(proof_worker_handle.total_account_workers() as f64);
+        // // Initialize the max worker gauges with the worker pool sizes
+        // metrics.max_storage_workers.set(proof_worker_handle.total_storage_workers() as f64);
+        // metrics.max_account_workers.set(proof_worker_handle.total_account_workers() as f64);
 
         Self {
             metrics,
@@ -368,7 +377,7 @@ impl MultiproofManager {
                 "No proof targets, sending empty multiproof back immediately"
             );
             input.send_empty_proof();
-            return
+            return;
         }
 
         match input {
@@ -432,35 +441,6 @@ impl MultiproofManager {
             error!(target: "engine::tree::payload_processor::multiproof", ?e, "Failed to dispatch storage proof");
             return;
         }
-
-        self.metrics
-            .active_storage_workers_histogram
-            .record(self.proof_worker_handle.active_storage_workers() as f64);
-        self.metrics
-            .active_account_workers_histogram
-            .record(self.proof_worker_handle.active_account_workers() as f64);
-        self.metrics
-            .pending_storage_multiproofs_histogram
-            .record(self.proof_worker_handle.pending_storage_tasks() as f64);
-        self.metrics
-            .pending_account_multiproofs_histogram
-            .record(self.proof_worker_handle.pending_account_tasks() as f64);
-    }
-
-    /// Signals that a multiproof calculation has finished.
-    fn on_calculation_complete(&self) {
-        self.metrics
-            .active_storage_workers_histogram
-            .record(self.proof_worker_handle.active_storage_workers() as f64);
-        self.metrics
-            .active_account_workers_histogram
-            .record(self.proof_worker_handle.active_account_workers() as f64);
-        self.metrics
-            .pending_storage_multiproofs_histogram
-            .record(self.proof_worker_handle.pending_storage_tasks() as f64);
-        self.metrics
-            .pending_account_multiproofs_histogram
-            .record(self.proof_worker_handle.pending_account_tasks() as f64);
     }
 
     /// Dispatches a single multiproof calculation to worker pool.
@@ -492,7 +472,7 @@ impl MultiproofManager {
 
         // Extend prefix sets with targets
         let frozen_prefix_sets =
-            ParallelProof::extend_prefix_sets_with_targets(&Default::default(), &proof_targets);
+            ParallelProof::<Factory>::extend_prefix_sets_with_targets(&Default::default(), &proof_targets);
 
         // Dispatch account multiproof to worker pool with result sender
         let input = AccountMultiproofInput {
@@ -514,38 +494,12 @@ impl MultiproofManager {
             error!(target: "engine::tree::payload_processor::multiproof", ?e, "Failed to dispatch account multiproof");
             return;
         }
-
-        self.metrics
-            .active_storage_workers_histogram
-            .record(self.proof_worker_handle.active_storage_workers() as f64);
-        self.metrics
-            .active_account_workers_histogram
-            .record(self.proof_worker_handle.active_account_workers() as f64);
-        self.metrics
-            .pending_storage_multiproofs_histogram
-            .record(self.proof_worker_handle.pending_storage_tasks() as f64);
-        self.metrics
-            .pending_account_multiproofs_histogram
-            .record(self.proof_worker_handle.pending_account_tasks() as f64);
     }
 }
 
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
 pub(crate) struct MultiProofTaskMetrics {
-    /// Histogram of active storage workers processing proofs.
-    pub active_storage_workers_histogram: Histogram,
-    /// Histogram of active account workers processing proofs.
-    pub active_account_workers_histogram: Histogram,
-    /// Gauge for the maximum number of storage workers in the pool.
-    pub max_storage_workers: Gauge,
-    /// Gauge for the maximum number of account workers in the pool.
-    pub max_account_workers: Gauge,
-    /// Histogram of pending storage multiproofs in the queue.
-    pub pending_storage_multiproofs_histogram: Histogram,
-    /// Histogram of pending account multiproofs in the queue.
-    pub pending_account_multiproofs_histogram: Histogram,
-
     /// Histogram of the number of prefetch proof target accounts.
     pub prefetch_proof_targets_accounts_histogram: Histogram,
     /// Histogram of the number of prefetch proof target storages.
@@ -682,7 +636,7 @@ pub(crate) struct MultiProofTaskMetrics {
 ///
 /// See the `run()` method documentation for detailed lifecycle flow.
 #[derive(Debug)]
-pub(super) struct MultiProofTask {
+pub(super) struct MultiProofTask<Factory> {
     /// The size of proof targets chunk to spawn in one calculation.
     /// If None, chunking is disabled and all targets are processed in a single proof.
     chunk_size: Option<usize>,
@@ -701,15 +655,22 @@ pub(super) struct MultiProofTask {
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
-    multiproof_manager: MultiproofManager,
+    multiproof_manager: MultiproofManager<Factory>,
     /// multi proof task metrics
     metrics: MultiProofTaskMetrics,
 }
 
-impl MultiProofTask {
+impl<Factory> MultiProofTask<Factory>
+where
+    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
     /// Creates a new multi proof task with the unified message channel
     pub(super) fn new(
-        proof_worker_handle: ProofWorkerHandle,
+        proof_worker_handle: ProofWorkerHandle<Factory>,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
         chunk_size: Option<usize>,
     ) -> Self {
@@ -769,12 +730,6 @@ impl MultiProofTask {
         // Process proof targets in chunks.
         let mut chunks = 0;
 
-        // Only chunk if multiple account or storage workers are available to take advantage of
-        // parallelism.
-        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
-            1 ||
-            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
-
         let mut dispatch = |proof_targets| {
             self.multiproof_manager.dispatch(
                 MultiproofInput {
@@ -790,9 +745,12 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if should_chunk &&
-            let Some(chunk_size) = self.chunk_size &&
-            proof_targets.chunking_length() > chunk_size
+        // Simple chunking decision based on configuration
+        let should_chunk = self.chunk_size.is_some();
+
+        if should_chunk
+            && let Some(chunk_size) = self.chunk_size
+            && proof_targets.chunking_length() > chunk_size
         {
             let mut chunks = 0usize;
             for proof_targets_chunk in proof_targets.chunks(chunk_size) {
@@ -862,7 +820,7 @@ impl MultiProofTask {
             let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
                 // this means the account has not been fetched yet, so we must fetch everything
                 // associated with this account
-                continue
+                continue;
             };
 
             let prev_target_storage_len = target_storage.len();
@@ -921,11 +879,8 @@ impl MultiProofTask {
 
         let mut spawned_proof_targets = MultiProofTargets::default();
 
-        // Only chunk if multiple account or storage workers are available to take advantage of
-        // parallelism.
-        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
-            1 ||
-            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
+        // Simple chunking decision based on configuration
+        let should_chunk = self.chunk_size.is_some();
 
         let mut dispatch = |hashed_state_update| {
             let proof_targets = get_proof_targets(
@@ -950,9 +905,9 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if should_chunk &&
-            let Some(chunk_size) = self.chunk_size &&
-            not_fetched_state_update.chunking_length() > chunk_size
+        if should_chunk
+            && let Some(chunk_size) = self.chunk_size
+            && not_fetched_state_update.chunking_length() > chunk_size
         {
             let mut chunks = 0usize;
             for chunk in not_fetched_state_update.chunks(chunk_size) {
@@ -1063,7 +1018,7 @@ impl MultiProofTask {
                                 .proof_calculation_duration_histogram
                                 .record(proof_result.elapsed);
 
-                            self.multiproof_manager.on_calculation_complete();
+                            // self.multiproof_manager.on_calculation_complete();
 
                             // Convert ProofResultMessage to SparseTrieUpdate
                             match proof_result.result {
@@ -1263,8 +1218,8 @@ fn get_proof_targets(
             .storage
             .keys()
             .filter(|slot| {
-                !fetched.is_some_and(|f| f.contains(*slot)) ||
-                    storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
+                !fetched.is_some_and(|f| f.contains(*slot))
+                    || storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
             })
             .peekable();
 
@@ -1307,7 +1262,7 @@ mod tests {
             .clone()
     }
 
-    fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
+    fn create_test_state_root_task<F>(factory: F) -> MultiProofTask<OverlayStateProviderFactory<F>>
     where
         F: DatabaseProviderFactory<
                 Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
@@ -1336,7 +1291,7 @@ mod tests {
         assert!(!sequencer.has_pending());
 
         let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2).unwrap());
-        assert_eq!(ready.len(), 1);
+        assert_eq!(ready.len(), 1); 
         assert!(!sequencer.has_pending());
     }
 

@@ -213,6 +213,7 @@ where
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
             + Send
+            + Sync
             + 'static,
     {
         let span = tracing::Span::current();
