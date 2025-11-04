@@ -323,6 +323,9 @@ pub(crate) async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     let benchmark_runner = BenchmarkRunner::new(&args);
     let mut comparison_generator = ComparisonGenerator::new(&args);
 
+    // Set the comparison directory in node manager to align with results directory
+    node_manager.set_comparison_dir(comparison_generator.get_output_dir());
+
     // Store original git state for restoration
     let original_ref = git_manager.get_current_ref()?;
     info!("Current git reference: {}", original_ref);

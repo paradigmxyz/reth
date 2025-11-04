@@ -7,7 +7,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    fs::File as AsyncFile,
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::Command,
 };
 use tracing::{debug, error, info, warn};
@@ -164,6 +165,10 @@ impl BenchmarkRunner {
         std::fs::create_dir_all(output_dir)
             .wrap_err_with(|| format!("Failed to create output directory: {output_dir:?}"))?;
 
+        // Create log file path for reth-bench output
+        let log_file_path = output_dir.join("reth_bench.log");
+        info!("reth-bench logs will be saved to: {:?}", log_file_path);
+
         // Build the reth-bench command
         let mut cmd = Command::new("reth-bench");
         cmd.args([
@@ -205,31 +210,54 @@ impl BenchmarkRunner {
         let stdout_lines = Arc::new(Mutex::new(Vec::new()));
         let stderr_lines = Arc::new(Mutex::new(Vec::new()));
 
-        // Stream stdout with prefix at debug level and capture for error reporting
+        // Stream stdout with prefix at debug level, capture for error reporting, and write to log
+        // file
         if let Some(stdout) = child.stdout.take() {
             let stdout_lines_clone = stdout_lines.clone();
+            let log_file = AsyncFile::create(&log_file_path)
+                .await
+                .wrap_err(format!("Failed to create log file: {:?}", log_file_path))?;
             tokio::spawn(async move {
                 let reader = BufReader::new(stdout);
                 let mut lines = reader.lines();
+                let mut log_file = log_file;
                 while let Ok(Some(line)) = lines.next_line().await {
                     debug!("[RETH-BENCH] {}", line);
                     if let Ok(mut captured) = stdout_lines_clone.lock() {
-                        captured.push(line);
+                        captured.push(line.clone());
+                    }
+                    // Write to log file (reth-bench output already has timestamps if needed)
+                    let log_line = format!("{}\n", line);
+                    if let Err(e) = log_file.write_all(log_line.as_bytes()).await {
+                        debug!("Failed to write to log file: {}", e);
                     }
                 }
             });
         }
 
-        // Stream stderr with prefix at debug level and capture for error reporting
+        // Stream stderr with prefix at debug level, capture for error reporting, and write to log
+        // file
         if let Some(stderr) = child.stderr.take() {
             let stderr_lines_clone = stderr_lines.clone();
+            let log_file = AsyncFile::options()
+                .create(true)
+                .append(true)
+                .open(&log_file_path)
+                .await
+                .wrap_err(format!("Failed to open log file for stderr: {:?}", log_file_path))?;
             tokio::spawn(async move {
                 let reader = BufReader::new(stderr);
                 let mut lines = reader.lines();
+                let mut log_file = log_file;
                 while let Ok(Some(line)) = lines.next_line().await {
                     debug!("[RETH-BENCH] {}", line);
                     if let Ok(mut captured) = stderr_lines_clone.lock() {
-                        captured.push(line);
+                        captured.push(line.clone());
+                    }
+                    // Write to log file (reth-bench output already has timestamps if needed)
+                    let log_line = format!("{}\n", line);
+                    if let Err(e) = log_file.write_all(log_line.as_bytes()).await {
+                        debug!("Failed to write to log file: {}", e);
                     }
                 }
             });

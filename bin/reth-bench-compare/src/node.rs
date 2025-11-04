@@ -11,7 +11,8 @@ use nix::unistd::Pid;
 use reth_chainspec::Chain;
 use std::{fs, path::PathBuf, time::Duration};
 use tokio::{
-    io::{AsyncBufReadExt, BufReader as AsyncBufReader},
+    fs::File as AsyncFile,
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader as AsyncBufReader},
     process::Command,
     time::{sleep, timeout},
 };
@@ -27,6 +28,7 @@ pub(crate) struct NodeManager {
     enable_profiling: bool,
     output_dir: PathBuf,
     additional_reth_args: Vec<String>,
+    comparison_dir: Option<PathBuf>,
 }
 
 impl NodeManager {
@@ -41,7 +43,31 @@ impl NodeManager {
             enable_profiling: args.profile,
             output_dir: args.output_dir_path(),
             additional_reth_args: args.reth_args.clone(),
+            comparison_dir: None,
         }
+    }
+
+    /// Set the comparison directory path for logging
+    pub(crate) fn set_comparison_dir(&mut self, dir: PathBuf) {
+        self.comparison_dir = Some(dir);
+    }
+
+    /// Get the log file path for a given reference type
+    fn get_log_file_path(&self, ref_type: &str) -> Result<PathBuf> {
+        let comparison_dir = self
+            .comparison_dir
+            .as_ref()
+            .ok_or_eyre("Comparison directory not set. Call set_comparison_dir first.")?;
+
+        // The comparison directory already contains the full path to results/<timestamp>
+        let log_dir = comparison_dir.join(ref_type);
+
+        // Create the directory if it doesn't exist
+        fs::create_dir_all(&log_dir)
+            .wrap_err(format!("Failed to create log directory: {:?}", log_dir))?;
+
+        let log_file = log_dir.join("reth_node.log");
+        Ok(log_file)
     }
 
     /// Get the perf event max sample rate from the system, capped at 10000
@@ -236,23 +262,48 @@ impl NodeManager {
             binary_path_str
         );
 
-        // Stream stdout and stderr with prefixes at debug level
+        // Prepare log file path
+        let log_file_path = self.get_log_file_path(ref_type)?;
+        info!("Reth node logs will be saved to: {:?}", log_file_path);
+
+        // Stream stdout and stderr with prefixes at debug level and to log file
         if let Some(stdout) = child.stdout.take() {
+            let log_file = AsyncFile::create(&log_file_path)
+                .await
+                .wrap_err(format!("Failed to create log file: {:?}", log_file_path))?;
             tokio::spawn(async move {
                 let reader = AsyncBufReader::new(stdout);
                 let mut lines = reader.lines();
+                let mut log_file = log_file;
                 while let Ok(Some(line)) = lines.next_line().await {
                     debug!("[RETH] {}", line);
+                    // Write to log file (reth already includes timestamps)
+                    let log_line = format!("{}\n", line);
+                    if let Err(e) = log_file.write_all(log_line.as_bytes()).await {
+                        debug!("Failed to write to log file: {}", e);
+                    }
                 }
             });
         }
 
         if let Some(stderr) = child.stderr.take() {
+            let log_file = AsyncFile::options()
+                .create(true)
+                .append(true)
+                .open(&log_file_path)
+                .await
+                .wrap_err(format!("Failed to open log file for stderr: {:?}", log_file_path))?;
             tokio::spawn(async move {
                 let reader = AsyncBufReader::new(stderr);
                 let mut lines = reader.lines();
+                let mut log_file = log_file;
                 while let Ok(Some(line)) = lines.next_line().await {
                     debug!("[RETH] {}", line);
+                    // Write to log file (reth already includes timestamps)
+                    let log_line = format!("{}\n", line);
+                    if let Err(e) = log_file.write_all(log_line.as_bytes()).await {
+                        debug!("Failed to write to log file: {}", e);
+                    }
                 }
             });
         }
