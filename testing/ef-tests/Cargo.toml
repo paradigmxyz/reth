@@ -32,7 +32,7 @@ reth-stateless = { workspace = true, features = ["secp256k1"] }
 reth-tracing.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
-revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit"] }
 
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true

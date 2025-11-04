@@ -64,25 +64,34 @@ install-op: ## Build and install the op-reth binary under `$(CARGO_HOME)/bin`.
 build: ## Build the reth binary into `target` directory.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 
-.PHONY: build-reth
-build-reth: ## Build the reth binary (alias for build target).
-	$(MAKE) build
-
 # Environment variables for reproducible builds
+# Initialize RUSTFLAGS
+RUST_BUILD_FLAGS =
+# Enable static linking to ensure reproducibility across builds
+RUST_BUILD_FLAGS += --C target-feature=+crt-static
+# Set the linker to use static libgcc to ensure reproducibility across builds
+RUST_BUILD_FLAGS += -C link-arg=-static-libgcc
+# Remove build ID from the binary to ensure reproducibility across builds
+RUST_BUILD_FLAGS += -C link-arg=-Wl,--build-id=none
+# Remove metadata hash from symbol names to ensure reproducible builds
+RUST_BUILD_FLAGS += -C metadata=''
 # Set timestamp from last git commit for reproducible builds
 SOURCE_DATE ?= $(shell git log -1 --pretty=%ct)
+# Disable incremental compilation to avoid non-deterministic artifacts
+CARGO_INCREMENTAL_VAL = 0
+# Set C locale for consistent string handling and sorting
+LOCALE_VAL = C
+# Set UTC timezone for consistent time handling across builds
+TZ_VAL = UTC
 
-# `reproducible` only supports reth on x86_64-unknown-linux-gnu
-build-%-reproducible:
-	@if [ "$*" != "reth" ]; then \
-		echo "Error: Reproducible builds are only supported for reth, not $*"; \
-		exit 1; \
-	fi
+.PHONY: build-reproducible
+build-reproducible: ## Build the reth binary into `target` directory with reproducible builds. Only works for x86_64-unknown-linux-gnu currently
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE) \
-	RUSTFLAGS="-C symbol-mangling-version=v0 -C strip=none -C link-arg=-Wl,--build-id=none -C metadata='' --remap-path-prefix $$(pwd)=." \
-	LC_ALL=C \
-	TZ=UTC \
-	cargo build --bin reth --features "$(FEATURES)" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
+	RUSTFLAGS="${RUST_BUILD_FLAGS} --remap-path-prefix $$(pwd)=." \
+	CARGO_INCREMENTAL=${CARGO_INCREMENTAL_VAL} \
+	LC_ALL=${LOCALE_VAL} \
+	TZ=${TZ_VAL} \
+	cargo build --bin reth --features "$(FEATURES)" --profile "release" --locked --target x86_64-unknown-linux-gnu
 
 .PHONY: build-debug
 build-debug: ## Build the reth binary into `target/debug` directory.
@@ -145,22 +154,6 @@ op-build-x86_64-apple-darwin:
 	$(MAKE) op-build-native-x86_64-apple-darwin
 op-build-aarch64-apple-darwin:
 	$(MAKE) op-build-native-aarch64-apple-darwin
-
-build-deb-%:
-	@case "$*" in \
-		x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|riscv64gc-unknown-linux-gnu) \
-			echo "Building debian package for $*"; \
-			;; \
-		*) \
-			echo "Error: Debian packages are only supported for x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, and riscv64gc-unknown-linux-gnu, not $*"; \
-			exit 1; \
-			;; \
-	esac
-	cargo install cargo-deb@3.6.0 --locked
-	cargo deb --profile $(PROFILE) --no-build --no-dbgsym --no-strip \
-		--target $* \
-		$(if $(VERSION),--deb-version "1~$(VERSION)") \
-		$(if $(VERSION),--output "target/$*/$(PROFILE)/reth-$(VERSION)-$*-$(PROFILE).deb")
 
 # Create a `.tar.gz` containing a binary for a specific target.
 define tarball_release_binary
