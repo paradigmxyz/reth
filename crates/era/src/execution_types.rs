@@ -24,7 +24,7 @@
 //! // Decompressed and decode typed compressed header
 //! let decoded_header: Header = compressed.decode_header()?;
 //! assert_eq!(decoded_header.number, 100);
-//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! # Ok::<(), reth_era::e2s::error::E2sError>(())
 //! ```
 //!
 //! ## [`CompressedBody`]
@@ -46,7 +46,7 @@
 //! let decoded_body: alloy_consensus::BlockBody<alloy_primitives::Bytes> =
 //!     compressed_body.decode()?;
 //! assert_eq!(decoded_body.transactions.len(), 1);
-//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! # Ok::<(), reth_era::e2s::error::E2sError>(())
 //! ```
 //!
 //! ## [`CompressedReceipts`]
@@ -68,7 +68,7 @@
 //! // Get raw receipt by decoding and decompressing compressed and encoded receipt
 //! let decompressed_receipt = compressed_receipt_data.decode::<ReceiptWithBloom>()?;
 //! assert_eq!(decompressed_receipt.receipt.cumulative_gas_used, 21000);
-//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! # Ok::<(), reth_era::e2s::error::E2sError>(())
 //! ``````
 
 use crate::{
