@@ -21,7 +21,7 @@ use revm_database::{
 };
 use serde::Serialize;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fmt::Debug,
     fs::File,
     io::Write,
@@ -30,6 +30,23 @@ use std::{
 
 type CollectionResult =
     (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
+
+/// Extension trait for normalizing ExecutionWitness to ensure deterministic comparison
+trait ExecutionWitnessExt {
+    /// Normalizes the witness by sorting codes and keys vectors in place.
+    /// This makes the witness comparison order-insensitive while preserving the same semantic
+    /// meaning (since these fields represent unordered sets of bytecode and preimages).
+    fn normalize(&mut self);
+}
+
+impl ExecutionWitnessExt for ExecutionWitness {
+    fn normalize(&mut self) {
+        // Sort codes and keys to ensure order-insensitive comparison
+        // These fields represent unordered sets of bytecode and preimages
+        self.codes.sort();
+        self.keys.sort();
+    }
+}
 
 /// Serializable version of `BundleState` for deterministic comparison
 #[derive(Debug, PartialEq, Eq)]
@@ -252,21 +269,13 @@ where
             let filename = format!("{}.witness.healthy.json", block_prefix);
             let healthy_path = self.save_file(filename, &healthy_node_witness)?;
 
-            // Compare witness as sets to avoid order sensitivity in codes and keys vectors
-            let codes_match = {
-                let re_executed_codes: BTreeSet<_> = witness.codes.iter().collect();
-                let healthy_codes: BTreeSet<_> = healthy_node_witness.codes.iter().collect();
-                re_executed_codes == healthy_codes
-            };
-            let keys_match = {
-                let re_executed_keys: BTreeSet<_> = witness.keys.iter().collect();
-                let healthy_keys: BTreeSet<_> = healthy_node_witness.keys.iter().collect();
-                re_executed_keys == healthy_keys
-            };
-            let witness_matches = witness.state == healthy_node_witness.state &&
-                codes_match &&
-                keys_match &&
-                witness.headers == healthy_node_witness.headers;
+            // Normalize both witnesses to ensure order-insensitive comparison
+            let mut normalized_witness = witness.clone();
+            let mut normalized_healthy_witness = healthy_node_witness.clone();
+            normalized_witness.normalize();
+            normalized_healthy_witness.normalize();
+
+            let witness_matches = normalized_witness == normalized_healthy_witness;
 
             if !witness_matches {
                 let filename = format!("{}.witness.diff", block_prefix);
