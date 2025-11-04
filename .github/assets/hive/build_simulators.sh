@@ -11,8 +11,8 @@ go build .
 
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
-./hive -client reth --sim "ethereum/eest" \
-  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal@v1.3.0/fixtures_bal.tar.gz \
+./hive -client reth --sim "ethereum/eels" \
+  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal@v1.4.0/fixtures_bal.tar.gz \
   --sim.buildarg branch=main \
   --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
@@ -31,8 +31,8 @@ docker save hive/hiveproxy:latest -o ../hive_assets/hiveproxy.tar & saving_pids+
 docker save hive/simulators/devp2p:latest -o ../hive_assets/devp2p.tar & saving_pids+=( $! )
 docker save hive/simulators/ethereum/engine:latest -o ../hive_assets/engine.tar & saving_pids+=( $! )
 docker save hive/simulators/ethereum/rpc-compat:latest -o ../hive_assets/rpc_compat.tar & saving_pids+=( $! )
-docker save hive/simulators/ethereum/eest/consume-engine:latest -o ../hive_assets/eest_engine.tar & saving_pids+=( $! )
-docker save hive/simulators/ethereum/eest/consume-rlp:latest -o ../hive_assets/eest_rlp.tar & saving_pids+=( $! )
+docker save hive/simulators/ethereum/eels/consume-engine:latest -o ../hive_assets/eels_engine.tar & saving_pids+=( $! )
+docker save hive/simulators/ethereum/eels/consume-rlp:latest -o ../hive_assets/eels_rlp.tar & saving_pids+=( $! )
 docker save hive/simulators/smoke/genesis:latest -o ../hive_assets/smoke_genesis.tar & saving_pids+=( $! )
 docker save hive/simulators/smoke/network:latest -o ../hive_assets/smoke_network.tar & saving_pids+=( $! )
 docker save hive/simulators/ethereum/sync:latest -o ../hive_assets/ethereum_sync.tar & saving_pids+=( $! )

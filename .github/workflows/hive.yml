@@ -32,7 +32,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v5
         with:
-          repository: Rimeeeeee/hive
+          repository: raxhvl/hive
           ref: feat/asmterdam-bal
           path: hivetests
 
@@ -139,7 +139,7 @@ jobs:
               # - debug_
 
           # consume-engine
-          - sim: ethereum/eest/consume-engine
+          - sim: ethereum/eels/consume-engine
             limit: .*tests/amsterdam.*
           # - sim: ethereum/eest/consume-engine
           #   limit: .*tests/prague.*
@@ -157,7 +157,7 @@ jobs:
           #   limit: .*tests/frontier.*
 
           # consume-rlp
-          - sim: ethereum/eest/consume-rlp
+          - sim: ethereum/eels/consume-rlp
             limit: .*tests/amsterdam.*
           # - sim: ethereum/eest/consume-rlp
           #   limit: .*tests/prague.*
@@ -208,7 +208,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v5
         with:
-          repository: Rimeeeeee/hive
+          repository: raxhvl/hive
           ref: feat/asmterdam-bal
           path: hivetests
 
