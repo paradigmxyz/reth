@@ -3,13 +3,45 @@
 //! This demonstrates how to build a `ChainSpec` with custom hardforks,
 //! implementing required traits for integration with Reth's chain management.
 
-use crate::hardforks::CustomHardforkConfig;
+use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
+use alloy_primitives::{B256, U256};
 use reth_chainspec::{
-    Chain, ChainSpec, EthChainSpec, EthereumHardforks, ForkCondition, Hardfork, Hardforks,
+    hardfork, BaseFeeParams, Chain, ChainSpec, DepositContract, EthChainSpec, EthereumHardfork,
+    EthereumHardforks, ForkCondition, Hardfork, Hardforks,
 };
-use reth_ethereum::chainspec::EthereumHardfork;
 use reth_network_peers::NodeRecord;
+use serde::{Deserialize, Serialize};
+
+// Define custom hardfork variants using Reth's `hardfork!` macro.
+// Each variant represents a protocol upgrade (e.g., enabling new features).
+hardfork!(
+    /// Custom hardforks for the example chain.
+    ///
+    /// These are inspired by Ethereum's upgrades but customized for demonstration.
+    /// Add new variants here to extend the chain's hardfork set.
+    CustomHardfork {
+        /// Enables basic custom features (e.g., a new precompile).
+        BasicUpgrade,
+        /// Enables advanced features (e.g., state modifications).
+        AdvancedUpgrade,
+    }
+);
+
+// Implement the `Hardfork` trait for each variant.
+// This defines the name and any custom logic (e.g., feature toggles).
+// Note: The hardfork! macro already implements Hardfork, so no manual impl needed.
+
+// Configuration for hardfork activation.
+// This struct holds settings like activation blocks and is serializable for config files.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomHardforkConfig {
+    /// Block number to activate BasicUpgrade.
+    pub basic_upgrade_block: u64,
+    /// Block number to activate AdvancedUpgrade.
+    pub advanced_upgrade_block: u64,
+}
 
 // Custom chain spec wrapping Reth's `ChainSpec` with our hardforks.
 #[derive(Debug, Clone)]
@@ -19,32 +51,20 @@ pub struct CustomChainSpec {
 
 impl CustomChainSpec {
     /// Creates a custom chain spec from a genesis file.
+    ///
+    /// This parses the [`ChainSpec`] and adds the custom hardforks.
     pub fn from_genesis(genesis: Genesis) -> Self {
-        let config: CustomHardforkConfig = genesis
-            .config
-            .extra_fields
-            .get("customHardforks")
-            .cloned()
-            .and_then(|val| serde_json::from_value(val).ok())
-            .unwrap_or_default();
-        let mut builder = ChainSpec::builder()
-            .chain(Chain::mainnet())
-            .genesis(genesis)
-            .frontier_activated()
-            .homestead_activated();
-        if let Some(block) = config.basic_upgrade_block {
-            builder = builder.with_fork(
-                crate::hardforks::CustomHardfork::BasicUpgrade,
-                ForkCondition::Block(block),
-            );
-        }
-        if let Some(block) = config.advanced_upgrade_block {
-            builder = builder.with_fork(
-                crate::hardforks::CustomHardfork::AdvancedUpgrade,
-                ForkCondition::Block(block),
-            );
-        }
-        let inner = builder.build();
+        let extra = genesis.config.extra_fields.deserialize_as::<CustomHardforkConfig>().unwrap();
+
+        let mut inner = ChainSpec::from_genesis(genesis);
+        inner.hardforks.insert(
+            CustomHardfork::BasicUpgrade,
+            ForkCondition::Timestamp(extra.basic_upgrade_block),
+        );
+        inner.hardforks.insert(
+            CustomHardfork::AdvancedUpgrade,
+            ForkCondition::Timestamp(extra.advanced_upgrade_block),
+        );
         Self { inner }
     }
 }
@@ -80,22 +100,19 @@ impl EthChainSpec for CustomChainSpec {
         self.inner.chain()
     }
 
-    fn base_fee_params_at_timestamp(
-        &self,
-        timestamp: u64,
-    ) -> reth_ethereum::chainspec::BaseFeeParams {
+    fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         self.inner.base_fee_params_at_timestamp(timestamp)
     }
 
-    fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<alloy_eips::eip7840::BlobParams> {
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
         self.inner.blob_params_at_timestamp(timestamp)
     }
 
-    fn deposit_contract(&self) -> Option<&reth_ethereum::chainspec::DepositContract> {
+    fn deposit_contract(&self) -> Option<&DepositContract> {
         self.inner.deposit_contract()
     }
 
-    fn genesis_hash(&self) -> revm_primitives::B256 {
+    fn genesis_hash(&self) -> B256 {
         self.inner.genesis_hash()
     }
 
@@ -119,7 +136,7 @@ impl EthChainSpec for CustomChainSpec {
         self.inner.bootnodes()
     }
 
-    fn final_paris_total_difficulty(&self) -> Option<revm_primitives::U256> {
+    fn final_paris_total_difficulty(&self) -> Option<U256> {
         self.inner.final_paris_total_difficulty()
     }
 }

@@ -2661,18 +2661,12 @@ name = "custom-hardforks"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip2124",
  "alloy-eips",
  "alloy-genesis",
+ "alloy-primitives",
  "reth-chainspec",
- "reth-ethereum",
  "reth-network-peers",
- "reth-node-builder",
- "reth-tracing",
- "revm-primitives",
  "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
