@@ -9,11 +9,12 @@ use reth_db_api::{
     RawKey, RawTable, RawValue,
 };
 use reth_era::{
+    common::{decode::DecodeCompressed, file_ops::StreamReader},
     e2s::error::E2sError,
-    era1_file::{BlockTupleIterator, Era1Reader},
-    era_file_ops::StreamReader,
-    execution_types::BlockTuple,
-    DecodeCompressed,
+    era1::{
+        file::{BlockTupleIterator, Era1Reader},
+        types::execution::BlockTuple,
+    },
 };
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;

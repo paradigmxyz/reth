@@ -72,8 +72,8 @@
 //! ``````
 
 use crate::{
+    common::decode::DecodeCompressed,
     e2s::{error::E2sError, types::Entry},
-    DecodeCompressed,
 };
 use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::{B256, U256};

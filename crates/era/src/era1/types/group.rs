@@ -1,11 +1,11 @@
-//! Era1 types
+//! Era1 group for era1 file content
 //!
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
 use crate::{
+    common::file_ops::EraFileId,
     e2s::types::{Entry, IndexEntry},
-    era_file_ops::EraFileId,
-    execution_types::{Accumulator, BlockTuple, MAX_BLOCKS_PER_ERA1},
+    era1::types::execution::{Accumulator, BlockTuple, MAX_BLOCKS_PER_ERA1},
 };
 use alloy_primitives::BlockNumber;
 
@@ -174,8 +174,8 @@ impl EraFileId for Era1Id {
 mod tests {
     use super::*;
     use crate::{
+        common::decode::DecodeCompressed,
         test_utils::{create_sample_block, create_test_block_with_compressed_data},
-        DecodeCompressed,
     };
     use alloy_consensus::ReceiptWithBloom;
     use alloy_primitives::{B256, U256};
