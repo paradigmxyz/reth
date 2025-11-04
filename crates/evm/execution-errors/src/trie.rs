@@ -6,41 +6,8 @@ use nybbles::Nibbles;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 use thiserror::Error;
 
-/// State root errors.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
-pub enum StateRootError {
-    /// Internal database error.
-    #[error(transparent)]
-    Database(#[from] DatabaseError),
-    /// Storage root error.
-    #[error(transparent)]
-    StorageRootError(#[from] StorageRootError),
-}
-
-impl From<StateRootError> for DatabaseError {
-    fn from(err: StateRootError) -> Self {
-        match err {
-            StateRootError::Database(err) |
-            StateRootError::StorageRootError(StorageRootError::Database(err)) => err,
-        }
-    }
-}
-
-/// Storage root error.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
-pub enum StorageRootError {
-    /// Internal database error.
-    #[error(transparent)]
-    Database(#[from] DatabaseError),
-}
-
-impl From<StorageRootError> for DatabaseError {
-    fn from(err: StorageRootError) -> Self {
-        match err {
-            StorageRootError::Database(err) => err,
-        }
-    }
-}
+// Re-export the state root errors from storage errors
+pub use reth_storage_errors::trie::{StateRootError, StorageRootError};
 
 /// State proof errors.
 #[derive(Error, PartialEq, Eq, Clone, Debug)]

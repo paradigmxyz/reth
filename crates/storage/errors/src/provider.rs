@@ -1,4 +1,8 @@
-use crate::{any::AnyError, db::DatabaseError};
+use crate::{
+    any::AnyError,
+    db::DatabaseError,
+    trie::{StateRootError, StorageRootError},
+};
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
@@ -26,6 +30,9 @@ pub enum ProviderError {
     /// Trie witness error.
     #[error("trie witness error: {_0}")]
     TrieWitnessError(String),
+    /// State root error.
+    #[error(transparent)]
+    StateRoot(#[from] StateRootError),
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]
     SenderRecoveryError,
@@ -243,6 +250,12 @@ pub enum ConsistentViewError {
 impl From<ConsistentViewError> for ProviderError {
     fn from(error: ConsistentViewError) -> Self {
         Self::ConsistentView(Box::new(error))
+    }
+}
+
+impl From<StorageRootError> for ProviderError {
+    fn from(error: StorageRootError) -> Self {
+        Self::StateRoot(StateRootError::StorageRootError(error))
     }
 }
 

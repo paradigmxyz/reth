@@ -8,7 +8,7 @@ use reth_db::{
     test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
     DatabaseEnv,
 };
-use reth_errors::ProviderResult;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
 use reth_primitives_traits::{Account, StorageEntry};
@@ -86,9 +86,7 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
 
-    let (root, updates) = StateRoot::from_tx(provider.tx_ref())
-        .root_with_updates()
-        .map_err(reth_db::DatabaseError::from)?;
+    let (root, updates) = StateRoot::from_tx(provider.tx_ref()).root_with_updates()?;
     provider.write_trie_updates(updates).unwrap();
 
     provider.commit()?;

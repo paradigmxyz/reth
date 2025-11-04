@@ -241,10 +241,8 @@ impl From<ParallelStateRootError> for ProviderError {
     fn from(error: ParallelStateRootError) -> Self {
         match error {
             ParallelStateRootError::Provider(error) => error,
-            ParallelStateRootError::StorageRoot(StorageRootError::Database(error)) => {
-                Self::Database(error)
-            }
-            ParallelStateRootError::Other(other) => Self::Database(DatabaseError::Other(other)),
+            ParallelStateRootError::StorageRoot(storage_err) => storage_err.into(),
+            ParallelStateRootError::Other(msg) => Self::other(ParallelStateRootError::Other(msg)),
         }
     }
 }

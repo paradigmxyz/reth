@@ -21,5 +21,8 @@ pub mod lockfile;
 pub mod provider;
 pub use provider::{ProviderError, ProviderResult};
 
+/// Trie error
+pub mod trie;
+
 /// Any error
 pub mod any;
