@@ -160,12 +160,11 @@ where
 
             if tx_receipt.is_none() {
                 // if flashblocks are supported, attempt to find id from the pending block
-                if let Ok(Some(pending_block)) = this.pending_flashblock().await {
-                    if let Some(Ok(receipt)) = pending_block
+                if let Ok(Some(pending_block)) = this.pending_flashblock().await &&
+                    let Some(Ok(receipt)) = pending_block
                         .find_and_convert_transaction_receipt(hash, this.tx_resp_builder())
-                    {
-                        return Ok(Some(receipt));
-                    }
+                {
+                    return Ok(Some(receipt));
                 }
             }
             let Some((tx, meta, receipt)) = tx_receipt else { return Ok(None) };
