@@ -507,20 +507,18 @@ mod tests {
 
     #[test]
     fn validate_header_extra_data_with_custom_limit() {
-        let mut header = Header::default();
-
         // Test with default 32 bytes - should pass
-        header.extra_data = Bytes::from(vec![0; 32]);
-        assert!(validate_header_extra_data(&header, 32).is_ok());
+        let header_32 = Header { extra_data: Bytes::from(vec![0; 32]), ..Default::default() };
+        assert!(validate_header_extra_data(&header_32, 32).is_ok());
 
         // Test exceeding default - should fail
-        header.extra_data = Bytes::from(vec![0; 33]);
+        let header_33 = Header { extra_data: Bytes::from(vec![0; 33]), ..Default::default() };
         assert_eq!(
-            validate_header_extra_data(&header, 32),
+            validate_header_extra_data(&header_33, 32),
             Err(ConsensusError::ExtraDataExceedsMax { len: 33 })
         );
 
         // Test with custom larger limit - should pass
-        assert!(validate_header_extra_data(&header, 64).is_ok());
+        assert!(validate_header_extra_data(&header_33, 64).is_ok());
     }
 }
