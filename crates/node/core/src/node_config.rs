@@ -427,6 +427,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Disables all discovery services for the node.
+    pub fn with_disabled_discovery(mut self) -> Self {
+        self.network.discovery.disable_discovery = true;
+        self
+    }
+
     /// Effectively disables the RPC state cache by setting the cache sizes to `0`.
     ///
     /// By setting the cache sizes to 0, caching of newly executed or fetched blocks will be
