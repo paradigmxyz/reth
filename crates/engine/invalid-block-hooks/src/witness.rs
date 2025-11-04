@@ -205,11 +205,6 @@ where
     N: NodePrimitives,
 {
     /// Generates an `ExecutionWitness` and returns it together with the `BundleState`.
-    ///
-    /// This is the core helper that performs block re-execution and collects all
-    /// artifacts necessary to build the execution witness. It is intentionally
-    /// kept small and self-contained to minimize drift and prepare for potential
-    /// reuse across subsystems.
     fn generate_execution_witness_core(
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
