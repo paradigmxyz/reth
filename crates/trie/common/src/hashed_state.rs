@@ -278,6 +278,15 @@ impl HashedPostState {
         ChunkedHashedPostState::new(self, size)
     }
 
+    /// Returns the number of items that will be considered during chunking in `[Self::chunks]`.
+    pub fn chunking_length(&self) -> usize {
+        self.accounts.len() +
+            self.storages
+                .values()
+                .map(|storage| if storage.wiped { 1 } else { 0 } + storage.storage.len())
+                .sum::<usize>()
+    }
+
     /// Extend this hashed post state with contents of another.
     /// Entries in the second hashed post state take precedence.
     pub fn extend(&mut self, other: Self) {
@@ -1247,5 +1256,66 @@ mod tests {
         assert_eq!(storage3.non_zero_valued_slots[0].0, B256::from([3; 32]));
         assert_eq!(storage3.zero_valued_slots.len(), 1);
         assert!(storage3.zero_valued_slots.contains(&B256::from([4; 32])));
+    }
+
+    #[test]
+    fn test_hashed_post_state_chunking_length() {
+        let addr1 = B256::from([1; 32]);
+        let addr2 = B256::from([2; 32]);
+        let addr3 = B256::from([3; 32]);
+        let addr4 = B256::from([4; 32]);
+        let slot1 = B256::from([1; 32]);
+        let slot2 = B256::from([2; 32]);
+        let slot3 = B256::from([3; 32]);
+
+        let state = HashedPostState {
+            accounts: B256Map::from_iter([(addr1, None), (addr2, None), (addr4, None)]),
+            storages: B256Map::from_iter([
+                (
+                    addr1,
+                    HashedStorage {
+                        wiped: false,
+                        storage: B256Map::from_iter([
+                            (slot1, U256::ZERO),
+                            (slot2, U256::ZERO),
+                            (slot3, U256::ZERO),
+                        ]),
+                    },
+                ),
+                (
+                    addr2,
+                    HashedStorage {
+                        wiped: true,
+                        storage: B256Map::from_iter([
+                            (slot1, U256::ZERO),
+                            (slot2, U256::ZERO),
+                            (slot3, U256::ZERO),
+                        ]),
+                    },
+                ),
+                (
+                    addr3,
+                    HashedStorage {
+                        wiped: false,
+                        storage: B256Map::from_iter([
+                            (slot1, U256::ZERO),
+                            (slot2, U256::ZERO),
+                            (slot3, U256::ZERO),
+                        ]),
+                    },
+                ),
+            ]),
+        };
+
+        let chunking_length = state.chunking_length();
+        for size in 1..=state.clone().chunks(1).count() {
+            let chunk_count = state.clone().chunks(size).count();
+            let expected_count = chunking_length.div_ceil(size);
+            assert_eq!(
+                chunk_count, expected_count,
+                "chunking_length: {}, size: {}",
+                chunking_length, size
+            );
+        }
     }
 }

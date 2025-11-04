@@ -30,8 +30,8 @@ pub struct Command {
     rpc_url: String,
 
     /// How long to wait after a forkchoice update before sending the next payload.
-    #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
-    wait_time: Option<Duration>,
+    #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, default_value = "250ms", verbatim_doc_comment)]
+    wait_time: Duration,
 
     /// The size of the block buffer (channel capacity) for prefetching blocks from the RPC
     /// endpoint.
@@ -170,10 +170,8 @@ impl Command {
             // convert gas used to gigagas, then compute gigagas per second
             info!(%combined_result);
 
-            // wait if we need to
-            if let Some(wait_time) = self.wait_time {
-                tokio::time::sleep(wait_time).await;
-            }
+            // wait before sending the next payload
+            tokio::time::sleep(self.wait_time).await;
 
             // record the current result
             let gas_row = TotalGasRow { block_number, gas_used, time: current_duration };

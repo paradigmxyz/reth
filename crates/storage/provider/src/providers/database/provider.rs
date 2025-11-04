@@ -52,7 +52,7 @@ use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, RecoveredBlock, SealedHeader, StorageEntry,
 };
 use reth_prune_types::{
-    PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE, PRUNE_SEGMENTS,
+    PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -3024,13 +3024,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(PRUNE_SEGMENTS
-            .iter()
+        Ok(PruneSegment::variants()
             .filter_map(|segment| {
                 self.tx
-                    .get::<tables::PruneCheckpoints>(*segment)
+                    .get::<tables::PruneCheckpoints>(segment)
                     .transpose()
-                    .map(|chk| chk.map(|chk| (*segment, chk)))
+                    .map(|chk| chk.map(|chk| (segment, chk)))
             })
             .collect::<Result<_, _>>()?)
     }

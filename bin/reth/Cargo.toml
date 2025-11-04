@@ -9,20 +9,6 @@ repository.workspace = true
 description = "Reth node implementation"
 default-run = "reth"
 
-[package.metadata.deb]
-maintainer = "reth team"
-depends = "$auto"
-section = "network"
-priority = "optional"
-maintainer-scripts = "../../pkg/reth/debian/"
-assets = [
-    "$auto",
-    ["../../README.md", "usr/share/doc/reth/", "644"],
-    ["../../LICENSE-APACHE", "usr/share/doc/reth/", "644"],
-    ["../../LICENSE-MIT", "usr/share/doc/reth/", "644"],
-]
-systemd-units = { enable = false, start = false, unit-name = "reth", unit-scripts = "../../pkg/reth/debian" }
-
 [lints]
 workspace = true
 
@@ -54,7 +40,7 @@ reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-ethereum-primitives.workspace = true
-reth-node-ethereum = { workspace = true, features = ["js-tracer"] }
+reth-node-ethereum.workspace = true
 reth-node-builder.workspace = true
 reth-node-metrics.workspace = true
 reth-consensus.workspace = true
@@ -81,11 +67,17 @@ backon.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc", "otlp", "reth-revm/portable"]
+default = ["jemalloc", "otlp", "reth-revm/portable", "js-tracer"]
 
 otlp = [
     "reth-ethereum-cli/otlp",
     "reth-node-core/otlp",
+]
+js-tracer = [
+    "reth-node-builder/js-tracer",
+    "reth-node-ethereum/js-tracer",
+    "reth-rpc/js-tracer",
+    "reth-rpc-eth-types/js-tracer",
 ]
 
 dev = ["reth-ethereum-cli/dev"]

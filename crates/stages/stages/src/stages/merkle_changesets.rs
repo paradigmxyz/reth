@@ -312,6 +312,12 @@ where
         // Get the previously computed range. This will be updated to reflect the populating of the
         // target range.
         let mut computed_range = Self::computed_range(provider, input.checkpoint)?;
+        debug!(
+            target: "sync::stages::merkle_changesets",
+            ?computed_range,
+            ?target_range,
+            "Got computed and target ranges",
+        );
 
         // We want the target range to not include any data already computed previously, if
         // possible, so we start the target range from the end of the computed range if that is
@@ -335,9 +341,9 @@ where
         }
 
         // If target range is empty (target_start >= target_end), stage is already successfully
-        // executed
+        // executed.
         if target_range.start >= target_range.end {
-            return Ok(ExecOutput::done(input.checkpoint.unwrap_or_default()));
+            return Ok(ExecOutput::done(StageCheckpoint::new(target_range.end.saturating_sub(1))));
         }
 
         // If our target range is a continuation of the already computed range then we can keep the

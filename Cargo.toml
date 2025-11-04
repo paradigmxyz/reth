@@ -326,12 +326,6 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 
-[profile.reproducible]
-inherits = "release"
-panic = "abort"
-codegen-units = 1
-incremental = false
-
 [workspace.dependencies]
 # reth
 op-reth = { path = "crates/optimism/bin" }
@@ -494,7 +488,7 @@ alloy-sol-macro = "1.4.1"
 alloy-sol-types = { version = "1.4.1", default-features = false }
 alloy-trie = { version = "0.9.1", default-features = false }
 
-alloy-hardforks = "0.4.2"
+alloy-hardforks = "0.4.3"
 
 op-alloy-rpc-types = { version = "0.22.0", default-features = false }
 alloy-op-evm = { version = "0.22.6", default-features = false }

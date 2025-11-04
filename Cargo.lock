@@ -297,9 +297,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-hardforks"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52ffa71f397f89c72a27d9c7e3340eed7981a18df9a257dd16b835ef7f53aef6"
+checksum = "51e7f93a60ef3d867c93d43442ef3f2d8a1095450131c3d4e16bbbbf2166b9bd"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -391,9 +391,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-hardforks"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b43e1c305c2f0e4b8878b943fa2f75234803bfca5cd4a4dc0a0a772842a278ea"
+checksum = "d0bc135abf78cf83a460bf785d52e4fe83c3ba5fadd416e2f79f7409eec45958"
 dependencies = [
  "alloy-chains",
  "alloy-hardforks",
@@ -4456,7 +4456,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots 1.0.3",
+ "webpki-roots 1.0.4",
 ]
 
 [[package]]
@@ -6120,7 +6120,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "11.2.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "auto_impl",
  "revm",
@@ -7215,7 +7215,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
- "webpki-roots 1.0.3",
+ "webpki-roots 1.0.4",
 ]
 
 [[package]]
@@ -9833,6 +9833,7 @@ dependencies = [
  "reth-codecs",
  "serde",
  "serde_json",
+ "strum 0.27.2",
  "thiserror 2.0.17",
  "toml",
 ]
@@ -10836,7 +10837,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "30.2.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10854,7 +10855,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "7.0.2"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "bitvec",
  "phf 0.13.1",
@@ -10865,7 +10866,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "10.1.2"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10881,7 +10882,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "11.1.2"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10896,7 +10897,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "9.0.2"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10909,7 +10910,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "8.0.3"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "auto_impl",
  "either",
@@ -10921,7 +10922,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "11.2.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10939,7 +10940,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "11.2.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "auto_impl",
  "either",
@@ -10976,7 +10977,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "28.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10988,7 +10989,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "28.1.1"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11012,7 +11013,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "21.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -11023,7 +11024,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "8.0.2"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efe3be8c429314f17a78659978b0525f6292737b"
+source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#180f9ff3a17fb6200a209dd733805ecd33657dd4"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.10.0",
@@ -11416,9 +11417,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82d20c4491bc164fa2f6c5d44565947a52ad80b9505d8e36f8d54c27c739fcd0"
+checksum = "1317c3bf3e7df961da95b0a56a172a02abead31276215a0497241a7624b487ce"
 dependencies = [
  "dyn-clone",
  "ref-cast",
@@ -11665,7 +11666,7 @@ dependencies = [
  "indexmap 1.9.3",
  "indexmap 2.12.0",
  "schemars 0.9.0",
- "schemars 1.0.4",
+ "schemars 1.0.5",
  "serde_core",
  "serde_json",
  "serde_with_macros",
@@ -12477,9 +12478,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.16"
+version = "0.7.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14307c986784f72ef81c89db7d9e28d6ac26d16213b109ea501696195e6e3ce5"
+checksum = "2efa149fe76073d6e8fd97ef4f4eca7b67f599660115591483572e406e165594"
 dependencies = [
  "bytes",
  "futures-core",
@@ -13303,14 +13304,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75c7f0ef91146ebfb530314f5f1d24528d7f0767efbfd31dce919275413e393e"
 dependencies = [
- "webpki-root-certs 1.0.3",
+ "webpki-root-certs 1.0.4",
 ]
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05d651ec480de84b762e7be71e6efa7461699c19d9e2c272c8d93455f567786e"
+checksum = "ee3e3b5f5e80bc89f30ce8d0343bf4e5f12341c51f3e26cbeecbc7c85443e85b"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -13321,14 +13322,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.3",
+ "webpki-roots 1.0.4",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32b130c0d2d49f8b6889abc456e795e82525204f27c42cf767cf0d7734e089b8"
+checksum = "b2878ef029c47c6e8cf779119f20fcf52bde7ad42a731b2a304bc221df17571e"
 dependencies = [
  "rustls-pki-types",
 ]
