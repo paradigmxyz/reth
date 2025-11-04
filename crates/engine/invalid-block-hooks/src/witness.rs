@@ -25,23 +25,6 @@ use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf}
 type CollectionResult =
     (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
 
-/// Extension trait for normalizing [`ExecutionWitness`] to ensure deterministic comparison
-trait ExecutionWitnessExt {
-    /// Normalizes the witness by sorting codes and keys vectors in place.
-    /// This makes the witness comparison order-insensitive while preserving the same semantic
-    /// meaning (since these fields represent unordered sets of bytecode and preimages).
-    fn normalize(&mut self);
-}
-
-impl ExecutionWitnessExt for ExecutionWitness {
-    fn normalize(&mut self) {
-        // Sort codes and keys to ensure order-insensitive comparison
-        // These fields represent unordered sets of bytecode and preimages
-        self.codes.sort();
-        self.keys.sort();
-    }
-}
-
 /// Serializable version of `BundleState` for deterministic comparison
 #[derive(Debug, PartialEq, Eq)]
 struct BundleStateSorted {
@@ -264,16 +247,20 @@ where
             let healthy_path = self.save_file(filename, &healthy_node_witness)?;
 
             // Normalize both witnesses to ensure order-insensitive comparison
+            // Sort codes and keys in place to make comparison order-insensitive
+            // These fields represent unordered sets of bytecode and preimages
             let mut normalized_witness = witness.clone();
             let mut normalized_healthy_witness = healthy_node_witness.clone();
-            normalized_witness.normalize();
-            normalized_healthy_witness.normalize();
+            normalized_witness.codes.sort();
+            normalized_witness.keys.sort();
+            normalized_healthy_witness.codes.sort();
+            normalized_healthy_witness.keys.sort();
 
             let witness_matches = normalized_witness == normalized_healthy_witness;
 
             if !witness_matches {
                 let filename = format!("{}.witness.diff", block_prefix);
-                let diff_path = self.save_diff(filename, witness, &healthy_node_witness)?;
+                let diff_path = self.save_diff(filename, &normalized_witness, &normalized_healthy_witness)?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
                     diff_path = %diff_path.display(),
