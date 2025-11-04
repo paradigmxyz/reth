@@ -560,7 +560,7 @@ where
             ctx.node.evm_config().clone(),
         );
         // install additional OP specific rpc methods
-        let debug_ext = OpDebugWitnessApi::new(
+        let debug_ext = OpDebugWitnessApi::<_, _, _, Attrs>::new(
             ctx.node.provider().clone(),
             Box::new(ctx.node.task_executor().clone()),
             builder,

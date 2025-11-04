@@ -4,7 +4,6 @@ use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadId;
 use core::mem;
 use eyre::{bail, OptionExt};
-use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_primitives_traits::{Recovered, SignedTransaction};
 use std::{collections::BTreeMap, ops::Deref};
 use tokio::sync::broadcast;
@@ -226,15 +225,6 @@ impl FlashBlockCompleteSequence {
     /// Returns the state root for the current sequence
     pub const fn state_root(&self) -> Option<B256> {
         self.state_root
-    }
-
-    /// Converts the complete sequence into execution data for the Engine API.
-    ///
-    /// This is the canonical way to convert a flashblock sequence into an execution payload
-    /// that can be submitted to the Engine API. The type parameter `T` must implement
-    /// `From<&FlashBlockCompleteSequence>`.
-    pub fn to_execution_data(&self) -> OpExecutionData {
-        self.into()
     }
 }
 

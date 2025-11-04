@@ -35,6 +35,9 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 alloy-consensus.workspace = true
 
+# op-alloy
+op-alloy-rpc-types-engine.workspace = true
+
 # io
 tokio.workspace = true
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
@@ -52,7 +55,6 @@ metrics.workspace = true
 eyre.workspace = true
 
 derive_more.workspace = true
-op-alloy-rpc-types-engine = "0.22.0"
 
 [dev-dependencies]
 test-case.workspace = true
