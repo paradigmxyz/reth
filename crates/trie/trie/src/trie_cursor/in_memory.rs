@@ -83,10 +83,14 @@ pub struct InMemoryTrieCursor<'a, C> {
 impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     /// Create new trie cursor which combines a DB cursor (None to assume empty DB) and a set of
     /// in-memory trie nodes.
-    pub const fn new(
+    pub fn new(
         cursor: Option<C>,
         trie_updates: &'a [(Nibbles, Option<BranchNodeCompact>)],
     ) -> Self {
+        debug_assert!(
+            trie_updates.is_sorted_by_key(|(k, _)| k),
+            "Overlay values must be sorted by path"
+        );
         let in_memory_cursor = ForwardInMemoryCursor::new(trie_updates);
         Self {
             cursor,

@@ -433,12 +433,6 @@ impl HashedStorage {
 }
 
 /// Sorted hashed post state optimized for iterating during state trie calculation.
-///
-/// This structure represents account and storage updates in a sorted format suitable for
-/// efficient trie traversal. Both accounts and storage slots use `Option<T>` to distinguish
-/// between updates and deletions:
-/// - `Some(value)`: The account/slot was updated to this value
-/// - `None`: The account was destroyed or the storage slot was deleted (set to zero)
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostStateSorted {
     /// Sorted collection of account updates. `None` indicates a destroyed account.
@@ -501,7 +495,7 @@ impl AsRef<Self> for HashedPostStateSorted {
 /// Sorted hashed storage optimized for iterating during state trie calculation.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct HashedStorageSorted {
-    /// Sorted collection of updated storage slots, None indicates zero valued.
+    /// Sorted collection of updated storage slots. [`U256::ZERO`] indicates a deleted value.
     pub storage_slots: Vec<(B256, U256)>,
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,

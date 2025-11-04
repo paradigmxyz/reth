@@ -38,12 +38,6 @@ where
         Ok(HashedPostStateCursor::new(Some(cursor), &self.post_state.as_ref().accounts))
     }
 
-    /// Returns a `HashedPostStateCursor` for storage slots that merges:
-    /// 1. `post_state_cursor` - In-memory overlay of storage updates (None if address has no
-    ///    updates)
-    /// 2. `cursor` - DB cursor for existing storage (None if storage was wiped via `SELF-DESTRUCT`)
-    ///
-    /// When storage is wiped, the DB cursor is omitted since all previous storage is destroyed.
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
@@ -65,14 +59,15 @@ where
     }
 }
 
-/// Trait for wrapper types that can be converted to `Option<NonZero>`.
+/// Trait for types that can be used with [`HashedPostStateCursor`] as a value.
 ///
 /// This enables uniform handling of deletions across different wrapper types:
 /// - `Option<Account>`: `None` indicates deletion
 /// - `U256`: `U256::ZERO` indicates deletion (maps to `None`)
 ///
-/// This design avoids the memory overhead of `Option<U256>` while maintaining
-/// uniform handling of deletions across different value types.
+/// This design allows us to use `U256::ZERO`, rather than an Option, to indicate deletion for
+/// storage (which maps cleanly to how changesets are stored in the DB) while not requiring two
+/// different cursor implementations.
 pub trait HashedPostStateCursorValue: Copy {
     /// The non-zero type returned by `into_option`.
     /// For `Option<Account>`, this is `Account`.
@@ -131,8 +126,7 @@ where
     /// - `cursor`: The database cursor. Pass `None` to indicate:
     ///   - For accounts: Empty database (no persisted accounts)
     ///   - For storage: Wiped storage (e.g., via `SELFDESTRUCT` - all previous storage destroyed)
-    /// - `updates`: Pre-sorted post state updates where `Some(value)` indicates an update and
-    ///   `None` indicates a deletion (destroyed account or zero-valued storage slot)
+    /// - `updates`: Pre-sorted post state updates.
     pub fn new(cursor: Option<C>, updates: &'a [(B256, V)]) -> Self {
         debug_assert!(updates.is_sorted_by_key(|(k, _)| k), "Overlay values must be sorted by key");
         Self {
@@ -147,7 +141,14 @@ where
     /// Asserts that the next entry to be returned from the cursor is not previous to the last entry
     /// returned.
     fn set_last_key(&mut self, next_entry: &Option<(B256, V::NonZero)>) {
-        self.last_key = next_entry.as_ref().map(|e| e.0);
+        let next_key = next_entry.as_ref().map(|e| e.0);
+        debug_assert!(
+            self.last_key.is_none_or(|last| next_key.is_none_or(|next| next >= last)),
+            "Cannot return entry {:?} previous to the last returned entry at {:?}",
+            next_key,
+            self.last_key,
+        );
+        self.last_key = next_key;
     }
 
     /// Seeks the `cursor_entry` field of the struct using the cursor.
@@ -169,6 +170,8 @@ where
 
     /// Seeks the `cursor_entry` field of the struct to the subsequent entry using the cursor.
     fn cursor_next(&mut self) -> Result<(), DatabaseError> {
+        debug_assert!(self.seeked);
+
         // If the previous entry is `None`, and we've done a seek previously, then the cursor is
         // exhausted, and we shouldn't call `next` again.
         if self.cursor_entry.is_some() {
@@ -252,6 +255,8 @@ where
     ///
     /// NOTE: This function will not return any entry unless [`HashedCursor::seek`] has been called.
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        debug_assert!(self.seeked, "Cursor must be seek'd before next is called");
+
         // A `last_key` of `None` indicates that the cursor is exhausted.
         let Some(last_key) = self.last_key else {
             return Ok(None);
