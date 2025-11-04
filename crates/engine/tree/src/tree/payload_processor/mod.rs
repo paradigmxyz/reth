@@ -204,10 +204,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
-    ) -> Result<
-        PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
-        (ParallelStateRootError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
-    >
+    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -222,10 +219,9 @@ where
         // consistent view of the database, including the trie tables. Because of this there is no
         // need for an overarching prefix set to invalidate any section of the trie tables, and so
         // we use an empty prefix set.
-        let prefix_sets = Arc::new(TriePrefixSetsMut::default());
 
         // Create and spawn the storage proof task
-        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory, prefix_sets);
+        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let proof_handle = ProofWorkerHandle::new(
@@ -267,12 +263,12 @@ where
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
         self.spawn_sparse_trie_task(sparse_trie_rx, proof_handle, state_root_tx);
 
-        Ok(PayloadHandle {
+        PayloadHandle {
             to_multi_proof,
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
-        })
+        }
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.

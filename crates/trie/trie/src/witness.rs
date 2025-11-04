@@ -147,11 +147,7 @@ where
 
         let (tx, rx) = mpsc::channel();
         let blinded_provider_factory = WitnessTrieNodeProviderFactory::new(
-            ProofTrieNodeProviderFactory::new(
-                self.trie_cursor_factory,
-                self.hashed_cursor_factory,
-                Arc::new(self.prefix_sets),
-            ),
+            ProofTrieNodeProviderFactory::new(self.trie_cursor_factory, self.hashed_cursor_factory),
             tx,
         );
         let mut sparse_trie = SparseStateTrie::<SerialSparseTrie>::new();
