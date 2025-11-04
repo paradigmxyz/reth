@@ -19,7 +19,7 @@ use crate::{
 use dyn_clone::DynClone;
 use futures_util::{
     future::{select, BoxFuture},
-    Future, FutureExt, TryFutureExt,
+    Future,
 };
 use std::{
     any::Any,
@@ -454,15 +454,15 @@ impl TaskExecutor {
         let panicked_tasks_tx = self.task_events_tx.clone();
         let on_shutdown = self.on_shutdown.clone();
 
-        // wrap the task in catch unwind
-        let task = std::panic::AssertUnwindSafe(fut)
-            .catch_unwind()
-            .map_err(move |error| {
+        let task = async move {
+            let result = std::panic::AssertUnwindSafe(fut).catch_unwind().await;
+            if let Err(error) = result {
                 let task_error = PanickedTaskError::new(name, error);
                 error!("{task_error}");
                 let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
-            })
-            .in_current_span();
+           }
+        }
+        .in_current_span();
 
         // Clone only the specific counter that we need.
         let finished_critical_tasks_total_metrics =
@@ -514,16 +514,15 @@ impl TaskExecutor {
         let on_shutdown = self.on_shutdown.clone();
         let fut = f(on_shutdown);
 
-        // wrap the task in catch unwind
-        let task = std::panic::AssertUnwindSafe(fut)
-            .catch_unwind()
-            .map_err(move |error| {
+        let task = async move {
+            let result = std::panic::AssertUnwindSafe(fut).catch_unwind().await;
+            if let Err(error) = result {
                 let task_error = PanickedTaskError::new(name, error);
                 error!("{task_error}");
                 let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
-            })
-            .map(drop)
-            .in_current_span();
+            }
+        }
+        .in_current_span();
 
         self.handle.spawn(task)
     }
