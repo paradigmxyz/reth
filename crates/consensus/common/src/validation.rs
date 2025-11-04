@@ -1,8 +1,6 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{
-    BlockHeader as _, Transaction, EMPTY_OMMER_ROOT_HASH,
-};
+use alloy_consensus::{BlockHeader as _, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{ConsensusError, TxGasLimitTooHighErr};
@@ -264,7 +262,10 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
 /// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
 /// This must be 32 bytes or fewer; formally Hx.
 #[inline]
-pub fn validate_header_extra_data<H: BlockHeader>(header: &H, max_size: usize) -> Result<(), ConsensusError> {
+pub fn validate_header_extra_data<H: BlockHeader>(
+    header: &H,
+    max_size: usize,
+) -> Result<(), ConsensusError> {
     let extra_data_len = header.extra_data().len();
     if extra_data_len > max_size {
         Err(ConsensusError::ExtraDataExceedsMax { len: extra_data_len })
@@ -507,18 +508,18 @@ mod tests {
     #[test]
     fn validate_header_extra_data_with_custom_limit() {
         let mut header = Header::default();
-        
+
         // Test with default 32 bytes - should pass
         header.extra_data = Bytes::from(vec![0; 32]);
         assert!(validate_header_extra_data(&header, 32).is_ok());
-        
+
         // Test exceeding default - should fail
         header.extra_data = Bytes::from(vec![0; 33]);
         assert_eq!(
             validate_header_extra_data(&header, 32),
             Err(ConsensusError::ExtraDataExceedsMax { len: 33 })
         );
-        
+
         // Test with custom larger limit - should pass
         assert!(validate_header_extra_data(&header, 64).is_ok());
     }
