@@ -11,9 +11,9 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
-    providers::StaticFileWriter, BlockReader, DBProvider, HeaderProvider, ProviderError,
-    PruneCheckpointReader, SenderRecoveryProvider, StaticFileProviderFactory, StatsReader,
-    WriteDestination,
+    providers::StaticFileWriter, BlockBodyIndicesProvider, BlockReader, DBProvider, HeaderProvider,
+    ProviderError, PruneCheckpointReader, StaticFileProviderFactory,
+    StaticFilesConfigurationProvider, StatsReader, WriteDestination,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_api::{
@@ -66,7 +66,7 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + StatsReader
         + PruneCheckpointReader
-        + SenderRecoveryProvider,
+        + StaticFilesConfigurationProvider,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -108,11 +108,8 @@ where
 
         let tx_batch_sender = setup_range_recovery(provider);
 
-        // Determine write destination based on provider configuration
-        let use_static_files = provider.static_file_senders();
-
         let static_file_provider = provider.static_file_provider();
-        let mut destination = if use_static_files {
+        let mut destination = if provider.static_files_v2_enabled() {
             WriteDestination::StaticFile(
                 static_file_provider
                     .get_writer(*block_range.start(), StaticFileSegment::TransactionSenders)?,
@@ -224,6 +221,8 @@ where
                     }
                 }
             };
+
+            // TODO: increment block
             destination.append_sender(tx_id, &sender)?;
             processed_transactions += 1;
         }

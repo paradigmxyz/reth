@@ -153,19 +153,13 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     prune_modes: PruneModes,
     /// Node storage handler.
     storage: Arc<N::Storage>,
-    /// Whether to use static files for transaction senders
-    static_file_senders: bool,
+    static_files_v2_enabled: bool,
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Returns reference to prune modes.
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
-    }
-
-    /// Returns whether static files are enabled for transaction senders.
-    pub const fn static_file_senders(&self) -> bool {
-        self.static_file_senders
     }
 }
 
@@ -255,9 +249,9 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
-        static_file_senders: bool,
+        static_files_v2_enabled: bool,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage, static_file_senders }
+        Self { tx, chain_spec, static_file_provider, prune_modes, storage, static_files_v2_enabled }
     }
 }
 
@@ -502,9 +496,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
-        static_file_senders: bool,
+        static_files_v2_enabled: bool,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage, static_file_senders }
+        Self { tx, chain_spec, static_file_provider, prune_modes, storage, static_files_v2_enabled }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -1320,7 +1314,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        if self.static_file_senders {
+        if self.static_files_v2_enabled {
             self.static_file_provider.senders_by_tx_range(range)
         } else {
             self.cursor_read_collect::<tables::TransactionSenders>(range)
@@ -1328,7 +1322,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        if self.static_file_senders {
+        if self.static_files_v2_enabled {
             self.static_file_provider.transaction_sender(id)
         } else {
             Ok(self.tx.get::<tables::TransactionSenders>(id)?)
@@ -2787,8 +2781,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// [`BlockWithdrawals`](tables::BlockWithdrawals).
     ///
     /// If the provider has __not__ configured full sender pruning, this will modify either:
-    /// * [`StaticFileSegment::TransactionSenders`] (if `static_file_senders` flag is enabled)
-    /// * [`TransactionSenders`](tables::TransactionSenders) (if `static_file_senders` flag is
+    /// * [`StaticFileSegment::TransactionSenders`] (if `static_files_v2_enabled` flag is enabled)
+    /// * [`TransactionSenders`](tables::TransactionSenders) (if `static_files_v2_enabled` flag is
     ///   disabled)
     ///
     /// If the provider has __not__ configured full transaction lookup pruning, this will modify
@@ -2820,7 +2814,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         let tx_count = block.body().transaction_count() as u64;
 
         // Ensures we have all the senders for the block's transactions.
-        let mut senders_writer = if self.static_file_senders {
+        let mut senders_writer = if self.static_files_v2_enabled {
             WriteDestination::StaticFile(
                 self.static_file_provider
                     .get_writer(block.number(), StaticFileSegment::TransactionSenders)?,
@@ -2949,7 +2943,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             }
         }
 
-        if self.static_file_senders {
+        if self.static_files_v2_enabled {
             let static_file_transaction_sender_num = self
                 .static_file_provider
                 .get_highest_static_file_tx(StaticFileSegment::TransactionSenders);
@@ -3163,9 +3157,9 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
     }
 }
 
-impl<TX, N: NodeTypes> crate::SenderRecoveryProvider for DatabaseProvider<TX, N> {
-    fn static_file_senders(&self) -> bool {
-        self.static_file_senders
+impl<TX, N: NodeTypes> crate::StaticFilesConfigurationProvider for DatabaseProvider<TX, N> {
+    fn static_files_v2_enabled(&self) -> bool {
+        self.static_files_v2_enabled
     }
 }
 

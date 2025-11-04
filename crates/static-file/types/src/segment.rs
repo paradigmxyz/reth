@@ -37,7 +37,7 @@ pub enum StaticFileSegment {
     #[strum(serialize = "receipts")]
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
-    #[strum(serialize = "transaction_senders")]
+    #[strum(serialize = "transaction-senders")]
     /// Static File segment responsible for the `TransactionSenders` table.
     TransactionSenders,
 }

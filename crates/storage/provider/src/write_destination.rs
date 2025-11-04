@@ -7,6 +7,10 @@ use reth_db_api::{cursor::DbCursorRW, tables};
 use reth_node_types::NodePrimitives;
 use reth_storage_errors::provider::ProviderResult;
 
+pub trait StaticFilesConfigurationProvider {
+    fn static_files_v2_enabled(&self) -> bool;
+}
+
 /// Represents a destination for writing data, either to database or static files.
 #[derive(Debug)]
 pub enum WriteDestination<'a, CURSOR, N> {
