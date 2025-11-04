@@ -31,8 +31,7 @@ where
         Ok(Self { engine_handle, sequence_receiver })
     }
 
-    /// Spawn the client to start sending FCUs and new payloads by periodically fetching recent
-    /// blocks.
+    /// Run the client to process flashblock sequences and submit them to the consensus engine.
     pub async fn run(mut self) {
         loop {
             match self.sequence_receiver.recv().await {

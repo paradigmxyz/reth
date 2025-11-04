@@ -41,8 +41,7 @@ fn to_execution_payload_v1(
 
 /// Converts flashblock base and delta into `ExecutionPayloadV2`.
 ///
-/// Wraps V1 payload with empty withdrawals array, as Optimism L2 blocks
-/// don't use Ethereum L1 withdrawals.
+/// Wraps V1 payload with withdrawals from the flashblock delta.
 fn to_execution_payload_v2(
     base: &ExecutionPayloadBaseV1,
     delta: &ExecutionPayloadFlashblockDeltaV1,
