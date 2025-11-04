@@ -83,10 +83,7 @@ where
     fn send_raw_transaction_sync(
         &self,
         tx: Bytes,
-    ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send
-    where
-        Self: LoadReceipt + 'static,
-    {
+    ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send {
         let this = self.clone();
         let timeout_duration = self.send_raw_transaction_sync_timeout();
         async move {
