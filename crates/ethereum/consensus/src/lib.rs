@@ -38,12 +38,14 @@ pub use validation::validate_block_post_execution;
 pub struct EthBeaconConsensus<ChainSpec> {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
+    /// Maximum allowed extra data size in bytes
+    pub max_extra_data_size: usize,
 }
 
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
     /// Create a new instance of [`EthBeaconConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec }
+        Self { chain_spec, max_extra_data_size: 32 }
     }
 
     /// Returns the chain spec associated with this consensus engine.
@@ -125,7 +127,7 @@ where
                 }
             }
         }
-        validate_header_extra_data(header)?;
+        validate_header_extra_data(header, self.max_extra_data_size)?;
         validate_header_gas(header)?;
         validate_header_base_fee(header, &self.chain_spec)?;
 
