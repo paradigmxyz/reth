@@ -7,65 +7,122 @@ use alloy_primitives::TxNumber;
 use core::{ops::RangeInclusive, str::FromStr};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use strum::{AsRefStr, EnumString};
+use strum::{AsRefStr, EnumIs, EnumString};
 
-#[derive(
-    Debug,
-    Copy,
-    Clone,
-    Eq,
-    PartialEq,
-    Hash,
-    Ord,
-    PartialOrd,
-    Deserialize,
-    Serialize,
-    EnumString,
-    AsRefStr,
-    Display,
-)]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-/// Segment of the data that can be moved to static files.
-pub enum StaticFileSegment {
-    #[strum(serialize = "headers")]
+macro_rules! segments {
+    ($(
+        $(#[$attr:meta])*
+        segment $name:ident {
+            name = $str_name:expr;
+            columns = $columns:expr;
+            key = $key_type:ident;
+        }
+    )*) => {
+        #[derive(
+            Debug,
+            Copy,
+            Clone,
+            Eq,
+            PartialEq,
+            Hash,
+            Ord,
+            PartialOrd,
+            Deserialize,
+            Serialize,
+            EnumString,
+            AsRefStr,
+            Display,
+            EnumIs,
+        )]
+        #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+        /// Segment of the data that can be moved to static files.
+        pub enum StaticFileSegment {
+            $(
+                #[strum(serialize = $str_name)]
+                $(#[$attr])*
+                $name,
+            )*
+        }
+
+        impl StaticFileSegment {
+            /// Returns the segment as a string.
+            pub const fn as_str(&self) -> &'static str {
+                match self {
+                    $(
+                        Self::$name => $str_name,
+                    )*
+                }
+            }
+
+            /// Returns an iterator over all segments.
+            pub fn iter() -> impl Iterator<Item = Self> {
+                // The order of segments is significant and must be maintained to ensure correctness.
+                [$(Self::$name,)*].into_iter()
+            }
+
+            /// Returns the number of columns for the segment
+            pub const fn columns(&self) -> usize {
+                match self {
+                    $(
+                        Self::$name => $columns,
+                    )*
+                }
+            }
+
+            /// Returns `true` if a segment row is linked to a transaction.
+            pub const fn is_tx_based(&self) -> bool {
+                match self {
+                    $(
+                        Self::$name => segments!(@is_tx_based $key_type),
+                    )*
+                }
+            }
+
+            /// Returns `true` if a segment row is linked to a block.
+            pub const fn is_block_based(&self) -> bool {
+                match self {
+                    $(
+                        Self::$name => segments!(@is_block_based $key_type),
+                    )*
+                }
+            }
+        }
+    };
+
+    (@is_block_based Block) => { true };
+    (@is_block_based Transaction) => { false };
+    (@is_tx_based Transaction) => { true };
+    (@is_tx_based Block) => { false };
+}
+
+segments! {
     /// Static File segment responsible for the `CanonicalHeaders`, `Headers`,
     /// `HeaderTerminalDifficulties` tables.
-    Headers,
-    #[strum(serialize = "transactions")]
+    segment Headers {
+        name = "headers";
+        columns = 3;
+        key = Block;
+    }
+
     /// Static File segment responsible for the `Transactions` table.
-    Transactions,
-    #[strum(serialize = "receipts")]
+    segment Transactions {
+        name = "transactions";
+        columns = 1;
+        key = Transaction;
+    }
+
     /// Static File segment responsible for the `Receipts` table.
-    Receipts,
+    segment Receipts {
+        name = "receipts";
+        columns = 1;
+        key = Transaction;
+    }
 }
 
 impl StaticFileSegment {
-    /// Returns the segment as a string.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Headers => "headers",
-            Self::Transactions => "transactions",
-            Self::Receipts => "receipts",
-        }
-    }
-
-    /// Returns an iterator over all segments.
-    pub fn iter() -> impl Iterator<Item = Self> {
-        // The order of segments is significant and must be maintained to ensure correctness.
-        [Self::Headers, Self::Transactions, Self::Receipts].into_iter()
-    }
-
     /// Returns the default configuration of the segment.
     pub const fn config(&self) -> SegmentConfig {
         SegmentConfig { compression: Compression::Lz4 }
-    }
-
-    /// Returns the number of columns for the segment
-    pub const fn columns(&self) -> usize {
-        match self {
-            Self::Headers => 3,
-            Self::Transactions | Self::Receipts => 1,
-        }
     }
 
     /// Returns the default file name for the provided segment and range.
@@ -120,26 +177,6 @@ impl StaticFileSegment {
         }
 
         Some((segment, SegmentRangeInclusive::new(block_start, block_end)))
-    }
-
-    /// Returns `true` if the segment is `StaticFileSegment::Headers`.
-    pub const fn is_headers(&self) -> bool {
-        matches!(self, Self::Headers)
-    }
-
-    /// Returns `true` if the segment is `StaticFileSegment::Receipts`.
-    pub const fn is_receipts(&self) -> bool {
-        matches!(self, Self::Receipts)
-    }
-
-    /// Returns `true` if a segment row is linked to a transaction.
-    pub const fn is_tx_based(&self) -> bool {
-        matches!(self, Self::Receipts | Self::Transactions)
-    }
-
-    /// Returns `true` if a segment row is linked to a block.
-    pub const fn is_block_based(&self) -> bool {
-        matches!(self, Self::Headers)
     }
 }
 
