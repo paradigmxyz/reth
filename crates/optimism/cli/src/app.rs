@@ -84,7 +84,7 @@ where
                     Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre!("{e}"))?;
                 }
 
-                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
+                runner.run_command_until_exit(|ctx| command.execute::<OpNode>(ctx, launcher))
             }
             Commands::Init(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())

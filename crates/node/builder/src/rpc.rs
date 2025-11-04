@@ -75,7 +75,7 @@ where
     EthApi: EthApiTypes,
 {
     /// Sets the hook that is run once the rpc server is started.
-    pub(crate) fn set_on_rpc_started<F>(&mut self, hook: F) -> &mut Self
+    pub fn set_on_rpc_started<F>(&mut self, hook: F) -> &mut Self
     where
         F: OnRpcStarted<Node, EthApi> + 'static,
     {
@@ -84,8 +84,7 @@ where
     }
 
     /// Sets the hook that is run once the rpc server is started.
-    #[expect(unused)]
-    pub(crate) fn on_rpc_started<F>(mut self, hook: F) -> Self
+    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
         F: OnRpcStarted<Node, EthApi> + 'static,
     {
@@ -94,19 +93,18 @@ where
     }
 
     /// Sets the hook that is run to configure the rpc modules.
-    pub(crate) fn set_extend_rpc_modules<F>(&mut self, hook: F) -> &mut Self
+    pub fn set_extend_rpc_modules<F>(&mut self, hook: F) -> &mut Self
     where
-        F: ExtendRpcModules<Node, EthApi> + 'static,
+        F: FnOnce(RpcContext<'_, Node, EthApi>) -> eyre::Result<()> + Send + 'static,
     {
         self.extend_rpc_modules = Box::new(hook);
         self
     }
 
     /// Sets the hook that is run to configure the rpc modules.
-    #[expect(unused)]
-    pub(crate) fn extend_rpc_modules<F>(mut self, hook: F) -> Self
+    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
-        F: ExtendRpcModules<Node, EthApi> + 'static,
+        F: FnOnce(RpcContext<'_, Node, EthApi>) -> eyre::Result<()> + Send + 'static,
     {
         self.set_extend_rpc_modules(hook);
         self

@@ -67,6 +67,7 @@ assert_matches.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 rand.workspace = true
 tempfile.workspace = true
+itertools.workspace = true
 
 [features]
 default = []
