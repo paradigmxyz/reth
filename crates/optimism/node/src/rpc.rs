@@ -71,7 +71,7 @@
 //!         components: node.node_adapter(),
 //!         config,
 //!         cache,
-//!         node.beacon_engine_handle.clone(),
+//!         beacon_engine_handle: node.beacon_engine_handle.clone(),
 //!     };
 //!     let eth_api = OpEthApiBuilder::<Optimism>::default().build_eth_api(ctx).await.unwrap();
 //!
