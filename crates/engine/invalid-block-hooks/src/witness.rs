@@ -20,18 +20,12 @@ use revm_database::{
     AccountStatus, RevertToSlot,
 };
 use serde::Serialize;
-use std::{
-    collections::BTreeMap,
-    fmt::Debug,
-    fs::File,
-    io::Write,
-    path::PathBuf,
-};
+use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 type CollectionResult =
     (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
 
-/// Extension trait for normalizing ExecutionWitness to ensure deterministic comparison
+/// Extension trait for normalizing [`ExecutionWitness`] to ensure deterministic comparison
 trait ExecutionWitnessExt {
     /// Normalizes the witness by sorting codes and keys vectors in place.
     /// This makes the witness comparison order-insensitive while preserving the same semantic
