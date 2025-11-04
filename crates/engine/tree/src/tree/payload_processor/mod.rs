@@ -29,8 +29,7 @@ use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
-    trie_cursor::TrieCursorFactory,
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory,
 };
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -891,19 +890,13 @@ mod tests {
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
 
-        let mut handle =
-            payload_processor
-                .spawn(
-                    Default::default(),
-                    core::iter::empty::<
-                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
-                    >(),
-                    StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-                    OverlayStateProviderFactory::new(provider_factory),
-                    &TreeConfig::default(),
-                )
-                .map_err(|(err, ..)| err)
-                .expect("failed to spawn payload processor");
+        let mut handle = payload_processor.spawn(
+            Default::default(),
+            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
+            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+            OverlayStateProviderFactory::new(provider_factory),
+            &TreeConfig::default(),
+        );
 
         let mut state_hook = handle.state_hook();
 

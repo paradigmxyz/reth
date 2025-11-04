@@ -42,12 +42,12 @@ use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
-use reth_provider::{DatabaseProviderROFactory, ProviderError};
+use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::{TriePrefixSets, TriePrefixSetsMut},
+    prefix_set::TriePrefixSets,
     proof::{ProofBlindedAccountProvider, ProofBlindedStorageProvider, StorageProof},
     trie_cursor::TrieCursorFactory,
     walker::TrieWalker,
@@ -1474,8 +1474,6 @@ enum AccountWorkerJob {
 mod tests {
     use super::*;
     use reth_provider::test_utils::create_test_provider_factory;
-    use reth_trie_common::prefix_set::TriePrefixSetsMut;
-    use std::sync::Arc;
     use tokio::{runtime::Builder, task};
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {

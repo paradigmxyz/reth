@@ -24,7 +24,7 @@ use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
     SerialSparseTrie, SparseStateTrie,
 };
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
