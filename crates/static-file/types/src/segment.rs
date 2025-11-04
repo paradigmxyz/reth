@@ -37,6 +37,9 @@ pub enum StaticFileSegment {
     #[strum(serialize = "receipts")]
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
+    #[strum(serialize = "transaction_senders")]
+    /// Static File segment responsible for the `TransactionSenders` table.
+    TransactionSenders,
 }
 
 impl StaticFileSegment {
@@ -46,13 +49,14 @@ impl StaticFileSegment {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
             Self::Receipts => "receipts",
+            Self::TransactionSenders => "transaction_senders",
         }
     }
 
     /// Returns an iterator over all segments.
     pub fn iter() -> impl Iterator<Item = Self> {
         // The order of segments is significant and must be maintained to ensure correctness.
-        [Self::Headers, Self::Transactions, Self::Receipts].into_iter()
+        [Self::Headers, Self::Transactions, Self::Receipts, Self::TransactionSenders].into_iter()
     }
 
     /// Returns the default configuration of the segment.
@@ -64,7 +68,7 @@ impl StaticFileSegment {
     pub const fn columns(&self) -> usize {
         match self {
             Self::Headers => 3,
-            Self::Transactions | Self::Receipts => 1,
+            Self::Transactions | Self::Receipts | Self::TransactionSenders => 1,
         }
     }
 
@@ -134,7 +138,7 @@ impl StaticFileSegment {
 
     /// Returns `true` if a segment row is linked to a transaction.
     pub const fn is_tx_based(&self) -> bool {
-        matches!(self, Self::Receipts | Self::Transactions)
+        matches!(self, Self::Receipts | Self::Transactions | Self::TransactionSenders)
     }
 
     /// Returns `true` if a segment row is linked to a block.

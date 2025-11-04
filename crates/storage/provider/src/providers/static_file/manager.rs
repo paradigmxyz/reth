@@ -7,10 +7,7 @@ use crate::{
     ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt,
 };
-use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta},
-    Header,
-};
+use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use dashmap::DashMap;
@@ -21,7 +18,7 @@ use reth_db::{
     lockfile::StorageLock,
     static_file::{
         iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
-        StaticFileCursor, TransactionMask,
+        StaticFileCursor, TransactionMask, TransactionSenderMask,
     },
 };
 use reth_db_api::{
@@ -903,6 +900,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         highest_tx,
                         highest_block,
                     )?,
+                StaticFileSegment::TransactionSenders => self
+                    .ensure_invariants::<_, tables::TransactionSenders>(
+                        provider,
+                        segment,
+                        highest_tx,
+                        highest_block,
+                    )?,
             } {
                 update_unwind_target(unwind);
             }
@@ -989,6 +993,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 StaticFileSegment::Headers => StageId::Headers,
                 StaticFileSegment::Transactions => StageId::Bodies,
                 StaticFileSegment::Receipts => StageId::Execution,
+                StaticFileSegment::TransactionSenders => StageId::SenderRecovery,
             })?
             .unwrap_or_default()
             .block_number;
@@ -1716,15 +1721,24 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        let txes = self.transactions_by_tx_range(range)?;
-        Ok(reth_primitives_traits::transaction::recover::recover_signers(&txes)?)
+        self.fetch_range_with_predicate(
+            StaticFileSegment::TransactionSenders,
+            to_range(range),
+            |cursor, number| cursor.get_one::<TransactionSenderMask>(number.into()),
+            |_| true,
+        )
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        match self.transaction_by_id_unhashed(id)? {
-            Some(tx) => Ok(tx.recover_signer().ok()),
-            None => Ok(None),
-        }
+        self.get_segment_provider_from_transaction(StaticFileSegment::TransactionSenders, id, None)
+            .and_then(|provider| provider.transaction_sender(id))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileTx(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 }
 

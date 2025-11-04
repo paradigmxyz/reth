@@ -1,3 +1,35 @@
+//! Generic writer abstraction for writing to either database tables or static files.
+
+use crate::providers::StaticFileProviderRWRefMut;
+use alloy_primitives::{Address, TxNumber};
+use reth_db_api::{cursor::DbCursorRW, tables};
+use reth_node_types::NodePrimitives;
+use reth_storage_errors::provider::ProviderResult;
+
+/// Represents a destination for writing data, either to database or static files.
+pub enum WriteDestination<'a, CURSOR, N> {
+    /// Write to database table via cursor
+    Database(&'a mut CURSOR),
+    /// Write to static file
+    StaticFile(StaticFileProviderRWRefMut<'a, N>),
+}
+
+impl<'a, CURSOR, N: NodePrimitives> WriteDestination<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRW<tables::TransactionSenders>,
+{
+    /// Append a transaction sender to the destination
+    pub fn append_sender(&mut self, tx_num: TxNumber, sender: &Address) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                cursor.append(tx_num, sender)?;
+                Ok(())
+            }
+            Self::StaticFile(writer) => writer.append_transaction_sender(tx_num, sender),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{

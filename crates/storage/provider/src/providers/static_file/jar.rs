@@ -6,12 +6,13 @@ use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
-use alloy_consensus::transaction::{SignerRecoverable, TransactionMeta};
+use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{
     BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor, TransactionMask,
+    TransactionSenderMask,
 };
 use reth_db_api::table::{Decompress, Value};
 use reth_node_types::NodePrimitives;
@@ -279,15 +280,20 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        let txs = self.transactions_by_tx_range(range)?;
-        Ok(reth_primitives_traits::transaction::recover::recover_signers(&txs)?)
+        let range = to_range(range);
+        let mut cursor = self.cursor()?;
+        let mut senders = Vec::with_capacity((range.end - range.start) as usize);
+
+        for num in range {
+            if let Some(tx) = cursor.get_one::<TransactionSenderMask>(num.into())? {
+                senders.push(tx)
+            }
+        }
+        Ok(senders)
     }
 
-    fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {
-        Ok(self
-            .cursor()?
-            .get_one::<TransactionMask<Self::Transaction>>(num.into())?
-            .and_then(|tx| tx.recover_signer().ok()))
+    fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
+        self.cursor()?.get_one::<TransactionSenderMask>(id.into())
     }
 }
 

@@ -11,8 +11,9 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
-    BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
-    StaticFileProviderFactory, StatsReader,
+    providers::StaticFileWriter, BlockReader, DBProvider, HeaderProvider, ProviderError,
+    PruneCheckpointReader, SenderRecoveryProvider, StaticFileProviderFactory, StatsReader,
+    WriteDestination,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_api::{
@@ -64,7 +65,8 @@ where
         + BlockReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + StatsReader
-        + PruneCheckpointReader,
+        + PruneCheckpointReader
+        + SenderRecoveryProvider,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -74,7 +76,8 @@ where
     /// Retrieve the range of transactions to iterate over by querying
     /// [`BlockBodyIndices`][reth_db_api::tables::BlockBodyIndices],
     /// collect transactions within that range, recover signer for each transaction and store
-    /// entries in the [`TransactionSenders`][reth_db_api::tables::TransactionSenders] table.
+    /// entries in the [`TransactionSenders`][reth_db_api::tables::TransactionSenders] table or
+    /// static files depending on configuration.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
@@ -94,9 +97,6 @@ where
             })
         }
 
-        // Acquire the cursor for inserting elements
-        let mut senders_cursor = provider.tx_ref().cursor_write::<tables::TransactionSenders>()?;
-
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
 
         // Iterate over transactions in batches, recover the senders and append them
@@ -108,8 +108,23 @@ where
 
         let tx_batch_sender = setup_range_recovery(provider);
 
+        // Determine write destination based on provider configuration
+        let use_static_files = provider.static_file_senders();
+
+        let static_file_provider = provider.static_file_provider();
+        let mut destination = if use_static_files {
+            WriteDestination::StaticFile(
+                static_file_provider
+                    .get_writer(*block_range.start(), StaticFileSegment::TransactionSenders)?,
+            )
+        } else {
+            WriteDestination::Database(
+                provider.tx_ref().cursor_write::<tables::TransactionSenders>()?,
+            )
+        };
+
         for range in batch {
-            recover_range(range, provider, tx_batch_sender.clone(), &mut senders_cursor)?;
+            recover_range(range, provider, tx_batch_sender.clone(), &mut destination)?;
         }
 
         Ok(ExecOutput {
@@ -145,7 +160,7 @@ fn recover_range<Provider, CURSOR>(
     tx_range: Range<u64>,
     provider: &Provider,
     tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>,
-    senders_cursor: &mut CURSOR,
+    destination: &mut WriteDestination<'_, CURSOR, Provider::Primitives>,
 ) -> Result<(), StageError>
 where
     Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
@@ -209,7 +224,7 @@ where
                     }
                 }
             };
-            senders_cursor.append(tx_id, &sender)?;
+            destination.append_sender(tx_id, &sender)?;
             processed_transactions += 1;
         }
     }

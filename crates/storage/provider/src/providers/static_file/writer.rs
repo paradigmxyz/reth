@@ -29,6 +29,7 @@ pub(crate) struct StaticFileWriters<N> {
     headers: RwLock<Option<StaticFileProviderRW<N>>>,
     transactions: RwLock<Option<StaticFileProviderRW<N>>>,
     receipts: RwLock<Option<StaticFileProviderRW<N>>>,
+    transaction_senders: RwLock<Option<StaticFileProviderRW<N>>>,
 }
 
 impl<N> Default for StaticFileWriters<N> {
@@ -37,6 +38,7 @@ impl<N> Default for StaticFileWriters<N> {
             headers: Default::default(),
             transactions: Default::default(),
             receipts: Default::default(),
+            transaction_senders: Default::default(),
         }
     }
 }
@@ -51,6 +53,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             StaticFileSegment::Headers => self.headers.write(),
             StaticFileSegment::Transactions => self.transactions.write(),
             StaticFileSegment::Receipts => self.receipts.write(),
+            StaticFileSegment::TransactionSenders => self.transaction_senders.write(),
         };
 
         if write_guard.is_none() {
@@ -61,7 +64,9 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     }
 
     pub(crate) fn commit(&self) -> ProviderResult<()> {
-        for writer_lock in [&self.headers, &self.transactions, &self.receipts] {
+        for writer_lock in
+            [&self.headers, &self.transactions, &self.receipts, &self.transaction_senders]
+        {
             let mut writer = writer_lock.write();
             if let Some(writer) = writer.as_mut() {
                 writer.commit()?;
@@ -71,7 +76,9 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     }
 
     pub(crate) fn has_unwind_queued(&self) -> bool {
-        for writer_lock in [&self.headers, &self.transactions, &self.receipts] {
+        for writer_lock in
+            [&self.headers, &self.transactions, &self.receipts, &self.transaction_senders]
+        {
             let writer = writer_lock.read();
             if let Some(writer) = writer.as_ref() &&
                 writer.will_prune_on_commit()
@@ -244,6 +251,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 StaticFileSegment::Receipts => {
                     self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
                 }
+                StaticFileSegment::TransactionSenders => self.prune_transaction_sender_data(
+                    to_delete,
+                    last_block_number.expect("should exist"),
+                )?,
             }
         }
 
@@ -672,6 +683,75 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(Some(tx_number))
     }
 
+    /// Appends transaction sender to static file.
+    ///
+    /// It **DOES NOT** call `increment_block()`, it should be handled elsewhere. There might be
+    /// empty blocks and this function wouldn't be called.
+    ///
+    /// Returns the current [`TxNumber`] as seen in the static file.
+    pub fn append_transaction_sender(
+        &mut self,
+        tx_num: TxNumber,
+        sender: &alloy_primitives::Address,
+    ) -> ProviderResult<()> {
+        let start = Instant::now();
+        self.ensure_no_queued_prune()?;
+
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::TransactionSenders);
+        self.append_with_tx_number(tx_num, sender)?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                StaticFileSegment::TransactionSenders,
+                StaticFileProviderOperation::Append,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Appends multiple transaction senders to the static file.
+    ///
+    /// Returns the current [`TxNumber`] as seen in the static file, if any.
+    pub fn append_transaction_senders<I>(&mut self, senders: I) -> ProviderResult<Option<TxNumber>>
+    where
+        I: Iterator<Item = Result<(TxNumber, alloy_primitives::Address), ProviderError>>,
+    {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::TransactionSenders);
+
+        let mut senders_iter = senders.into_iter().peekable();
+        // If senders are empty, we can simply return None
+        if senders_iter.peek().is_none() {
+            return Ok(None);
+        }
+
+        let start = Instant::now();
+        self.ensure_no_queued_prune()?;
+
+        // At this point senders contains at least one sender, so this would be overwritten.
+        let mut tx_number = 0;
+        let mut count: u64 = 0;
+
+        for sender_result in senders_iter {
+            let (tx_num, sender) = sender_result?;
+            self.append_with_tx_number(tx_num, sender)?;
+            tx_number = tx_num;
+            count += 1;
+        }
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operations(
+                StaticFileSegment::TransactionSenders,
+                StaticFileProviderOperation::Append,
+                count,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(Some(tx_number))
+    }
+
     /// Adds an instruction to prune `to_delete` transactions during commit.
     ///
     /// Note: `last_block` refers to the block the unwinds ends at.
@@ -693,6 +773,21 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         last_block: BlockNumber,
     ) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Receipts);
+        self.queue_prune(to_delete, Some(last_block))
+    }
+
+    /// Adds an instruction to prune `to_delete` transaction senders during commit.
+    ///
+    /// Note: `last_block` refers to the block the unwinds ends at.
+    pub fn prune_transaction_senders(
+        &mut self,
+        to_delete: u64,
+        last_block: BlockNumber,
+    ) -> ProviderResult<()> {
+        debug_assert_eq!(
+            self.writer.user_header().segment(),
+            StaticFileSegment::TransactionSenders
+        );
         self.queue_prune(to_delete, Some(last_block))
     }
 
@@ -764,6 +859,29 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 StaticFileSegment::Receipts,
+                StaticFileProviderOperation::Prune,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Prunes the last `to_delete` transaction senders from the data file.
+    fn prune_transaction_sender_data(
+        &mut self,
+        to_delete: u64,
+        last_block: BlockNumber,
+    ) -> ProviderResult<()> {
+        let start = Instant::now();
+
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::TransactionSenders);
+
+        self.truncate(to_delete, Some(last_block))?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                StaticFileSegment::TransactionSenders,
                 StaticFileProviderOperation::Prune,
                 Some(start.elapsed()),
             );

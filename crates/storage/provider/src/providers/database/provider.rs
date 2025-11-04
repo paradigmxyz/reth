@@ -18,7 +18,7 @@ use crate::{
     OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
     StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
     StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieReader, TrieWriter,
+    TransactionsProviderExt, TrieReader, TrieWriter, WriteDestination,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -80,7 +80,7 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
-    ops::{Deref, DerefMut, Not, Range, RangeBounds, RangeFrom, RangeInclusive},
+    ops::{Deref, DerefMut, Range, RangeBounds, RangeFrom, RangeInclusive},
     sync::Arc,
 };
 use tracing::{debug, trace};
@@ -153,12 +153,19 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     prune_modes: PruneModes,
     /// Node storage handler.
     storage: Arc<N::Storage>,
+    /// Whether to use static files for transaction senders
+    static_file_senders: bool,
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Returns reference to prune modes.
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
+    }
+
+    /// Returns whether static files are enabled for transaction senders.
+    pub const fn static_file_senders(&self) -> bool {
+        self.static_file_senders
     }
 }
 
@@ -248,8 +255,9 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
+        static_file_senders: bool,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage }
+        Self { tx, chain_spec, static_file_provider, prune_modes, storage, static_file_senders }
     }
 }
 
@@ -494,8 +502,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
+        static_file_senders: bool,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage }
+        Self { tx, chain_spec, static_file_provider, prune_modes, storage, static_file_senders }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -643,27 +652,27 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         HF: Fn(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
         BF: Fn(H, BodyTy<N>, Vec<Address>) -> ProviderResult<B>,
     {
-        let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
-
         self.block_range(range, headers_range, |header, body, tx_range| {
             let senders = if tx_range.is_empty() {
                 Vec::new()
             } else {
                 // fetch senders from the senders table
-                let known_senders =
-                    senders_cursor
-                        .walk_range(tx_range.clone())?
-                        .collect::<Result<HashMap<_, _>, _>>()?;
+                // TODO: optimize
+                let known_senders = self.senders_by_tx_range(tx_range)?;
 
                 let mut senders = Vec::with_capacity(body.transactions().len());
-                for (tx_num, tx) in tx_range.zip(body.transactions()) {
-                    match known_senders.get(&tx_num) {
+                for (tx, sender) in body
+                    .transactions()
+                    .iter()
+                    .zip(known_senders.into_iter().map(Some).chain(std::iter::repeat(None)))
+                {
+                    match sender {
                         None => {
                             // recover the sender from the transaction if not found
                             let sender = tx.recover_signer_unchecked()?;
                             senders.push(sender);
                         }
-                        Some(sender) => senders.push(*sender),
+                        Some(sender) => senders.push(sender),
                     }
                 }
 
@@ -1311,11 +1320,19 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.cursor_read_collect::<tables::TransactionSenders>(range)
+        if self.static_file_senders {
+            self.static_file_provider.senders_by_tx_range(range)
+        } else {
+            self.cursor_read_collect::<tables::TransactionSenders>(range)
+        }
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        Ok(self.tx.get::<tables::TransactionSenders>(id)?)
+        if self.static_file_senders {
+            self.static_file_provider.transaction_sender(id)
+        } else {
+            Ok(self.tx.get::<tables::TransactionSenders>(id)?)
+        }
     }
 }
 
@@ -1607,19 +1624,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
         let has_receipts_pruning = self.prune_modes.has_receipts_pruning();
 
-        // Prepare receipts cursor if we are going to write receipts to the database
-        //
-        // We are writing to database if requested or if there's any kind of receipt pruning
-        // configured
-        let mut receipts_cursor = self.tx.cursor_write::<tables::Receipts<Self::Receipt>>()?;
-
-        // Prepare receipts static writer if we are going to write receipts to static files
-        //
-        // We are writing to static files if requested and if there's no receipt pruning configured
-        let mut receipts_static_writer = has_receipts_pruning
-            .not()
-            .then(|| self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts))
-            .transpose()?;
+        let mut receipts_writer = if has_receipts_pruning {
+            WriteDestination::Database(self.tx.cursor_write::<tables::Receipts<Self::Receipt>>()?)
+        } else {
+            WriteDestination::StaticFile(
+                self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?,
+            )
+        };
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
         // [`PruneSegment::ContractLogs`].
@@ -1632,9 +1643,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let block_number = first_block + idx as u64;
 
             // Increment block number for receipts static file writer
-            if let Some(writer) = receipts_static_writer.as_mut() {
-                writer.increment_block(block_number)?;
-            }
+            receipts_writer.increment_block(block_number)?;
 
             // Skip writing receipts if pruning configuration requires us to.
             if prunable_receipts &&
@@ -1648,11 +1657,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
 
-                if let Some(writer) = &mut receipts_static_writer {
-                    writer.append_receipt(receipt_idx, receipt)?;
-                } else {
-                    receipts_cursor.append(receipt_idx, receipt)?;
-                }
+                receipts_writer.append_receipt(receipt_idx, receipt)?;
             }
         }
 
@@ -2781,8 +2786,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// If withdrawals are not empty, this will modify
     /// [`BlockWithdrawals`](tables::BlockWithdrawals).
     ///
-    /// If the provider has __not__ configured full sender pruning, this will modify
-    /// [`TransactionSenders`](tables::TransactionSenders).
+    /// If the provider has __not__ configured full sender pruning, this will modify either:
+    /// * [`StaticFileSegment::TransactionSenders`] (if `static_file_senders` flag is enabled)
+    /// * [`TransactionSenders`](tables::TransactionSenders) (if `static_file_senders` flag is
+    ///   disabled)
     ///
     /// If the provider has __not__ configured full transaction lookup pruning, this will modify
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
@@ -2813,11 +2820,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         let tx_count = block.body().transaction_count() as u64;
 
         // Ensures we have all the senders for the block's transactions.
+        let mut senders_writer = if self.static_file_senders {
+            WriteDestination::StaticFile(
+                self.static_file_provider
+                    .get_writer(block.number(), StaticFileSegment::TransactionSenders)?,
+            )
+        } else {
+            WriteDestination::Database(self.tx.cursor_write::<tables::TransactionSenders>()?)
+        };
         for (transaction, sender) in block.body().transactions_iter().zip(block.senders_iter()) {
             let hash = transaction.tx_hash();
 
             if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
-                self.tx.put::<tables::TransactionSenders>(next_tx_num, *sender)?;
+                senders_writer.append_sender(next_tx_num, sender)?;
             }
 
             if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
@@ -2934,7 +2949,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             }
         }
 
-        self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
+        if self.static_file_senders {
+            let static_file_transaction_sender_num = self
+                .static_file_provider
+                .get_highest_static_file_tx(StaticFileSegment::TransactionSenders);
+
+            let to_delete = static_file_transaction_sender_num
+                .map(|static_num| (static_num + 1).saturating_sub(unwind_tx_from))
+                .unwrap_or_default();
+
+            self.static_file_provider
+                .latest_writer(StaticFileSegment::Receipts)?
+                .prune_transaction_senders(to_delete, unwind_tx_from)?;
+        } else {
+            self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
+        }
 
         self.remove_bodies_above(block)?;
 
@@ -3131,6 +3160,12 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         }
 
         Ok(true)
+    }
+}
+
+impl<TX, N: NodeTypes> crate::SenderRecoveryProvider for DatabaseProvider<TX, N> {
+    fn static_file_senders(&self) -> bool {
+        self.static_file_senders
     }
 }
 

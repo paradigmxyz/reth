@@ -3,6 +3,7 @@ use clap::Parser;
 use reth_db::{
     static_file::{
         ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+        TransactionSenderMask,
     },
     RawDupSort,
 };
@@ -75,6 +76,10 @@ impl Command {
                     StaticFileSegment::Receipts => {
                         (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
                     }
+                    StaticFileSegment::TransactionSenders => (
+                        table_key::<tables::TransactionSenders>(&key)?,
+                        <TransactionSenderMask>::MASK,
+                    ),
                 };
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(
@@ -115,6 +120,13 @@ impl Command {
                                         content[0].as_slice(),
                                     )?;
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
+                                }
+                                StaticFileSegment::TransactionSenders => {
+                                    let sender =
+                                        <<tables::TransactionSenders as Table>::Value>::decompress(
+                                            content[0].as_slice(),
+                                        )?;
+                                    println!("{}", serde_json::to_string_pretty(&sender)?);
                                 }
                             }
                         }
