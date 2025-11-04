@@ -18,7 +18,7 @@ use crate::{
 
 /// Target for disabling the --debug.startup-sync-state-idle flag
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DisableStartupSyncStateIdle {
+pub(crate) enum DisableStartupSyncStateIdle {
     /// Disable for baseline and warmup runs
     Baseline,
     /// Disable for feature runs only
@@ -35,10 +35,7 @@ impl FromStr for DisableStartupSyncStateIdle {
             "baseline" => Ok(Self::Baseline),
             "feature" => Ok(Self::Feature),
             "all" => Ok(Self::All),
-            _ => Err(format!(
-                "Invalid value '{}'. Expected 'baseline', 'feature', or 'all'",
-                s
-            )),
+            _ => Err(format!("Invalid value '{}'. Expected 'baseline', 'feature', or 'all'", s)),
         }
     }
 }
@@ -185,9 +182,7 @@ impl Args {
         base_args_str: Option<&String>,
     ) -> Vec<String> {
         // Parse the base arguments string if provided
-        let mut args = base_args_str
-            .map(|s| parse_args_string(s))
-            .unwrap_or_default();
+        let mut args = base_args_str.map(|s| parse_args_string(s)).unwrap_or_default();
 
         // Determine if we should add the --debug.startup-sync-state-idle flag
         let should_add_flag = match self.disable_startup_sync_state_idle {
@@ -201,15 +196,9 @@ impl Args {
 
         if should_add_flag {
             args.push("--debug.startup-sync-state-idle".to_string());
-            debug!(
-                "Adding --debug.startup-sync-state-idle flag for ref_type: {}",
-                ref_type
-            );
+            debug!("Adding --debug.startup-sync-state-idle flag for ref_type: {}", ref_type);
         } else {
-            debug!(
-                "Skipping --debug.startup-sync-state-idle flag for ref_type: {}",
-                ref_type
-            );
+            debug!("Skipping --debug.startup-sync-state-idle flag for ref_type: {}", ref_type);
         }
 
         args
