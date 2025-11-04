@@ -250,7 +250,7 @@ where
             // Sort codes and keys in place to make comparison order-insensitive
             // These fields represent unordered sets of bytecode and preimages
             let mut normalized_witness = witness.clone();
-            let mut normalized_healthy_witness = healthy_node_witness.clone();
+            let mut normalized_healthy_witness = healthy_node_witness;
             normalized_witness.codes.sort();
             normalized_witness.keys.sort();
             normalized_healthy_witness.codes.sort();
@@ -260,7 +260,8 @@ where
 
             if !witness_matches {
                 let filename = format!("{}.witness.diff", block_prefix);
-                let diff_path = self.save_diff(filename, &normalized_witness, &normalized_healthy_witness)?;
+                let diff_path =
+                    self.save_diff(filename, &normalized_witness, &normalized_healthy_witness)?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
                     diff_path = %diff_path.display(),
