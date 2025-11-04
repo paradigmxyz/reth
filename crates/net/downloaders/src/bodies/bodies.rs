@@ -21,7 +21,6 @@ use std::{
     cmp::Ordering,
     collections::BinaryHeap,
     fmt::Debug,
-    mem,
     ops::RangeInclusive,
     pin::Pin,
     sync::Arc,
@@ -215,9 +214,7 @@ where
 
     /// Adds a new response to the internal buffer
     fn buffer_bodies_response(&mut self, response: Vec<BlockResponse<B>>) {
-        // take into account capacity
-        let size = response.iter().map(BlockResponse::size).sum::<usize>() +
-            response.capacity() * mem::size_of::<BlockResponse<B>>();
+        let size = response.iter().map(BlockResponse::size).sum::<usize>();
 
         let response = OrderedBodiesResponse { resp: response, size };
         let response_len = response.len();
