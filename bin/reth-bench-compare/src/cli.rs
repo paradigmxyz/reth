@@ -7,7 +7,7 @@ use reth_chainspec::Chain;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::{DatadirArgs, LogArgs};
 use reth_tracing::FileWorkerGuard;
-use std::{net::TcpListener, path::PathBuf};
+use std::{net::TcpListener, path::PathBuf, str::FromStr};
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
@@ -15,6 +15,43 @@ use crate::{
     benchmark::BenchmarkRunner, comparison::ComparisonGenerator, compilation::CompilationManager,
     git::GitManager, node::NodeManager,
 };
+
+/// Target for disabling the --debug.startup-sync-state-idle flag
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisableStartupSyncStateIdle {
+    /// Disable for baseline and warmup runs
+    Baseline,
+    /// Disable for feature runs only
+    Feature,
+    /// Disable for all runs
+    All,
+}
+
+impl FromStr for DisableStartupSyncStateIdle {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "baseline" => Ok(Self::Baseline),
+            "feature" => Ok(Self::Feature),
+            "all" => Ok(Self::All),
+            _ => Err(format!(
+                "Invalid value '{}'. Expected 'baseline', 'feature', or 'all'",
+                s
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for DisableStartupSyncStateIdle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Baseline => write!(f, "baseline"),
+            Self::Feature => write!(f, "feature"),
+            Self::All => write!(f, "all"),
+        }
+    }
+}
 
 /// Automated reth benchmark comparison between git references
 #[derive(Debug, Parser)]
@@ -122,6 +159,15 @@ pub(crate) struct Args {
     /// Example: `jemalloc,asm-keccak`
     #[arg(long, value_name = "FEATURES", default_value = "jemalloc,asm-keccak")]
     pub features: String,
+
+    /// Disable automatic --debug.startup-sync-state-idle flag for specific runs.
+    /// Can be "baseline", "feature", or "all".
+    /// By default, the flag is passed to warmup, baseline, and feature runs.
+    /// When "baseline" is specified, the flag is NOT passed to warmup OR baseline.
+    /// When "feature" is specified, the flag is NOT passed to feature.
+    /// When "all" is specified, the flag is NOT passed to any run.
+    #[arg(long, value_name = "TARGET")]
+    pub disable_startup_sync_state_idle: Option<DisableStartupSyncStateIdle>,
 }
 
 impl Args {
@@ -129,6 +175,44 @@ impl Args {
     pub(crate) fn init_tracing(&self) -> Result<Option<FileWorkerGuard>> {
         let guard = self.logs.init_tracing()?;
         Ok(guard)
+    }
+
+    /// Build additional arguments for a specific ref type, conditionally including
+    /// --debug.startup-sync-state-idle based on the configuration
+    pub(crate) fn build_additional_args(
+        &self,
+        ref_type: &str,
+        base_args_str: Option<&String>,
+    ) -> Vec<String> {
+        // Parse the base arguments string if provided
+        let mut args = base_args_str
+            .map(|s| parse_args_string(s))
+            .unwrap_or_default();
+
+        // Determine if we should add the --debug.startup-sync-state-idle flag
+        let should_add_flag = match self.disable_startup_sync_state_idle {
+            None => true, // By default, add the flag
+            Some(DisableStartupSyncStateIdle::All) => false,
+            Some(DisableStartupSyncStateIdle::Baseline) => {
+                ref_type != "baseline" && ref_type != "warmup"
+            }
+            Some(DisableStartupSyncStateIdle::Feature) => ref_type != "feature",
+        };
+
+        if should_add_flag {
+            args.push("--debug.startup-sync-state-idle".to_string());
+            debug!(
+                "Adding --debug.startup-sync-state-idle flag for ref_type: {}",
+                ref_type
+            );
+        } else {
+            debug!(
+                "Skipping --debug.startup-sync-state-idle flag for ref_type: {}",
+                ref_type
+            );
+        }
+
+        args
     }
 
     /// Get the default RPC URL for a given chain
@@ -414,9 +498,8 @@ async fn run_warmup_phase(
 
     info!("Using cached baseline binary for warmup (commit: {})", &baseline_commit[..8]);
 
-    // Get baseline additional arguments for warmup
-    let additional_args =
-        args.baseline_args.as_ref().map(|s| parse_args_string(s)).unwrap_or_default();
+    // Build additional args with conditional --debug.startup-sync-state-idle flag
+    let additional_args = args.build_additional_args("warmup", args.baseline_args.as_ref());
 
     // Start reth node for warmup
     let mut node_process =
@@ -509,16 +592,15 @@ async fn run_benchmark_workflow(
 
         info!("Using cached {} binary (commit: {})", ref_type, &commit[..8]);
 
-        // Get reference-specific additional arguments
-        let additional_args = match ref_type {
-            "baseline" => {
-                args.baseline_args.as_ref().map(|s| parse_args_string(s)).unwrap_or_default()
-            }
-            "feature" => {
-                args.feature_args.as_ref().map(|s| parse_args_string(s)).unwrap_or_default()
-            }
-            _ => Vec::new(),
+        // Get reference-specific base arguments string
+        let base_args_str = match ref_type {
+            "baseline" => args.baseline_args.as_ref(),
+            "feature" => args.feature_args.as_ref(),
+            _ => None,
         };
+
+        // Build additional args with conditional --debug.startup-sync-state-idle flag
+        let additional_args = args.build_additional_args(ref_type, base_args_str);
 
         // Start reth node
         let mut node_process =
