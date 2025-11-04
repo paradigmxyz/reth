@@ -784,8 +784,8 @@ alloy-transport-ws = { git = "https://github.com/Soubhik-10/alloy", branch = "ba
 #
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
 revm = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
-alloy-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "withdrawal" }
-alloy-op-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "withdrawal" }
+alloy-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "new-approach4" }
+alloy-op-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "new-approach4" }
 revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
 revm-database = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
 revm-state = { git = "https://github.com/bluealloy/revm", branch = "rakita/bal" }
