@@ -74,28 +74,28 @@ where
 /// This design avoids the memory overhead of `Option<U256>` while maintaining
 /// uniform handling of deletions across different value types.
 pub trait HashedPostStateCursorValue: Copy {
-    /// The non-zero type returned by `as_option`.
+    /// The non-zero type returned by `into_option`.
     /// For `Option<Account>`, this is `Account`.
     /// For `U256`, this is `U256`.
     type NonZero: Copy + std::fmt::Debug;
 
     /// Returns `Some(&NonZero)` if the value is present, `None` if deleted.
-    fn as_option(&self) -> Option<&Self::NonZero>;
+    fn into_option(self) -> Option<Self::NonZero>;
 }
 
 impl HashedPostStateCursorValue for Option<Account> {
     type NonZero = Account;
 
-    fn as_option(&self) -> Option<&Self::NonZero> {
-        self.as_ref()
+    fn into_option(self) -> Option<Self::NonZero> {
+        self
     }
 }
 
 impl HashedPostStateCursorValue for U256 {
     type NonZero = Self;
 
-    fn as_option(&self) -> Option<&Self::NonZero> {
-        (*self != Self::ZERO).then_some(self)
+    fn into_option(self) -> Option<Self::NonZero> {
+        (self != Self::ZERO).then_some(self)
     }
 }
 
@@ -133,7 +133,8 @@ where
     ///   - For storage: Wiped storage (e.g., via `SELFDESTRUCT` - all previous storage destroyed)
     /// - `updates`: Pre-sorted post state updates where `Some(value)` indicates an update and
     ///   `None` indicates a deletion (destroyed account or zero-valued storage slot)
-    pub const fn new(cursor: Option<C>, updates: &'a [(B256, V)]) -> Self {
+    pub fn new(cursor: Option<C>, updates: &'a [(B256, V)]) -> Self {
+        debug_assert!(updates.is_sorted_by_key(|(k, _)| k), "Overlay values must be sorted by key");
         Self {
             cursor,
             cursor_entry: None,
@@ -184,51 +185,36 @@ where
     /// node.
     fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
         loop {
-            match self.post_state_cursor.current().copied() {
-                Some((mem_key, wrapped_value)) => {
-                    match wrapped_value.as_option() {
-                        None => {
-                            // Overlay has a removed node
-                            if self
-                                .cursor_entry
-                                .as_ref()
-                                .is_none_or(|(db_key, _)| &mem_key < db_key)
-                            {
-                                // DB cursor is exhausted or ahead of in-memory cursor, skip deleted
-                                // entry
-                                self.post_state_cursor.first_after(&mem_key);
-                            } else if self
-                                .cursor_entry
-                                .as_ref()
-                                .is_some_and(|(db_key, _)| &mem_key == db_key)
-                            {
-                                // Removed node matches DB entry, move both cursors
-                                self.post_state_cursor.first_after(&mem_key);
-                                self.cursor_next()?;
-                            } else {
-                                // mem_key > db_key, return db entry
-                                return Ok(self.cursor_entry)
-                            }
-                        }
-                        Some(value) => {
-                            // Overlay has a value
-                            if self
-                                .cursor_entry
-                                .as_ref()
-                                .is_none_or(|(db_key, _)| &mem_key <= db_key)
-                            {
-                                // Return the overlay's value (prior to or equal to DB's node, or DB
-                                // is exhausted)
-                                return Ok(Some((mem_key, *value)))
-                            }
+            let post_state_current =
+                self.post_state_cursor.current().copied().map(|(k, v)| (k, v.into_option()));
 
-                            // mem_key > db_key, return db entry
-                            return Ok(self.cursor_entry)
-                        }
-                    }
+            match (post_state_current, &self.cursor_entry) {
+                (Some((mem_key, None)), _)
+                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key < db_key) =>
+                {
+                    // If overlay has a removed value but DB cursor is exhausted or ahead of the
+                    // in-memory cursor then move ahead in-memory, as there might be further
+                    // non-removed overlay values.
+                    self.post_state_cursor.first_after(&mem_key);
                 }
-                // Overlay is exhausted, return db_entry
-                None => return Ok(self.cursor_entry),
+                (Some((mem_key, None)), Some((db_key, _))) if &mem_key == db_key => {
+                    // If overlay has a removed value which is returned from DB then move both
+                    // cursors ahead to the next key.
+                    self.post_state_cursor.first_after(&mem_key);
+                    self.cursor_next()?;
+                }
+                (Some((mem_key, Some(value))), _)
+                    if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key <= db_key) =>
+                {
+                    // If overlay returns a value prior to the DB's value, or the DB is exhausted,
+                    // then we return the overlay's value.
+                    return Ok(Some((mem_key, value)))
+                }
+                // All other cases:
+                // - mem_key > db_key
+                // - overlay is exhausted
+                // Return the db_entry. If DB is also exhausted then this returns None.
+                _ => return Ok(self.cursor_entry),
             }
         }
     }
@@ -304,7 +290,7 @@ where
     /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         // Storage is not empty if it has non-zero slots.
-        if self.post_state_cursor.has_any(|(_, value)| value.as_option().is_some()) {
+        if self.post_state_cursor.has_any(|(_, value)| value.into_option().is_some()) {
             return Ok(false);
         }
 
@@ -344,11 +330,11 @@ mod tests {
                     itertools::EitherOrBoth::Left((key, node)) => Some((key, node)),
                     // Only in post state: keep if not a deletion
                     itertools::EitherOrBoth::Right((key, wrapped)) => {
-                        wrapped.as_option().map(|val| (key, *val))
+                        wrapped.into_option().map(|val| (key, val))
                     }
                     // In both: post state takes precedence (keep if not a deletion)
                     itertools::EitherOrBoth::Both(_, (key, wrapped)) => {
-                        wrapped.as_option().map(|val| (key, *val))
+                        wrapped.into_option().map(|val| (key, val))
                     }
                 })
                 .collect()
