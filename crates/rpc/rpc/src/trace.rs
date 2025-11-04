@@ -390,11 +390,10 @@ where
         }
 
         let mut all_traces = Vec::new();
+        let mut block_traces = Vec::with_capacity(self.inner.eth_config.max_tracing_requests);
         for chunk_start in (start..end).step_by(self.inner.eth_config.max_tracing_requests) {
             let chunk_end =
                 std::cmp::min(chunk_start + self.inner.eth_config.max_tracing_requests as u64, end);
-
-            let mut block_traces = Vec::with_capacity((chunk_end - chunk_start) as usize);
 
             // fetch all blocks in that chunk
             let blocks = self
@@ -430,7 +429,7 @@ where
                 block_traces.push(traces);
             }
 
-            let block_traces = futures::future::try_join_all(block_traces).await?;
+            let block_traces = futures::future::try_join_all(block_traces.drain(..)).await?;
             all_traces.extend(block_traces.into_iter().flatten().flat_map(|traces| {
                 traces.into_iter().flatten().flat_map(|traces| traces.into_iter())
             }));
