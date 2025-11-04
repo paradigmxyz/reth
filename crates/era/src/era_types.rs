@@ -5,6 +5,8 @@
 use crate::{
     consensus_types::{CompressedBeaconState, CompressedSignedBeaconBlock},
     e2s_types::{Entry, IndexEntry, SLOT_INDEX},
+    era_file_ops::EraFileId,
+    execution_types::MAX_BLOCKS_PER_ERA1,
 };
 
 /// Era file content group
@@ -119,6 +121,83 @@ impl IndexEntry for SlotIndex {
 
     fn offsets(&self) -> &[i64] {
         &self.offsets
+    }
+}
+
+/// Era file identifier
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EraId {
+    /// Network configuration name
+    pub network_name: String,
+
+    /// First slot number in file
+    pub start_slot: u64,
+
+    /// Number of slots in the file
+    pub slot_count: u32,
+
+    /// Optional hash identifier for this file
+    /// First 4 bytes of the last historical root in the last state in the era file
+    pub hash: Option<[u8; 4]>,
+}
+
+impl EraId {
+    /// Create a new [`EraId`]
+    pub fn new(network_name: impl Into<String>, start_slot: u64, slot_count: u32) -> Self {
+        Self { network_name: network_name.into(), start_slot, slot_count, hash: None }
+    }
+
+    /// Add a hash identifier to  [`EraId`]
+    pub const fn with_hash(mut self, hash: [u8; 4]) -> Self {
+        self.hash = Some(hash);
+        self
+    }
+
+    // Helper function to calculate the number of eras per era1 file,
+    // If the user can decide how many blocks per era1 file there are, we need to calculate it.
+    // Most of the time it should be 1, but it can never be more than 2 eras per file
+    // as there is a maximum of 8192 blocks per era1 file.
+    const fn calculate_era_count(&self, first_era: u64) -> u64 {
+        // Calculate the actual last block number in the range
+        let last_block = self.start_slot + self.slot_count as u64 - 1;
+        // Find which era the last block belongs to
+        let last_era = last_block / MAX_BLOCKS_PER_ERA1 as u64;
+        // Count how many eras we span
+        last_era - first_era + 1
+    }
+}
+
+impl EraFileId for EraId {
+    fn network_name(&self) -> &str {
+        &self.network_name
+    }
+
+    fn start_number(&self) -> u64 {
+        self.start_slot
+    }
+
+    fn count(&self) -> u32 {
+        self.slot_count
+    }
+    /// Convert to file name following the era file naming:
+    /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.era(1)`
+    /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
+    /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
+    fn to_file_name(&self) -> String {
+        // Find which era the first block belongs to
+        // TODO: double check we can use `start_slot` instead of `start_block`
+        let era_number = self.start_slot / MAX_BLOCKS_PER_ERA1 as u64;
+        let era_count = self.calculate_era_count(era_number);
+        if let Some(hash) = self.hash {
+            format!(
+                "{}-{:05}-{:05}-{:02x}{:02x}{:02x}{:02x}.era1",
+                self.network_name, era_number, era_count, hash[0], hash[1], hash[2], hash[3]
+            )
+        } else {
+            // era spec format with placeholder hash when no hash available
+            // Format: `<config-name>-<era-number>-<era-count>-00000000.era1`
+            format!("{}-{:05}-{:05}-00000000.era1", self.network_name, era_number, era_count)
+        }
     }
 }
 
