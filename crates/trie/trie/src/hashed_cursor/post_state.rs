@@ -242,9 +242,10 @@ where
         self.cursor_seek(key)?;
         self.post_state_cursor.seek(&key);
 
+        self.seeked = true;
+
         let entry = self.choose_next_entry()?;
         self.set_last_key(&entry);
-        self.seeked = true;
         Ok(entry)
     }
 

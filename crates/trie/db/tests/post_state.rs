@@ -538,8 +538,7 @@ fn all_storage_slots_deleted_not_wiped_exact_keys() {
     .unwrap();
 
     // Create post state with same keys but all Zero values (deletions)
-    let wiped = false;
-    let mut hashed_storage = HashedStorage::new(wiped);
+    let mut hashed_storage = HashedStorage::new(false);
     for (key, _) in &db_entries {
         hashed_storage.storage.insert(*key, U256::ZERO); // Zero value = deletion
     }
