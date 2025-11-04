@@ -506,11 +506,12 @@ where
                     }
                     // Try to get pending block and receipts
                     if let Ok(Some(pending_block)) = self.eth_api.local_pending_block().await {
-                        if let BlockNumberOrTag::Number(to_block) = to_block
-                            && to_block < pending_block.block.number() {
-                                // this block range is empty based on the user input
-                                return Ok(Vec::new());
-                            }
+                        if let BlockNumberOrTag::Number(to_block) = to_block &&
+                            to_block < pending_block.block.number()
+                        {
+                            // this block range is empty based on the user input
+                            return Ok(Vec::new());
+                        }
 
                         let info = self.provider().chain_info()?;
                         if pending_block.block.number() > info.best_number {
