@@ -20,11 +20,12 @@ pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reqwest::Url;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
+use reth_node_api::{ExecutionPayload, FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
-    ExecutionPayloadBaseV1, FlashBlockBuildInfo, FlashBlockCompleteSequenceRx, FlashBlockRx,
-    FlashBlockService, FlashblocksListeners, PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
+    ExecutionPayloadBaseV1, FlashBlockBuildInfo, FlashBlockCompleteSequence,
+    FlashBlockCompleteSequenceRx, FlashBlockConsensusClient, FlashBlockRx, FlashBlockService,
+    FlashblocksListeners, PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
 };
 use reth_rpc::eth::core::EthApiInner;
 use reth_rpc_eth_api::{
@@ -71,23 +72,6 @@ pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
 pub struct OpEthApi<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Gateway to node's core components.
     inner: Arc<OpEthApiInner<N, Rpc>>,
-}
-
-/// Trait for accessing flashblock related functions from an Eth API.
-pub trait FlashblockApi {
-    /// Returns a flashblock receiver, if any, by resubscribing to it.
-    fn flashblock_rx(&self) -> Option<FlashBlockCompleteSequenceRx>;
-}
-
-// Implement FlashblockApi for OpEthApi
-impl<N, Rpc> FlashblockApi for OpEthApi<N, Rpc>
-where
-    N: reth_rpc_eth_api::RpcNodeCore,
-    Rpc: reth_rpc_eth_api::RpcConvert,
-{
-    fn flashblock_rx(&self) -> Option<FlashBlockCompleteSequenceRx> {
-        self.flashblock_rx()
-    }
 }
 
 impl<N: RpcNodeCore, Rpc: RpcConvert> Clone for OpEthApi<N, Rpc> {
@@ -480,7 +464,12 @@ where
                                  + From<ExecutionPayloadBaseV1>
                                  + Unpin,
         >,
-        Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>,
+        Types: NodeTypes<
+            ChainSpec: Hardforks + EthereumHardforks,
+            Payload: reth_node_api::PayloadTypes<
+                ExecutionData: for<'a> From<&'a FlashBlockCompleteSequence> + ExecutionPayload,
+            >,
+        >,
     >,
     NetworkT: RpcTypes,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
@@ -528,6 +517,13 @@ where
             let in_progress_rx = service.subscribe_in_progress();
 
             ctx.components.task_executor().spawn(Box::pin(service.run(tx)));
+
+            info!(target: "reth::cli", "Launching FlashBlockConsensusClient");
+            let flashblock_client = FlashBlockConsensusClient::new(
+                ctx.beacon_engine_handle.clone(),
+                flashblocks_sequence.subscribe(),
+            )?;
+            ctx.components.task_executor().spawn(Box::pin(flashblock_client.run()));
 
             Some(FlashblocksListeners::new(
                 pending_rx,

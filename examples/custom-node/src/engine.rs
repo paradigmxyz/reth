@@ -68,6 +68,15 @@ impl ExecutionPayload for CustomExecutionData {
     }
 }
 
+impl From<&reth_optimism_flashblocks::FlashBlockCompleteSequence> for CustomExecutionData {
+    fn from(sequence: &reth_optimism_flashblocks::FlashBlockCompleteSequence) -> Self {
+        let inner = OpExecutionData::from(sequence);
+        // Derive extension from sequence data - using gas_used from last flashblock as an example
+        let extension = sequence.last().diff.gas_used;
+        Self { inner, extension }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomPayloadAttributes {
     #[serde(flatten)]

@@ -36,7 +36,6 @@ use reth_node_builder::{
 use reth_optimism_chainspec::{OpChainSpec, OpHardfork};
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
-use reth_optimism_flashblocks::FlashBlockConsensusClient;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
@@ -45,7 +44,7 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
 use reth_optimism_rpc::{
-    eth::{ext::OpEthExtApi, FlashblockApi, OpEthApiBuilder},
+    eth::{ext::OpEthExtApi, OpEthApiBuilder},
     historical::{HistoricalRpc, HistoricalRpcClient},
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
@@ -498,10 +497,7 @@ where
         Types: NodeTypes<
             ChainSpec: OpHardforks,
             Primitives: OpPayloadPrimitives,
-            Payload: PayloadTypes<
-                ExecutionData = OpExecutionData,
-                PayloadBuilderAttributes = Attrs,
-            >,
+            Payload: PayloadTypes<PayloadBuilderAttributes = Attrs>,
         >,
         Evm: ConfigureEvm<
             NextBlockEnvCtx: BuildNextEnv<
@@ -512,7 +508,7 @@ where
         >,
         Pool: TransactionPool<Transaction: OpPooledTx>,
     >,
-    EthB: EthApiBuilder<N, EthApi: FlashblockApi>,
+    EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -583,10 +579,6 @@ where
             ctx.node.provider().clone(),
         );
 
-        // Capture node components needed for FlashBlockConsensusClient
-        let engine_handle = ctx.beacon_engine_handle.clone();
-        let task_executor = ctx.node.task_executor().clone();
-
         rpc_add_ons
             .launch_add_ons_with(ctx, move |container| {
                 let reth_node_builder::rpc::RpcModuleContainer { modules, auth_module, registry } =
@@ -621,18 +613,6 @@ where
                     )?;
                 }
 
-                // Launch FlashBlockConsensusClient if flashblocks are configured
-                if let Some(flashblock_rx) = registry.eth_api().flashblock_rx() {
-                    info!(target: "reth::cli", "Launching FlashBlockConsensusClient");
-
-                    let flashblock_client =
-                        FlashBlockConsensusClient::new(engine_handle, flashblock_rx)?;
-
-                    task_executor.spawn_critical("flashblock consensus client", async move {
-                        flashblock_client.run().await
-                    });
-                }
-
                 Ok(())
             })
             .await
@@ -646,10 +626,7 @@ where
         Types: NodeTypes<
             ChainSpec: OpHardforks,
             Primitives: OpPayloadPrimitives,
-            Payload: PayloadTypes<
-                ExecutionData = OpExecutionData,
-                PayloadBuilderAttributes = Attrs,
-            >,
+            Payload: PayloadTypes<PayloadBuilderAttributes = Attrs>,
         >,
         Evm: ConfigureEvm<
             NextBlockEnvCtx: BuildNextEnv<
@@ -660,7 +637,7 @@ where
         >,
     >,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: OpPooledTx,
-    EthB: EthApiBuilder<N, EthApi: FlashblockApi>,
+    EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,

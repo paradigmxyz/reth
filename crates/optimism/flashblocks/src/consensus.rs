@@ -1,6 +1,5 @@
-use crate::FlashBlockCompleteSequenceRx;
+use crate::{FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx};
 use alloy_primitives::B256;
-use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_optimism_payload_builder::OpPayloadTypes;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadTypes};
@@ -10,15 +9,20 @@ use tracing::*;
 ///
 /// [`FlashBlockService`]: crate::FlashBlockService
 #[derive(Debug)]
-pub struct FlashBlockConsensusClient<
-    P: PayloadTypes<ExecutionData = OpExecutionData> = OpPayloadTypes,
-> {
+pub struct FlashBlockConsensusClient<P = OpPayloadTypes>
+where
+    P: PayloadTypes,
+{
     /// Handle to execution client.
     engine_handle: ConsensusEngineHandle<P>,
     sequence_receiver: FlashBlockCompleteSequenceRx,
 }
 
-impl<P: PayloadTypes<ExecutionData = OpExecutionData>> FlashBlockConsensusClient<P> {
+impl<P> FlashBlockConsensusClient<P>
+where
+    P: PayloadTypes,
+    P::ExecutionData: for<'a> From<&'a FlashBlockCompleteSequence>,
+{
     /// Create a new `FlashBlockConsensusClient` with the given Op engine and sequence receiver.
     pub const fn new(
         engine_handle: ConsensusEngineHandle<P>,
@@ -35,20 +39,20 @@ impl<P: PayloadTypes<ExecutionData = OpExecutionData>> FlashBlockConsensusClient
                 Ok(sequence) => {
                     // Extract block information for logging
                     let last_flashblock = sequence.last();
-                    let block_hash = last_flashblock.diff.block_hash;
+                    let flashblock_count = sequence.count();
                     let block_number = sequence.payload_base().block_number;
-                    let tx_count = last_flashblock.diff.transactions.len();
+                    let block_hash = last_flashblock.diff.block_hash;
                     let gas_used = last_flashblock.diff.gas_used;
 
                     // Convert the flashblock sequence to execution payload
-                    let payload = sequence.to_execution_data();
+                    let payload = P::ExecutionData::from(&sequence);
 
                     // Submit new payload to the engine
                     match self.engine_handle.new_payload(payload).await {
                         Ok(result) => {
                             debug!(
                                 target: "optimism::flashblocks::consensus::flashblock-client",
-                                flashblock_count = sequence.count(),
+                                flashblock_count,
                                 block_number,
                                 %block_hash,
                                 gas_used,
@@ -62,15 +66,16 @@ impl<P: PayloadTypes<ExecutionData = OpExecutionData>> FlashBlockConsensusClient
                                 %err,
                                 block_number,
                                 %block_hash,
-                                tx_count,
                                 gas_used,
                                 "failed to submit new payload"
                             );
+                            return;
                         }
                     }
 
-                    // Update fork choice to make this block the head
-                    let forkchoice_state = alloy_rpc_types_engine::ForkchoiceState {
+                    // Update fork choice to make this block the head, only after new_payload
+                    // succeeded.
+                    let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
                         head_block_hash: block_hash,
                         safe_block_hash: B256::ZERO,
                         finalized_block_hash: B256::ZERO,
@@ -78,7 +83,7 @@ impl<P: PayloadTypes<ExecutionData = OpExecutionData>> FlashBlockConsensusClient
 
                     match self
                         .engine_handle
-                        .fork_choice_updated(forkchoice_state, None, EngineApiMessageVersion::V3)
+                        .fork_choice_updated(fcu_state, None, EngineApiMessageVersion::V3)
                         .await
                     {
                         Ok(result) => {
@@ -86,9 +91,7 @@ impl<P: PayloadTypes<ExecutionData = OpExecutionData>> FlashBlockConsensusClient
                                 target: "optimism::flashblocks::consensus::flashblock-client",
                                 block_number,
                                 %block_hash,
-                                head_block_hash = %forkchoice_state.head_block_hash,
-                                safe_block_hash = %forkchoice_state.safe_block_hash,
-                                finalized_block_hash = %forkchoice_state.finalized_block_hash,
+                                head_block_hash = %fcu_state.head_block_hash,
                                 ?result,
                                 "successfully updated fork choice"
                             );
@@ -99,7 +102,7 @@ impl<P: PayloadTypes<ExecutionData = OpExecutionData>> FlashBlockConsensusClient
                                 %err,
                                 block_number,
                                 %block_hash,
-                                head_block_hash = %forkchoice_state.head_block_hash,
+                                head_block_hash = %fcu_state.head_block_hash,
                                 "failed to submit fork choice update"
                             );
                         }

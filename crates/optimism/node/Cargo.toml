@@ -42,7 +42,6 @@ reth-optimism-chainspec.workspace = true
 reth-optimism-consensus = { workspace = true, features = ["std"] }
 reth-optimism-forks.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
-reth-optimism-flashblocks.workspace = true
 
 # revm with required optimism features
 # Note: this must be kept to ensure all features are properly enabled/forwarded
