@@ -1,20 +1,15 @@
 //! Loads and formats OP transaction RPC response.
 
 use crate::{OpEthApi, OpEthApiError, SequencerClient};
-use alloy_consensus::TxReceipt as _;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use futures::StreamExt;
 use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{BlockBody, SignedTransaction, SignerRecoverable};
-use reth_rpc_convert::transaction::ConvertReceiptInput;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_rpc_eth_api::{
-    helpers::{
-        receipt::calculate_gas_used_and_next_log_index, spec::SignersForRpc, EthTransactions,
-        LoadReceipt, LoadTransaction,
-    },
+    helpers::{spec::SignersForRpc, EthTransactions, LoadReceipt, LoadTransaction},
     try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
     RpcReceipt, TxInfoMapper,
 };
@@ -97,12 +92,29 @@ where
         async move {
             let mut canonical_stream = this.provider().canonical_state_stream();
             let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
-            let flashblock_rx = this.subscribe_received_flashblocks();
-            let mut flashblock_stream = flashblock_rx.map(WatchStream::new);
+            let mut flashblock_stream = this.pending_block_rx().map(WatchStream::new);
 
             tokio::time::timeout(timeout_duration, async {
                 loop {
                     tokio::select! {
+                        biased;
+                        // check if the tx was preconfirmed in a new flashblock
+                        flashblock = async {
+                            if let Some(stream) = &mut flashblock_stream {
+                                stream.next().await
+                            } else {
+                                futures::future::pending().await
+                            }
+                        } => {
+                            if let Some(flashblock) = flashblock.flatten() {
+                                // if flashblocks are supported, attempt to find id from the pending block
+                                if let Some(receipt) = flashblock
+                                .find_and_convert_transaction_receipt(hash, this.tx_resp_builder())
+                                {
+                                    return receipt;
+                                }
+                            }
+                        }
                         // Listen for regular canonical block updates for inclusion
                         canonical_notification = canonical_stream.next() => {
                             if let Some(notification) = canonical_notification {
@@ -116,25 +128,6 @@ where
                             } else {
                                 // Canonical stream ended
                                 break;
-                            }
-                        }
-                        // check if the tx was preconfirmed in a new flashblock
-                        flashblock = async {
-                            if let Some(ref mut stream) = flashblock_stream {
-                                stream.next().await
-                            } else {
-                                futures::future::pending().await
-                            }
-                        } => {
-                            // TODO: use submitted tx and fetch OpReceipt from flashblock
-
-                            // Check flashblocks for faster confirmation (Optimism-specific)
-                            if let Ok(Some(pending_block)) = this.pending_flashblock().await {
-                                let block_and_receipts = pending_block.into_block_and_receipts();
-                                if block_and_receipts.block.body().contains_transaction(&hash)
-                                    && let Some(receipt) = this.transaction_receipt(hash).await? {
-                                        return Ok(receipt);
-                                    }
                             }
                         }
                     }
@@ -171,40 +164,10 @@ where
             if tx_receipt.is_none() {
                 // if flashblocks are supported, attempt to find id from the pending block
                 if let Ok(Some(pending_block)) = this.pending_flashblock().await {
-                    let block_and_receipts = pending_block.into_block_and_receipts();
-                    if let Some((tx, receipt)) =
-                        block_and_receipts.find_transaction_and_receipt_by_hash(hash)
+                    if let Some(Ok(receipt)) = pending_block
+                        .find_and_convert_transaction_receipt(hash, this.tx_resp_builder())
                     {
-                        // Build tx receipt from pending block and receipts directly inline.
-                        // This avoids canonical cache lookup that would be done by the
-                        // `build_transaction_receipt` which would result in a block not found
-                        // issue. See: https://github.com/paradigmxyz/reth/issues/18529
-                        let meta = tx.meta();
-                        let all_receipts = &block_and_receipts.receipts;
-
-                        let (gas_used, next_log_index) =
-                            calculate_gas_used_and_next_log_index(meta.index, all_receipts);
-
-                        return Ok(Some(
-                            this.tx_resp_builder()
-                                .convert_receipts_with_block(
-                                    vec![ConvertReceiptInput {
-                                        tx: tx
-                                            .tx()
-                                            .clone()
-                                            .try_into_recovered_unchecked()
-                                            .map_err(Self::Error::from_eth_err)?
-                                            .as_recovered_ref(),
-                                        gas_used: receipt.cumulative_gas_used() - gas_used,
-                                        receipt: receipt.clone(),
-                                        next_log_index,
-                                        meta,
-                                    }],
-                                    block_and_receipts.sealed_block(),
-                                )?
-                                .pop()
-                                .unwrap(),
-                        ))
+                        return Ok(Some(receipt));
                     }
                 }
             }
