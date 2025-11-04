@@ -83,7 +83,7 @@ impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
     /// Sends a disconnect command to the session.
     pub fn disconnect(&self, reason: Option<DisconnectReason>) {
         // Note: we clone the sender which ensures the channel has capacity to send the message
-        let _ = self.commands_to_session.clone().try_send(SessionCommand::Disconnect { reason });
+        let _ = self.commands_to_session.try_send(SessionCommand::Disconnect { reason });
     }
 
     /// Sends a disconnect command to the session, awaiting the command channel for available
@@ -92,7 +92,7 @@ impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
         &self,
         reason: Option<DisconnectReason>,
     ) -> Result<(), SendError<SessionCommand<N>>> {
-        self.commands_to_session.clone().send(SessionCommand::Disconnect { reason }).await
+        self.commands_to_session.send(SessionCommand::Disconnect { reason }).await
     }
 
     /// Returns the direction of the active session (inbound or outbound).
