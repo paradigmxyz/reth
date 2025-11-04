@@ -429,6 +429,7 @@ where
                 block_traces.push(traces);
             }
 
+            #[allow(clippy::iter_with_drain)]
             let block_traces = futures::future::try_join_all(block_traces.drain(..)).await?;
             all_traces.extend(block_traces.into_iter().flatten().flat_map(|traces| {
                 traces.into_iter().flatten().flat_map(|traces| traces.into_iter())
