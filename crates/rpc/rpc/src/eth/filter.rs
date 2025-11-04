@@ -1,6 +1,7 @@
 //! `eth_` `Filter` RPC handler implementation
 
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
@@ -498,29 +499,40 @@ where
             FilterBlockOption::Range { from_block, to_block } => {
                 // Handle special case where from block is pending
                 if from_block.is_some_and(|b| b.is_pending()) {
-                    let mut all_logs = Vec::new();
-
-                    // Try to get pending block and receipts
-                    if let Ok(Some(pending_block)) =
-                        self.eth_api.local_pending_block_exclusive().await
-                    {
-                        let timestamp = pending_block.block.timestamp();
-                        let block_num_hash = pending_block.block.num_hash();
-                        append_matching_block_logs(
-                            &mut all_logs,
-                            ProviderOrBlock::<Eth::Provider>::Block(pending_block.block),
-                            &filter,
-                            block_num_hash,
-                            &pending_block.receipts,
-                            false, // removed = false for pending blocks
-                            timestamp,
-                        )?;
+                    let to_block = to_block.unwrap_or(BlockNumberOrTag::Pending);
+                    if !(to_block.is_pending() || to_block.is_number()) {
+                        // always empty range
+                        return Ok(Vec::new());
                     }
+                    // Try to get pending block and receipts
+                    if let Ok(Some(pending_block)) = self.eth_api.local_pending_block().await {
+                        if let BlockNumberOrTag::Number(to_block) = to_block {
+                            if to_block < pending_block.block.number() {
+                                // this block range is empty based on the user input
+                                return Ok(Vec::new());
+                            }
+                        }
 
-                    return Ok(all_logs);
+                        let info = self.provider().chain_info()?;
+                        if pending_block.block.number() > info.best_number {
+                            // only consider the pending block if it is ahead of the chain
+                            let mut all_logs = Vec::new();
+                            let timestamp = pending_block.block.timestamp();
+                            let block_num_hash = pending_block.block.num_hash();
+                            append_matching_block_logs(
+                                &mut all_logs,
+                                ProviderOrBlock::<Eth::Provider>::Block(pending_block.block),
+                                &filter,
+                                block_num_hash,
+                                &pending_block.receipts,
+                                false, // removed = false for pending blocks
+                                timestamp,
+                            )?;
+                            return Ok(all_logs);
+                        }
+                    }
                 }
 
-                // Original logic for non-pending ranges
                 let info = self.provider().chain_info()?;
                 let start_block = info.best_number;
                 let from = from_block
