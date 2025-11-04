@@ -72,7 +72,7 @@
 //! ``````
 
 use crate::{
-    e2s_types::{E2sError, Entry},
+    e2s::{error::E2sError, types::Entry},
     DecodeCompressed,
 };
 use alloy_consensus::{Block, BlockBody, Header};
