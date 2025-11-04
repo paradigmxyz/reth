@@ -204,8 +204,13 @@ where
     E: ConfigureEvm<Primitives = N> + 'static,
     N: NodePrimitives,
 {
-    /// Re-executes the block and collects execution data
-    fn re_execute_block(
+    /// Generates an `ExecutionWitness` and returns it together with the `BundleState`.
+    ///
+    /// This is the core helper that performs block re-execution and collects all
+    /// artifacts necessary to build the execution witness. It is intentionally
+    /// kept small and self-contained to minimize drift and prepare for potential
+    /// reuse across subsystems.
+    fn generate_execution_witness_core(
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
@@ -222,6 +227,17 @@ where
         let witness = generate(codes, preimages, hashed_state, state_provider)?;
 
         Ok((witness, bundle_state))
+    }
+
+    /// Re-executes the block and collects execution data
+    fn re_execute_block(
+        &self,
+        parent_header: &SealedHeader<N::BlockHeader>,
+        block: &RecoveredBlock<N::Block>,
+    ) -> eyre::Result<(ExecutionWitness, BundleState)> {
+        // Delegate to the small core helper to avoid logic drift and ease future reuse.
+        // TODO: Consider exposing this helper for reuse by the RPC Debug API.
+        self.generate_execution_witness_core(parent_header, block)
     }
 
     /// Handles witness generation, saving, and comparison with healthy node
