@@ -428,7 +428,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Disables all discovery services for the node.
-    pub fn with_disabled_discovery(mut self) -> Self {
+    pub const fn with_disabled_discovery(mut self) -> Self {
         self.network.discovery.disable_discovery = true;
         self
     }
