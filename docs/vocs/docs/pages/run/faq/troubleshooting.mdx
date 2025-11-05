@@ -43,14 +43,14 @@ stat /full/path/datadir
 If you're:
 
 1. Running behind the tip
-2. Have slow canonical commit time according to the `Canonical Commit Latency Time` chart on [Grafana dashboard](/run/monitoring#prometheus--grafana) (more than 2-3 seconds)
+2. Have slow canonical commit time according to the `Canonical Commit Latency Time` chart on [Grafana dashboard](/docs/vocs/docs/pages/run/monitoring.mdx) (more than 2-3 seconds)
 3. Seeing warnings in your logs such as
     ```console
     2023-11-08T15:17:24.789731Z  WARN providers::db: Transaction insertion took too long block_number=18528075 tx_num=2150227643 hash=0xb7de1d6620efbdd3aa8547c47a0ff09a7fd3e48ba3fd2c53ce94c6683ed66e7c elapsed=6.793759034s
     ```
 
 then most likely you're experiencing issues with the [database freelist](https://github.com/paradigmxyz/reth/issues/5228).
-To confirm it, check if the values on the `Freelist` chart on [Grafana dashboard](/run/monitoring#prometheus--grafana)
+To confirm it, check if the values on the `Freelist` chart on [Grafana dashboard](/docs/vocs/docs/pages/run/monitoring.mdx)
 is greater than 10M.
 
 Currently, there are two main ways to fix this issue.
