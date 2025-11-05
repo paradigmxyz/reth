@@ -1044,7 +1044,6 @@ impl MultiProofTask {
         skip_all
     )]
     pub(crate) fn run(mut self) {
-
         let mut updates_finished = false;
 
         // Timestamp before the first state update or prefetch was received
@@ -1229,7 +1228,9 @@ impl MultiProofTask {
         );
 
         // update total metrics on finish
-        self.metrics.state_updates_received_histogram.record(self.state_update_proofs_requested as f64);
+        self.metrics
+            .state_updates_received_histogram
+            .record(self.state_update_proofs_requested as f64);
         self.metrics.proofs_processed_histogram.record(self.proofs_processed as f64);
         if let Some(total_time) = first_update_time.map(|t| t.elapsed()) {
             self.metrics.multiproof_task_total_duration_histogram.record(total_time);
