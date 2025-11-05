@@ -1,7 +1,7 @@
 //! Utilities helpers to create era data structures for testing purposes.
 
 use crate::{
-    consensus_types::{CompressedBeaconState, CompressedSignedBeaconBlock},
+    era::types::consensus::{CompressedBeaconState, CompressedSignedBeaconBlock},
     era1::types::execution::{
         BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
     },

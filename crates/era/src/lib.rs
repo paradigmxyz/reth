@@ -13,10 +13,9 @@
 //! - Era1 format: <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
 pub mod common;
-pub mod consensus_types;
 pub mod e2s;
+pub mod era;
 pub mod era1;
-pub mod era_types;
 
 #[cfg(test)]
 pub(crate) mod test_utils;
