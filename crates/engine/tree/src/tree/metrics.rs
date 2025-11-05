@@ -1,11 +1,13 @@
-use crate::tree::MeteredStateHook;
+use crate::tree::{error::InsertBlockFatalError, MeteredStateHook, TreeOutcome};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_evm::{
     block::{BlockExecutor, ExecutableTx},
     Evm,
 };
+use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
 use core::borrow::BorrowMut;
-use reth_errors::BlockExecutionError;
+use reth_engine_primitives::{ForkchoiceStatus, OnForkChoiceUpdated};
+use reth_errors::{BlockExecutionError, ProviderError};
 use reth_evm::{metrics::ExecutorMetrics, OnStateHook};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
@@ -15,7 +17,7 @@ use reth_metrics::{
 use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::{debug_span, trace};
 
 /// Metrics for the `EngineApi`.
@@ -132,20 +134,20 @@ pub(crate) struct TreeMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "consensus.engine.beacon")]
 pub(crate) struct EngineMetrics {
+    /// Engine API forkchoiceUpdated response type metrics
+    #[metric(skip)]
+    pub(crate) forkchoice_updated: ForkchoiceUpdatedMetrics,
+    /// Engine API newPayload response type metrics
+    #[metric(skip)]
+    pub(crate) new_payload: NewPayloadStatusMetrics,
     /// How many executed blocks are currently stored.
     pub(crate) executed_blocks: Gauge,
     /// How many already executed blocks were directly inserted into the tree.
     pub(crate) inserted_already_executed_blocks: Counter,
     /// The number of times the pipeline was run.
     pub(crate) pipeline_runs: Counter,
-    /// The total count of forkchoice updated messages received.
-    pub(crate) forkchoice_updated_messages: Counter,
-    /// The total count of forkchoice updated messages with payload received.
-    pub(crate) forkchoice_with_attributes_updated_messages: Counter,
     /// Newly arriving block hash is not present in executed blocks cache storage
     pub(crate) executed_new_block_cache_miss: Counter,
-    /// The total count of new payload messages received.
-    pub(crate) new_payload_messages: Counter,
     /// Histogram of persistence operation durations (in seconds)
     pub(crate) persistence_duration: Histogram,
     /// Tracks the how often we failed to deliver a newPayload response.
@@ -158,6 +160,109 @@ pub(crate) struct EngineMetrics {
     pub(crate) failed_forkchoice_updated_response_deliveries: Counter,
     /// block insert duration
     pub(crate) block_insert_total_duration: Histogram,
+}
+
+/// Metrics for engine forkchoiceUpdated responses.
+#[derive(Metrics)]
+#[metrics(scope = "consensus.engine.beacon")]
+pub(crate) struct ForkchoiceUpdatedMetrics {
+    /// The total count of forkchoice updated messages received.
+    pub(crate) forkchoice_updated_messages: Counter,
+    /// The total count of forkchoice updated messages with payload received.
+    pub(crate) forkchoice_with_attributes_updated_messages: Counter,
+    /// The total count of forkchoice updated messages that we responded to with
+    /// [`Valid`](ForkchoiceStatus::Valid).
+    pub(crate) forkchoice_updated_valid: Counter,
+    /// The total count of forkchoice updated messages that we responded to with
+    /// [`Invalid`](ForkchoiceStatus::Invalid).
+    pub(crate) forkchoice_updated_invalid: Counter,
+    /// The total count of forkchoice updated messages that we responded to with
+    /// [`Syncing`](ForkchoiceStatus::Syncing).
+    pub(crate) forkchoice_updated_syncing: Counter,
+    /// The total count of forkchoice updated messages that were unsuccessful, i.e. we responded
+    /// with an error type that is not a [`PayloadStatusEnum`].
+    pub(crate) forkchoice_updated_error: Counter,
+    /// Latency for the last forkchoice updated call.
+    pub(crate) forkchoice_updated_last: Gauge,
+}
+
+impl ForkchoiceUpdatedMetrics {
+    /// Increment the forkchoiceUpdated counter based on the given result
+    pub(crate) fn update_response_metrics(
+        &self,
+        has_attrs: bool,
+        result: &Result<TreeOutcome<OnForkChoiceUpdated>, ProviderError>,
+        elapsed: Duration,
+    ) {
+        match result {
+            Ok(outcome) => match outcome.outcome.forkchoice_status() {
+                ForkchoiceStatus::Valid => self.forkchoice_updated_valid.increment(1),
+                ForkchoiceStatus::Invalid => self.forkchoice_updated_invalid.increment(1),
+                ForkchoiceStatus::Syncing => self.forkchoice_updated_syncing.increment(1),
+            },
+            Err(_) => self.forkchoice_updated_error.increment(1),
+        }
+        self.forkchoice_updated_messages.increment(1);
+        if has_attrs {
+            self.forkchoice_with_attributes_updated_messages.increment(1);
+        }
+        self.forkchoice_updated_last.set(elapsed);
+    }
+}
+
+/// Metrics for engine newPayload responses.
+#[derive(Metrics)]
+#[metrics(scope = "consensus.engine.beacon")]
+pub(crate) struct NewPayloadStatusMetrics {
+    /// The total count of new payload messages received.
+    pub(crate) new_payload_messages: Counter,
+    /// The total count of new payload messages that we responded to with
+    /// [Valid](PayloadStatusEnum::Valid).
+    pub(crate) new_payload_valid: Counter,
+    /// The total count of new payload messages that we responded to with
+    /// [Invalid](PayloadStatusEnum::Invalid).
+    pub(crate) new_payload_invalid: Counter,
+    /// The total count of new payload messages that we responded to with
+    /// [Syncing](PayloadStatusEnum::Syncing).
+    pub(crate) new_payload_syncing: Counter,
+    /// The total count of new payload messages that we responded to with
+    /// [Accepted](PayloadStatusEnum::Accepted).
+    pub(crate) new_payload_accepted: Counter,
+    /// The total count of new payload messages that were unsuccessful, i.e. we responded with an
+    /// error type that is not a [`PayloadStatusEnum`].
+    pub(crate) new_payload_error: Counter,
+    /// The total gas of valid new payload messages received.
+    pub(crate) new_payload_total_gas: Histogram,
+    /// The gas per second of valid new payload messages received.
+    pub(crate) new_payload_gas_per_second: Histogram,
+    /// Latency for the last new payload call.
+    pub(crate) new_payload_last: Gauge,
+}
+
+impl NewPayloadStatusMetrics {
+    /// Increment the newPayload counter based on the given result
+    pub(crate) fn update_response_metrics(
+        &self,
+        result: &Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError>,
+        gas_used: u64,
+        elapsed: Duration,
+    ) {
+        match result {
+            Ok(outcome) => match outcome.outcome.status {
+                PayloadStatusEnum::Valid => {
+                    self.new_payload_valid.increment(1);
+                    self.new_payload_total_gas.record(gas_used as f64);
+                    self.new_payload_gas_per_second.record(gas_used as f64 / elapsed.as_secs_f64());
+                }
+                PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),
+                PayloadStatusEnum::Accepted => self.new_payload_accepted.increment(1),
+                PayloadStatusEnum::Invalid { .. } => self.new_payload_invalid.increment(1),
+            },
+            Err(_) => self.new_payload_error.increment(1),
+        }
+        self.new_payload_messages.increment(1);
+        self.new_payload_last.set(elapsed);
+    }
 }
 
 /// Metrics for non-execution related block validation.
