@@ -4,10 +4,12 @@
 use alloy_consensus::{BlockBody, Header};
 use alloy_primitives::U256;
 use reth_era::{
+    common::file_ops::{StreamReader, StreamWriter},
     e2s::types::IndexEntry,
-    era1_file::{Era1Reader, Era1Writer},
-    era_file_ops::{StreamReader, StreamWriter},
-    execution_types::CompressedBody,
+    era1::{
+        file::{Era1Reader, Era1Writer},
+        types::execution::CompressedBody,
+    },
 };
 use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;

@@ -1,4 +1,4 @@
-//! Represents reading and writing operations' era file
+//! Era file format traits and I/O operations.
 
 use crate::e2s::{error::E2sError, types::Version};
 use std::{
