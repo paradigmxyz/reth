@@ -101,8 +101,9 @@ where
             .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?
             .ok_or(P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse))??;
 
-        // let's check the compressed length first, we will need to check again once confirming
-        // that it contains snappy-compressed data (this will be the case for all non-p2p messages).
+        // Check that the uncompressed message length does not exceed the max payload size.
+        // Note: The first message (Hello/Disconnect) is not snappy compressed. We will check the
+        // decompressed length again for subsequent messages after the handshake.
         if first_message_bytes.len() > MAX_PAYLOAD_SIZE {
             return Err(P2PStreamError::MessageTooBig {
                 message_size: first_message_bytes.len(),
