@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.8.3"
+version = "1.8.4"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -666,7 +666,7 @@ secp256k1 = { version = "0.30", default-features = false, features = [
 rand_08 = { package = "rand", version = "0.8" }
 
 # for eip-4844
-c-kzg = "2.1.4"
+c-kzg = "2.1.5"
 
 # config
 toml = "0.8"
