@@ -182,6 +182,8 @@ pub(crate) struct ForkchoiceUpdatedMetrics {
     /// The total count of forkchoice updated messages that were unsuccessful, i.e. we responded
     /// with an error type that is not a [`PayloadStatusEnum`].
     pub(crate) forkchoice_updated_error: Counter,
+    /// Latency for the forkchoice updated calls.
+    pub(crate) forkchoice_updated_latency: Histogram,
     /// Latency for the last forkchoice updated call.
     pub(crate) forkchoice_updated_last: Gauge,
 }
@@ -206,6 +208,7 @@ impl ForkchoiceUpdatedMetrics {
         if has_attrs {
             self.forkchoice_with_attributes_updated_messages.increment(1);
         }
+        self.forkchoice_updated_latency.record(elapsed);
         self.forkchoice_updated_last.set(elapsed);
     }
 }
@@ -235,6 +238,8 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) new_payload_total_gas: Histogram,
     /// The gas per second of valid new payload messages received.
     pub(crate) new_payload_gas_per_second: Histogram,
+    /// Latency for the new payload calls.
+    pub(crate) new_payload_latency: Histogram,
     /// Latency for the last new payload call.
     pub(crate) new_payload_last: Gauge,
 }
@@ -261,6 +266,7 @@ impl NewPayloadStatusMetrics {
             Err(_) => self.new_payload_error.increment(1),
         }
         self.new_payload_messages.increment(1);
+        self.new_payload_latency.record(elapsed);
         self.new_payload_last.set(elapsed);
     }
 }
