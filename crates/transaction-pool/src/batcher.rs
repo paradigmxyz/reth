@@ -60,7 +60,9 @@ where
     ) -> (Self, mpsc::UnboundedSender<BatchTxRequest<Pool::Transaction>>) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
 
-        let processor = Self { pool, max_batch_size, buf: Vec::with_capacity(1), request_rx };
+        let max_batch_size = max_batch_size.max(1);
+        let processor =
+            Self { pool, max_batch_size, buf: Vec::with_capacity(max_batch_size), request_rx };
 
         (processor, request_tx)
     }
@@ -103,12 +105,11 @@ where
             ready!(this.request_rx.poll_recv_many(cx, this.buf, *this.max_batch_size));
 
             if !this.buf.is_empty() {
-                let batch = std::mem::take(this.buf);
+                let batch = this.buf.split_off(0);
                 let pool = this.pool.clone();
                 tokio::spawn(async move {
                     Self::process_batch(&pool, batch).await;
                 });
-                this.buf.reserve(1);
 
                 continue;
             }
