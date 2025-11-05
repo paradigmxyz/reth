@@ -230,21 +230,15 @@ fn bench_state_root(c: &mut Criterion) {
                     },
                     |(genesis_hash, mut payload_processor, provider, state_updates)| {
                         black_box({
-                            let mut handle = payload_processor
-                                .spawn(
-                                    Default::default(),
-                                    core::iter::empty::<
-                                        Result<
-                                            Recovered<TransactionSigned>,
-                                            core::convert::Infallible,
-                                        >,
-                                    >(),
-                                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                                    OverlayStateProviderFactory::new(provider),
-                                    &TreeConfig::default(),
-                                )
-                                .map_err(|(err, ..)| err)
-                                .expect("failed to spawn payload processor");
+                            let mut handle = payload_processor.spawn(
+                                Default::default(),
+                                core::iter::empty::<
+                                    Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+                                >(),
+                                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                                OverlayStateProviderFactory::new(provider),
+                                &TreeConfig::default(),
+                            );
 
                             let mut state_hook = handle.state_hook();
 

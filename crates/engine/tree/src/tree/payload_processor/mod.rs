@@ -28,10 +28,7 @@ use reth_evm::{
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
-    trie_cursor::TrieCursorFactory,
-};
+use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
@@ -204,10 +201,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
-    ) -> Result<
-        PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
-        (ParallelStateRootError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
-    >
+    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -222,10 +216,9 @@ where
         // consistent view of the database, including the trie tables. Because of this there is no
         // need for an overarching prefix set to invalidate any section of the trie tables, and so
         // we use an empty prefix set.
-        let prefix_sets = Arc::new(TriePrefixSetsMut::default());
 
         // Create and spawn the storage proof task
-        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory, prefix_sets);
+        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let proof_handle = ProofWorkerHandle::new(
@@ -267,12 +260,12 @@ where
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
         self.spawn_sparse_trie_task(sparse_trie_rx, proof_handle, state_root_tx);
 
-        Ok(PayloadHandle {
+        PayloadHandle {
             to_multi_proof,
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
-        })
+        }
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
@@ -897,19 +890,13 @@ mod tests {
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
 
-        let mut handle =
-            payload_processor
-                .spawn(
-                    Default::default(),
-                    core::iter::empty::<
-                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
-                    >(),
-                    StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-                    OverlayStateProviderFactory::new(provider_factory),
-                    &TreeConfig::default(),
-                )
-                .map_err(|(err, ..)| err)
-                .expect("failed to spawn payload processor");
+        let mut handle = payload_processor.spawn(
+            Default::default(),
+            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
+            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+            OverlayStateProviderFactory::new(provider_factory),
+            &TreeConfig::default(),
+        );
 
         let mut state_hook = handle.state_hook();
 

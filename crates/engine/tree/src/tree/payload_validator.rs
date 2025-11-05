@@ -370,8 +370,7 @@ where
         let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
 
         // Plan the strategy used for state root computation.
-        let state_root_plan = self.plan_state_root_computation();
-        let strategy = state_root_plan.strategy;
+        let strategy = self.plan_state_root_computation();
 
         debug!(
             target: "engine::tree::payload_validator",
@@ -383,7 +382,7 @@ where
         let txs = self.tx_iterator_for(&input)?;
 
         // Spawn the appropriate processor based on strategy
-        let (mut handle, strategy) = ensure_ok!(self.spawn_payload_processor(
+        let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
             provider_builder,
@@ -751,13 +750,10 @@ where
         state: &EngineApiTreeState<N>,
         strategy: StateRootStrategy,
     ) -> Result<
-        (
-            PayloadHandle<
-                impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
-                impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
-            >,
-            StateRootStrategy,
-        ),
+        PayloadHandle<
+            impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
+            impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
+        >,
         InsertBlockErrorKind,
     > {
         match strategy {
@@ -791,34 +787,13 @@ where
                 // Use state root task only if prefix sets are empty, otherwise proof generation is
                 // too expensive because it requires walking all paths in every proof.
                 let spawn_start = Instant::now();
-                let (handle, strategy) = match self.payload_processor.spawn(
+                let handle = self.payload_processor.spawn(
                     env,
                     txs,
                     provider_builder,
                     multiproof_provider_factory,
                     &self.config,
-                ) {
-                    Ok(handle) => {
-                        // Successfully spawned with state root task support
-                        (handle, StateRootStrategy::StateRootTask)
-                    }
-                    Err((error, txs, env, provider_builder)) => {
-                        // Failed to spawn proof workers, fallback to parallel state root
-                        error!(
-                            target: "engine::tree::payload_validator",
-                            ?error,
-                            "Failed to spawn proof workers, falling back to parallel state root"
-                        );
-                        (
-                            self.payload_processor.spawn_cache_exclusive(
-                                env,
-                                txs,
-                                provider_builder,
-                            ),
-                            StateRootStrategy::Parallel,
-                        )
-                    }
-                };
+                );
 
                 // record prewarming initialization duration
                 self.metrics
@@ -826,9 +801,9 @@ where
                     .spawn_payload_processor
                     .record(spawn_start.elapsed().as_secs_f64());
 
-                Ok((handle, strategy))
+                Ok(handle)
             }
-            strategy @ (StateRootStrategy::Parallel | StateRootStrategy::Synchronous) => {
+            StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
                 let start = Instant::now();
                 let handle =
                     self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
@@ -839,7 +814,7 @@ where
                     .spawn_payload_processor
                     .record(start.elapsed().as_secs_f64());
 
-                Ok((handle, strategy))
+                Ok(handle)
             }
         }
     }
@@ -877,7 +852,7 @@ where
 
     /// Determines the state root computation strategy based on configuration.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    fn plan_state_root_computation(&self) -> StateRootPlan {
+    fn plan_state_root_computation(&self) -> StateRootStrategy {
         let strategy = if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
         } else if self.config.use_state_root_task() {
@@ -892,7 +867,7 @@ where
             "Planned state root computation strategy"
         );
 
-        StateRootPlan { strategy }
+        strategy
     }
 
     /// Called when an invalid block is encountered during validation.
@@ -969,12 +944,6 @@ enum StateRootStrategy {
     Parallel,
     /// Fall back to synchronous computation via the state provider.
     Synchronous,
-}
-
-/// State root computation plan that captures strategy and required data.
-struct StateRootPlan {
-    /// Strategy that should be attempted for computing the state root.
-    strategy: StateRootStrategy,
 }
 
 /// Type that validates the payloads processed by the engine.
