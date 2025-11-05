@@ -1393,11 +1393,6 @@ where
                                 let start = Instant::now();
                                 let mut output =
                                     self.on_forkchoice_updated(state, payload_attrs, version);
-                                let elapsed = start.elapsed();
-                                self.metrics
-                                    .engine
-                                    .forkchoice_updated
-                                    .update_response_metrics(has_attrs, &output, elapsed);
 
                                 if let Ok(res) = &mut output {
                                     // track last received forkchoice state
@@ -1414,6 +1409,12 @@ where
                                     // handle the event if any
                                     self.on_maybe_tree_event(res.event.take())?;
                                 }
+
+                                let elapsed = start.elapsed();
+                                self.metrics
+                                    .engine
+                                    .forkchoice_updated
+                                    .update_response_metrics(has_attrs, &output, elapsed);
 
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(Into::into))
