@@ -84,6 +84,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> ProviderResult<Self> {
+        // Load storage settings from database at init time. Creates a temporary provider
+        // to read persisted settings, falling back to legacy defaults if none exist.
+        //
+        // Both factory and all providers it creates should share these cached settings.
         let legacy_settings = StorageSettings::legacy();
         let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
