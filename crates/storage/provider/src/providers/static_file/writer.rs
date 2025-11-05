@@ -2,7 +2,6 @@ use super::{
     manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
 };
 use crate::providers::static_file::metrics::StaticFileProviderOperation;
-use crate::get_genesis_block_number;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
 use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
@@ -304,7 +303,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             .as_ref()
             .map(|block_range| block_range.end())
             .or_else(|| {
-                (self.writer.user_header().expected_block_start() > get_genesis_block_number())
+                (self.writer.user_header().expected_block_start() > self.reader().get_genesis_block_number())
                     .then(|| self.writer.user_header().expected_block_start() - 1)
             });
 
