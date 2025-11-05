@@ -396,15 +396,12 @@ where
             match self.tx_fee_cap {
                 Some(0) | None => {} // Skip if cap is 0 or None
                 Some(tx_fee_cap_wei) => {
-                    // max possible tx fee is (gas_price * gas_limit)
-                    // (if EIP1559) max possible tx fee is (max_fee_per_gas * gas_limit)
-                    let gas_price = transaction.max_fee_per_gas();
-                    let max_tx_fee_wei = gas_price.saturating_mul(transaction_gas_limit as u128);
+                    let max_tx_fee_wei = transaction.cost().saturating_sub(transaction.value());
                     if max_tx_fee_wei > tx_fee_cap_wei {
                         return Err(TransactionValidationOutcome::Invalid(
                             transaction,
                             InvalidPoolTransactionError::ExceedsFeeCap {
-                                max_tx_fee_wei,
+                                max_tx_fee_wei: max_tx_fee_wei.saturating_to(),
                                 tx_fee_cap_wei,
                             },
                         ))
