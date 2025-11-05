@@ -1,14 +1,13 @@
 //! Configuration for peering.
 
+use reth_net_banlist::BanList;
+use reth_network_peers::{NodeRecord, TrustedPeer};
 use std::{
     collections::HashSet,
     io::{self, ErrorKind},
     path::Path,
     time::Duration,
 };
-
-use reth_net_banlist::BanList;
-use reth_network_peers::{NodeRecord, TrustedPeer};
 use tracing::info;
 
 use crate::{BackoffKind, ReputationChangeWeights};
@@ -116,6 +115,17 @@ impl Default for ConnectionsConfig {
             max_concurrent_outbound_dials: DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS,
         }
     }
+}
+
+/// A set of peers that are trusted and should be connected to or accepted from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct PersistedPeers {
+    /// Trusted nodes to connect to or accept from
+    pub trusted: HashSet<NodeRecord>,
+    /// Basic nodes to connect to.
+    pub basic: HashSet<NodeRecord>,
 }
 
 /// Config type for initiating a `PeersManager` instance.
@@ -286,6 +296,7 @@ impl PeersConfig {
     }
 
     /// Read from file nodes available at launch. Ignored if None.
+    #[cfg(feature = "serde")]
     pub fn with_basic_nodes_from_file(
         self,
         optional_file: Option<impl AsRef<Path>>,
@@ -297,7 +308,19 @@ impl PeersConfig {
             Err(e) => Err(e)?,
         };
         info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
-        let nodes: HashSet<NodeRecord> = serde_json::from_reader(reader)?;
+
+        let mut contents = String::new();
+        io::Read::read_to_string(&mut reader.into_inner(), &mut contents)?;
+
+        if let Ok(persistent_peers) = serde_json::from_str::<PersistedPeers>(&contents) {
+            return Ok(self
+                .with_trusted_nodes(
+                    persistent_peers.trusted.into_iter().map(TrustedPeer::from).collect(),
+                )
+                .with_basic_nodes(persistent_peers.basic));
+        }
+
+        let nodes: HashSet<NodeRecord> = serde_json::from_str(&contents)?;
         Ok(self.with_basic_nodes(nodes))
     }
 
