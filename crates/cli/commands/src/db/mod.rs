@@ -13,6 +13,7 @@ mod clear;
 mod diff;
 mod get;
 mod list;
+mod migrate;
 mod repair_trie;
 mod stats;
 /// DB List TUI
@@ -49,6 +50,8 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
+    /// Migrate database to another location
+    Migrate(migrate::Command),
     /// Verifies trie consistency and outputs any inconsistencies
     RepairTrie(repair_trie::Command),
     /// Lists current and local database versions
@@ -137,6 +140,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::Clear(command) => {
                 let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
                 command.execute(provider_factory)?;
+            }
+            Subcommands::Migrate(command) => {
+                // Get database arguments from system configuration
+                let db_args = self.env.db.database_args();
+                db_ro_exec!(self.env, tool, N, {
+                    command.execute(tool.provider_factory.db_ref(), &db_args)?;
+                });
             }
             Subcommands::RepairTrie(command) => {
                 let access_rights =
