@@ -379,9 +379,17 @@ mod tests {
 
         proptest! {
             #![proptest_config(ProptestConfig::with_cases(1000))]
-
-            #[test]
-            fn proptest_hashed_post_state_cursor(
+        /// Tests `HashedPostStateCursor` produces identical results to a pre-merged cursor
+        /// across 1000 random scenarios.
+        ///
+        /// For random DB entries and post-state changes, creates two cursors:
+        /// - Control: pre-merged data (expected behavior)  
+        /// - Test: `HashedPostStateCursor` (lazy overlay)
+        ///
+        /// Executes random sequences of `next()` and `seek()` operations, asserting
+        /// both cursors return identical results.
+        #[test]
+        fn proptest_hashed_post_state_cursor(
                 db_nodes in sorted_db_nodes_strategy(),
                 post_state_nodes in sorted_post_state_nodes_strategy(),
                 op_choices in prop::collection::vec(any::<u8>(), 10..500),
