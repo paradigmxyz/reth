@@ -492,7 +492,7 @@ alloy-sol-macro = "1.4.1"
 alloy-sol-types = { version = "1.4.1", default-features = false }
 alloy-trie = { version = "0.9.1", default-features = false }
 
-alloy-hardforks = "0.4.4"
+alloy-hardforks = "0.4.3"
 
 op-alloy-rpc-types = { version = "0.22.0", default-features = false }
 alloy-op-evm = { version = "0.22.6", default-features = false }
@@ -530,7 +530,7 @@ alloy-transport-http = { version = "1.0.41", features = [
 alloy-transport-ipc = { version = "1.0.41", default-features = false }
 alloy-transport-ws = { version = "1.0.41", default-features = false }
 # op
-alloy-op-hardforks = "0.4.4"
+alloy-op-hardforks = "0.4.3"
 op-alloy-rpc-types-engine = { version = "0.22.0", default-features = false }
 op-alloy-network = { version = "0.22.0", default-features = false }
 op-alloy-consensus = { version = "0.22.0", default-features = false }
