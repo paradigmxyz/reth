@@ -299,9 +299,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-hardforks"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51e7f93a60ef3d867c93d43442ef3f2d8a1095450131c3d4e16bbbbf2166b9bd"
+checksum = "1e29d7eacf42f89c21d7f089916d0bdb4f36139a31698790e8837d2dbbd4b2c3"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -397,9 +397,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-hardforks"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0bc135abf78cf83a460bf785d52e4fe83c3ba5fadd416e2f79f7409eec45958"
+checksum = "95ac97adaba4c26e17192d81f49186ac20c1e844e35a00e169c8d3d58bc84e6b"
 dependencies = [
  "alloy-chains",
  "alloy-hardforks",
