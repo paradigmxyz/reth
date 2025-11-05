@@ -219,11 +219,17 @@ pub trait IndexEntry: Sized {
 
         // Extract count from last 8 bytes
         let count_bytes = &entry.data[entry.data.len() - 8..];
-        let count = i64::from_le_bytes(
+        let count_i64 = i64::from_le_bytes(
             count_bytes
                 .try_into()
                 .map_err(|_| E2sError::Ssz("Failed to read count bytes".to_string()))?,
-        ) as usize;
+        );
+
+        // Validate that count is non-negative before converting to usize
+        if count_i64 < 0 {
+            return Err(E2sError::Ssz(format!("Invalid negative count value: {}", count_i64)));
+        }
+        let count = count_i64 as usize;
 
         // Verify entry has correct size
         let expected_len = 8 + count * 8 + 8;
