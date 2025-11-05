@@ -16,7 +16,7 @@
 //!
 //! ```rust
 //! use alloy_consensus::Header;
-//! use reth_era::{execution_types::CompressedHeader, DecodeCompressed};
+//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedHeader};
 //!
 //! let header = Header { number: 100, ..Default::default() };
 //! // Compress the header: rlp encoding and Snappy compression
@@ -32,7 +32,7 @@
 //! ```rust
 //! use alloy_consensus::{BlockBody, Header};
 //! use alloy_primitives::Bytes;
-//! use reth_era::{execution_types::CompressedBody, DecodeCompressed};
+//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedBody};
 //! use reth_ethereum_primitives::TransactionSigned;
 //!
 //! let body: BlockBody<Bytes> = BlockBody {
@@ -53,7 +53,7 @@
 //!
 //! ```rust
 //! use alloy_consensus::ReceiptWithBloom;
-//! use reth_era::{execution_types::CompressedReceipts, DecodeCompressed};
+//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedReceipts};
 //! use reth_ethereum_primitives::{Receipt, TxType};
 //!
 //! let receipt = Receipt {
