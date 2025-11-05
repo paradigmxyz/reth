@@ -1,4 +1,4 @@
-//! Decoding
+//! Compressed data decoding utilities.
 
 use crate::e2s::error::E2sError;
 use alloy_rlp::Decodable;
