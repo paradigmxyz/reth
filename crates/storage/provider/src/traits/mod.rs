@@ -10,3 +10,9 @@ pub use static_file_provider::StaticFileProviderFactory;
 
 mod full;
 pub use full::FullProvider;
+
+/// Trait for accessing provider configuration.
+pub trait ProviderConfiguration {
+    /// Returns whether new static file segments are enabled.
+    fn new_static_files_enabled(&self) -> bool;
+}

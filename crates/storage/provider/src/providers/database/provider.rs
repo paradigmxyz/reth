@@ -153,8 +153,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     prune_modes: PruneModes,
     /// Node storage handler.
     storage: Arc<N::Storage>,
-    /// Whether to use static files v2
-    static_files_v2_enabled: bool,
+    /// Whether to use new static file segments.
+    new_static_files_enabled: bool,
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -250,9 +250,16 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
-        static_files_v2_enabled: bool,
+        new_static_files_enabled: bool,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage, static_files_v2_enabled }
+        Self {
+            tx,
+            chain_spec,
+            static_file_provider,
+            prune_modes,
+            storage,
+            new_static_files_enabled,
+        }
     }
 }
 
@@ -497,9 +504,16 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
-        static_files_v2_enabled: bool,
+        new_static_files_enabled: bool,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage, static_files_v2_enabled }
+        Self {
+            tx,
+            chain_spec,
+            static_file_provider,
+            prune_modes,
+            storage,
+            new_static_files_enabled,
+        }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -3138,9 +3152,9 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
     }
 }
 
-impl<TX, N: NodeTypes> crate::StaticFilesConfigurationProvider for DatabaseProvider<TX, N> {
-    fn static_files_v2_enabled(&self) -> bool {
-        self.static_files_v2_enabled
+impl<TX, N: NodeTypes> crate::ProviderConfiguration for DatabaseProvider<TX, N> {
+    fn new_static_files_enabled(&self) -> bool {
+        self.new_static_files_enabled
     }
 }
 

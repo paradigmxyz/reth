@@ -64,8 +64,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     prune_modes: PruneModes,
     /// The node storage handler.
     storage: Arc<N::Storage>,
-    /// Whether to use static files v2
-    static_files_v2_enabled: bool,
+    /// Whether to use new static file segments.
+    new_static_files_enabled: bool,
 }
 
 impl<N: NodeTypes> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
@@ -88,7 +88,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
             static_file_provider,
             prune_modes: PruneModes::default(),
             storage: Default::default(),
-            static_files_v2_enabled: false,
+            new_static_files_enabled: false,
         }
     }
 
@@ -104,9 +104,9 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         self
     }
 
-    /// Enables using static files v2.
-    pub const fn with_static_files_v2(mut self, enabled: bool) -> Self {
-        self.static_files_v2_enabled = enabled;
+    /// Enables using new static file segments.
+    pub const fn with_new_static_files_enabled(mut self, enabled: bool) -> Self {
+        self.new_static_files_enabled = enabled;
         self
     }
 
@@ -137,7 +137,7 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
             static_file_provider,
             prune_modes: PruneModes::default(),
             storage: Default::default(),
-            static_files_v2_enabled: false,
+            new_static_files_enabled: false,
         })
     }
 }
@@ -157,7 +157,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.static_file_provider.clone(),
             self.prune_modes.clone(),
             self.storage.clone(),
-            self.static_files_v2_enabled,
+            self.new_static_files_enabled,
         ))
     }
 
@@ -173,7 +173,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.static_file_provider.clone(),
             self.prune_modes.clone(),
             self.storage.clone(),
-            self.static_files_v2_enabled,
+            self.new_static_files_enabled,
         )))
     }
 
@@ -563,7 +563,7 @@ where
             static_file_provider,
             prune_modes,
             storage,
-            static_files_v2_enabled,
+            new_static_files_enabled,
         } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
@@ -571,7 +571,7 @@ where
             .field("static_file_provider", &static_file_provider)
             .field("prune_modes", &prune_modes)
             .field("storage", &storage)
-            .field("static_files_v2_enabled", &static_files_v2_enabled)
+            .field("new_static_files_enabled", &new_static_files_enabled)
             .finish()
     }
 }
@@ -584,7 +584,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             static_file_provider: self.static_file_provider.clone(),
             prune_modes: self.prune_modes.clone(),
             storage: self.storage.clone(),
-            static_files_v2_enabled: self.static_files_v2_enabled,
+            new_static_files_enabled: self.new_static_files_enabled,
         }
     }
 }
