@@ -383,7 +383,7 @@ mod tests {
         /// across 1000 random scenarios.
         ///
         /// For random DB entries and post-state changes, creates two cursors:
-        /// - Control: pre-merged data (expected behavior)  
+        /// - Control: pre-merged data (expected behavior)
         /// - Test: `HashedPostStateCursor` (lazy overlay)
         ///
         /// Executes random sequences of `next()` and `seek()` operations, asserting
