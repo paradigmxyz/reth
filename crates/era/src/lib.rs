@@ -13,8 +13,7 @@
 //! - Era1 format: <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
 pub mod consensus_types;
-pub mod e2s_file;
-pub mod e2s_types;
+pub mod e2s;
 pub mod era1_file;
 pub mod era1_types;
 pub mod era_file_ops;
@@ -23,7 +22,7 @@ pub mod execution_types;
 #[cfg(test)]
 pub(crate) mod test_utils;
 
-use crate::e2s_types::E2sError;
+use crate::e2s::error::E2sError;
 use alloy_rlp::Decodable;
 use ssz::Decode;
 

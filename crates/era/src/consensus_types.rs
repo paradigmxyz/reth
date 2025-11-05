@@ -1,7 +1,7 @@
 //! Consensus types for Era post-merge history files
 
 use crate::{
-    e2s_types::{E2sError, Entry},
+    e2s::{error::E2sError, types::Entry},
     DecodeCompressedSsz,
 };
 use snap::{read::FrameDecoder, write::FrameEncoder};

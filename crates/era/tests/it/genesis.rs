@@ -7,7 +7,7 @@ use crate::{
     Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES, MAINNET, SEPOLIA,
 };
 use alloy_consensus::{BlockBody, Header};
-use reth_era::{e2s_types::IndexEntry, execution_types::CompressedBody};
+use reth_era::{e2s::types::IndexEntry, execution_types::CompressedBody};
 use reth_ethereum_primitives::TransactionSigned;
 
 #[tokio::test(flavor = "multi_thread")]

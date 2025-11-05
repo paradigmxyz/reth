@@ -6,8 +6,11 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>.
 
 use crate::{
-    e2s_file::{E2StoreReader, E2StoreWriter},
-    e2s_types::{E2sError, Entry, IndexEntry, Version},
+    e2s::{
+        error::E2sError,
+        file::{E2StoreReader, E2StoreWriter},
+        types::{Entry, IndexEntry, Version},
+    },
     era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
     era_file_ops::{EraFileFormat, FileReader, StreamReader, StreamWriter},
     execution_types::{

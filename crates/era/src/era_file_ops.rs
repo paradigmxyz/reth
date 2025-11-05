@@ -1,6 +1,6 @@
 //! Represents reading and writing operations' era file
 
-use crate::{e2s_types::Version, E2sError};
+use crate::e2s::{error::E2sError, types::Version};
 use std::{
     fs::File,
     io::{Read, Seek, Write},

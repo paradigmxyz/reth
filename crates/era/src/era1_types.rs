@@ -3,7 +3,7 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
 use crate::{
-    e2s_types::{Entry, IndexEntry},
+    e2s::types::{Entry, IndexEntry},
     era_file_ops::EraFileId,
     execution_types::{Accumulator, BlockTuple, MAX_BLOCKS_PER_ERA1},
 };

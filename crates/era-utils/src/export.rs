@@ -6,7 +6,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, B256, U256};
 use eyre::{eyre, Result};
 use reth_era::{
-    e2s_types::IndexEntry,
+    e2s::types::IndexEntry,
     era1_file::Era1Writer,
     era1_types::{BlockIndex, Era1Id},
     era_file_ops::{EraFileId, StreamWriter},
