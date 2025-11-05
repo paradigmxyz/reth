@@ -4,7 +4,7 @@
 
 use crate::{
     consensus_types::{CompressedBeaconState, CompressedSignedBeaconBlock},
-    e2s_types::{Entry, IndexEntry, SLOT_INDEX},
+    e2s::types::{Entry, IndexEntry, SLOT_INDEX},
 };
 
 /// Era file content group
@@ -126,7 +126,7 @@ impl IndexEntry for SlotIndex {
 mod tests {
     use super::*;
     use crate::{
-        e2s_types::{Entry, IndexEntry},
+        e2s::types::{Entry, IndexEntry},
         test_utils::{create_beacon_block, create_beacon_state},
     };
 

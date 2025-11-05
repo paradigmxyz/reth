@@ -8,7 +8,7 @@
 
 use reqwest::{Client, Url};
 use reth_era::{
-    e2s_types::E2sError,
+    e2s::error::E2sError,
     era1_file::{Era1File, Era1Reader},
     era_file_ops::FileReader,
 };

@@ -9,7 +9,7 @@ use reth_db_api::{
     RawKey, RawTable, RawValue,
 };
 use reth_era::{
-    e2s_types::E2sError,
+    e2s::error::E2sError,
     era1_file::{BlockTupleIterator, Era1Reader},
     era_file_ops::StreamReader,
     execution_types::BlockTuple,
