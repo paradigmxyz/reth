@@ -8,9 +8,9 @@
 
 use reqwest::{Client, Url};
 use reth_era::{
+    common::file_ops::FileReader,
     e2s::error::E2sError,
-    era1_file::{Era1File, Era1Reader},
-    era_file_ops::FileReader,
+    era1::file::{Era1File, Era1Reader},
 };
 use reth_era_downloader::EraClient;
 use std::{
