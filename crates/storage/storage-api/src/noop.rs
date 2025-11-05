@@ -1,13 +1,14 @@
 //! Various noop implementations for traits.
 
+#[cfg(feature = "db-api")]
+use crate::StorageChangeSetReader;
 use crate::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader,
     HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageChangeSetReader, StorageRootProvider, TransactionVariant, TransactionsProvider,
-    TrieReader,
+    StorageRootProvider, TransactionVariant, TransactionsProvider, TrieReader,
 };
 
 #[cfg(feature = "db-api")]
@@ -26,6 +27,7 @@ use core::{
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 #[cfg(feature = "db-api")]
 use reth_db_api::mock::{DatabaseMock, TxMock};
+#[cfg(feature = "db-api")]
 use reth_db_api::models::BlockNumberAddress;
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
@@ -405,6 +407,7 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
         Ok(None)
     }
 }
+#[cfg(feature = "db-api")]
 impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<C, N> {
     fn storage_changeset(
         &self,
