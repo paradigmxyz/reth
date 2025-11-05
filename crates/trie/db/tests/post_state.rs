@@ -208,6 +208,18 @@ fn fuzz_hashed_account_cursor() {
     );
 }
 
+/// Tests `is_storage_empty()` correctly distinguishes wiped storage from storage with zero values.
+///
+/// Key distinction:
+/// - `wiped = true`: Storage cleared/deleted → empty
+/// - `wiped = false` with zeros: Explicit zero values → not empty
+///
+/// Test cases:
+/// 1. No entries → empty
+/// 2. Non-zero values → not empty
+/// 3. Some zero values, not wiped → not empty
+/// 4. Wiped + zero post-state → empty
+/// 5. Wiped + non-zero post-state → not empty
 #[test]
 fn storage_is_empty() {
     let address = B256::random();
@@ -244,7 +256,7 @@ fn storage_is_empty() {
         assert!(!cursor.is_storage_empty().unwrap());
     }
 
-    // all zero values, but not wiped
+    // Some zero values, but not wiped
     {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
