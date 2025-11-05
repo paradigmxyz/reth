@@ -1346,6 +1346,63 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
             self.storage_provider.storage_changeset(block_number)
         }
     }
+
+    fn get_storage_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<Vec<(BlockNumberAddress, StorageEntry)>>> {
+        if let Some(state) =
+            self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
+        {
+            let changeset = state
+                .block()
+                .execution_output
+                .bundle
+                .reverts
+                .clone()
+                .to_plain_state_reverts()
+                .storage
+                .into_iter()
+                .flatten()
+                .find(|revert| revert.address == address)
+                .map(|revert| {
+                    revert
+                        .storage_revert
+                        .into_iter()
+                        .map(move |(key, value)| {
+                            (
+                                BlockNumberAddress((block_number, revert.address)),
+                                StorageEntry { key: key.into(), value: value.to_previous_value() },
+                            )
+                        })
+                        .collect()
+                });
+
+            Ok(changeset)
+        } else {
+            // Perform checks on whether or not changesets exist for the block.
+
+            // No prune checkpoint means history should exist and we should `unwrap_or(true)`
+            let storage_history_exists = self
+                .storage_provider
+                .get_prune_checkpoint(PruneSegment::StorageHistory)?
+                .and_then(|checkpoint| {
+                    // return true if the block number is ahead of the prune checkpoint.
+                    //
+                    // The checkpoint stores the highest pruned block number, so we should make
+                    // sure the block_number is strictly greater.
+                    checkpoint.block_number.map(|checkpoint| block_number > checkpoint)
+                })
+                .unwrap_or(true);
+
+            if !storage_history_exists {
+                return Err(ProviderError::StateAtBlockPruned(block_number))
+            }
+
+            self.storage_provider.get_storage_before_block(block_number, address)
+        }
+    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {

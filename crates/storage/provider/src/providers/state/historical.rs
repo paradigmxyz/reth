@@ -14,7 +14,8 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
-    BlockNumReader, BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider,
+    BlockNumReader, BytecodeReader, DBProvider, StateProofProvider, StorageChangeSetReader,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -396,8 +397,9 @@ impl<Provider: Sync> HashedPostStateProvider for HistoricalStateProviderRef<'_, 
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> StateProvider
-    for HistoricalStateProviderRef<'_, Provider>
+impl<
+        Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader,
+    > StateProvider for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get storage.
     fn storage(
@@ -407,18 +409,14 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> 
     ) -> ProviderResult<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
-            HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
-                self.tx()
-                    .cursor_dup_read::<tables::StorageChangeSets>()?
-                    .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
-                    .filter(|entry| entry.key == storage_key)
-                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
-                        block_number: changeset_block_number,
-                        address,
-                        storage_key: Box::new(storage_key),
-                    })?
-                    .value,
-            )),
+            HistoryInfo::InChangeset(changeset_block_number) => Ok(self
+                .provider
+                .get_storage_before_block(changeset_block_number, address)?
+                .and_then(|storage_keys| {
+                    storage_keys.iter().find_map(|(_, storage_entry)| {
+                        (storage_entry.key == storage_key).then_some(storage_entry.value)
+                    })
+                })),
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
                 .tx()
                 .cursor_dup_read::<tables::PlainStorageState>()?
@@ -487,7 +485,7 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader]);
+delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -534,6 +532,7 @@ mod tests {
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
         BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+        StorageChangeSetReader,
     };
     use reth_storage_errors::provider::ProviderError;
 
@@ -545,7 +544,7 @@ mod tests {
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
     const fn assert_historical_state_provider<
-        T: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader,
+        T: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader,
     >() {
         assert_state_provider::<HistoricalStateProvider<T>>();
     }

@@ -879,6 +879,28 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
             .map(|result| -> ProviderResult<_> { Ok(result?) })
             .collect()
     }
+
+    fn get_storage_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<Vec<(BlockNumberAddress, StorageEntry)>>> {
+        let storage_range: Range<BlockNumberAddress> =
+            (block_number, address).into()..(block_number + 1, address).into();
+
+        let entries = self
+            .tx
+            .cursor_dup_read::<tables::StorageChangeSets>()?
+            .walk_range(storage_range)?
+            .map(|result| result.map_err(ProviderError::from))
+            .collect::<ProviderResult<Vec<_>>>()?;
+
+        if entries.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(entries))
+        }
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {

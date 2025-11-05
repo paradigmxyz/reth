@@ -4,6 +4,7 @@ use alloc::{
 };
 use alloy_primitives::{Address, BlockNumber, B256};
 use core::ops::RangeInclusive;
+use reth_db_api::models::BlockNumberAddress;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
 
@@ -40,5 +41,14 @@ pub trait StorageChangeSetReader: Send + Sync {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>>;
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>>;
+
+    /// Search the block's storage changeset for the given address and return the result
+    ///
+    /// Return `None` if the account was not changed in this block
+    fn get_storage_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<Vec<(BlockNumberAddress, StorageEntry)>>>;
 }

@@ -685,6 +685,14 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         self.consistent_provider()?.storage_changeset(block_number)
     }
+
+    fn get_storage_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<Vec<(BlockNumberAddress, StorageEntry)>>> {
+        self.consistent_provider()?.get_storage_before_block(block_number, address)
+    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {

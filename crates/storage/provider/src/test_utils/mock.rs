@@ -18,7 +18,7 @@ use alloy_primitives::{
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, EthChainSpec};
-use reth_db::transaction::DbTx;
+use reth_db::{models::BlockNumberAddress, transaction::DbTx};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
@@ -27,14 +27,14 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
-    SignerRecoverable,
+    SignerRecoverable, StorageEntry,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageRootProvider, TrieReader,
+    StorageChangeSetReader, StorageRootProvider, TrieReader,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -988,6 +988,25 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
         _block_number: BlockNumber,
         _address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
+        Ok(None)
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn storage_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn get_storage_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<Vec<(BlockNumberAddress, StorageEntry)>>> {
         Ok(None)
     }
 }

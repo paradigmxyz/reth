@@ -37,20 +37,22 @@ use parking_lot::RwLock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
-    models::StoredBlockBodyIndices,
+    models::{BlockNumberAddress, StoredBlockBodyIndices},
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };
-use reth_primitives::{Account, Bytecode, RecoveredBlock, SealedHeader, TransactionMeta};
+use reth_primitives::{
+    Account, Bytecode, RecoveredBlock, SealedHeader, StorageEntry, TransactionMeta,
+};
 use reth_provider::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
     CanonChainTracker, CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
     ChainStateBlockReader, ChainStateBlockWriter, ChangeSetReader, DatabaseProviderFactory,
     HeaderProvider, PruneCheckpointReader, ReceiptProvider, StageCheckpointReader, StateProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageReader,
-    TransactionVariant, TransactionsProvider,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
+    StorageReader, TransactionVariant, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_rpc_convert::{TryFromBlockResponse, TryFromReceiptResponse, TryFromTransactionResponse};
@@ -1750,6 +1752,28 @@ where
         _block_number: BlockNumber,
         _address: Address,
     ) -> ProviderResult<Option<reth_db_api::models::AccountBeforeTx>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<P, Node, N> StorageChangeSetReader for RpcBlockchainStateProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
+    fn storage_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn get_storage_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<Vec<(BlockNumberAddress, StorageEntry)>>> {
         Err(ProviderError::UnsupportedProvider)
     }
 }

@@ -6,7 +6,8 @@ use crate::{
     HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider, TrieReader,
+    StorageChangeSetReader, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    TrieReader,
 };
 
 #[cfg(feature = "db-api")]
@@ -25,10 +26,13 @@ use core::{
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 #[cfg(feature = "db-api")]
 use reth_db_api::mock::{DatabaseMock, TxMock};
+use reth_db_api::models::BlockNumberAddress;
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{
+    Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader, StorageEntry,
+};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -398,6 +402,22 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
         _block_number: BlockNumber,
         _address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
+        Ok(None)
+    }
+}
+impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<C, N> {
+    fn storage_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn get_storage_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<Vec<(BlockNumberAddress, StorageEntry)>>> {
         Ok(None)
     }
 }
