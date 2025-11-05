@@ -704,6 +704,12 @@ pub(super) struct MultiProofTask {
     multiproof_manager: MultiproofManager,
     /// multi proof task metrics
     metrics: MultiProofTaskMetrics,
+    /// Number of prefetch proofs requested.
+    prefetch_proofs_requested: u64,
+    /// Number of state update proofs requested.
+    state_update_proofs_requested: u64,
+    /// Number of proofs processed.
+    proofs_processed: u64,
 }
 
 impl MultiProofTask {
@@ -732,6 +738,9 @@ impl MultiProofTask {
                 proof_result_tx,
             ),
             metrics,
+            prefetch_proofs_requested: 0,
+            state_update_proofs_requested: 0,
+            proofs_processed: 0,
         }
     }
 
@@ -1035,10 +1044,6 @@ impl MultiProofTask {
         skip_all
     )]
     pub(crate) fn run(mut self) {
-        // TODO convert those into fields
-        let mut prefetch_proofs_requested = 0;
-        let mut state_update_proofs_requested = 0;
-        let mut proofs_processed = 0;
 
         let mut updates_finished = false;
 
@@ -1057,7 +1062,7 @@ impl MultiProofTask {
                 recv(self.proof_result_rx) -> proof_msg => {
                     match proof_msg {
                         Ok(proof_result) => {
-                            proofs_processed += 1;
+                            self.proofs_processed += 1;
 
                             self.metrics
                                 .proof_calculation_duration_histogram
@@ -1071,7 +1076,7 @@ impl MultiProofTask {
                                     debug!(
                                         target: "engine::tree::payload_processor::multiproof",
                                         sequence = proof_result.sequence_number,
-                                        total_proofs = proofs_processed,
+                                        total_proofs = self.proofs_processed,
                                         "Processing calculated proof from worker"
                                     );
 
@@ -1093,9 +1098,9 @@ impl MultiProofTask {
                             }
 
                             if self.is_done(
-                                proofs_processed,
-                                state_update_proofs_requested,
-                                prefetch_proofs_requested,
+                                self.proofs_processed,
+                                self.state_update_proofs_requested,
+                                self.prefetch_proofs_requested,
                                 updates_finished,
                             ) {
                                 debug!(
@@ -1129,12 +1134,12 @@ impl MultiProofTask {
                                 let account_targets = targets.len();
                                 let storage_targets =
                                     targets.values().map(|slots| slots.len()).sum::<usize>();
-                                prefetch_proofs_requested += self.on_prefetch_proof(targets);
+                                self.prefetch_proofs_requested += self.on_prefetch_proof(targets);
                                 debug!(
                                     target: "engine::tree::payload_processor::multiproof",
                                     account_targets,
                                     storage_targets,
-                                    prefetch_proofs_requested,
+                                    self.prefetch_proofs_requested,
                                     "Prefetching proofs"
                                 );
                             }
@@ -1151,12 +1156,12 @@ impl MultiProofTask {
                                 }
 
                                 let len = update.len();
-                                state_update_proofs_requested += self.on_state_update(source, update);
+                                self.state_update_proofs_requested += self.on_state_update(source, update);
                                 debug!(
                                     target: "engine::tree::payload_processor::multiproof",
                                     ?source,
                                     len,
-                                    ?state_update_proofs_requested,
+                                    self.state_update_proofs_requested,
                                     "Received new state update"
                                 );
                             }
@@ -1167,9 +1172,9 @@ impl MultiProofTask {
                                 updates_finished_time = Some(Instant::now());
 
                                 if self.is_done(
-                                    proofs_processed,
-                                    state_update_proofs_requested,
-                                    prefetch_proofs_requested,
+                                    self.proofs_processed,
+                                    self.state_update_proofs_requested,
+                                    self.prefetch_proofs_requested,
                                     updates_finished,
                                 ) {
                                     debug!(
@@ -1182,7 +1187,7 @@ impl MultiProofTask {
                             MultiProofMessage::EmptyProof { sequence_number, state } => {
                                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::EmptyProof");
 
-                                proofs_processed += 1;
+                                self.proofs_processed += 1;
 
                                 if let Some(combined_update) = self.on_proof(
                                     sequence_number,
@@ -1192,9 +1197,9 @@ impl MultiProofTask {
                                 }
 
                                 if self.is_done(
-                                    proofs_processed,
-                                    state_update_proofs_requested,
-                                    prefetch_proofs_requested,
+                                    self.proofs_processed,
+                                    self.state_update_proofs_requested,
+                                    self.prefetch_proofs_requested,
                                     updates_finished,
                                 ) {
                                     debug!(
@@ -1216,16 +1221,16 @@ impl MultiProofTask {
 
         debug!(
             target: "engine::tree::payload_processor::multiproof",
-            total_updates = state_update_proofs_requested,
-            total_proofs = proofs_processed,
+            total_updates = self.state_update_proofs_requested,
+            total_proofs = self.proofs_processed,
             total_time = ?first_update_time.map(|t|t.elapsed()),
             time_since_updates_finished = ?updates_finished_time.map(|t|t.elapsed()),
             "All proofs processed, ending calculation"
         );
 
         // update total metrics on finish
-        self.metrics.state_updates_received_histogram.record(state_update_proofs_requested as f64);
-        self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
+        self.metrics.state_updates_received_histogram.record(self.state_update_proofs_requested as f64);
+        self.metrics.proofs_processed_histogram.record(self.proofs_processed as f64);
         if let Some(total_time) = first_update_time.map(|t| t.elapsed()) {
             self.metrics.multiproof_task_total_duration_histogram.record(total_time);
         }
