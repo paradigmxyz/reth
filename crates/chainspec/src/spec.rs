@@ -580,7 +580,7 @@ impl<H: BlockHeader> ChainSpec<H> {
 
     /// An internal helper function that returns a head block that satisfies a given Fork condition.
     ///
-    /// Creates a [`Head`] representation for a fork activation point, used by [`fork_id`] to
+    /// Creates a [`Head`] representation for a fork activation point, used by [`Self::fork_id`] to
     /// compute fork IDs. For timestamp-based forks, includes the last block-based fork number
     /// before the merge (if any).
     pub(crate) fn satisfy(&self, cond: ForkCondition) -> Head {
