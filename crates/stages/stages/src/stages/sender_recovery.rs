@@ -1,7 +1,7 @@
-use alloy_primitives::{Address, TxNumber};
+use alloy_primitives::{Address, BlockNumber, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
-use reth_db::static_file::TransactionMask;
+use reth_db::{models::StoredBlockBodyIndices, static_file::TransactionMask};
 use reth_db_api::{
     cursor::DbCursorRW,
     table::Value,
@@ -13,7 +13,7 @@ use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
     providers::StaticFileWriter, BlockBodyIndicesProvider, BlockReader, DBProvider, HeaderProvider,
     ProviderError, PruneCheckpointReader, StaticFileProviderFactory,
-    StaticFilesConfigurationProvider, StatsReader, WriteDestination,
+    StaticFilesConfigurationProvider, StatsReader, TransactionsProvider, WriteDestination,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_api::{
@@ -120,8 +120,17 @@ where
             )
         };
 
+        let mut block_body_indices =
+            block_range.clone().into_iter().zip(provider.block_body_indices_range(block_range)?);
+
         for range in batch {
-            recover_range(range, provider, tx_batch_sender.clone(), &mut destination)?;
+            recover_range(
+                range,
+                &mut block_body_indices,
+                provider,
+                tx_batch_sender.clone(),
+                &mut destination,
+            )?;
         }
 
         Ok(ExecOutput {
@@ -154,13 +163,18 @@ where
 }
 
 fn recover_range<Provider, CURSOR>(
-    tx_range: Range<u64>,
+    tx_range: Range<TxNumber>,
+    block_body_indices: &mut impl Iterator<Item = (BlockNumber, StoredBlockBodyIndices)>,
     provider: &Provider,
     tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>,
     destination: &mut WriteDestination<'_, CURSOR, Provider::Primitives>,
 ) -> Result<(), StageError>
 where
-    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
+    Provider: DBProvider
+        + HeaderProvider
+        + TransactionsProvider
+        + BlockBodyIndicesProvider
+        + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
@@ -184,6 +198,9 @@ where
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Appending recovered senders to the database");
 
     let mut processed_transactions = 0;
+    let (mut current_block_number, mut current_block_body_indices) =
+        block_body_indices.next().unwrap();
+    let mut last_block_number = None;
     for channel in receivers {
         while let Ok(recovered) = channel.recv() {
             let (tx_id, sender) = match recovered {
@@ -222,12 +239,37 @@ where
                 }
             };
 
-            // TODO: increment block
+            // If current block body indices do not contain the transaction we're recovering, we
+            // need to update current block number and body indices we're processing
+            if !current_block_body_indices.contains_tx(tx_id) {
+                (current_block_number, current_block_body_indices) =
+                    block_body_indices.next().unwrap();
+            }
+
+            // If this is the first block we're processing or the current block number was updated,
+            // increment the destination block number
+            if last_block_number
+                .is_none_or(|last_block_number| last_block_number != current_block_number)
+            {
+                // Special case for block number #0 that cannot have transactions, but still needs
+                // to be incremented
+                if current_block_number == 1 {
+                    destination.increment_block(0)?;
+                }
+                destination.increment_block(current_block_number)?;
+                last_block_number = Some(current_block_number);
+            }
+
             destination.append_sender(tx_id, &sender)?;
             processed_transactions += 1;
         }
     }
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Finished recovering senders batch");
+
+    // Drain block body indices to increment the destination block number
+    for (block_number, _) in block_body_indices {
+        destination.increment_block(block_number)?;
+    }
 
     // Fail safe to ensure that we do not proceed without having recovered all senders.
     let expected = tx_range.end - tx_range.start;
