@@ -1,10 +1,10 @@
-//! Era types for `.era` files
+//! Era types for `.era` file content
 //!
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
 
 use crate::{
-    consensus_types::{CompressedBeaconState, CompressedSignedBeaconBlock},
     e2s::types::{Entry, IndexEntry, SLOT_INDEX},
+    era::types::consensus::{CompressedBeaconState, CompressedSignedBeaconBlock},
 };
 
 /// Era file content group
