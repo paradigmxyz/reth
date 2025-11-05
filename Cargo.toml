@@ -646,7 +646,7 @@ secp256k1 = { version = "0.30", default-features = false, features = ["global-co
 rand_08 = { package = "rand", version = "0.8" }
 
 # for eip-4844
-c-kzg = "2.1.4"
+c-kzg = "2.1.5"
 
 # config
 toml = "0.8"
