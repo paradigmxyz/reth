@@ -7,7 +7,7 @@ use crate::{
         TreeConfig,
     },
 };
-use alloy_consensus::Header;
+
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -336,15 +336,12 @@ impl TestHarness {
 
     fn persist_blocks(&self, blocks: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>) {
         let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
-        let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
 
         for block in &blocks {
             block_data.push((block.hash(), block.clone_block()));
-            headers_data.push((block.hash(), block.header().clone()));
         }
 
         self.provider.extend_blocks(block_data);
-        self.provider.extend_headers(headers_data);
     }
 }
 
