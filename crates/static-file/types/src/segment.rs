@@ -40,7 +40,7 @@ pub enum StaticFileSegment {
 impl StaticFileSegment {
     /// Returns the segment as a string.
     pub const fn as_str(&self) -> &'static str {
-        // `strum` doesn't generate a comment for `into_str` when using `IntoStaticStr` derive
+        // `strum` doesn't generate a doc comment for `into_str` when using `IntoStaticStr` derive
         // macro, so we need to manually implement it.
         match self {
             Self::Headers => "headers",
