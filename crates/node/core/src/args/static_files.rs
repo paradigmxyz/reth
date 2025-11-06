@@ -21,17 +21,6 @@ pub struct StaticFilesArgs {
 }
 
 impl StaticFilesArgs {
-    /// Converts the CLI arguments to a [`StaticFilesConfig`].
-    pub const fn to_config(&self) -> StaticFilesConfig {
-        StaticFilesConfig {
-            blocks_per_file: BlocksPerFileConfig {
-                headers: self.blocks_per_file_headers,
-                transactions: self.blocks_per_file_transactions,
-                receipts: self.blocks_per_file_receipts,
-            },
-        }
-    }
-
     /// Merges the CLI arguments with an existing [`StaticFilesConfig`], giving priority to CLI
     /// args.
     pub fn merge_with_config(&self, config: StaticFilesConfig) -> StaticFilesConfig {
