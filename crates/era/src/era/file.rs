@@ -179,6 +179,7 @@ impl<R: Read + Seek> EraReader<R> {
         let state_slot_index = state_slot_index
             .ok_or_else(|| E2sError::Ssz("Era file missing state slot index".to_string()))?;
 
+        // Create appropriate `EraGroup`, genesis vs non-genesis
         let mut group = if let Some(block_index) = block_slot_index {
             EraGroup::with_block_index(blocks, state, block_index, state_slot_index)
         } else {
@@ -258,6 +259,7 @@ impl<W: Write> StreamWriter<W> for EraWriter<W> {
         if let Some(ref block_index) = file.group.slot_index {
             self.write_block_slot_index(block_index)?;
         }
+
         // Write state index
         self.write_state_slot_index(&file.group.state_slot_index)?;
 

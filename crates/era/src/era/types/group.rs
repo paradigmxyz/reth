@@ -215,16 +215,16 @@ impl EraFileId for EraId {
         self.slot_count
     }
     /// Convert to file name following the era file naming:
-    /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.era(1)`
+    /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.era`
     /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
-    /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
+    /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
     fn to_file_name(&self) -> String {
         let era_number = self.era_number();
         let era_count = self.calculate_era_count();
 
         if let Some(hash) = self.hash {
             format!(
-                "{}-{:05}-{:05}-{:02x}{:02x}{:02x}{:02x}.era1",
+                "{}-{:05}-{:05}-{:02x}{:02x}{:02x}{:02x}.era",
                 self.network_name, era_number, era_count, hash[0], hash[1], hash[2], hash[3]
             )
         } else {
