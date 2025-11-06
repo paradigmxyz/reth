@@ -31,6 +31,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
+use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
@@ -39,7 +40,7 @@ use reth_db_api::{
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
-        BlockNumberHashedAddress, ShardedKey, StoredBlockBodyIndices,
+        BlockNumberHashedAddress, ShardedKey, StorageSettings, StoredBlockBodyIndices,
     },
     table::Table,
     tables,
@@ -52,13 +53,14 @@ use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, RecoveredBlock, SealedHeader, StorageEntry,
 };
 use reth_prune_types::{
-    PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE, PRUNE_SEGMENTS,
+    PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, NodePrimitivesProvider, StateProvider,
-    StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
+    NodePrimitivesProvider, StateProvider, StorageChangeSetReader, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -153,6 +155,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     prune_modes: PruneModes,
     /// Node storage handler.
     storage: Arc<N::Storage>,
+    /// Storage configuration settings for this node
+    storage_settings: Arc<RwLock<StorageSettings>>,
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -248,8 +252,9 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
+        storage_settings: Arc<RwLock<StorageSettings>>,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage }
+        Self { tx, chain_spec, static_file_provider, prune_modes, storage, storage_settings }
     }
 }
 
@@ -494,8 +499,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
+        storage_settings: Arc<RwLock<StorageSettings>>,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage }
+        Self { tx, chain_spec, static_file_provider, prune_modes, storage, storage_settings }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -3024,13 +3030,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(PRUNE_SEGMENTS
-            .iter()
+        Ok(PruneSegment::variants()
             .filter_map(|segment| {
                 self.tx
-                    .get::<tables::PruneCheckpoints>(*segment)
+                    .get::<tables::PruneCheckpoints>(segment)
                     .transpose()
-                    .map(|chk| chk.map(|chk| (*segment, chk)))
+                    .map(|chk| chk.map(|chk| (segment, chk)))
             })
             .collect::<Result<_, _>>()?)
     }
@@ -3131,6 +3136,28 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         }
 
         Ok(true)
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> MetadataProvider for DatabaseProvider<TX, N> {
+    fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>> {
+        self.tx.get::<tables::Metadata>(key.to_string()).map_err(Into::into)
+    }
+}
+
+impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
+    fn write_metadata(&self, key: &str, value: Vec<u8>) -> ProviderResult<()> {
+        self.tx.put::<tables::Metadata>(key.to_string(), value).map_err(Into::into)
+    }
+}
+
+impl<TX: Send + Sync, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
+    fn cached_storage_settings(&self) -> StorageSettings {
+        *self.storage_settings.read()
+    }
+
+    fn set_storage_settings_cache(&self, settings: StorageSettings) {
+        *self.storage_settings.write() = settings;
     }
 }
 

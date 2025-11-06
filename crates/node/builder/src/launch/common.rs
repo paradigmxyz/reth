@@ -471,7 +471,7 @@ where
                 .build()?;
 
         let factory =
-            ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)
+            ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
                 .with_prune_modes(self.prune_modes());
 
         let has_receipt_pruning = self.toml_config().prune.has_receipts_pruning();

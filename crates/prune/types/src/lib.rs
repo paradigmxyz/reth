@@ -25,5 +25,5 @@ pub use pruner::{
     PruneInterruptReason, PruneProgress, PrunedSegmentInfo, PrunerOutput, SegmentOutput,
     SegmentOutputCheckpoint,
 };
-pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError, PRUNE_SEGMENTS};
+pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
 pub use target::{PruneModes, UnwindTargetPrunedError, MINIMUM_PRUNING_DISTANCE};

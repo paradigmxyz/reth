@@ -6,13 +6,19 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>.
 
 use crate::{
-    e2s_file::{E2StoreReader, E2StoreWriter},
-    e2s_types::{E2sError, Entry, IndexEntry, Version},
-    era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
-    era_file_ops::{EraFileFormat, FileReader, StreamReader, StreamWriter},
-    execution_types::{
-        self, Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
-        TotalDifficulty, MAX_BLOCKS_PER_ERA1,
+    common::file_ops::{EraFileFormat, FileReader, StreamReader, StreamWriter},
+    e2s::{
+        error::E2sError,
+        file::{E2StoreReader, E2StoreWriter},
+        types::{Entry, IndexEntry, Version},
+    },
+    era1::types::{
+        execution::{
+            Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
+            TotalDifficulty, ACCUMULATOR, COMPRESSED_BODY, COMPRESSED_HEADER, COMPRESSED_RECEIPTS,
+            MAX_BLOCKS_PER_ERA1, TOTAL_DIFFICULTY,
+        },
+        group::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
     },
 };
 use alloy_primitives::BlockNumber;
@@ -127,19 +133,19 @@ impl<R: Read + Seek> BlockTupleIterator<R> {
             };
 
             match entry.entry_type {
-                execution_types::COMPRESSED_HEADER => {
+                COMPRESSED_HEADER => {
                     self.headers.push_back(CompressedHeader::from_entry(&entry)?);
                 }
-                execution_types::COMPRESSED_BODY => {
+                COMPRESSED_BODY => {
                     self.bodies.push_back(CompressedBody::from_entry(&entry)?);
                 }
-                execution_types::COMPRESSED_RECEIPTS => {
+                COMPRESSED_RECEIPTS => {
                     self.receipts.push_back(CompressedReceipts::from_entry(&entry)?);
                 }
-                execution_types::TOTAL_DIFFICULTY => {
+                TOTAL_DIFFICULTY => {
                     self.difficulties.push_back(TotalDifficulty::from_entry(&entry)?);
                 }
-                execution_types::ACCUMULATOR => {
+                ACCUMULATOR => {
                     if self.accumulator.is_some() {
                         return Err(E2sError::Ssz("Multiple accumulator entries found".to_string()));
                     }
@@ -327,10 +333,7 @@ impl<W: Write> StreamWriter<W> for Era1Writer<W> {
 
 impl<W: Write> Era1Writer<W> {
     /// Write a single block tuple
-    pub fn write_block(
-        &mut self,
-        block_tuple: &crate::execution_types::BlockTuple,
-    ) -> Result<(), E2sError> {
+    pub fn write_block(&mut self, block_tuple: &BlockTuple) -> Result<(), E2sError> {
         if !self.has_written_version {
             self.write_version()?;
         }
@@ -403,13 +406,7 @@ impl<W: Write> Era1Writer<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        era_file_ops::FileWriter,
-        execution_types::{
-            Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
-            TotalDifficulty,
-        },
-    };
+    use crate::common::file_ops::FileWriter;
     use alloy_primitives::{B256, U256};
     use std::io::Cursor;
     use tempfile::tempdir;
