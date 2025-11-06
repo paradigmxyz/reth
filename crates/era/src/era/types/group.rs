@@ -6,8 +6,10 @@ use crate::{
     common::file_ops::EraFileId,
     e2s::types::{Entry, IndexEntry, SLOT_INDEX},
     era::types::consensus::{CompressedBeaconState, CompressedSignedBeaconBlock},
-    era1::types::execution::MAX_BLOCKS_PER_ERA1,
 };
+
+/// Number of slots per historical root in ERA files
+pub const SLOTS_PER_HISTORICAL_ROOT: u64 = 8192;
 
 /// Era file content group
 ///
@@ -161,7 +163,7 @@ impl EraId {
         // Calculate the actual last block number in the range
         let last_block = self.start_slot + self.slot_count as u64 - 1;
         // Find which era the last block belongs to
-        let last_era = last_block / MAX_BLOCKS_PER_ERA1 as u64;
+        let last_era = last_block / SLOTS_PER_HISTORICAL_ROOT as u64;
         // Count how many eras we span
         last_era - first_era + 1
     }
@@ -186,7 +188,7 @@ impl EraFileId for EraId {
     fn to_file_name(&self) -> String {
         // Find which era the first block belongs to
         // TODO: double check we can use `start_slot` instead of `start_block`
-        let era_number = self.start_slot / MAX_BLOCKS_PER_ERA1 as u64;
+        let era_number = self.start_slot / SLOTS_PER_HISTORICAL_ROOT as u64;
         let era_count = self.calculate_era_count(era_number);
         if let Some(hash) = self.hash {
             format!(
