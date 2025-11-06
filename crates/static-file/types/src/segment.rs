@@ -7,7 +7,7 @@ use alloy_primitives::TxNumber;
 use core::{ops::RangeInclusive, str::FromStr};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use strum::{AsRefStr, EnumString};
+use strum::{AsRefStr, EnumIs, EnumString};
 
 #[derive(
     Debug,
@@ -23,6 +23,7 @@ use strum::{AsRefStr, EnumString};
     EnumString,
     AsRefStr,
     Display,
+    EnumIs,
 )]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Segment of the data that can be moved to static files.
@@ -120,16 +121,6 @@ impl StaticFileSegment {
         }
 
         Some((segment, SegmentRangeInclusive::new(block_start, block_end)))
-    }
-
-    /// Returns `true` if the segment is `StaticFileSegment::Headers`.
-    pub const fn is_headers(&self) -> bool {
-        matches!(self, Self::Headers)
-    }
-
-    /// Returns `true` if the segment is `StaticFileSegment::Receipts`.
-    pub const fn is_receipts(&self) -> bool {
-        matches!(self, Self::Receipts)
     }
 
     /// Returns `true` if a segment row is linked to a transaction.
