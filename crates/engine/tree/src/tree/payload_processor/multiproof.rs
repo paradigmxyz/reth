@@ -743,7 +743,12 @@ impl MultiProofTask {
     /// Handles request for proof prefetch.
     ///
     /// Returns a number of proofs that were spawned.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip_all, fields(accounts = targets.len()))]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::multiproof",
+        skip_all,
+        fields(accounts = targets.len(), chunks = 0)
+    )]
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
@@ -785,10 +790,16 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if should_chunk && let Some(chunk_size) = self.chunk_size {
+        if should_chunk &&
+            let Some(chunk_size) = self.chunk_size &&
+            proof_targets.chunking_length() > chunk_size
+        {
+            let mut chunks = 0usize;
             for proof_targets_chunk in proof_targets.chunks(chunk_size) {
                 dispatch(proof_targets_chunk);
+                chunks += 1;
             }
+            tracing::Span::current().record("chunks", chunks);
         } else {
             dispatch(proof_targets);
         }
@@ -874,7 +885,12 @@ impl MultiProofTask {
     /// Handles state updates.
     ///
     /// Returns a number of proofs that were spawned.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip(self, update), fields(accounts = update.len()))]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::multiproof",
+        skip(self, update),
+        fields(accounts = update.len(), chunks = 0)
+    )]
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
@@ -934,10 +950,16 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if should_chunk && let Some(chunk_size) = self.chunk_size {
+        if should_chunk &&
+            let Some(chunk_size) = self.chunk_size &&
+            not_fetched_state_update.chunking_length() > chunk_size
+        {
+            let mut chunks = 0usize;
             for chunk in not_fetched_state_update.chunks(chunk_size) {
                 dispatch(chunk);
+                chunks += 1;
             }
+            tracing::Span::current().record("chunks", chunks);
         } else {
             dispatch(not_fetched_state_update);
         }
@@ -1295,7 +1317,7 @@ mod tests {
     {
         let rt_handle = get_test_runtime_handle();
         let overlay_factory = OverlayStateProviderFactory::new(factory);
-        let task_ctx = ProofTaskCtx::new(overlay_factory, Default::default());
+        let task_ctx = ProofTaskCtx::new(overlay_factory);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
 

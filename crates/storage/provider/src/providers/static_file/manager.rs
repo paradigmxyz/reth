@@ -228,7 +228,7 @@ pub struct StaticFileProviderInner<N> {
     map: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
     /// Min static file range for each segment.
     /// This index is initialized on launch to keep track of the lowest, non-expired static file
-    /// per segment.
+    /// per segment and gets updated on `Self::update_index()`.
     ///
     /// This tracks the lowest static file per segment together with the block range in that
     /// file. E.g. static file is batched in 500k block intervals then the lowest static file
@@ -592,6 +592,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let header = jar.user_header().clone();
         jar.delete().map_err(ProviderError::other)?;
 
+        // SAFETY: this is currently necessary to ensure that certain indexes like
+        // `static_files_min_block` have the correct values after pruning.
         self.initialize_index()?;
 
         Ok(header)
@@ -677,6 +679,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         segment_max_block: Option<BlockNumber>,
     ) -> ProviderResult<()> {
+        let mut min_block = self.static_files_min_block.write();
         let mut max_block = self.static_files_max_block.write();
         let mut expected_block_index = self.static_files_expected_block_index.write();
         let mut tx_index = self.static_files_tx_index.write();
@@ -695,6 +698,34 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 )
                 .map_err(ProviderError::other)?;
 
+                // Update min_block to track the lowest block range of the segment.
+                // This is initially set by initialize_index() on node startup, but must be updated
+                // as the file grows to prevent stale values.
+                //
+                // Without this update, min_block can remain at genesis (e.g. Some([0..=0]) or None)
+                // even after syncing to higher blocks (e.g. [0..=100]). A stale
+                // min_block causes get_lowest_static_file_block() to return the
+                // wrong end value, which breaks pruning logic that relies on it for
+                // safety checks.
+                //
+                // Example progression:
+                // 1. Node starts, initialize_index() sets min_block = [0..=0]
+                // 2. Sync to block 100, this update sets min_block = [0..=100]
+                // 3. Pruner calls get_lowest_static_file_block() -> returns 100 (correct). Without
+                //    this update, it would incorrectly return 0 (stale)
+                if let Some(current_block_range) = jar.user_header().block_range() {
+                    min_block
+                        .entry(segment)
+                        .and_modify(|current_min| {
+                            // delete_jar WILL ALWAYS re-initialize all indexes, so we are always
+                            // sure that current_min is always the lowest.
+                            if current_block_range.start() == current_min.start() {
+                                *current_min = current_block_range;
+                            }
+                        })
+                        .or_insert(current_block_range);
+                }
+
                 // Update the expected block index
                 expected_block_index
                     .entry(segment)
@@ -705,7 +736,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     })
                     .or_insert_with(|| BTreeMap::from([(fixed_range.end(), fixed_range)]));
 
-                // Update the tx index by first removing all entries which have a higher
+                // Updates the tx index by first removing all entries which have a higher
                 // block_start than our current static file.
                 if let Some(tx_range) = jar.user_header().tx_range() {
                     // Current block range has the same block start as `fixed_range``, but block end
@@ -753,6 +784,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
             None => {
                 max_block.remove(&segment);
+                min_block.remove(&segment);
                 expected_block_index.remove(&segment);
                 tx_index.remove(&segment);
             }

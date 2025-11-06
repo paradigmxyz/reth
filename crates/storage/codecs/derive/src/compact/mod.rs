@@ -82,7 +82,7 @@ pub fn get_fields(data: &Data) -> FieldList {
                 );
                 load_field(&data_fields.unnamed[0], &mut fields, false);
             }
-            syn::Fields::Unit => todo!(),
+            syn::Fields::Unit => unimplemented!("Compact does not support unit structs"),
         },
         Data::Enum(data) => {
             for variant in &data.variants {
@@ -106,7 +106,7 @@ pub fn get_fields(data: &Data) -> FieldList {
                 }
             }
         }
-        Data::Union(_) => todo!(),
+        Data::Union(_) => unimplemented!("Compact does not support union types"),
     }
 
     fields

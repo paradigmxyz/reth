@@ -974,6 +974,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
         // Helper function to check if a value matches the expected value
+        #[inline]
         fn check_value_match(
             actual_value: &Vec<u8>,
             expected_value: Option<&Vec<u8>>,
