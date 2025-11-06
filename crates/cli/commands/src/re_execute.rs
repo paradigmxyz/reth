@@ -114,7 +114,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             .ok_or_else(|| eyre::eyre!("receipts for block {} not found", block.number()))?;
 
                         // Helper function to calculate gas used for a specific transaction
-                        let calculate_gas_used = |receipts: &[_], index: usize| -> u64 {
+                       fn calculate_gas_used(receipts: &[impl TxReceipt], index: usize) -> u64 {
                             let prev_gas = if index == 0 {
                                 0
                             } else {
