@@ -68,6 +68,29 @@ impl EraGroup {
     pub fn add_entry(&mut self, entry: Entry) {
         self.other_entries.push(entry);
     }
+
+    /// Get the starting slot and slot count.
+    pub const fn slot_range(&self) -> (u64, u32) {
+        if let Some(ref block_index) = self.slot_index {
+            // Non-genesis era: use block slot index
+            (block_index.starting_slot, block_index.slot_count() as u32)
+        } else {
+            // Genesis era: use state slot index, it should be slot 0
+            // Genesis has only the genesis state, no blocks
+            (self.state_slot_index.starting_slot, 0)
+        }
+    }
+
+    /// Get the starting slot number
+    pub const fn starting_slot(&self) -> u64 {
+        self.slot_range().0
+    }
+
+    /// Get the number of slots
+    pub const fn slot_count(&self) -> u32 {
+        self.slot_range().1
+    }
+
 }
 
 /// [`SlotIndex`] records store offsets to data at specific slots

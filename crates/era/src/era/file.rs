@@ -19,7 +19,6 @@ use crate::{
         },
         group::{EraGroup, EraId, SlotIndex},
     },
-    era1::types::execution::BlockTuple,
 };
 
 use std::{
@@ -164,7 +163,7 @@ impl<R: Read + Seek> EraReader<R> {
         let _version_entry = match self.reader.read_version()? {
             Some(entry) if entry.is_version() => entry,
             Some(_) => return Err(E2sError::Ssz("First entry is not a Version entry".to_string())),
-            None => return Err(E2sError::Ssz("Empty Era1 file".to_string())),
+            None => return Err(E2sError::Ssz("Empty Era file".to_string())),
         };
 
         let mut iter = self.iter();
@@ -187,13 +186,9 @@ impl<R: Read + Seek> EraReader<R> {
         };
 
         // Add other entries
-        for entry in other_entries {
-            group.add_entry(entry);
-        }
+         for entry in other_entries { group.add_entry(entry); }
 
-        let start_slot = group.slot_index.as_ref().map(|idx| idx.starting_slot).unwrap_or(0);
-
-        let slot_count = group.blocks.len() as u32;
+        let (start_slot, slot_count) = group.slot_range();
 
         let id = EraId::new(network_name, start_slot, slot_count);
 
@@ -244,11 +239,11 @@ impl<W: Write> StreamWriter<W> for EraWriter<W> {
 
         // Write all blocks
         for block in &file.group.blocks {
-            self.write_block(block)?;
+            self.write_beacon_block(block)?;
         }
 
         // Write state
-        self.write_state(&file.group.era_state)?;
+        self.write_beacon_state(&file.group.era_state)?;
 
         // Write other entries
         for entry in &file.group.other_entries {
@@ -272,30 +267,15 @@ impl<W: Write> StreamWriter<W> for EraWriter<W> {
 }
 
 impl<W: Write> EraWriter<W> {
-    /// Write for a single slot
-    pub fn write_slot(&mut self, block_tuple: &BlockTuple) -> Result<(), E2sError> {
+    /// Write beacon block
+    pub fn write_beacon_block(&mut self, block: &CompressedSignedBeaconBlock) -> Result<(), E2sError> {
         if !self.has_written_version {
             self.write_version()?;
         }
 
-        // Write header
-        let header_entry = block_tuple.header.to_entry();
-        self.writer.write_entry(&header_entry)?;
-
-        // Write body
-        let body_entry = block_tuple.body.to_entry();
-        self.writer.write_entry(&body_entry)?;
-
-        // Write receipts
-        let receipts_entry = block_tuple.receipts.to_entry();
-        self.writer.write_entry(&receipts_entry)?;
-
-        // Write difficulty
-        let difficulty_entry = block_tuple.total_difficulty.to_entry();
-        self.writer.write_entry(&difficulty_entry)?;
-
+        let entry = block.to_entry();
+        self.writer.write_entry(&entry)?;
         self.has_written_blocks = true;
-
         Ok(())
     }
 
@@ -315,7 +295,10 @@ impl<W: Write> EraWriter<W> {
 
         Ok(())
     }
-    fn write_state(&mut self, state: &CompressedBeaconState) -> Result<(), E2sError> {
+
+    
+    // Write beacon state
+    fn write_beacon_state(&mut self, state: &CompressedBeaconState) -> Result<(), E2sError> {
         if !self.has_written_version {
             self.write_version()?;
         }
@@ -327,18 +310,6 @@ impl<W: Write> EraWriter<W> {
         let entry = state.to_entry();
         self.writer.write_entry(&entry)?;
         self.has_written_state = true;
-        Ok(())
-    }
-
-    /// Write a beacon block
-    fn write_block(&mut self, block: &CompressedSignedBeaconBlock) -> Result<(), E2sError> {
-        if !self.has_written_version {
-            self.write_version()?;
-        }
-
-        let entry = block.to_entry();
-        self.writer.write_entry(&entry)?;
-        self.has_written_blocks = true;
         Ok(())
     }
 }
