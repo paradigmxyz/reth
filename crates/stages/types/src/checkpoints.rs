@@ -1,4 +1,6 @@
 use super::StageId;
+#[cfg(test)]
+use alloc::vec;
 use alloc::{format, string::String, vec::Vec};
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use core::ops::RangeInclusive;

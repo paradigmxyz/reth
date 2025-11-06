@@ -125,7 +125,7 @@ pub async fn setup_engine_with_chain_import(
             db.clone(),
             chain_spec.clone(),
             reth_provider::providers::StaticFileProvider::read_write(static_files_path.clone())?,
-        );
+        )?;
 
         // Initialize genesis if needed
         reth_db_common::init::init_genesis(&provider_factory)?;
@@ -324,7 +324,8 @@ mod tests {
                 chain_spec.clone(),
                 reth_provider::providers::StaticFileProvider::read_write(static_files_path.clone())
                     .unwrap(),
-            );
+            )
+            .expect("failed to create provider factory");
 
             // Initialize genesis
             reth_db_common::init::init_genesis(&provider_factory).unwrap();
@@ -384,7 +385,8 @@ mod tests {
                 chain_spec.clone(),
                 reth_provider::providers::StaticFileProvider::read_only(static_files_path, false)
                     .unwrap(),
-            );
+            )
+            .expect("failed to create provider factory");
 
             let provider = provider_factory.database_provider_ro().unwrap();
 
@@ -475,7 +477,8 @@ mod tests {
             db.clone(),
             chain_spec.clone(),
             reth_provider::providers::StaticFileProvider::read_write(static_files_path).unwrap(),
-        );
+        )
+        .expect("failed to create provider factory");
 
         // Initialize genesis
         reth_db_common::init::init_genesis(&provider_factory).unwrap();

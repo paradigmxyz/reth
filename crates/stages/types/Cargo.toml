@@ -24,12 +24,14 @@ modular-bitfield = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-codecs.workspace = true
+reth-trie-common = { workspace = true, features = ["reth-codec"] }
 alloy-primitives = { workspace = true, features = ["arbitrary", "rand"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 rand.workspace = true
 bytes.workspace = true
+modular-bitfield.workspace = true
 
 [features]
 default = ["std"]

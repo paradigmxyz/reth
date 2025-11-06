@@ -219,12 +219,12 @@ where
             writer.write_accumulator(&accumulator)?;
             writer.write_block_index(&block_index)?;
             writer.flush()?;
-            created_files.push(file_path.clone());
 
             info!(
                 target: "era::history::export",
                 "Wrote ERA1 file: {file_path:?} with {blocks_written} blocks"
             );
+            created_files.push(file_path);
         }
     }
 
