@@ -174,7 +174,7 @@ impl EraId {
         // Calculate the actual last slot number in the range
         let last_slot = self.start_slot + self.slot_count as u64 - 1;
         // Find which era the last block belongs to
-        let last_era = last_slot / SLOTS_PER_HISTORICAL_ROOT as u64;
+        let last_era = last_slot / SLOTS_PER_HISTORICAL_ROOT;
         // Count how many eras we span
         last_era - first_era + 1
     }
@@ -197,10 +197,9 @@ impl EraFileId for EraId {
     /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
     /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
     fn to_file_name(&self) -> String {
-
         let era_number = self.era_number();
         let era_count = self.calculate_era_count();
-        
+
         if let Some(hash) = self.hash {
             format!(
                 "{}-{:05}-{:05}-{:02x}{:02x}{:02x}{:02x}.era1",
