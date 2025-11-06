@@ -139,7 +139,7 @@ impl StaticFileSegment {
 }
 
 /// A segment header that contains information common to all segments. Used for storage.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Copy)]
 pub struct SegmentHeader {
     /// Defines the expected block range for a static file segment. This attribute is crucial for
     /// scenarios where the file contains no data, allowing for a representation beyond a
@@ -170,14 +170,19 @@ impl SegmentHeader {
         self.segment
     }
 
+    /// Returns the expected block range.
+    pub const fn expected_block_range(&self) -> SegmentRangeInclusive {
+        self.expected_block_range
+    }
+
     /// Returns the block range.
-    pub const fn block_range(&self) -> Option<&SegmentRangeInclusive> {
-        self.block_range.as_ref()
+    pub const fn block_range(&self) -> Option<SegmentRangeInclusive> {
+        self.block_range
     }
 
     /// Returns the transaction range.
-    pub const fn tx_range(&self) -> Option<&SegmentRangeInclusive> {
-        self.tx_range.as_ref()
+    pub const fn tx_range(&self) -> Option<SegmentRangeInclusive> {
+        self.tx_range
     }
 
     /// The expected block start of the segment.
@@ -326,9 +331,13 @@ impl SegmentRangeInclusive {
     }
 
     /// Returns the length of the inclusive range.
-    #[allow(clippy::len_without_is_empty)]
     pub const fn len(&self) -> u64 {
         self.end.saturating_sub(self.start).saturating_add(1)
+    }
+
+    /// Returns true if the range is empty.
+    pub const fn is_empty(&self) -> bool {
+        self.start > self.end
     }
 }
 

@@ -13,12 +13,12 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, HashingWriter, HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider,
-    HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
-    StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
-    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieReader, TrieWriter, WriteDestination,
+    DBProvider, EitherWriter, HashingWriter, HeaderProvider, HeaderSyncGapProvider,
+    HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter, LatestStateProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, RevertsInit, StageCheckpointReader, StateProviderBox, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, TrieReader, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -1619,14 +1619,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
-        let has_receipts_pruning = self.prune_modes.has_receipts_pruning();
-
-        let mut receipts_writer = if has_receipts_pruning {
-            WriteDestination::Database(self.tx.cursor_write::<tables::Receipts<Self::Receipt>>()?)
-        } else {
-            WriteDestination::StaticFile(
+        // Write receipts to static files only if they're explicitly enabled or we don't have
+        // receipts pruning
+        let mut receipts_writer = if self.storage_settings.read().receipts_in_static_files ||
+            !self.prune_modes.has_receipts_pruning()
+        {
+            EitherWriter::StaticFile(
                 self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?,
             )
+        } else {
+            EitherWriter::Database(self.tx.cursor_write::<tables::Receipts<Self::Receipt>>()?)
         };
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
@@ -2818,12 +2820,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         // Ensures we have all the senders for the block's transactions.
         let mut senders_writer = if self.storage_settings.read().senders_in_static_files {
-            WriteDestination::StaticFile(
+            EitherWriter::StaticFile(
                 self.static_file_provider
                     .get_writer(block.number(), StaticFileSegment::TransactionSenders)?,
             )
         } else {
-            WriteDestination::Database(self.tx.cursor_write::<tables::TransactionSenders>()?)
+            EitherWriter::Database(self.tx.cursor_write::<tables::TransactionSenders>()?)
         };
         for (transaction, sender) in block.body().transactions_iter().zip(block.senders_iter()) {
             let hash = transaction.tx_hash();

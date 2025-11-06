@@ -341,8 +341,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current static file,
     /// and create the next one if we are past the end range.
-    ///
-    /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {
         let segment = self.writer.user_header().segment();
 
@@ -510,8 +508,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     }
 
     /// Appends to tx number-based static file.
-    ///
-    /// Returns the current [`TxNumber`] as seen in the static file.
     fn append_with_tx_number<V: Compact>(
         &mut self,
         tx_num: TxNumber,
@@ -540,8 +536,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     ///
     /// It **CALLS** `increment_block()` since the number of headers is equal to the number of
     /// blocks.
-    ///
-    /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn append_header(&mut self, header: &N::BlockHeader, hash: &BlockHash) -> ProviderResult<()>
     where
         N::BlockHeader: Compact,
@@ -553,8 +547,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     ///
     /// It **CALLS** `increment_block()` since the number of headers is equal to the number of
     /// blocks.
-    ///
-    /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn append_header_with_td(
         &mut self,
         header: &N::BlockHeader,
@@ -590,8 +582,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     ///
     /// It **DOES NOT CALL** `increment_block()`, it should be handled elsewhere. There might be
     /// empty blocks and this function wouldn't be called.
-    ///
-    /// Returns the current [`TxNumber`] as seen in the static file.
     pub fn append_transaction(&mut self, tx_num: TxNumber, tx: &N::SignedTx) -> ProviderResult<()>
     where
         N::SignedTx: Compact,
@@ -617,8 +607,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     ///
     /// It **DOES NOT** call `increment_block()`, it should be handled elsewhere. There might be
     /// empty blocks and this function wouldn't be called.
-    ///
-    /// Returns the current [`TxNumber`] as seen in the static file.
     pub fn append_receipt(&mut self, tx_num: TxNumber, receipt: &N::Receipt) -> ProviderResult<()>
     where
         N::Receipt: Compact,
@@ -641,9 +629,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     }
 
     /// Appends multiple receipts to the static file.
-    ///
-    /// Returns the current [`TxNumber`] as seen in the static file, if any.
-    pub fn append_receipts<I, R>(&mut self, receipts: I) -> ProviderResult<Option<TxNumber>>
+    pub fn append_receipts<I, R>(&mut self, receipts: I) -> ProviderResult<()>
     where
         I: Iterator<Item = Result<(TxNumber, R), ProviderError>>,
         R: Borrow<N::Receipt>,
@@ -654,20 +640,18 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let mut receipts_iter = receipts.into_iter().peekable();
         // If receipts are empty, we can simply return None
         if receipts_iter.peek().is_none() {
-            return Ok(None);
+            return Ok(());
         }
 
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         // At this point receipts contains at least one receipt, so this would be overwritten.
-        let mut tx_number = 0;
         let mut count: u64 = 0;
 
         for receipt_result in receipts_iter {
             let (tx_num, receipt) = receipt_result?;
             self.append_with_tx_number(tx_num, receipt.borrow())?;
-            tx_number = tx_num;
             count += 1;
         }
 
@@ -680,15 +664,13 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        Ok(Some(tx_number))
+        Ok(())
     }
 
     /// Appends transaction sender to static file.
     ///
     /// It **DOES NOT** call `increment_block()`, it should be handled elsewhere. There might be
     /// empty blocks and this function wouldn't be called.
-    ///
-    /// Returns the current [`TxNumber`] as seen in the static file.
     pub fn append_transaction_sender(
         &mut self,
         tx_num: TxNumber,
@@ -712,9 +694,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     }
 
     /// Appends multiple transaction senders to the static file.
-    ///
-    /// Returns the current [`TxNumber`] as seen in the static file, if any.
-    pub fn append_transaction_senders<I>(&mut self, senders: I) -> ProviderResult<Option<TxNumber>>
+    pub fn append_transaction_senders<I>(&mut self, senders: I) -> ProviderResult<()>
     where
         I: Iterator<Item = Result<(TxNumber, alloy_primitives::Address), ProviderError>>,
     {
@@ -723,20 +703,18 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let mut senders_iter = senders.into_iter().peekable();
         // If senders are empty, we can simply return None
         if senders_iter.peek().is_none() {
-            return Ok(None);
+            return Ok(());
         }
 
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         // At this point senders contains at least one sender, so this would be overwritten.
-        let mut tx_number = 0;
         let mut count: u64 = 0;
 
         for sender_result in senders_iter {
             let (tx_num, sender) = sender_result?;
             self.append_with_tx_number(tx_num, sender)?;
-            tx_number = tx_num;
             count += 1;
         }
 
@@ -749,7 +727,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        Ok(Some(tx_number))
+        Ok(())
     }
 
     /// Adds an instruction to prune `to_delete` transactions during commit.

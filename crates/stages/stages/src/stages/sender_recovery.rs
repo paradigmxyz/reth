@@ -11,9 +11,9 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
-    providers::StaticFileWriter, BlockBodyIndicesProvider, BlockReader, DBProvider, HeaderProvider,
-    ProviderError, PruneCheckpointReader, StaticFileProviderFactory, StatsReader,
-    StorageSettingsCache, TransactionsProvider, WriteDestination,
+    providers::StaticFileWriter, BlockBodyIndicesProvider, BlockReader, DBProvider, EitherWriter,
+    HeaderProvider, ProviderError, PruneCheckpointReader, StaticFileProviderFactory, StatsReader,
+    StorageSettingsCache, TransactionsProvider,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_api::{
@@ -88,15 +88,13 @@ where
         let end_block = *block_range.end();
 
         let static_file_provider = provider.static_file_provider();
-        let mut destination = if provider.cached_storage_settings().senders_in_static_files {
-            WriteDestination::StaticFile(
+        let mut writer = if provider.cached_storage_settings().senders_in_static_files {
+            EitherWriter::StaticFile(
                 static_file_provider
                     .get_writer(*block_range.start(), StaticFileSegment::TransactionSenders)?,
             )
         } else {
-            WriteDestination::Database(
-                provider.tx_ref().cursor_write::<tables::TransactionSenders>()?,
-            )
+            EitherWriter::Database(provider.tx_ref().cursor_write::<tables::TransactionSenders>()?)
         };
 
         // No transactions to walk over
@@ -104,7 +102,7 @@ where
             info!(target: "sync::stages::sender_recovery", ?tx_range, "Target transaction already reached");
             // Drain block range to increment the destination block number
             for block in block_range {
-                destination.increment_block(block)?;
+                writer.increment_block(block)?;
             }
 
             return Ok(ExecOutput {
@@ -134,13 +132,13 @@ where
                 &mut block_body_indices,
                 provider,
                 tx_batch_sender.clone(),
-                &mut destination,
+                &mut writer,
             )?;
         }
 
         // Drain block body indices to increment the destination block number
         for (block_number, _) in block_body_indices {
-            destination.increment_block(block_number)?;
+            writer.increment_block(block_number)?;
         }
 
         Ok(ExecOutput {
@@ -177,7 +175,7 @@ fn recover_range<Provider, CURSOR>(
     block_body_indices: &mut impl Iterator<Item = (BlockNumber, StoredBlockBodyIndices)>,
     provider: &Provider,
     tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>,
-    destination: &mut WriteDestination<'_, CURSOR, Provider::Primitives>,
+    writer: &mut EitherWriter<'_, CURSOR, Provider::Primitives>,
 ) -> Result<(), StageError>
 where
     Provider: DBProvider
@@ -264,13 +262,13 @@ where
                 // Special case for block number #0 that cannot have transactions, but still needs
                 // to be incremented
                 if current_block_number == 1 {
-                    destination.increment_block(0)?;
+                    writer.increment_block(0)?;
                 }
-                destination.increment_block(current_block_number)?;
+                writer.increment_block(current_block_number)?;
                 last_block_number = Some(current_block_number);
             }
 
-            destination.append_sender(tx_id, &sender)?;
+            writer.append_sender(tx_id, &sender)?;
             processed_transactions += 1;
         }
     }
@@ -278,7 +276,7 @@ where
 
     // Drain block body indices to increment the destination block number
     for (block_number, _) in block_body_indices {
-        destination.increment_block(block_number)?;
+        writer.increment_block(block_number)?;
     }
 
     // Fail safe to ensure that we do not proceed without having recovered all senders.
