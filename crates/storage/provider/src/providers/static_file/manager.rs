@@ -419,25 +419,6 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
 }
 
 impl<N: NodePrimitives> StaticFileProvider<N> {
-    /// Set a custom number of blocks per file for all segments.
-    #[cfg(any(test, feature = "test-utils"))]
-    pub fn with_custom_blocks_per_file(self, blocks_per_file: u64) -> Self {
-        let mut provider =
-            Arc::try_unwrap(self.0).expect("should be called when initializing only");
-        for segment in StaticFileSegment::iter() {
-            provider.blocks_per_file.insert(segment, blocks_per_file);
-        }
-        Self(Arc::new(provider))
-    }
-
-    /// Enables metrics on the [`StaticFileProvider`].
-    pub fn with_metrics(self) -> Self {
-        let mut provider =
-            Arc::try_unwrap(self.0).expect("should be called when initializing only");
-        provider.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
-        Self(Arc::new(provider))
-    }
-
     /// Reports metrics for the static files.
     pub fn report_metrics(&self) -> ProviderResult<()> {
         let Some(metrics) = &self.metrics else { return Ok(()) };
@@ -2058,13 +2039,14 @@ mod tests {
     use reth_db::test_utils::create_test_static_files_dir;
     use reth_static_file_types::{SegmentRangeInclusive, StaticFileSegment};
 
-    use crate::providers::StaticFileProvider;
+    use crate::StaticFileProviderBuilder;
 
     #[test]
     fn test_find_fixed_range_with_block_index() -> eyre::Result<()> {
         let (static_dir, _) = create_test_static_files_dir();
-        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)?
-            .with_custom_blocks_per_file(100);
+        let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
+            .with_blocks_per_file(100)
+            .build()?;
 
         let segment = StaticFileSegment::Headers;
 

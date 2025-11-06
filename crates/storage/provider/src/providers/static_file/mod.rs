@@ -564,8 +564,9 @@ mod tests {
         let (static_dir, _) = create_test_static_files_dir();
 
         {
-            let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)?
-                .with_custom_blocks_per_file(10);
+            let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
+                .with_blocks_per_file(00)
+                .build()?;
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
 
             let mut header = Header::default();
@@ -589,8 +590,9 @@ mod tests {
         }
 
         {
-            let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)?
-                .with_custom_blocks_per_file(5);
+            let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
+                .with_blocks_per_file(5)
+                .build()?;
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
 
             let mut header = Header::default();
@@ -615,8 +617,9 @@ mod tests {
         }
 
         {
-            let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)?
-                .with_custom_blocks_per_file(15);
+            let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
+                .with_blocks_per_file(15)
+                .build()?;
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
 
             let mut header = Header::default();
