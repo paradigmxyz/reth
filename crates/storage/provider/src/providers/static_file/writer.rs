@@ -168,8 +168,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
-        let block_range = static_file_provider.find_fixed_range(block);
-        let (jar, path) = match static_file_provider.get_segment_provider_from_block(
+        let block_range = static_file_provider.find_fixed_range(segment, block);
+        let (jar, path) = match static_file_provider.get_segment_provider_for_block(
             segment,
             block_range.start(),
             None,
@@ -362,7 +362,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 self.data_path = data_path;
 
                 *self.writer.user_header_mut() = SegmentHeader::new(
-                    self.reader().find_fixed_range(last_block + 1),
+                    self.reader().find_fixed_range(segment, last_block + 1),
                     None,
                     None,
                     segment,

@@ -1317,7 +1317,7 @@ mod tests {
     {
         let rt_handle = get_test_runtime_handle();
         let overlay_factory = OverlayStateProviderFactory::new(factory);
-        let task_ctx = ProofTaskCtx::new(overlay_factory, Default::default());
+        let task_ctx = ProofTaskCtx::new(overlay_factory);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
 
