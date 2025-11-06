@@ -28,26 +28,36 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
     /// Block's hashed state.
+    ///
+    /// Supports both unsorted and sorted variants so payload builders can avoid cloning in order
+    /// to convert from one to the other when it's not necessary.
     pub hashed_state: Either<Arc<HashedPostState>, Arc<HashedPostStateSorted>>,
     /// Trie updates that result from calculating the state root for the block.
+    ///
+    /// Supports both unsorted and sorted variants so payload builders can avoid cloning in order
+    /// to convert from one to the other when it's not necessary.
     pub trie_updates: Either<Arc<TrieUpdates>, Arc<TrieUpdatesSorted>>,
 }
 
-impl<N: NodePrimitives> From<BuiltPayloadExecutedBlock<N>> for reth_chain_state::ExecutedBlock<N> {
-    fn from(block: BuiltPayloadExecutedBlock<N>) -> Self {
-        let hashed_state = match block.hashed_state {
+impl<N: NodePrimitives> BuiltPayloadExecutedBlock<N> {
+    /// Converts this into an [`reth_chain_state::ExecutedBlock`].
+    ///
+    /// If the hashed state or trie updates are in sorted form, they will be converted
+    /// back to their unsorted representations.
+    pub fn into_executed_payload(self) -> reth_chain_state::ExecutedBlock<N> {
+        let hashed_state = match self.hashed_state {
             Either::Left(unsorted) => unsorted,
             Either::Right(sorted) => Arc::new(Arc::unwrap_or_clone(sorted).into()),
         };
 
-        let trie_updates = match block.trie_updates {
+        let trie_updates = match self.trie_updates {
             Either::Left(unsorted) => unsorted,
             Either::Right(sorted) => Arc::new(Arc::unwrap_or_clone(sorted).into()),
         };
 
-        Self {
-            recovered_block: block.recovered_block,
-            execution_output: block.execution_output,
+        reth_chain_state::ExecutedBlock {
+            recovered_block: self.recovered_block,
+            execution_output: self.execution_output,
             hashed_state,
             trie_updates,
         }
