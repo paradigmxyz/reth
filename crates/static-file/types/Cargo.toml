@@ -21,6 +21,7 @@ strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 reth-nippy-jar.workspace = true
+serde_json.workspace = true
 
 [features]
 default = ["std"]

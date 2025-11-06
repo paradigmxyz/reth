@@ -10545,6 +10545,7 @@ dependencies = [
  "derive_more",
  "reth-nippy-jar",
  "serde",
+ "serde_json",
  "strum 0.27.2",
 ]
 

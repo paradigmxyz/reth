@@ -73,7 +73,7 @@ impl StaticFileSegment {
     pub fn filename(&self, block_range: &SegmentRangeInclusive) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`].
-        format!("static_file_{}_{}_{}", self.as_ref(), block_range.start(), block_range.end())
+        format!("static_file_{}_{}_{}", self.as_str(), block_range.start(), block_range.end())
     }
 
     /// Returns file name for the provided segment and range, alongside filters, compression.
@@ -471,6 +471,36 @@ mod tests {
                 },
                 receipts.user_header()
             );
+        }
+    }
+
+    #[test]
+    fn test_static_file_segment_str_roundtrip() {
+        for segment in StaticFileSegment::iter() {
+            let static_str = segment.as_str();
+            assert_eq!(StaticFileSegment::from_str(static_str).unwrap(), segment);
+
+            let expected_str = match segment {
+                StaticFileSegment::Headers => "headers",
+                StaticFileSegment::Transactions => "transactions",
+                StaticFileSegment::Receipts => "receipts",
+            };
+            assert_eq!(static_str, expected_str);
+        }
+    }
+
+    #[test]
+    fn test_static_file_segment_serde_roundtrip() {
+        for segment in StaticFileSegment::iter() {
+            let ser = serde_json::to_string(&segment).unwrap();
+            assert_eq!(serde_json::from_str::<StaticFileSegment>(&ser).unwrap(), segment);
+
+            let expected_str = match segment {
+                StaticFileSegment::Headers => "Headers",
+                StaticFileSegment::Transactions => "Transactions",
+                StaticFileSegment::Receipts => "Receipts",
+            };
+            assert_eq!(ser, format!("\"{expected_str}\""));
         }
     }
 }
