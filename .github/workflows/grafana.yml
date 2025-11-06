@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: Check for ${DS_PROMETHEUS} in overview.json
         run: |
-          if grep -F '${DS_PROMETHEUS}' etc/grafana/dashboards/overview.json; then
+          if grep -Fn '${DS_PROMETHEUS}' etc/grafana/dashboards/overview.json; then
             echo "Error: overview.json contains '\${DS_PROMETHEUS}' placeholder"
             echo "Please replace it with '\${datasource}'"
             exit 1
