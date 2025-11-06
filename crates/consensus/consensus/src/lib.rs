@@ -349,7 +349,7 @@ pub enum ConsensusError {
     },
 
     /// Error when the child gas limit exceeds the maximum allowed increase.
-    #[error("child gas_limit {child_gas_limit} is exceed the max allowed increase ({parent_gas_limit}/{GAS_LIMIT_BOUND_DIVISOR})")]
+    #[error("child gas_limit {child_gas_limit} exceeds the max allowed increase ({parent_gas_limit}/{GAS_LIMIT_BOUND_DIVISOR})")]
     GasLimitInvalidIncrease {
         /// The parent gas limit.
         parent_gas_limit: u64,
