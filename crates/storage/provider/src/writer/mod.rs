@@ -908,7 +908,8 @@ mod tests {
             }
         }
 
-        let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
+        let (_, updates) =
+            StateRoot::from_provider(provider_rw.as_ref()).root_with_updates().unwrap();
         provider_rw.write_trie_updates(updates).unwrap();
 
         let mut state = State::builder().with_bundle_update().build();
@@ -916,7 +917,7 @@ mod tests {
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
                 StateRoot::overlay_root(
-                    tx,
+                    provider_rw.as_ref(),
                     provider_factory.hashed_post_state(&state.bundle_state)
                 )
                 .unwrap(),
@@ -1098,7 +1099,6 @@ mod tests {
         let hashed_address = keccak256(address);
         let provider_factory = create_test_provider_factory();
         let provider_rw = provider_factory.provider_rw().unwrap();
-        let tx = provider_rw.tx_ref();
 
         // insert initial account storage
         let init_storage = HashedStorage::from_iter(
@@ -1117,7 +1117,7 @@ mod tests {
 
         // calculate database storage root and write intermediate storage nodes.
         let StorageRootProgress::Complete(storage_root, _, storage_updates) =
-            StorageRoot::from_tx_hashed(tx, hashed_address)
+            StorageRoot::from_provider_hashed(provider_rw.as_ref(), hashed_address)
                 .with_no_threshold()
                 .calculate(true)
                 .unwrap()
@@ -1148,7 +1148,9 @@ mod tests {
         provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
 
         // re-calculate database storage root
-        let storage_root = StorageRoot::overlay_root(tx, address, updated_storage.clone()).unwrap();
+        let storage_root =
+            StorageRoot::overlay_root(provider_rw.as_ref(), address, updated_storage.clone())
+                .unwrap();
         assert_eq!(storage_root, storage_root_prehashed(updated_storage.storage));
     }
 }

@@ -22,7 +22,7 @@ impl<CF, T> InMemoryTrieCursorFactory<CF, T> {
 
 impl<'overlay, CF, T> TrieCursorFactory for InMemoryTrieCursorFactory<CF, &'overlay T>
 where
-    CF: TrieCursorFactory + 'overlay,
+    CF: TrieCursorFactory,
     T: AsRef<TrieUpdatesSorted>,
 {
     type AccountTrieCursor<'cursor>
@@ -44,22 +44,8 @@ where
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        // if the storage trie has no updates then we use this as the in-memory overlay.
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
-
-        let storage_trie_updates =
-            self.trie_updates.as_ref().storage_tries_ref().get(&hashed_address);
-        let (storage_nodes, cleared) = storage_trie_updates
-            .map(|u| (u.storage_nodes_ref(), u.is_deleted()))
-            .unwrap_or((&EMPTY_UPDATES, false));
-
-        let cursor = if cleared {
-            None
-        } else {
-            Some(self.cursor_factory.storage_trie_cursor(hashed_address)?)
-        };
-
-        Ok(InMemoryTrieCursor::new(cursor, storage_nodes))
+        let cursor = self.cursor_factory.storage_trie_cursor(hashed_address).ok();
+        Ok(InMemoryTrieCursor::new_storage(cursor, hashed_address, self.trie_updates.as_ref()))
     }
 }
 
@@ -96,6 +82,28 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             #[cfg(debug_assertions)]
             seeked: false,
         }
+    }
+
+    /// Create new storage trie cursor from a cursor factory and trie updates.
+    ///
+    /// This method handles the logic of determining whether to use a database cursor based on
+    /// whether the storage trie has been cleared.
+    pub fn new_storage(
+        cursor: Option<C>,
+        hashed_address: B256,
+        trie_updates: &'a TrieUpdatesSorted,
+    ) -> Self {
+        // if the storage trie has no updates then we use an empty overlay.
+        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+
+        let storage_trie_updates = trie_updates.storage_tries_ref().get(&hashed_address);
+        let (storage_nodes, cleared) = storage_trie_updates
+            .map(|u| (u.storage_nodes_ref(), u.is_deleted()))
+            .unwrap_or((&EMPTY_UPDATES, false));
+
+        let cursor = if cleared { None } else { cursor };
+
+        Self::new(cursor, storage_nodes)
     }
 
     /// Asserts that the next entry to be returned from the cursor is not previous to the last entry

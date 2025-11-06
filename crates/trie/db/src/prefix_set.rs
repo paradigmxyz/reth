@@ -14,31 +14,32 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_primitives_traits::StorageEntry;
+use reth_storage_api::DBProvider;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
     KeyHasher, Nibbles,
 };
 
-/// A wrapper around a database transaction that loads prefix sets within a given block range.
+/// A wrapper around a database provider that loads prefix sets within a given block range.
 #[derive(Debug)]
-pub struct PrefixSetLoader<'a, TX, KH>(&'a TX, PhantomData<KH>);
+pub struct PrefixSetLoader<'a, P, KH>(&'a P, PhantomData<KH>);
 
-impl<'a, TX, KH> PrefixSetLoader<'a, TX, KH> {
+impl<'a, P, KH> PrefixSetLoader<'a, P, KH> {
     /// Create a new loader.
-    pub const fn new(tx: &'a TX) -> Self {
-        Self(tx, PhantomData)
+    pub const fn new(provider: &'a P) -> Self {
+        Self(provider, PhantomData)
     }
 }
 
-impl<TX, KH> Deref for PrefixSetLoader<'_, TX, KH> {
-    type Target = TX;
+impl<P, KH> Deref for PrefixSetLoader<'_, P, KH> {
+    type Target = P;
 
     fn deref(&self) -> &Self::Target {
         self.0
     }
 }
 
-impl<TX: DbTx, KH: KeyHasher> PrefixSetLoader<'_, TX, KH> {
+impl<P: DBProvider, KH: KeyHasher> PrefixSetLoader<'_, P, KH> {
     /// Load all account and storage changes for the given block range.
     pub fn load(self, range: RangeInclusive<BlockNumber>) -> Result<TriePrefixSets, DatabaseError> {
         // Initialize prefix sets.
@@ -46,9 +47,11 @@ impl<TX: DbTx, KH: KeyHasher> PrefixSetLoader<'_, TX, KH> {
         let mut storage_prefix_sets = HashMap::<B256, PrefixSetMut>::default();
         let mut destroyed_accounts = HashSet::default();
 
+        let tx = self.0.tx_ref();
+
         // Walk account changeset and insert account prefixes.
-        let mut account_changeset_cursor = self.cursor_read::<tables::AccountChangeSets>()?;
-        let mut account_hashed_state_cursor = self.cursor_read::<tables::HashedAccounts>()?;
+        let mut account_changeset_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
+        let mut account_hashed_state_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
         for account_entry in account_changeset_cursor.walk_range(range.clone())? {
             let (_, AccountBeforeTx { address, .. }) = account_entry?;
             let hashed_address = KH::hash_key(address);
@@ -61,7 +64,7 @@ impl<TX: DbTx, KH: KeyHasher> PrefixSetLoader<'_, TX, KH> {
 
         // Walk storage changeset and insert storage prefixes as well as account prefixes if missing
         // from the account prefix set.
-        let mut storage_cursor = self.cursor_dup_read::<tables::StorageChangeSets>()?;
+        let mut storage_cursor = tx.cursor_dup_read::<tables::StorageChangeSets>()?;
         let storage_range = BlockNumberAddress::range(range);
         for storage_entry in storage_cursor.walk_range(storage_range)? {
             let (BlockNumberAddress((_, address)), StorageEntry { key, .. }) = storage_entry?;

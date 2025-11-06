@@ -593,13 +593,12 @@ where
 {
     trace!(target: "reth::cli", "Computing state root");
 
-    let tx = provider.tx_ref();
     let mut intermediate_state: Option<IntermediateStateRootState> = None;
     let mut total_flushed_updates = 0;
 
     loop {
         let mut state_root =
-            StateRootComputer::from_tx(tx).with_intermediate_state(intermediate_state);
+            StateRootComputer::from_provider(provider).with_intermediate_state(intermediate_state);
 
         if let Some(sets) = prefix_sets.clone() {
             state_root = state_root.with_prefix_sets(sets);

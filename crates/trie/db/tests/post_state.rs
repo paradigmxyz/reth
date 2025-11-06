@@ -12,7 +12,6 @@ use reth_trie::{
     },
     HashedPostState, HashedStorage,
 };
-use reth_trie_db::DatabaseHashedCursorFactory;
 use std::collections::BTreeMap;
 
 fn assert_account_cursor_order(

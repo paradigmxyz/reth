@@ -2691,7 +2691,6 @@ mod tests {
         BranchNode, ExtensionNode, HashBuilder, LeafNode, RlpNode, TrieMask, TrieNode,
         EMPTY_ROOT_HASH,
     };
-    use reth_trie_db::DatabaseTrieCursorFactory;
     use reth_trie_sparse::{
         provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
         LeafLookup, LeafLookupError, RevealedSparseNode, SerialSparseTrie, SparseNode,
@@ -5060,11 +5059,10 @@ mod tests {
                     // Insert state updates into the hash builder and calculate the root
                     state.extend(update);
                     let provider = provider_factory.provider().unwrap();
-                    let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
                         run_hash_builder(
                             state.clone(),
-                            trie_cursor.account_trie_cursor().unwrap(),
+                            provider.account_trie_cursor().unwrap(),
                             Default::default(),
                             state.keys().copied(),
                         );
@@ -5105,11 +5103,10 @@ mod tests {
                     let sparse_updates = updated_sparse.take_updates();
 
                     let provider = provider_factory.provider().unwrap();
-                    let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
                         run_hash_builder(
                             state.clone(),
-                            trie_cursor.account_trie_cursor().unwrap(),
+                            provider.account_trie_cursor().unwrap(),
                             keys_to_delete
                                 .iter()
                                 .map(|nibbles| B256::from_slice(&nibbles.pack()))

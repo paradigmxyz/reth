@@ -64,7 +64,9 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
 
     // Generate the intermediate nodes on the receiving end of the channel
     let (_, _, trie_updates) =
-        StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+        <StorageRoot<_, _> as DatabaseStorageRoot<_>>::from_provider_hashed(&tx, hashed_address)
+            .root_with_updates()
+            .unwrap();
 
     // 1. Some state transition happens, update the hashed storage to the new value
     let modified_key = B256::from_str(modified).unwrap();
@@ -77,7 +79,8 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
         .unwrap();
 
     // 2. Calculate full merkle root
-    let loader = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address);
+    let loader =
+        <StorageRoot<_, _> as DatabaseStorageRoot<_>>::from_provider_hashed(&tx, hashed_address);
     let modified_root = loader.root().unwrap();
 
     // Update the intermediate roots table so that we can run the incremental verification
@@ -90,8 +93,9 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
     // 3. Calculate the incremental root
     let mut storage_changes = PrefixSetMut::default();
     storage_changes.insert(Nibbles::unpack(modified_key));
-    let loader = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address)
-        .with_prefix_set(storage_changes.freeze());
+    let loader =
+        <StorageRoot<_, _> as DatabaseStorageRoot<_>>::from_provider_hashed(&tx, hashed_address)
+            .with_prefix_set(storage_changes.freeze());
     let incremental_root = loader.root().unwrap();
 
     assert_eq!(modified_root, incremental_root);
@@ -685,7 +689,9 @@ fn storage_trie_around_extension_node() {
     let (expected_root, expected_updates) = extension_node_storage_trie(&tx, hashed_address);
 
     let (got, _, updates) =
-        StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+        <StorageRoot<_, _> as DatabaseStorageRoot<_>>::from_provider_hashed(&tx, hashed_address)
+            .root_with_updates()
+            .unwrap();
     assert_eq!(expected_root, got);
     assert_eq!(expected_updates, updates);
     assert_trie_updates(updates.storage_nodes_ref());

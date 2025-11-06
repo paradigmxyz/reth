@@ -10706,6 +10706,7 @@ dependencies = [
  "reth-execution-errors",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-storage-api",
  "reth-trie",
  "reth-trie-common",
  "revm",

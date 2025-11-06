@@ -8,7 +8,9 @@ use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
+    hashed_cursor::HashedCursorFactory,
     proof::{Proof, StorageProof},
+    trie_cursor::TrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
@@ -58,14 +60,17 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
     }
 }
 
-impl<Provider: DBProvider + Sync> StateRootProvider for LatestStateProviderRef<'_, Provider> {
+impl<Provider> StateRootProvider for LatestStateProviderRef<'_, Provider>
+where
+    Provider: DBProvider + Sync + TrieCursorFactory + HashedCursorFactory,
+{
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        StateRoot::overlay_root(self.tx(), hashed_state)
+        StateRoot::overlay_root(self.0, hashed_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
-        StateRoot::overlay_root_from_nodes(self.tx(), input)
+        StateRoot::overlay_root_from_nodes(self.0, input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -73,7 +78,7 @@ impl<Provider: DBProvider + Sync> StateRootProvider for LatestStateProviderRef<'
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        StateRoot::overlay_root_with_updates(self.tx(), hashed_state)
+        StateRoot::overlay_root_with_updates(self.0, hashed_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -81,18 +86,21 @@ impl<Provider: DBProvider + Sync> StateRootProvider for LatestStateProviderRef<'
         &self,
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
+        StateRoot::overlay_root_from_nodes_with_updates(self.0, input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 
-impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef<'_, Provider> {
+impl<Provider> StorageRootProvider for LatestStateProviderRef<'_, Provider>
+where
+    Provider: DBProvider + Sync + TrieCursorFactory + HashedCursorFactory,
+{
     fn storage_root(
         &self,
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        StorageRoot::overlay_root(self.tx(), address, hashed_storage)
+        StorageRoot::overlay_root(self.0, address, hashed_storage)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -102,7 +110,7 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        StorageProof::overlay_storage_proof(self.tx(), address, slot, hashed_storage)
+        StorageProof::overlay_storage_proof(self.0, address, slot, hashed_storage)
             .map_err(ProviderError::from)
     }
 
@@ -112,19 +120,22 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        StorageProof::overlay_storage_multiproof(self.tx(), address, slots, hashed_storage)
+        StorageProof::overlay_storage_multiproof(self.0, address, slots, hashed_storage)
             .map_err(ProviderError::from)
     }
 }
 
-impl<Provider: DBProvider + Sync> StateProofProvider for LatestStateProviderRef<'_, Provider> {
+impl<Provider> StateProofProvider for LatestStateProviderRef<'_, Provider>
+where
+    Provider: DBProvider + Sync + TrieCursorFactory + HashedCursorFactory,
+{
     fn proof(
         &self,
         input: TrieInput,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        let proof = <Proof<_, _> as DatabaseProof>::from_tx(self.tx());
+        let proof = <Proof<_, _> as DatabaseProof>::from_provider(self.0);
         proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
     }
 
@@ -133,12 +144,12 @@ impl<Provider: DBProvider + Sync> StateProofProvider for LatestStateProviderRef<
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        let proof = <Proof<_, _> as DatabaseProof>::from_tx(self.tx());
+        let proof = <Proof<_, _> as DatabaseProof>::from_provider(self.0);
         proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
     }
 
     fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        TrieWitness::overlay_witness(self.tx(), input, target)
+        <TrieWitness<_, _> as DatabaseTrieWitness<_>>::overlay_witness(self.0, input, target)
             .map_err(ProviderError::from)
             .map(|hm| hm.into_values().collect())
     }
@@ -150,8 +161,9 @@ impl<Provider: DBProvider + Sync> HashedPostStateProvider for LatestStateProvide
     }
 }
 
-impl<Provider: DBProvider + BlockHashReader> StateProvider
-    for LatestStateProviderRef<'_, Provider>
+impl<Provider> StateProvider for LatestStateProviderRef<'_, Provider>
+where
+    Provider: DBProvider + BlockHashReader + TrieCursorFactory + HashedCursorFactory,
 {
     /// Get storage.
     fn storage(
@@ -196,7 +208,7 @@ impl<Provider: DBProvider> LatestStateProvider<Provider> {
 }
 
 // Delegates all provider impls to [LatestStateProviderRef]
-delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader ]);
+delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader + TrieCursorFactory + HashedCursorFactory]);
 
 #[cfg(test)]
 mod tests {
@@ -204,7 +216,9 @@ mod tests {
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
-    const fn assert_latest_state_provider<T: DBProvider + BlockHashReader>() {
+    const fn assert_latest_state_provider<
+        T: DBProvider + BlockHashReader + TrieCursorFactory + HashedCursorFactory,
+    >() {
         assert_state_provider::<LatestStateProvider<T>>();
     }
 }

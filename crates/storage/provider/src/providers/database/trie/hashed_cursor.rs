@@ -1,48 +1,10 @@
 use alloy_primitives::{B256, U256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
-    tables,
-    transaction::DbTx,
-    DatabaseError,
+    tables, DatabaseError,
 };
 use reth_primitives_traits::Account;
-use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-
-/// A struct wrapping database transaction that implements [`HashedCursorFactory`].
-#[derive(Debug, Clone)]
-pub struct DatabaseHashedCursorFactory<T>(T);
-
-impl<T> DatabaseHashedCursorFactory<T> {
-    /// Create new database hashed cursor factory.
-    pub const fn new(tx: T) -> Self {
-        Self(tx)
-    }
-}
-
-impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&TX> {
-    type AccountCursor<'a>
-        = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>
-    where
-        Self: 'a;
-    type StorageCursor<'a>
-        = DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>
-    where
-        Self: 'a;
-
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        Ok(DatabaseHashedAccountCursor(self.0.cursor_read::<tables::HashedAccounts>()?))
-    }
-
-    fn hashed_storage_cursor(
-        &self,
-        hashed_address: B256,
-    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        Ok(DatabaseHashedStorageCursor::new(
-            self.0.cursor_dup_read::<tables::HashedStorages>()?,
-            hashed_address,
-        ))
-    }
-}
+use reth_trie::hashed_cursor::{HashedCursor, HashedStorageCursor};
 
 /// A struct wrapping database cursor over hashed accounts implementing [`HashedCursor`] for
 /// iterating over accounts.

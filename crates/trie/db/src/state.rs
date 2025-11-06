@@ -1,4 +1,4 @@
-use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, PrefixSetLoader};
+use crate::PrefixSetLoader;
 use alloy_primitives::{
     map::{AddressMap, B256Map},
     BlockNumber, B256, U256,
@@ -11,10 +11,13 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_execution_errors::StateRootError;
+use reth_storage_api::DBProvider;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot,
-    StateRootProgress, TrieInput,
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
+    updates::TrieUpdates,
+    HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot, StateRootProgress,
+    TrieInput,
 };
 use std::{
     collections::HashMap,
@@ -22,10 +25,13 @@ use std::{
 };
 use tracing::{debug, instrument};
 
-/// Extends [`StateRoot`] with operations specific for working with a database transaction.
-pub trait DatabaseStateRoot<'a, TX>: Sized {
+/// Extends [`StateRoot`] with operations specific for working with a database provider.
+pub trait DatabaseStateRoot<'a, P>: Sized {
+    /// The provider type.
+    type Provider;
+
     /// Create a new [`StateRoot`] instance.
-    fn from_tx(tx: &'a TX) -> Self;
+    fn from_provider(provider: &'a Self::Provider) -> Self;
 
     /// Given a block number range, identifies all the accounts and storage keys that
     /// have changed.
@@ -34,7 +40,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// An instance of state root calculator with account and storage prefixes loaded.
     fn incremental_root_calculator(
-        tx: &'a TX,
+        provider: &'a P,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError>;
 
@@ -45,7 +51,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The updated state root.
     fn incremental_root(
-        tx: &'a TX,
+        provider: &'a P,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError>;
 
@@ -58,7 +64,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The updated state root and the trie updates.
     fn incremental_root_with_updates(
-        tx: &'a TX,
+        provider: &'a P,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 
@@ -69,7 +75,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The intermediate progress of state root computation.
     fn incremental_root_with_progress(
-        tx: &'a TX,
+        provider: &'a P,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError>;
 
@@ -105,22 +111,22 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// # Returns
     ///
     /// The state root for this [`HashedPostState`].
-    fn overlay_root(tx: &'a TX, post_state: HashedPostState) -> Result<B256, StateRootError>;
+    fn overlay_root(provider: &'a P, post_state: HashedPostState) -> Result<B256, StateRootError>;
 
     /// Calculates the state root for this [`HashedPostState`] and returns it alongside trie
     /// updates. See [`Self::overlay_root`] for more info.
     fn overlay_root_with_updates(
-        tx: &'a TX,
+        provider: &'a P,
         post_state: HashedPostState,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 
     /// Calculates the state root for provided [`HashedPostState`] using cached intermediate nodes.
-    fn overlay_root_from_nodes(tx: &'a TX, input: TrieInput) -> Result<B256, StateRootError>;
+    fn overlay_root_from_nodes(provider: &'a P, input: TrieInput) -> Result<B256, StateRootError>;
 
     /// Calculates the state root and trie updates for provided [`HashedPostState`] using
     /// cached intermediate nodes.
     fn overlay_root_from_nodes_with_updates(
-        tx: &'a TX,
+        provider: &'a P,
         input: TrieInput,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 }
@@ -135,90 +141,88 @@ pub trait DatabaseHashedPostState<TX>: Sized {
     ) -> Result<Self, DatabaseError>;
 }
 
-impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
-    for StateRoot<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
+impl<'a, P> DatabaseStateRoot<'a, P> for StateRoot<&'a P, &'a P>
+where
+    P: TrieCursorFactory + HashedCursorFactory + DBProvider,
 {
-    fn from_tx(tx: &'a TX) -> Self {
-        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
+    type Provider = P;
+
+    fn from_provider(provider: &'a Self::Provider) -> Self {
+        Self::new(provider, provider)
     }
 
     fn incremental_root_calculator(
-        tx: &'a TX,
+        provider: &'a P,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets = PrefixSetLoader::<_, KeccakKeyHasher>::new(tx).load(range)?;
-        Ok(Self::from_tx(tx).with_prefix_sets(loaded_prefix_sets))
+        let loaded_prefix_sets =
+            PrefixSetLoader::<_, KeccakKeyHasher>::new(provider).load(range)?;
+        Ok(Self::from_provider(provider).with_prefix_sets(loaded_prefix_sets))
     }
 
     fn incremental_root(
-        tx: &'a TX,
+        provider: &'a P,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root");
-        Self::incremental_root_calculator(tx, range)?.root()
+        Self::incremental_root_calculator(provider, range)?.root()
     }
 
     fn incremental_root_with_updates(
-        tx: &'a TX,
+        provider: &'a P,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root");
-        Self::incremental_root_calculator(tx, range)?.root_with_updates()
+        Self::incremental_root_calculator(provider, range)?.root_with_updates()
     }
 
     fn incremental_root_with_progress(
-        tx: &'a TX,
+        provider: &'a P,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root with progress");
-        Self::incremental_root_calculator(tx, range)?.root_with_progress()
+        Self::incremental_root_calculator(provider, range)?.root_with_progress()
     }
 
-    fn overlay_root(tx: &'a TX, post_state: HashedPostState) -> Result<B256, StateRootError> {
+    fn overlay_root(provider: &'a P, post_state: HashedPostState) -> Result<B256, StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let state_sorted = post_state.into_sorted();
-        StateRoot::new(
-            DatabaseTrieCursorFactory::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
-        )
-        .with_prefix_sets(prefix_sets)
-        .root()
+        StateRoot::new(provider, HashedPostStateCursorFactory::new(provider, &state_sorted))
+            .with_prefix_sets(prefix_sets)
+            .root()
     }
 
     fn overlay_root_with_updates(
-        tx: &'a TX,
+        provider: &'a P,
         post_state: HashedPostState,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let state_sorted = post_state.into_sorted();
-        StateRoot::new(
-            DatabaseTrieCursorFactory::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
-        )
-        .with_prefix_sets(prefix_sets)
-        .root_with_updates()
+        StateRoot::new(provider, HashedPostStateCursorFactory::new(provider, &state_sorted))
+            .with_prefix_sets(prefix_sets)
+            .root_with_updates()
     }
 
-    fn overlay_root_from_nodes(tx: &'a TX, input: TrieInput) -> Result<B256, StateRootError> {
+    fn overlay_root_from_nodes(provider: &'a P, input: TrieInput) -> Result<B256, StateRootError> {
         let state_sorted = input.state.into_sorted();
         let nodes_sorted = input.nodes.into_sorted();
         StateRoot::new(
-            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            InMemoryTrieCursorFactory::new(provider, &nodes_sorted),
+            HashedPostStateCursorFactory::new(provider, &state_sorted),
         )
         .with_prefix_sets(input.prefix_sets.freeze())
         .root()
     }
 
     fn overlay_root_from_nodes_with_updates(
-        tx: &'a TX,
+        provider: &'a P,
         input: TrieInput,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let state_sorted = input.state.into_sorted();
         let nodes_sorted = input.nodes.into_sorted();
         StateRoot::new(
-            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            InMemoryTrieCursorFactory::new(provider, &nodes_sorted),
+            HashedPostStateCursorFactory::new(provider, &state_sorted),
         )
         .with_prefix_sets(input.prefix_sets.freeze())
         .root_with_updates()

@@ -50,6 +50,12 @@ mod metrics;
 mod chain;
 pub use chain::*;
 
+mod trie;
+pub use trie::{
+    DatabaseAccountTrieCursor, DatabaseHashedAccountCursor, DatabaseHashedStorageCursor,
+    DatabaseStorageTrieCursor,
+};
+
 /// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.

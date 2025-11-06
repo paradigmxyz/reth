@@ -2,12 +2,13 @@
 
 use alloy_primitives::B256;
 use reth_db_api::{cursor::DbCursorRW, tables, transaction::DbTxMut};
-use reth_provider::test_utils::create_test_provider_factory;
+use reth_provider::{
+    test_utils::create_test_provider_factory, DatabaseAccountTrieCursor, DatabaseStorageTrieCursor,
+};
 use reth_trie::{
     prefix_set::PrefixSetMut, trie_cursor::TrieCursor, walker::TrieWalker, BranchNodeCompact,
     Nibbles, StorageTrieEntry,
 };
-use reth_trie_db::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor};
 
 #[test]
 fn walk_nodes_with_common_prefix() {

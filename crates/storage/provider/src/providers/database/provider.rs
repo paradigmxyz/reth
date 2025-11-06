@@ -3,7 +3,14 @@ use crate::{
         storage_trie_wiped_changeset_iter, StorageRevertsIter, StorageTrieCurrentValuesIter,
     },
     providers::{
-        database::{chain::ChainStorage, metrics},
+        database::{
+            chain::ChainStorage,
+            metrics,
+            trie::{
+                DatabaseAccountTrieCursor, DatabaseHashedAccountCursor,
+                DatabaseHashedStorageCursor, DatabaseStorageTrieCursor,
+            },
+        },
         static_file::StaticFileWriter,
         NodeTypesForProvider, StaticFileProvider,
     },
@@ -44,7 +51,7 @@ use reth_db_api::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    BlockNumberList, PlainAccountState, PlainStorageState,
+    BlockNumberList, DatabaseError, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
@@ -69,9 +76,6 @@ use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     BranchNodeCompact, HashedPostStateSorted, Nibbles, StoredNibbles, StoredNibblesSubKey,
     TrieChangeSetsEntry,
-};
-use reth_trie_db::{
-    DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
 };
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
@@ -2254,8 +2258,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
 
         // Step 2: Create an InMemoryTrieCursorFactory with the reverts
         // This gives us the trie state as it was after the target block was processed
-        let db_cursor_factory = DatabaseTrieCursorFactory::new(tx);
-        let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
+        let cursor_factory = InMemoryTrieCursorFactory::new(self, &reverts);
 
         // Step 3: Collect all account trie nodes that changed in the target block
         let mut account_nodes = Vec::new();
@@ -3130,6 +3133,61 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         }
 
         Ok(true)
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypes> reth_trie::hashed_cursor::HashedCursorFactory
+    for DatabaseProvider<TX, N>
+{
+    type AccountCursor<'a>
+        = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>
+    where
+        Self: 'a;
+    type StorageCursor<'a>
+        = DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>
+    where
+        Self: 'a;
+
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+        Ok(DatabaseHashedAccountCursor::new(self.tx.cursor_read::<tables::HashedAccounts>()?))
+    }
+
+    fn hashed_storage_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+        Ok(DatabaseHashedStorageCursor::new(
+            self.tx.cursor_dup_read::<tables::HashedStorages>()?,
+            hashed_address,
+        ))
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypes> reth_trie::trie_cursor::TrieCursorFactory
+    for DatabaseProvider<TX, N>
+{
+    type AccountTrieCursor<'a>
+        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>
+    where
+        Self: 'a;
+
+    type StorageTrieCursor<'a>
+        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>
+    where
+        Self: 'a;
+
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+        Ok(DatabaseAccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?))
+    }
+
+    fn storage_trie_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+        Ok(DatabaseStorageTrieCursor::new(
+            self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
+            hashed_address,
+        ))
     }
 }
 

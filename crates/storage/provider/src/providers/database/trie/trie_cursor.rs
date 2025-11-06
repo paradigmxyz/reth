@@ -1,55 +1,12 @@
 use alloy_primitives::B256;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    tables,
-    transaction::DbTx,
-    DatabaseError,
+    tables, DatabaseError,
 };
 use reth_trie::{
-    trie_cursor::{TrieCursor, TrieCursorFactory},
-    updates::StorageTrieUpdatesSorted,
-    BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
+    trie_cursor::TrieCursor, updates::StorageTrieUpdatesSorted, BranchNodeCompact, Nibbles,
+    StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
-
-/// Wrapper struct for database transaction implementing trie cursor factory trait.
-#[derive(Debug, Clone)]
-pub struct DatabaseTrieCursorFactory<T>(T);
-
-impl<T> DatabaseTrieCursorFactory<T> {
-    /// Create new [`DatabaseTrieCursorFactory`].
-    pub const fn new(tx: T) -> Self {
-        Self(tx)
-    }
-}
-
-impl<TX> TrieCursorFactory for DatabaseTrieCursorFactory<&TX>
-where
-    TX: DbTx,
-{
-    type AccountTrieCursor<'a>
-        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>
-    where
-        Self: 'a;
-
-    type StorageTrieCursor<'a>
-        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>
-    where
-        Self: 'a;
-
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        Ok(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?))
-    }
-
-    fn storage_trie_cursor(
-        &self,
-        hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        Ok(DatabaseStorageTrieCursor::new(
-            self.0.cursor_dup_read::<tables::StoragesTrie>()?,
-            hashed_address,
-        ))
-    }
-}
 
 /// A cursor over the account trie.
 #[derive(Debug)]
@@ -195,9 +152,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::create_test_provider_factory;
     use alloy_primitives::hex_literal::hex;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
-    use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]
     fn test_account_trie_order() {
