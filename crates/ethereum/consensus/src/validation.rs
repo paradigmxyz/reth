@@ -154,6 +154,8 @@ fn verify_bal(
     // Missing accounts (expected but not found in body)
     for addr in &expected_addrs {
         if !body_addrs.contains(addr) {
+            tracing::debug!("Missing acc : computed bal {:?},body bal{:?}", expected_bal, body_bal);
+            tracing::debug!("Missing Address: {:?}", addr);
             return Err(ConsensusError::InvalidBalMissingAccount);
         }
     }
@@ -161,6 +163,8 @@ fn verify_bal(
     // Extra accounts (body has accounts not in expected)
     for addr in &body_addrs {
         if !expected_addrs.contains(addr) {
+            tracing::debug!("Extra acc : computed bal {:?},body bal{:?}", expected_bal, body_bal);
+            tracing::debug!("Extra Address: {:?}", addr);
             return Err(ConsensusError::InvalidBalExtraAccount);
         }
     }
