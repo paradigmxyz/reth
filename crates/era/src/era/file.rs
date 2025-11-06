@@ -186,7 +186,9 @@ impl<R: Read + Seek> EraReader<R> {
         };
 
         // Add other entries
-         for entry in other_entries { group.add_entry(entry); }
+        for entry in other_entries {
+            group.add_entry(entry);
+        }
 
         let (start_slot, slot_count) = group.slot_range();
 
@@ -205,7 +207,8 @@ pub struct EraWriter<W: Write> {
     has_written_version: bool,
     has_written_blocks: bool,
     has_written_state: bool,
-    has_written_slot_indices: bool,
+    has_written_block_slot_index: bool,
+    has_written_state_slot_index: bool,
 }
 
 impl<W: Write> StreamWriter<W> for EraWriter<W> {
@@ -218,7 +221,8 @@ impl<W: Write> StreamWriter<W> for EraWriter<W> {
             has_written_version: false,
             has_written_blocks: false,
             has_written_state: false,
-            has_written_slot_indices: false,
+            has_written_block_slot_index: false,
+            has_written_state_slot_index: false,
         }
     }
 
@@ -250,11 +254,12 @@ impl<W: Write> StreamWriter<W> for EraWriter<W> {
             self.writer.write_entry(entry)?;
         }
 
-        // Write slot indices
+        // Write slot index
         if let Some(ref block_index) = file.group.slot_index {
-            self.write_slot_index(block_index)?;
+            self.write_block_slot_index(block_index)?;
         }
-        self.write_slot_index(&file.group.state_slot_index)?;
+        // Write state index
+        self.write_state_slot_index(&file.group.state_slot_index)?;
 
         self.writer.flush()?;
         Ok(())
@@ -268,7 +273,10 @@ impl<W: Write> StreamWriter<W> for EraWriter<W> {
 
 impl<W: Write> EraWriter<W> {
     /// Write beacon block
-    pub fn write_beacon_block(&mut self, block: &CompressedSignedBeaconBlock) -> Result<(), E2sError> {
+    pub fn write_beacon_block(
+        &mut self,
+        block: &CompressedSignedBeaconBlock,
+    ) -> Result<(), E2sError> {
         if !self.has_written_version {
             self.write_version()?;
         }
@@ -279,24 +287,6 @@ impl<W: Write> EraWriter<W> {
         Ok(())
     }
 
-    /// Write the slot index
-    pub fn write_slot_index(&mut self, slot_index: &SlotIndex) -> Result<(), E2sError> {
-        if !self.has_written_version {
-            self.write_version()?;
-        }
-
-        if self.has_written_slot_indices {
-            return Err(E2sError::Ssz("Block index already written".to_string()));
-        }
-
-        let block_index_entry = slot_index.to_entry();
-        self.writer.write_entry(&block_index_entry)?;
-        self.has_written_slot_indices = true;
-
-        Ok(())
-    }
-
-    
     // Write beacon state
     fn write_beacon_state(&mut self, state: &CompressedBeaconState) -> Result<(), E2sError> {
         if !self.has_written_version {
@@ -310,6 +300,40 @@ impl<W: Write> EraWriter<W> {
         let entry = state.to_entry();
         self.writer.write_entry(&entry)?;
         self.has_written_state = true;
+        Ok(())
+    }
+
+    /// Write the block slot index
+    pub fn write_block_slot_index(&mut self, slot_index: &SlotIndex) -> Result<(), E2sError> {
+        if !self.has_written_version {
+            self.write_version()?;
+        }
+
+        if self.has_written_block_slot_index {
+            return Err(E2sError::Ssz("Block slot index already written".to_string()));
+        }
+
+        let entry = slot_index.to_entry();
+        self.writer.write_entry(&entry)?;
+        self.has_written_block_slot_index = true;
+
+        Ok(())
+    }
+
+    /// Write the state slot index
+    pub fn write_state_slot_index(&mut self, slot_index: &SlotIndex) -> Result<(), E2sError> {
+        if !self.has_written_version {
+            self.write_version()?;
+        }
+
+        if self.has_written_state_slot_index {
+            return Err(E2sError::Ssz("State slot index already written".to_string()));
+        }
+
+        let entry = slot_index.to_entry();
+        self.writer.write_entry(&entry)?;
+        self.has_written_state_slot_index = true;
+
         Ok(())
     }
 }

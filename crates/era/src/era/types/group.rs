@@ -90,7 +90,6 @@ impl EraGroup {
     pub const fn slot_count(&self) -> u32 {
         self.slot_range().1
     }
-
 }
 
 /// [`SlotIndex`] records store offsets to data at specific slots
