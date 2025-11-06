@@ -23,6 +23,10 @@ impl<R: Read + Seek> E2StoreReader<R> {
     }
 
     /// Read and validate the version record
+    ///
+    /// Returns `Ok(Some(entry))` if a valid version entry is found at the beginning of the file.
+    /// Returns `Ok(None)` if the file is empty or contains no entries.
+    /// Returns an error if the first entry exists but is not a version entry.
     pub fn read_version(&mut self) -> Result<Option<Entry>, E2sError> {
         // Reset reader to beginning
         self.reader.seek(SeekFrom::Start(0))?;
