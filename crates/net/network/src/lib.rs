@@ -115,7 +115,7 @@
 )]
 #![allow(unreachable_pub)]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common helpers for network testing.
@@ -140,6 +140,7 @@ mod listener;
 mod manager;
 mod metrics;
 mod network;
+mod required_block_filter;
 mod session;
 mod state;
 mod swarm;
@@ -172,8 +173,11 @@ pub use swarm::NetworkConnectionState;
 /// re-export p2p interfaces
 pub use reth_network_p2p as p2p;
 
-/// re-export types crate
-pub use reth_eth_wire_types as types;
+/// re-export types crates
+pub mod types {
+    pub use reth_eth_wire_types::*;
+    pub use reth_network_types::*;
+}
 
 use aquamarine as _;
 

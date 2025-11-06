@@ -1,72 +1,27 @@
 //! L1 `eth` API types.
 
-use alloy_consensus::TxEnvelope;
-use alloy_network::{Ethereum, Network};
-use alloy_rpc_types::TransactionRequest;
-use alloy_rpc_types_eth::{Transaction, TransactionInfo};
-use reth_ethereum_primitives::EthPrimitives;
-use reth_primitives_traits::{Recovered, TxTy};
-use reth_rpc_eth_api::EthApiTypes;
-use reth_rpc_eth_types::EthApiError;
-use reth_rpc_types_compat::TransactionCompat;
+use alloy_network::Ethereum;
+use reth_evm_ethereum::EthEvmConfig;
+use reth_rpc_convert::RpcConverter;
+use reth_rpc_eth_types::receipt::EthReceiptConverter;
 
-/// A standalone [`EthApiTypes`] implementation for Ethereum.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct EthereumEthApiTypes(EthTxBuilder);
-
-impl EthApiTypes for EthereumEthApiTypes {
-    type Error = EthApiError;
-    type NetworkTypes = Ethereum;
-    type TransactionCompat = EthTxBuilder;
-
-    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
-        &self.0
-    }
-}
-
-/// Builds RPC transaction response for l1.
-#[derive(Debug, Clone, Copy, Default)]
-#[non_exhaustive]
-pub struct EthTxBuilder;
-
-impl TransactionCompat for EthTxBuilder
-where
-    Self: Send + Sync,
-{
-    type Primitives = EthPrimitives;
-    type Transaction = <Ethereum as Network>::TransactionResponse;
-
-    type Error = EthApiError;
-
-    fn fill(
-        &self,
-        tx: Recovered<TxTy<Self::Primitives>>,
-        tx_info: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::Error> {
-        let tx = tx.convert::<TxEnvelope>();
-        Ok(Transaction::from_transaction(tx, tx_info))
-    }
-
-    fn build_simulate_v1_transaction(
-        &self,
-        request: TransactionRequest,
-    ) -> Result<TxTy<Self::Primitives>, Self::Error> {
-        TransactionRequest::build_typed_simulate_transaction(request)
-            .map_err(|_| EthApiError::TransactionConversionError)
-    }
-}
+/// An [`RpcConverter`] with its generics set to Ethereum specific.
+pub type EthRpcConverter<ChainSpec> =
+    RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>;
 
 //tests for simulate
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_consensus::{Transaction, TxType};
+    use alloy_rpc_types_eth::TransactionRequest;
+    use reth_chainspec::MAINNET;
     use reth_rpc_eth_types::simulate::resolve_transaction;
     use revm::database::CacheDB;
 
     #[test]
     fn test_resolve_transaction_empty_request() {
-        let builder = EthTxBuilder::default();
+        let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
         let tx = TransactionRequest::default();
         let result = resolve_transaction(tx, 21000, 0, 1, &mut db, &builder).unwrap();
@@ -81,7 +36,7 @@ mod tests {
     #[test]
     fn test_resolve_transaction_legacy() {
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
-        let builder = EthTxBuilder::default();
+        let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
 
         let tx = TransactionRequest { gas_price: Some(100), ..Default::default() };
 
@@ -97,7 +52,7 @@ mod tests {
     #[test]
     fn test_resolve_transaction_partial_eip1559() {
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
-        let builder = EthTxBuilder::default();
+        let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
 
         let tx = TransactionRequest {
             max_fee_per_gas: Some(200),
@@ -105,7 +60,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = resolve_transaction(tx, 21000, 0, 1, &mut db, &builder).unwrap();
+        let result = resolve_transaction(tx, 21000, 0, 1, &mut db, &rpc_converter).unwrap();
 
         assert_eq!(result.tx_type(), TxType::Eip1559);
         let tx = result.into_inner();

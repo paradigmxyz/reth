@@ -315,7 +315,7 @@ fn recover_sender<T: SignedTransaction>(
     // value is greater than `secp256k1n / 2` if past EIP-2. There are transactions
     // pre-homestead which have large `s` values, so using [Signature::recover_signer] here
     // would not be backwards-compatible.
-    let sender = tx.recover_signer_unchecked_with_buf(rlp_buf).map_err(|_| {
+    let sender = tx.recover_unchecked_with_buf(rlp_buf).map_err(|_| {
         SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id })
     })?;
 
@@ -490,7 +490,7 @@ mod tests {
             ExecOutput {
                 checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
-                        processed: runner.db.table::<tables::TransactionSenders>().unwrap().len()
+                        processed: runner.db.count_entries::<tables::TransactionSenders>().unwrap()
                             as u64,
                         total: total_transactions
                     }
@@ -599,7 +599,7 @@ mod tests {
         ///
         /// 1. If there are any entries in the [`tables::TransactionSenders`] table above a given
         ///    block number.
-        /// 2. If the is no requested block entry in the bodies table, but
+        /// 2. If there is no requested block entry in the bodies table, but
         ///    [`tables::TransactionSenders`] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self

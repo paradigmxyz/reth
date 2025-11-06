@@ -10,7 +10,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 /// Various provider traits.
 mod traits;
@@ -35,7 +35,7 @@ pub use static_file::StaticFileSegment;
 
 pub use reth_execution_types::*;
 
-pub mod bundle_state;
+pub mod changesets_utils;
 
 /// Re-export `OriginalValuesKnown`
 pub use revm_database::states::OriginalValuesKnown;
@@ -49,7 +49,10 @@ pub use reth_chain_state::{
 };
 
 // reexport traits to avoid breaking changes
-pub use reth_storage_api::{HistoryWriter, StatsReader};
+pub use reth_storage_api::{
+    HistoryWriter, MetadataProvider, MetadataWriter, StatsReader, StorageSettings,
+    StorageSettingsCache,
+};
 
 pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
     let start = match bounds.start_bound() {

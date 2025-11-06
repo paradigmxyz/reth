@@ -54,7 +54,31 @@ pub fn mock_tx_pool() -> MockTxPool {
 
 /// Sets the value for the field
 macro_rules! set_value {
-    ($this:ident => $field:ident) => {
+    // For mutable references
+    (&mut $this:expr => $field:ident) => {{
+        let new_value = $field;
+        match $this {
+            MockTransaction::Legacy { $field, .. } => {
+                *$field = new_value;
+            }
+            MockTransaction::Eip1559 { $field, .. } => {
+                *$field = new_value;
+            }
+            MockTransaction::Eip4844 { $field, .. } => {
+                *$field = new_value;
+            }
+            MockTransaction::Eip2930 { $field, .. } => {
+                *$field = new_value;
+            }
+            MockTransaction::Eip7702 { $field, .. } => {
+                *$field = new_value;
+            }
+        }
+        // Ensure the tx cost is always correct after each mutation.
+        $this.update_cost();
+    }};
+    // For owned values
+    ($this:expr => $field:ident) => {{
         let new_value = $field;
         match $this {
             MockTransaction::Legacy { ref mut $field, .. } |
@@ -67,7 +91,7 @@ macro_rules! set_value {
         }
         // Ensure the tx cost is always correct after each mutation.
         $this.update_cost();
-    };
+    }};
 }
 
 /// Gets the value for the field
@@ -89,7 +113,7 @@ macro_rules! make_setters_getters {
         paste! {$(
             /// Sets the value of the specified field.
             pub fn [<set_ $name>](&mut self, $name: $t) -> &mut Self {
-                set_value!(self => $name);
+                set_value!(&mut self => $name);
                 self
             }
 
@@ -653,7 +677,7 @@ impl MockTransaction {
         matches!(self, Self::Eip2930 { .. })
     }
 
-    /// Checks if the transaction is of the EIP-2930 type.
+    /// Checks if the transaction is of the EIP-7702 type.
     pub const fn is_eip7702(&self) -> bool {
         matches!(self, Self::Eip7702 { .. })
     }
@@ -799,21 +823,24 @@ impl alloy_consensus::Transaction for MockTransaction {
     }
 
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        base_fee.map_or(self.max_fee_per_gas(), |base_fee| {
-            // if the tip is greater than the max priority fee per gas, set it to the max
-            // priority fee per gas + base fee
-            let tip = self.max_fee_per_gas().saturating_sub(base_fee as u128);
-            if let Some(max_tip) = self.max_priority_fee_per_gas() {
-                if tip > max_tip {
-                    max_tip + base_fee as u128
+        base_fee.map_or_else(
+            || self.max_fee_per_gas(),
+            |base_fee| {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas().saturating_sub(base_fee as u128);
+                if let Some(max_tip) = self.max_priority_fee_per_gas() {
+                    if tip > max_tip {
+                        max_tip + base_fee as u128
+                    } else {
+                        // otherwise return the max fee per gas
+                        self.max_fee_per_gas()
+                    }
                 } else {
-                    // otherwise return the max fee per gas
                     self.max_fee_per_gas()
                 }
-            } else {
-                self.max_fee_per_gas()
-            }
-        })
+            },
+        )
     }
 
     fn is_dynamic_fee(&self) -> bool {
@@ -1449,8 +1476,8 @@ impl MockFeeRange {
         max_fee_blob: Range<u128>,
     ) -> Self {
         assert!(
-            max_fee.start <= priority_fee.end,
-            "max_fee_range should be strictly below the priority fee range"
+            max_fee.start >= priority_fee.end,
+            "max_fee_range should be strictly above the priority fee range"
         );
         Self {
             gas_price: gas_price.try_into().unwrap(),
@@ -1707,7 +1734,7 @@ impl MockTransactionSet {
     ///
     /// Let an example transaction set be `[(tx1, 1), (tx2, 2)]`, where the first element of the
     /// tuple is a transaction, and the second element is the nonce. If the `gap_pct` is 50, and
-    /// the `gap_range` is `1..=1`, then the resulting transaction set could would be either
+    /// the `gap_range` is `1..=1`, then the resulting transaction set could be either
     /// `[(tx1, 1), (tx2, 2)]` or `[(tx1, 1), (tx2, 3)]`, with a 50% chance of either.
     pub fn with_nonce_gaps(
         &mut self,

@@ -2,7 +2,15 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EvmFactory};
+use alloy_evm::{
+    eth::EthEvmContext,
+    precompiles::PrecompilesMap,
+    revm::{
+        handler::EthPrecompiles,
+        precompile::{Precompile, PrecompileId},
+    },
+    EvmFactory,
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Bytes};
 use reth_ethereum::{
@@ -10,12 +18,11 @@ use reth_ethereum::{
     evm::{
         primitives::{Database, EvmEnv},
         revm::{
-            context::{Context, TxEnv},
+            context::{BlockEnv, Context, TxEnv},
             context_interface::result::{EVMError, HaltReason},
-            handler::EthPrecompiles,
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
-            precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
+            precompile::{PrecompileOutput, PrecompileResult, Precompiles},
             primitives::hardfork::SpecId,
             MainBuilder, MainContext,
         },
@@ -47,6 +54,7 @@ impl EvmFactory for MyEvmFactory {
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
     type Spec = SpecId;
+    type BlockEnv = BlockEnv;
     type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
@@ -84,7 +92,7 @@ impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type EVM = EthEvmConfig<MyEvmFactory>;
+    type EVM = EthEvmConfig<ChainSpec, MyEvmFactory>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config =
@@ -93,19 +101,18 @@ where
     }
 }
 
-/// Returns precompiles for Fjor spec.
+/// Returns precompiles for Prague spec.
 pub fn prague_custom() -> &'static Precompiles {
     static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
     INSTANCE.get_or_init(|| {
         let mut precompiles = Precompiles::prague().clone();
         // Custom precompile.
-        precompiles.extend([(
+        let precompile = Precompile::new(
+            PrecompileId::custom("custom"),
             address!("0x0000000000000000000000000000000000000999"),
-            |_, _| -> PrecompileResult {
-                PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new()))
-            } as PrecompileFn,
-        )
-            .into()]);
+            |_, _| PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new())),
+        );
+        precompiles.extend([precompile]);
         precompiles
     })
 }

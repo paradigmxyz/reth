@@ -5,9 +5,10 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+pub mod block;
 pub mod builder;
 pub mod cache;
 pub mod error;
@@ -17,9 +18,9 @@ pub mod id_provider;
 pub mod logs_utils;
 pub mod pending_block;
 pub mod receipt;
-pub mod revm_utils;
 pub mod simulate;
 pub mod transaction;
+pub mod tx_forward;
 pub mod utils;
 
 pub use builder::config::{EthConfig, EthFilterConfig};
@@ -34,5 +35,5 @@ pub use gas_oracle::{
 };
 pub use id_provider::EthSubscriptionIdProvider;
 pub use pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-pub use receipt::EthReceiptBuilder;
-pub use transaction::TransactionSource;
+pub use transaction::{FillTransactionResult, TransactionSource};
+pub use tx_forward::ForwardConfig;

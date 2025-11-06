@@ -1,9 +1,9 @@
-//! Contains a precompile cache that is backed by a moka cache.
+//! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
 
 use alloy_primitives::Bytes;
 use parking_lot::Mutex;
-use reth_evm::precompiles::{DynPrecompile, Precompile};
-use revm::precompile::{PrecompileOutput, PrecompileResult};
+use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
+use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
 use schnellru::LruMap;
 use std::{
@@ -123,7 +123,7 @@ where
     /// The precompile.
     precompile: DynPrecompile,
     /// Cache metrics.
-    metrics: CachedPrecompileMetrics,
+    metrics: Option<CachedPrecompileMetrics>,
     /// Spec id associated to the EVM from which this cached precompile was created.
     spec_id: S,
 }
@@ -133,30 +133,51 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// `CachedPrecompile` constructor.
-    pub(crate) fn new(precompile: DynPrecompile, cache: PrecompileCache<S>, spec_id: S) -> Self {
-        Self { precompile, cache, spec_id, metrics: Default::default() }
+    pub(crate) const fn new(
+        precompile: DynPrecompile,
+        cache: PrecompileCache<S>,
+        spec_id: S,
+        metrics: Option<CachedPrecompileMetrics>,
+    ) -> Self {
+        Self { precompile, cache, spec_id, metrics }
     }
 
     pub(crate) fn wrap(
         precompile: DynPrecompile,
         cache: PrecompileCache<S>,
         spec_id: S,
+        metrics: Option<CachedPrecompileMetrics>,
     ) -> DynPrecompile {
-        let wrapped = Self::new(precompile, cache, spec_id);
-        move |data: &[u8], gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
+        let precompile_id = precompile.precompile_id().clone();
+        let wrapped = Self::new(precompile, cache, spec_id, metrics);
+        (precompile_id, move |input: PrecompileInput<'_>| -> PrecompileResult {
+            wrapped.call(input)
+        })
             .into()
     }
 
     fn increment_by_one_precompile_cache_hits(&self) {
-        self.metrics.precompile_cache_hits.increment(1);
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_cache_hits.increment(1);
+        }
     }
 
     fn increment_by_one_precompile_cache_misses(&self) {
-        self.metrics.precompile_cache_misses.increment(1);
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_cache_misses.increment(1);
+        }
+    }
+
+    fn set_precompile_cache_size_metric(&self, to: f64) {
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_cache_size.set(to);
+        }
     }
 
     fn increment_by_one_precompile_errors(&self) {
-        self.metrics.precompile_errors.increment(1);
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_errors.increment(1);
+        }
     }
 }
 
@@ -164,23 +185,28 @@ impl<S> Precompile for CachedPrecompile<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    fn call(&self, data: &[u8], gas_limit: u64) -> PrecompileResult {
-        let key = CacheKeyRef::new(self.spec_id.clone(), data);
+    fn precompile_id(&self) -> &PrecompileId {
+        self.precompile.precompile_id()
+    }
+
+    fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
+        let key = CacheKeyRef::new(self.spec_id.clone(), input.data);
 
         if let Some(entry) = &self.cache.get(&key) {
             self.increment_by_one_precompile_cache_hits();
-            if gas_limit >= entry.gas_used() {
+            if input.gas >= entry.gas_used() {
                 return entry.to_precompile_result()
             }
         }
 
-        let result = self.precompile.call(data, gas_limit);
+        let calldata = input.data;
+        let result = self.precompile.call(input);
 
         match &result {
             Ok(output) => {
-                let key = CacheKey::new(self.spec_id.clone(), Bytes::copy_from_slice(data));
+                let key = CacheKey::new(self.spec_id.clone(), Bytes::copy_from_slice(calldata));
                 let size = self.cache.insert(key, CacheEntry(output.clone()));
-                self.metrics.precompile_cache_size.set(size as f64);
+                self.set_precompile_cache_size_metric(size as f64);
                 self.increment_by_one_precompile_cache_misses();
             }
             _ => {
@@ -208,12 +234,24 @@ pub(crate) struct CachedPrecompileMetrics {
     precompile_errors: metrics::Counter,
 }
 
+impl CachedPrecompileMetrics {
+    /// Creates a new instance of [`CachedPrecompileMetrics`] with the given address.
+    ///
+    /// Adds address as an `address` label padded with zeros to at least two hex symbols, prefixed
+    /// by `0x`.
+    pub(crate) fn new_with_address(address: Address) -> Self {
+        Self::new_with_labels(&[("address", format!("0x{address:02x}"))])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::hash::DefaultHasher;
 
     use super::*;
-    use revm::precompile::PrecompileOutput;
+    use reth_evm::{EthEvmFactory, Evm, EvmEnv, EvmFactory};
+    use reth_revm::db::EmptyDB;
+    use revm::{context::TxEnv, precompile::PrecompileOutput};
     use revm_primitives::hardfork::SpecId;
 
     #[test]
@@ -235,17 +273,18 @@ mod tests {
 
     #[test]
     fn test_precompile_cache_basic() {
-        let dyn_precompile: DynPrecompile = |_input: &[u8], _gas: u64| -> PrecompileResult {
-            Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::default() })
-        }
+        let dyn_precompile: DynPrecompile = (|_input: PrecompileInput<'_>| -> PrecompileResult {
+            Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::default(), reverted: false })
+        })
         .into();
 
         let cache =
-            CachedPrecompile::new(dyn_precompile, PrecompileCache::default(), SpecId::PRAGUE);
+            CachedPrecompile::new(dyn_precompile, PrecompileCache::default(), SpecId::PRAGUE, None);
 
         let output = PrecompileOutput {
             gas_used: 50,
             bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
+            reverted: false,
         };
 
         let key = CacheKey::new(SpecId::PRAGUE, b"test_input".into());
@@ -260,6 +299,7 @@ mod tests {
 
     #[test]
     fn test_precompile_cache_map_separate_addresses() {
+        let mut evm = EthEvmFactory::default().create_evm(EmptyDB::default(), EvmEnv::default());
         let input_data = b"same_input";
         let gas_limit = 100_000;
 
@@ -269,53 +309,96 @@ mod tests {
         let mut cache_map = PrecompileCacheMap::default();
 
         // create the first precompile with a specific output
-        let precompile1: DynPrecompile = {
-            move |data: &[u8], _gas: u64| -> PrecompileResult {
-                assert_eq!(data, input_data);
+        let precompile1: DynPrecompile = (PrecompileId::custom("custom"), {
+            move |input: PrecompileInput<'_>| -> PrecompileResult {
+                assert_eq!(input.data, input_data);
 
                 Ok(PrecompileOutput {
                     gas_used: 5000,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_1"),
+                    reverted: false,
                 })
             }
-        }
-        .into();
+        })
+            .into();
 
         // create the second precompile with a different output
-        let precompile2: DynPrecompile = {
-            move |data: &[u8], _gas: u64| -> PrecompileResult {
-                assert_eq!(data, input_data);
+        let precompile2: DynPrecompile = (PrecompileId::custom("custom"), {
+            move |input: PrecompileInput<'_>| -> PrecompileResult {
+                assert_eq!(input.data, input_data);
 
                 Ok(PrecompileOutput {
                     gas_used: 7000,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_2"),
+                    reverted: false,
                 })
             }
-        }
-        .into();
+        })
+            .into();
 
         let wrapped_precompile1 = CachedPrecompile::wrap(
             precompile1,
             cache_map.cache_for_address(address1),
             SpecId::PRAGUE,
+            None,
         );
         let wrapped_precompile2 = CachedPrecompile::wrap(
             precompile2,
             cache_map.cache_for_address(address2),
             SpecId::PRAGUE,
+            None,
         );
 
+        let precompile1_address = Address::with_last_byte(1);
+        let precompile2_address = Address::with_last_byte(2);
+
+        evm.precompiles_mut().apply_precompile(&precompile1_address, |_| Some(wrapped_precompile1));
+        evm.precompiles_mut().apply_precompile(&precompile2_address, |_| Some(wrapped_precompile2));
+
         // first invocation of precompile1 (cache miss)
-        let result1 = wrapped_precompile1.call(input_data, gas_limit).unwrap();
-        assert_eq!(result1.bytes.as_ref(), b"output_from_precompile_1");
+        let result1 = evm
+            .transact_raw(TxEnv {
+                caller: Address::ZERO,
+                gas_limit,
+                data: input_data.into(),
+                kind: precompile1_address.into(),
+                ..Default::default()
+            })
+            .unwrap()
+            .result
+            .into_output()
+            .unwrap();
+        assert_eq!(result1.as_ref(), b"output_from_precompile_1");
 
         // first invocation of precompile2 with the same input (should be a cache miss)
         // if cache was incorrectly shared, we'd get precompile1's result
-        let result2 = wrapped_precompile2.call(input_data, gas_limit).unwrap();
-        assert_eq!(result2.bytes.as_ref(), b"output_from_precompile_2");
+        let result2 = evm
+            .transact_raw(TxEnv {
+                caller: Address::ZERO,
+                gas_limit,
+                data: input_data.into(),
+                kind: precompile2_address.into(),
+                ..Default::default()
+            })
+            .unwrap()
+            .result
+            .into_output()
+            .unwrap();
+        assert_eq!(result2.as_ref(), b"output_from_precompile_2");
 
         // second invocation of precompile1 (should be a cache hit)
-        let result3 = wrapped_precompile1.call(input_data, gas_limit).unwrap();
-        assert_eq!(result3.bytes.as_ref(), b"output_from_precompile_1");
+        let result3 = evm
+            .transact_raw(TxEnv {
+                caller: Address::ZERO,
+                gas_limit,
+                data: input_data.into(),
+                kind: precompile1_address.into(),
+                ..Default::default()
+            })
+            .unwrap()
+            .result
+            .into_output()
+            .unwrap();
+        assert_eq!(result3.as_ref(), b"output_from_precompile_1");
     }
 }

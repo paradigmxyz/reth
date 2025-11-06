@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
 extern crate alloc;
@@ -16,7 +16,9 @@ pub use builder::OpPayloadBuilder;
 pub mod error;
 pub mod payload;
 use op_alloy_rpc_types_engine::OpExecutionData;
-pub use payload::{OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilderAttributes};
+pub use payload::{
+    payload_id_optimism, OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilderAttributes,
+};
 mod traits;
 use reth_optimism_primitives::OpPrimitives;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};

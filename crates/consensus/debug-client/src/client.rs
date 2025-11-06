@@ -1,8 +1,8 @@
 use alloy_consensus::Sealable;
 use alloy_primitives::B256;
 use reth_node_api::{
-    BeaconConsensusEngineHandle, BuiltPayload, EngineApiMessageVersion, ExecutionPayload,
-    NodePrimitives, PayloadTypes,
+    BuiltPayload, ConsensusEngineHandle, EngineApiMessageVersion, ExecutionPayload, NodePrimitives,
+    PayloadTypes,
 };
 use reth_primitives_traits::{Block, SealedBlock};
 use reth_tracing::tracing::warn;
@@ -62,7 +62,7 @@ pub trait BlockProvider: Send + Sync + 'static {
 #[derive(Debug)]
 pub struct DebugConsensusClient<P: BlockProvider, T: PayloadTypes> {
     /// Handle to execution client.
-    engine_handle: BeaconConsensusEngineHandle<T>,
+    engine_handle: ConsensusEngineHandle<T>,
     /// Provider to get consensus blocks from.
     block_provider: P,
 }
@@ -70,7 +70,7 @@ pub struct DebugConsensusClient<P: BlockProvider, T: PayloadTypes> {
 impl<P: BlockProvider, T: PayloadTypes> DebugConsensusClient<P, T> {
     /// Create a new debug consensus client with the given handle to execution
     /// client and block provider.
-    pub const fn new(engine_handle: BeaconConsensusEngineHandle<T>, block_provider: P) -> Self {
+    pub const fn new(engine_handle: ConsensusEngineHandle<T>, block_provider: P) -> Self {
         Self { engine_handle, block_provider }
     }
 }
@@ -84,7 +84,6 @@ where
     /// blocks.
     pub async fn run(self) {
         let mut previous_block_hashes = AllocRingBuffer::new(64);
-
         let mut block_stream = {
             let (tx, rx) = mpsc::channel::<P::Block>(64);
             let block_provider = self.block_provider.clone();

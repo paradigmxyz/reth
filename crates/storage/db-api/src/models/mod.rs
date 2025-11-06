@@ -12,18 +12,22 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
-use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
+use reth_trie_common::{
+    StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry, *,
+};
 use serde::{Deserialize, Serialize};
 
 pub mod accounts;
 pub mod blocks;
 pub mod integer_list;
+pub mod metadata;
 pub mod sharded_key;
 pub mod storage_sharded_key;
 
 pub use accounts::*;
 pub use blocks::*;
 pub use integer_list::IntegerList;
+pub use metadata::*;
 pub use reth_db_models::{
     AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StoredBlockBodyIndices,
     StoredBlockWithdrawals,
@@ -128,7 +132,7 @@ impl Encode for StoredNibbles {
     fn encode(self) -> Self::Encoded {
         // NOTE: This used to be `to_compact`, but all it does is append the bytes to the buffer,
         // so we can just use the implementation of `Into<Vec<u8>>` to reuse the buffer.
-        self.0.into()
+        self.0.to_vec()
     }
 }
 
@@ -215,10 +219,11 @@ impl_compression_for_compact!(
     Header,
     Account,
     Log,
-    Receipt,
+    Receipt<T>,
     TxType,
     StorageEntry,
     BranchNodeCompact,
+    TrieChangeSetsEntry,
     StoredNibbles,
     StoredNibblesSubKey,
     StorageTrieEntry,
@@ -256,7 +261,7 @@ macro_rules! impl_compression_fixed_compact {
                 }
 
                 fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
-                    let _  = Compact::to_compact(self, buf);
+                    let _ = Compact::to_compact(self, buf);
                 }
             }
 

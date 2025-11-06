@@ -1,7 +1,7 @@
-//! Optimism supervisor and sequencer metrics
+//! Optimism supervisor metrics
 
 use crate::supervisor::InteropTxValidatorError;
-use op_alloy_rpc_types::InvalidInboxEntry;
+use op_alloy_rpc_types::SuperchainDAError;
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
@@ -50,39 +50,23 @@ impl SupervisorMetrics {
     pub fn increment_metrics_for_error(&self, error: &InteropTxValidatorError) {
         if let InteropTxValidatorError::InvalidEntry(inner) = error {
             match inner {
-                InvalidInboxEntry::SkippedData => self.skipped_data_count.increment(1),
-                InvalidInboxEntry::UnknownChain => self.unknown_chain_count.increment(1),
-                InvalidInboxEntry::ConflictingData => self.conflicting_data_count.increment(1),
-                InvalidInboxEntry::IneffectiveData => self.ineffective_data_count.increment(1),
-                InvalidInboxEntry::OutOfOrder => self.out_of_order_count.increment(1),
-                InvalidInboxEntry::AwaitingReplacement => {
+                SuperchainDAError::SkippedData => self.skipped_data_count.increment(1),
+                SuperchainDAError::UnknownChain => self.unknown_chain_count.increment(1),
+                SuperchainDAError::ConflictingData => self.conflicting_data_count.increment(1),
+                SuperchainDAError::IneffectiveData => self.ineffective_data_count.increment(1),
+                SuperchainDAError::OutOfOrder => self.out_of_order_count.increment(1),
+                SuperchainDAError::AwaitingReplacement => {
                     self.awaiting_replacement_count.increment(1)
                 }
-                InvalidInboxEntry::OutOfScope => self.out_of_scope_count.increment(1),
-                InvalidInboxEntry::NoParentForFirstBlock => {
+                SuperchainDAError::OutOfScope => self.out_of_scope_count.increment(1),
+                SuperchainDAError::NoParentForFirstBlock => {
                     self.no_parent_for_first_block_count.increment(1)
                 }
-                InvalidInboxEntry::FutureData => self.future_data_count.increment(1),
-                InvalidInboxEntry::MissedData => self.missed_data_count.increment(1),
-                InvalidInboxEntry::DataCorruption => self.data_corruption_count.increment(1),
-                InvalidInboxEntry::UninitializedChainDatabase => {}
+                SuperchainDAError::FutureData => self.future_data_count.increment(1),
+                SuperchainDAError::MissedData => self.missed_data_count.increment(1),
+                SuperchainDAError::DataCorruption => self.data_corruption_count.increment(1),
+                _ => {}
             }
         }
-    }
-}
-
-/// Optimism sequencer metrics
-#[derive(Metrics, Clone)]
-#[metrics(scope = "optimism_transaction_pool.sequencer")]
-pub struct SequencerMetrics {
-    /// How long it takes to forward a transaction to the sequencer
-    pub(crate) sequencer_forward_latency: Histogram,
-}
-
-impl SequencerMetrics {
-    /// Records the duration it took to forward a transaction
-    #[inline]
-    pub fn record_forward_latency(&self, duration: Duration) {
-        self.sequencer_forward_latency.record(duration.as_secs_f64());
     }
 }

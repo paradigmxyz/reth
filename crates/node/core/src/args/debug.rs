@@ -32,19 +32,23 @@ pub struct DebugArgs {
         long = "debug.etherscan",
         help_heading = "Debug",
         conflicts_with = "tip",
-        conflicts_with = "rpc_consensus_ws",
+        conflicts_with = "rpc_consensus_url",
         value_name = "ETHERSCAN_API_URL"
     )]
     pub etherscan: Option<Option<String>>,
 
-    /// Runs a fake consensus client using blocks fetched from an RPC `WebSocket` endpoint.
+    /// Runs a fake consensus client using blocks fetched from an RPC endpoint.
+    /// Supports both HTTP and `WebSocket` endpoints - `WebSocket` endpoints will use
+    /// subscriptions, while HTTP endpoints will poll for new blocks.
     #[arg(
-        long = "debug.rpc-consensus-ws",
+        long = "debug.rpc-consensus-url",
+        alias = "debug.rpc-consensus-ws",
         help_heading = "Debug",
         conflicts_with = "tip",
-        conflicts_with = "etherscan"
+        conflicts_with = "etherscan",
+        value_name = "RPC_URL"
     )]
-    pub rpc_consensus_ws: Option<String>,
+    pub rpc_consensus_url: Option<String>,
 
     /// If provided, the engine will skip `n` consecutive FCUs.
     #[arg(long = "debug.skip-fcu", help_heading = "Debug")]
@@ -80,6 +84,11 @@ pub struct DebugArgs {
     pub invalid_block_hook: Option<InvalidBlockSelection>,
 
     /// The RPC URL of a healthy node to use for comparing invalid block hook results against.
+    ///
+    ///Debug setting that enables execution witness comparison for troubleshooting bad blocks.
+    /// When enabled, the node will collect execution witnesses from the specified source and
+    /// compare them against local execution when a bad block is encountered, helping identify
+    /// discrepancies in state execution.
     #[arg(
         long = "debug.healthy-node-rpc-url",
         help_heading = "Debug",
@@ -87,6 +96,18 @@ pub struct DebugArgs {
         verbatim_doc_comment
     )]
     pub healthy_node_rpc_url: Option<String>,
+
+    /// The URL of the ethstats server to connect to.
+    /// Example: `nodename:secret@host:port`
+    #[arg(long = "ethstats", help_heading = "Debug")]
+    pub ethstats: Option<String>,
+
+    /// Set the node to idle state when the backfill is not running.
+    ///
+    /// This makes the `eth_syncing` RPC return "Idle" when the node has just started or finished
+    /// the backfill, but did not yet receive any new blocks.
+    #[arg(long = "debug.startup-sync-state-idle", help_heading = "Debug")]
+    pub startup_sync_state_idle: bool,
 }
 
 impl Default for DebugArgs {
@@ -96,7 +117,7 @@ impl Default for DebugArgs {
             tip: None,
             max_block: None,
             etherscan: None,
-            rpc_consensus_ws: None,
+            rpc_consensus_url: None,
             skip_fcu: None,
             skip_new_payload: None,
             reorg_frequency: None,
@@ -104,6 +125,8 @@ impl Default for DebugArgs {
             engine_api_store: None,
             invalid_block_hook: Some(InvalidBlockSelection::default()),
             healthy_node_rpc_url: None,
+            ethstats: None,
+            startup_sync_state_idle: false,
         }
     }
 }

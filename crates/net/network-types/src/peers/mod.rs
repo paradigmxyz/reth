@@ -25,7 +25,7 @@ pub struct Peer {
     /// The state of the connection, if any.
     pub state: PeerConnectionState,
     /// The [`ForkId`] that the peer announced via discovery.
-    pub fork_id: Option<ForkId>,
+    pub fork_id: Option<Box<ForkId>>,
     /// Whether the entry should be removed after an existing session was terminated.
     pub remove_after_disconnect: bool,
     /// The kind of peer
@@ -83,12 +83,16 @@ impl Peer {
     }
 
     /// Applies a reputation change to the peer and returns what action should be taken.
-    pub fn apply_reputation(&mut self, reputation: i32) -> ReputationChangeOutcome {
+    pub fn apply_reputation(
+        &mut self,
+        reputation: i32,
+        kind: ReputationChangeKind,
+    ) -> ReputationChangeOutcome {
         let previous = self.reputation;
         // we add reputation since negative reputation change decrease total reputation
         self.reputation = previous.saturating_add(reputation);
 
-        trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), "applied reputation change");
+        trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), ?kind, "applied reputation change");
 
         if self.state.is_connected() && self.is_banned() {
             self.state.disconnect();

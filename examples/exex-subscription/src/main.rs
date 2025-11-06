@@ -1,18 +1,16 @@
 #![allow(dead_code)]
 
-//! An ExEx example that installs a new RPC subscription endpoint that emit storage changes for a
+//! An ExEx example that installs a new RPC subscription endpoint that emits storage changes for a
 //! requested address.
 #[allow(dead_code)]
 use alloy_primitives::{Address, U256};
-use clap::Parser;
 use futures::TryStreamExt;
 use jsonrpsee::{
-    core::SubscriptionResult, proc_macros::rpc, tracing, PendingSubscriptionSink,
-    SubscriptionMessage,
+    core::SubscriptionResult, proc_macros::rpc, PendingSubscriptionSink, SubscriptionMessage,
 };
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
-    node::{api::FullNodeComponents, EthereumNode},
+    node::{api::FullNodeComponents, builder::NodeHandleFor, EthereumNode},
 };
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
@@ -166,19 +164,13 @@ async fn my_exex<Node: FullNodeComponents>(
     Ok(())
 }
 
-#[derive(Parser, Debug)]
-struct Args {
-    #[arg(long)]
-    enable_ext: bool,
-}
-
 fn main() -> eyre::Result<()> {
-    reth_ethereum::cli::Cli::parse_args().run(|builder, _args| async move {
+    reth_ethereum::cli::Cli::parse_args().run(|builder, _| async move {
         let (subscriptions_tx, subscriptions_rx) = mpsc::unbounded_channel::<SubscriptionRequest>();
 
         let rpc = StorageWatcherRpc::new(subscriptions_tx.clone());
 
-        let handle = builder
+        let handle: NodeHandleFor<EthereumNode> = builder
             .node(EthereumNode::default())
             .extend_rpc_modules(move |ctx| {
                 ctx.modules.merge_configured(StorageWatcherApiServer::into_rpc(rpc))?;

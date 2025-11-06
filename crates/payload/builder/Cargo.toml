@@ -21,7 +21,7 @@ reth-ethereum-engine-primitives.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
-alloy-primitives = { workspace = true, optional = true }
+alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 
 # async
@@ -37,14 +37,10 @@ metrics.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alloy-primitives.workspace = true
-alloy-consensus.workspace = true
-
 tokio = { workspace = true, features = ["sync", "rt"] }
 
 [features]
 test-utils = [
-    "alloy-primitives",
     "reth-chain-state/test-utils",
     "reth-primitives-traits/test-utils",
     "tokio/rt",

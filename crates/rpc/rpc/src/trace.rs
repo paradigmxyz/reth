@@ -1,10 +1,12 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::BlockId;
 use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
-use alloy_primitives::{map::HashSet, Bytes, B256, U256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, BlockHash, Bytes, B256, U256,
+};
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
-    transaction::TransactionRequest,
     BlockOverrides, Index,
 };
 use alloy_rpc_types_trace::{
@@ -18,8 +20,9 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
-use reth_revm::{database::StateProviderDatabase, db::CacheDB};
+use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_api::TraceApiServer;
+use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
     FromEthApiError, RpcNodeCore,
@@ -31,8 +34,10 @@ use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
+    storage::StorageInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -87,7 +92,7 @@ where
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(
         &self,
-        trace_request: TraceCallRequest,
+        trace_request: TraceCallRequest<RpcTxReq<Eth::NetworkTypes>>,
     ) -> Result<TraceResults, Eth::Error> {
         let at = trace_request.block_id.unwrap_or_default();
         let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
@@ -101,7 +106,7 @@ where
                 // <https://github.com/rust-lang/rust/issues/100013>
                 let db = db.0;
 
-                let (res, _) = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
+                let res = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &db)
@@ -142,7 +147,7 @@ where
     /// Note: Allows tracing dependent transactions, hence all transactions are traced in sequence
     pub async fn trace_call_many(
         &self,
-        calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
+        calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
         let at = block_id.unwrap_or(BlockId::pending());
@@ -153,7 +158,8 @@ where
         self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 let mut calls = calls.into_iter().peekable();
 
@@ -166,8 +172,7 @@ where
                     )?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
-                    let (res, _) =
-                        this.eth_api().inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+                    let res = this.eth_api().inspect(&mut db, evm_env, tx_env, &mut inspector)?;
 
                     let trace_res = inspector
                         .into_parity_builder()
@@ -358,7 +363,7 @@ where
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
         // We'll reuse the matcher across multiple blocks that are traced in parallel
         let matcher = Arc::new(filter.matcher());
-        let TraceFilter { from_block, to_block, after, count, .. } = filter;
+        let TraceFilter { from_block, to_block, mut after, count, .. } = filter;
         let start = from_block.unwrap_or(0);
 
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
@@ -384,78 +389,97 @@ where
             .into())
         }
 
-        // fetch all blocks in that range
-        let blocks = self
-            .provider()
-            .recovered_block_range(start..=end)
-            .map_err(Eth::Error::from_eth_err)?
-            .into_iter()
-            .map(Arc::new)
-            .collect::<Vec<_>>();
+        let mut all_traces = Vec::new();
+        let mut block_traces = Vec::with_capacity(self.inner.eth_config.max_tracing_requests);
+        for chunk_start in (start..end).step_by(self.inner.eth_config.max_tracing_requests) {
+            let chunk_end =
+                std::cmp::min(chunk_start + self.inner.eth_config.max_tracing_requests as u64, end);
 
-        // trace all blocks
-        let mut block_traces = Vec::with_capacity(blocks.len());
-        for block in &blocks {
-            let matcher = matcher.clone();
-            let traces = self.eth_api().trace_block_until(
-                block.hash().into(),
-                Some(block.clone()),
-                None,
-                TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _, _| {
-                    let mut traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                    traces.retain(|trace| matcher.matches(&trace.trace));
-                    Ok(Some(traces))
-                },
-            );
-            block_traces.push(traces);
-        }
+            // fetch all blocks in that chunk
+            let blocks = self
+                .eth_api()
+                .spawn_blocking_io(move |this| {
+                    Ok(this
+                        .provider()
+                        .recovered_block_range(chunk_start..=chunk_end)
+                        .map_err(Eth::Error::from_eth_err)?
+                        .into_iter()
+                        .map(Arc::new)
+                        .collect::<Vec<_>>())
+                })
+                .await?;
 
-        let block_traces = futures::future::try_join_all(block_traces).await?;
-        let mut all_traces = block_traces
-            .into_iter()
-            .flatten()
-            .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
-            .collect::<Vec<_>>();
-
-        // add reward traces for all blocks
-        for block in &blocks {
-            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                all_traces.extend(
-                    self.extract_reward_traces(
-                        block.header(),
-                        block.body().ommers(),
-                        base_block_reward,
-                    )
-                    .into_iter()
-                    .filter(|trace| matcher.matches(&trace.trace)),
+            // trace all blocks
+            for block in &blocks {
+                let matcher = matcher.clone();
+                let traces = self.eth_api().trace_block_until(
+                    block.hash().into(),
+                    Some(block.clone()),
+                    None,
+                    TracingInspectorConfig::default_parity(),
+                    move |tx_info, mut ctx| {
+                        let mut traces = ctx
+                            .take_inspector()
+                            .into_parity_builder()
+                            .into_localized_transaction_traces(tx_info);
+                        traces.retain(|trace| matcher.matches(&trace.trace));
+                        Ok(Some(traces))
+                    },
                 );
-            } else {
-                // no block reward, means we're past the Paris hardfork and don't expect any rewards
-                // because the blocks in ascending order
-                break
+                block_traces.push(traces);
             }
+
+            #[allow(clippy::iter_with_drain)]
+            let block_traces = futures::future::try_join_all(block_traces.drain(..)).await?;
+            all_traces.extend(block_traces.into_iter().flatten().flat_map(|traces| {
+                traces.into_iter().flatten().flat_map(|traces| traces.into_iter())
+            }));
+
+            // add reward traces for all blocks
+            for block in &blocks {
+                if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
+                    all_traces.extend(
+                        self.extract_reward_traces(
+                            block.header(),
+                            block.body().ommers(),
+                            base_block_reward,
+                        )
+                        .into_iter()
+                        .filter(|trace| matcher.matches(&trace.trace)),
+                    );
+                } else {
+                    // no block reward, means we're past the Paris hardfork and don't expect any
+                    // rewards because the blocks in ascending order
+                    break
+                }
+            }
+
+            // Skips the first `after` number of matching traces.
+            if let Some(cutoff) = after.map(|a| a as usize) &&
+                cutoff < all_traces.len()
+            {
+                all_traces.drain(..cutoff);
+                // we removed the first `after` traces
+                after = None;
+            }
+
+            // Return at most `count` of traces
+            if let Some(count) = count {
+                let count = count as usize;
+                if count < all_traces.len() {
+                    all_traces.truncate(count);
+                    return Ok(all_traces)
+                }
+            };
         }
 
-        // Skips the first `after` number of matching traces.
-        // If `after` is greater than or equal to the number of matched traces, it returns an empty
-        // array.
-        if let Some(after) = after.map(|a| a as usize) {
-            if after < all_traces.len() {
-                all_traces.drain(..after);
-            } else {
-                return Ok(vec![])
-            }
+        // If `after` is greater than or equal to the number of matched traces, it returns an
+        // empty array.
+        if let Some(cutoff) = after.map(|a| a as usize) &&
+            cutoff >= all_traces.len()
+        {
+            return Ok(vec![])
         }
-
-        // Return at most `count` of traces
-        if let Some(count) = count {
-            let count = count as usize;
-            if count < all_traces.len() {
-                all_traces.truncate(count);
-            }
-        };
 
         Ok(all_traces)
     }
@@ -469,9 +493,11 @@ where
             block_id,
             None,
             TracingInspectorConfig::default_parity(),
-            |tx_info, inspector, _, _, _| {
-                let traces =
-                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+            |tx_info, mut ctx| {
+                let traces = ctx
+                    .take_inspector()
+                    .into_parity_builder()
+                    .into_localized_transaction_traces(tx_info);
                 Ok(traces)
             },
         );
@@ -482,14 +508,14 @@ where
         let mut maybe_traces =
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
-        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                traces.extend(self.extract_reward_traces(
-                    block.header(),
-                    block.body().ommers(),
-                    base_block_reward,
-                ));
-            }
+        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) &&
+            let Some(base_block_reward) = self.calculate_base_block_reward(block.header())?
+        {
+            traces.extend(self.extract_reward_traces(
+                block.header(),
+                block.body().ommers(),
+                base_block_reward,
+            ));
         }
 
         Ok(maybe_traces)
@@ -506,14 +532,16 @@ where
                 block_id,
                 None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
-                move |tx_info, inspector, res, state, db| {
-                    let mut full_trace =
-                        inspector.into_parity_builder().into_trace_results(&res, &trace_types);
+                move |tx_info, mut ctx| {
+                    let mut full_trace = ctx
+                        .take_inspector()
+                        .into_parity_builder()
+                        .into_trace_results(&ctx.result, &trace_types);
 
                     // If statediffs were requested, populate them with the account balance and
                     // nonce from pre-state
                     if let Some(ref mut state_diff) = full_trace.state_diff {
-                        populate_state_diff(state_diff, db, state.iter())
+                        populate_state_diff(state_diff, &ctx.db, ctx.state.iter())
                             .map_err(Eth::Error::from_eth_err)?;
                     }
 
@@ -541,10 +569,10 @@ where
                 block_id,
                 None,
                 OpcodeGasInspector::default,
-                move |tx_info, inspector, _res, _, _| {
+                move |tx_info, ctx| {
                     let trace = TransactionOpcodeGas {
                         transaction_hash: tx_info.hash.expect("tx hash is set"),
-                        opcode_gas: inspector.opcode_gas_iter().collect(),
+                        opcode_gas: ctx.inspector.opcode_gas_iter().collect(),
                     };
                     Ok(trace)
                 },
@@ -561,10 +589,45 @@ where
             transactions,
         }))
     }
+
+    /// Returns all storage slots accessed during transaction execution along with their access
+    /// counts.
+    pub async fn trace_block_storage_access(
+        &self,
+        block_id: BlockId,
+    ) -> Result<Option<BlockStorageAccess>, Eth::Error> {
+        let res = self
+            .eth_api()
+            .trace_block_inspector(
+                block_id,
+                None,
+                StorageInspector::default,
+                move |tx_info, ctx| {
+                    let trace = TransactionStorageAccess {
+                        transaction_hash: tx_info.hash.expect("tx hash is set"),
+                        storage_access: ctx.inspector.accessed_slots().clone(),
+                        unique_loads: ctx.inspector.unique_loads(),
+                        warm_loads: ctx.inspector.warm_loads(),
+                    };
+                    Ok(trace)
+                },
+            )
+            .await?;
+
+        let Some(transactions) = res else { return Ok(None) };
+
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
+
+        Ok(Some(BlockStorageAccess {
+            block_hash: block.hash(),
+            block_number: block.number(),
+            transactions,
+        }))
+    }
 }
 
 #[async_trait]
-impl<Eth> TraceApiServer for TraceApi<Eth>
+impl<Eth> TraceApiServer<RpcTxReq<Eth::NetworkTypes>> for TraceApi<Eth>
 where
     Eth: TraceExt + 'static,
 {
@@ -573,7 +636,7 @@ where
     /// Handler for `trace_call`
     async fn trace_call(
         &self,
-        call: TransactionRequest,
+        call: RpcTxReq<Eth::NetworkTypes>,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
         state_overrides: Option<StateOverride>,
@@ -588,7 +651,7 @@ where
     /// Handler for `trace_callMany`
     async fn trace_call_many(
         &self,
-        calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
+        calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
@@ -646,6 +709,7 @@ where
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>> {
+        let _permit = self.inner.blocking_task_guard.clone().acquire_many_owned(2).await;
         Ok(Self::trace_filter(self, filter).await.map_err(Into::into)?)
     }
 
@@ -705,6 +769,33 @@ struct TraceApiInner<Eth> {
     blocking_task_guard: BlockingTaskGuard,
     // eth config settings
     eth_config: EthConfig,
+}
+
+/// Response type for storage tracing that contains all accessed storage slots
+/// for a transaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionStorageAccess {
+    /// Hash of the transaction
+    pub transaction_hash: B256,
+    /// Tracks storage slots and access counter.
+    pub storage_access: HashMap<Address, HashMap<B256, u64>>,
+    /// Number of unique storage loads
+    pub unique_loads: u64,
+    /// Number of warm storage loads
+    pub warm_loads: u64,
+}
+
+/// Response type for storage tracing that contains all accessed storage slots
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockStorageAccess {
+    /// The block hash
+    pub block_hash: BlockHash,
+    /// The block's number
+    pub block_number: u64,
+    /// All executed transactions in the block in the order they were executed
+    pub transactions: Vec<TransactionStorageAccess>,
 }
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block

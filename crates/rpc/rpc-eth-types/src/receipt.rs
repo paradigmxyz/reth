@@ -1,83 +1,40 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
-use super::EthResult;
-use alloy_consensus::{transaction::TransactionMeta, ReceiptEnvelope, TxReceipt};
+use crate::EthApiError;
+use alloy_consensus::{ReceiptEnvelope, Transaction};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
-use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
-use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
-use reth_primitives_traits::SignedTransaction;
+use alloy_rpc_types_eth::{Log, TransactionReceipt};
+use reth_chainspec::EthChainSpec;
+use reth_ethereum_primitives::Receipt;
+use reth_primitives_traits::{NodePrimitives, TransactionMeta};
+use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
+use std::sync::Arc;
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
-pub fn build_receipt<R, T, E>(
-    transaction: &T,
-    meta: TransactionMeta,
-    receipt: &R,
-    all_receipts: &[R],
+pub fn build_receipt<N, E>(
+    input: ConvertReceiptInput<'_, N>,
     blob_params: Option<BlobParams>,
-    build_envelope: impl FnOnce(ReceiptWithBloom<alloy_consensus::Receipt<Log>>) -> E,
-) -> EthResult<TransactionReceipt<E>>
+    build_rpc_receipt: impl FnOnce(N::Receipt, usize, TransactionMeta) -> E,
+) -> TransactionReceipt<E>
 where
-    R: TxReceipt<Log = alloy_primitives::Log>,
-    T: SignedTransaction,
+    N: NodePrimitives,
 {
-    // Note: we assume this transaction is valid, because it's mined (or part of pending block)
-    // and we don't need to check for pre EIP-2
-    let from = transaction.recover_signer_unchecked()?;
+    let ConvertReceiptInput { tx, meta, receipt, gas_used, next_log_index } = input;
+    let from = tx.signer();
 
-    // get the previous transaction cumulative gas used
-    let gas_used = if meta.index == 0 {
-        receipt.cumulative_gas_used()
-    } else {
-        let prev_tx_idx = (meta.index - 1) as usize;
-        all_receipts
-            .get(prev_tx_idx)
-            .map(|prev_receipt| receipt.cumulative_gas_used() - prev_receipt.cumulative_gas_used())
-            .unwrap_or_default()
-    };
-
-    let blob_gas_used = transaction.blob_gas_used();
+    let blob_gas_used = tx.blob_gas_used();
     // Blob gas price should only be present if the transaction is a blob transaction
     let blob_gas_price =
         blob_gas_used.and_then(|_| Some(blob_params?.calc_blob_fee(meta.excess_blob_gas?)));
 
-    let logs_bloom = receipt.bloom();
-
-    // get number of logs in the block
-    let mut num_logs = 0;
-    for prev_receipt in all_receipts.iter().take(meta.index as usize) {
-        num_logs += prev_receipt.logs().len();
-    }
-
-    let logs: Vec<Log> = receipt
-        .logs()
-        .iter()
-        .enumerate()
-        .map(|(tx_log_idx, log)| Log {
-            inner: log.clone(),
-            block_hash: Some(meta.block_hash),
-            block_number: Some(meta.block_number),
-            block_timestamp: Some(meta.timestamp),
-            transaction_hash: Some(meta.tx_hash),
-            transaction_index: Some(meta.index),
-            log_index: Some((num_logs + tx_log_idx) as u64),
-            removed: false,
-        })
-        .collect();
-
-    let rpc_receipt = alloy_rpc_types_eth::Receipt {
-        status: receipt.status_or_post_state(),
-        cumulative_gas_used: receipt.cumulative_gas_used(),
-        logs,
-    };
-
-    let (contract_address, to) = match transaction.kind() {
-        TxKind::Create => (Some(from.create(transaction.nonce())), None),
+    let (contract_address, to) = match tx.kind() {
+        TxKind::Create => (Some(from.create(tx.nonce())), None),
         TxKind::Call(addr) => (None, Some(Address(*addr))),
     };
 
-    Ok(TransactionReceipt {
-        inner: build_envelope(ReceiptWithBloom { receipt: rpc_receipt, logs_bloom }),
+    TransactionReceipt {
+        inner: build_rpc_receipt(receipt, next_log_index, meta),
         transaction_hash: meta.tx_hash,
         transaction_index: Some(meta.index),
         block_hash: Some(meta.block_hash),
@@ -86,52 +43,76 @@ where
         to,
         gas_used,
         contract_address,
-        effective_gas_price: transaction.effective_gas_price(meta.base_fee),
+        effective_gas_price: tx.effective_gas_price(meta.base_fee),
         // EIP-4844 fields
         blob_gas_price,
         blob_gas_used,
-    })
+    }
 }
 
-/// Receipt response builder.
-#[derive(Debug)]
-pub struct EthReceiptBuilder {
-    /// The base response body, contains L1 fields.
-    pub base: TransactionReceipt,
+/// Converter for Ethereum receipts.
+#[derive(derive_more::Debug)]
+pub struct EthReceiptConverter<
+    ChainSpec,
+    Builder = fn(Receipt, usize, TransactionMeta) -> ReceiptEnvelope<Log>,
+> {
+    chain_spec: Arc<ChainSpec>,
+    #[debug(skip)]
+    build_rpc_receipt: Builder,
 }
 
-impl EthReceiptBuilder {
-    /// Returns a new builder with the base response body (L1 fields) set.
-    ///
-    /// Note: This requires _all_ block receipts because we need to calculate the gas used by the
-    /// transaction.
-    pub fn new(
-        transaction: &TransactionSigned,
-        meta: TransactionMeta,
-        receipt: &Receipt,
-        all_receipts: &[Receipt],
-        blob_params: Option<BlobParams>,
-    ) -> EthResult<Self> {
-        let base = build_receipt(
-            transaction,
-            meta,
-            receipt,
-            all_receipts,
-            blob_params,
-            |receipt_with_bloom| match receipt.tx_type {
-                TxType::Legacy => ReceiptEnvelope::Legacy(receipt_with_bloom),
-                TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt_with_bloom),
-                TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt_with_bloom),
-                TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt_with_bloom),
-                TxType::Eip7702 => ReceiptEnvelope::Eip7702(receipt_with_bloom),
+impl<ChainSpec, Builder> Clone for EthReceiptConverter<ChainSpec, Builder>
+where
+    Builder: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            chain_spec: self.chain_spec.clone(),
+            build_rpc_receipt: self.build_rpc_receipt.clone(),
+        }
+    }
+}
+
+impl<ChainSpec> EthReceiptConverter<ChainSpec> {
+    /// Creates a new converter with the given chain spec.
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self {
+            chain_spec,
+            build_rpc_receipt: |receipt, next_log_index, meta| {
+                receipt.into_rpc(next_log_index, meta).into()
             },
-        )?;
-
-        Ok(Self { base })
+        }
     }
 
-    /// Builds a receipt response from the base response body, and any set additional fields.
-    pub fn build(self) -> TransactionReceipt {
-        self.base
+    /// Sets new builder for the converter.
+    pub fn with_builder<Builder>(
+        self,
+        build_rpc_receipt: Builder,
+    ) -> EthReceiptConverter<ChainSpec, Builder> {
+        EthReceiptConverter { chain_spec: self.chain_spec, build_rpc_receipt }
+    }
+}
+
+impl<N, ChainSpec, Builder, Rpc> ReceiptConverter<N> for EthReceiptConverter<ChainSpec, Builder>
+where
+    N: NodePrimitives,
+    ChainSpec: EthChainSpec + 'static,
+    Builder: Fn(N::Receipt, usize, TransactionMeta) -> Rpc + 'static,
+{
+    type RpcReceipt = TransactionReceipt<Rpc>;
+    type Error = EthApiError;
+
+    fn convert_receipts(
+        &self,
+        inputs: Vec<ConvertReceiptInput<'_, N>>,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
+        let mut receipts = Vec::with_capacity(inputs.len());
+
+        for input in inputs {
+            let blob_params = self.chain_spec.blob_params_at_timestamp(input.meta.timestamp);
+            receipts.push(build_receipt(input, blob_params, &self.build_rpc_receipt));
+        }
+
+        Ok(receipts)
     }
 }

@@ -4,6 +4,7 @@ use std::{
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
+    time::Duration,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::trace;
@@ -28,6 +29,8 @@ pub enum MetricEvent {
         /// Maximum known block number reachable by this stage.
         /// If specified, `entities_total` metric is updated.
         max_block_number: Option<BlockNumber>,
+        /// The duration of stage iteration including database commit.
+        elapsed: Duration,
     },
 }
 
@@ -49,20 +52,12 @@ impl MetricsListener {
         trace!(target: "sync::metrics", ?event, "Metric event received");
         match event {
             MetricEvent::SyncHeight { height } => {
-                for stage_id in StageId::ALL {
-                    self.handle_event(MetricEvent::StageCheckpoint {
-                        stage_id,
-                        checkpoint: StageCheckpoint {
-                            block_number: height,
-                            stage_checkpoint: None,
-                        },
-                        max_block_number: Some(height),
-                    });
-                }
+                self.update_all_stages_height(height);
             }
-            MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number } => {
+            MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number, elapsed } => {
                 let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
 
+                stage_metrics.total_elapsed.increment(elapsed.as_secs_f64());
                 stage_metrics.checkpoint.set(checkpoint.block_number as f64);
 
                 let (processed, total) = match checkpoint.entities() {
@@ -76,6 +71,17 @@ impl MetricsListener {
                     stage_metrics.entities_total.set(total as f64);
                 }
             }
+        }
+    }
+
+    /// Updates all stage checkpoints to the given height efficiently.
+    fn update_all_stages_height(&mut self, height: BlockNumber) {
+        for stage_id in StageId::ALL {
+            let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
+            let height_f64 = height as f64;
+            stage_metrics.checkpoint.set(height_f64);
+            stage_metrics.entities_processed.set(height_f64);
+            stage_metrics.entities_total.set(height_f64);
         }
     }
 }

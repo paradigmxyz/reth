@@ -370,7 +370,7 @@ where
             .map(|(exex_id, num_hash)| {
                 num_hash.map_or(Ok((exex_id, num_hash, false)), |num_hash| {
                     self.provider
-                        .is_known(&num_hash.hash)
+                        .is_known(num_hash.hash)
                         // Save the ExEx ID, finished height, and whether the hash is canonical
                         .map(|is_canonical| (exex_id, Some(num_hash), is_canonical))
                 })
@@ -501,11 +501,11 @@ where
                 .next_notification_id
                 .checked_sub(this.min_id)
                 .expect("exex expected notification ID outside the manager's range");
-            if let Some(notification) = this.buffer.get(notification_index) {
-                if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
-                    // The channel was closed, which is irrecoverable for the manager
-                    return Poll::Ready(Err(err.into()))
-                }
+            if let Some(notification) = this.buffer.get(notification_index) &&
+                let Poll::Ready(Err(err)) = exex.send(cx, notification)
+            {
+                // The channel was closed, which is irrecoverable for the manager
+                return Poll::Ready(Err(err.into()))
             }
             min_id = min_id.min(exex.next_notification_id);
             this.exex_handles.push(exex);
@@ -663,11 +663,11 @@ mod tests {
     use futures::{StreamExt, TryStreamExt};
     use rand::Rng;
     use reth_db_common::init::init_genesis;
-    use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockReader,
-        BlockWriter, Chain, DatabaseProviderFactory, StorageLocation, TransactionVariant,
+        BlockWriter, Chain, DBProvider, DatabaseProviderFactory, TransactionVariant,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
 
@@ -1107,7 +1107,7 @@ mod tests {
             "test_exex".to_string(),
             Default::default(),
             provider,
-            EthExecutorProvider::mainnet(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -1162,7 +1162,7 @@ mod tests {
             "test_exex".to_string(),
             Default::default(),
             provider,
-            EthExecutorProvider::mainnet(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -1212,7 +1212,7 @@ mod tests {
             "test_exex".to_string(),
             Default::default(),
             provider,
-            EthExecutorProvider::mainnet(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -1255,7 +1255,7 @@ mod tests {
             "test_exex".to_string(),
             Default::default(),
             provider,
-            EthExecutorProvider::mainnet(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -1303,7 +1303,7 @@ mod tests {
         .try_recover()
         .unwrap();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw.insert_block(block.clone(), StorageLocation::Database).unwrap();
+        provider_rw.insert_block(block.clone()).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = BlockchainProvider::new(provider_factory).unwrap();
@@ -1315,7 +1315,7 @@ mod tests {
             "test_exex".to_string(),
             Default::default(),
             provider.clone(),
-            EthExecutorProvider::mainnet(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 

@@ -1,12 +1,13 @@
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     prefix_set::TriePrefixSetsMut,
-    proof::{Proof, ProofBlindedProviderFactory},
+    proof::{Proof, ProofTrieNodeProviderFactory},
     trie_cursor::TrieCursorFactory,
 };
 use alloy_rlp::EMPTY_STRING_CODE;
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie_common::HashedPostState;
+use reth_trie_sparse::SparseTrieInterface;
 
 use alloy_primitives::{
     keccak256,
@@ -20,10 +21,10 @@ use reth_execution_errors::{
 };
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode},
-    SparseStateTrie,
+    provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
+    SerialSparseTrie, SparseStateTrie,
 };
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -83,7 +84,7 @@ impl<T, H> TrieWitness<T, H> {
         self
     }
 
-    /// Set `always_include_root_node` to true. Root node will be included even on empty state.
+    /// Set `always_include_root_node` to true. Root node will be included even in empty state.
     /// This setting is useful if the caller wants to verify the witness against the
     /// parent state root.
     pub const fn always_include_root_node(mut self) -> Self {
@@ -145,15 +146,11 @@ where
         }
 
         let (tx, rx) = mpsc::channel();
-        let blinded_provider_factory = WitnessBlindedProviderFactory::new(
-            ProofBlindedProviderFactory::new(
-                self.trie_cursor_factory,
-                self.hashed_cursor_factory,
-                Arc::new(self.prefix_sets),
-            ),
+        let blinded_provider_factory = WitnessTrieNodeProviderFactory::new(
+            ProofTrieNodeProviderFactory::new(self.trie_cursor_factory, self.hashed_cursor_factory),
             tx,
         );
-        let mut sparse_trie = SparseStateTrie::new(blinded_provider_factory);
+        let mut sparse_trie = SparseStateTrie::<SerialSparseTrie>::new();
         sparse_trie.reveal_multiproof(multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.
@@ -161,6 +158,7 @@ where
             proof_targets.into_iter().sorted_unstable_by_key(|(ha, _)| *ha)
         {
             // Update storage trie first.
+            let provider = blinded_provider_factory.storage_node_provider(hashed_address);
             let storage = state.storages.get(&hashed_address);
             let storage_trie = sparse_trie.storage_trie_mut(&hashed_address).ok_or(
                 SparseStateTrieErrorKind::SparseStorageTrie(
@@ -176,11 +174,11 @@ where
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
 
                 if let Some(value) = maybe_leaf_value {
-                    storage_trie.update_leaf(storage_nibbles, value).map_err(|err| {
+                    storage_trie.update_leaf(storage_nibbles, value, &provider).map_err(|err| {
                         SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
                     })?;
                 } else {
-                    storage_trie.remove_leaf(&storage_nibbles).map_err(|err| {
+                    storage_trie.remove_leaf(&storage_nibbles, &provider).map_err(|err| {
                         SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
                     })?;
                 }
@@ -194,7 +192,11 @@ where
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
                 .unwrap_or_default();
-            sparse_trie.update_account(hashed_address, account)?;
+
+            if !sparse_trie.update_account(hashed_address, account, &blinded_provider_factory)? {
+                let nibbles = Nibbles::unpack(hashed_address);
+                sparse_trie.remove_account_leaf(&nibbles, &blinded_provider_factory)?;
+            }
 
             while let Ok(node) = rx.try_recv() {
                 self.witness.insert(keccak256(&node), node);
@@ -235,56 +237,56 @@ where
 }
 
 #[derive(Debug, Clone)]
-struct WitnessBlindedProviderFactory<F> {
-    /// Blinded node provider factory.
+struct WitnessTrieNodeProviderFactory<F> {
+    /// Trie node provider factory.
     provider_factory: F,
-    /// Sender for forwarding fetched blinded node.
+    /// Sender for forwarding fetched trie node.
     tx: mpsc::Sender<Bytes>,
 }
 
-impl<F> WitnessBlindedProviderFactory<F> {
+impl<F> WitnessTrieNodeProviderFactory<F> {
     const fn new(provider_factory: F, tx: mpsc::Sender<Bytes>) -> Self {
         Self { provider_factory, tx }
     }
 }
 
-impl<F> BlindedProviderFactory for WitnessBlindedProviderFactory<F>
+impl<F> TrieNodeProviderFactory for WitnessTrieNodeProviderFactory<F>
 where
-    F: BlindedProviderFactory,
-    F::AccountNodeProvider: BlindedProvider,
-    F::StorageNodeProvider: BlindedProvider,
+    F: TrieNodeProviderFactory,
+    F::AccountNodeProvider: TrieNodeProvider,
+    F::StorageNodeProvider: TrieNodeProvider,
 {
-    type AccountNodeProvider = WitnessBlindedProvider<F::AccountNodeProvider>;
-    type StorageNodeProvider = WitnessBlindedProvider<F::StorageNodeProvider>;
+    type AccountNodeProvider = WitnessTrieNodeProvider<F::AccountNodeProvider>;
+    type StorageNodeProvider = WitnessTrieNodeProvider<F::StorageNodeProvider>;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
         let provider = self.provider_factory.account_node_provider();
-        WitnessBlindedProvider::new(provider, self.tx.clone())
+        WitnessTrieNodeProvider::new(provider, self.tx.clone())
     }
 
     fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
         let provider = self.provider_factory.storage_node_provider(account);
-        WitnessBlindedProvider::new(provider, self.tx.clone())
+        WitnessTrieNodeProvider::new(provider, self.tx.clone())
     }
 }
 
 #[derive(Debug)]
-struct WitnessBlindedProvider<P> {
+struct WitnessTrieNodeProvider<P> {
     /// Proof-based blinded.
     provider: P,
     /// Sender for forwarding fetched blinded node.
     tx: mpsc::Sender<Bytes>,
 }
 
-impl<P> WitnessBlindedProvider<P> {
+impl<P> WitnessTrieNodeProvider<P> {
     const fn new(provider: P, tx: mpsc::Sender<Bytes>) -> Self {
         Self { provider, tx }
     }
 }
 
-impl<P: BlindedProvider> BlindedProvider for WitnessBlindedProvider<P> {
-    fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
-        let maybe_node = self.provider.blinded_node(path)?;
+impl<P: TrieNodeProvider> TrieNodeProvider for WitnessTrieNodeProvider<P> {
+    fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+        let maybe_node = self.provider.trie_node(path)?;
         if let Some(node) = &maybe_node {
             self.tx
                 .send(node.node.clone())

@@ -2,7 +2,7 @@
 //! previous blocks.
 
 use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
-use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction};
+use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction, TxReceipt};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;
@@ -15,7 +15,7 @@ use reth_rpc_server_types::{
         DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
     },
 };
-use reth_storage_api::{BlockReader, BlockReaderIdExt};
+use reth_storage_api::{BlockReaderIdExt, NodePrimitivesProvider};
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
@@ -49,7 +49,7 @@ pub struct GasPriceOracleConfig {
     pub max_reward_percentile_count: u64,
 
     /// The default gas price to use if there are no blocks to use
-    pub default: Option<U256>,
+    pub default_suggested_fee: Option<U256>,
 
     /// The maximum gas price to use for the estimate
     pub max_price: Option<U256>,
@@ -66,7 +66,7 @@ impl Default for GasPriceOracleConfig {
             max_header_history: MAX_HEADER_HISTORY,
             max_block_history: MAX_HEADER_HISTORY,
             max_reward_percentile_count: MAX_REWARD_PERCENTILE_COUNT,
-            default: None,
+            default_suggested_fee: None,
             max_price: Some(DEFAULT_MAX_GAS_PRICE),
             ignore_price: Some(DEFAULT_IGNORE_GAS_PRICE),
         }
@@ -77,12 +77,12 @@ impl Default for GasPriceOracleConfig {
 #[derive(Debug)]
 pub struct GasPriceOracle<Provider>
 where
-    Provider: BlockReader,
+    Provider: NodePrimitivesProvider,
 {
     /// The type used to subscribe to block events and get block info
     provider: Provider,
     /// The cache for blocks
-    cache: EthStateCache<Provider::Block, Provider::Receipt>,
+    cache: EthStateCache<Provider::Primitives>,
     /// The config for the oracle
     oracle_config: GasPriceOracleConfig,
     /// The price under which the sample will be ignored.
@@ -94,13 +94,13 @@ where
 
 impl<Provider> GasPriceOracle<Provider>
 where
-    Provider: BlockReaderIdExt,
+    Provider: BlockReaderIdExt + NodePrimitivesProvider,
 {
     /// Creates and returns the [`GasPriceOracle`].
     pub fn new(
         provider: Provider,
         mut oracle_config: GasPriceOracleConfig,
-        cache: EthStateCache<Provider::Block, Provider::Receipt>,
+        cache: EthStateCache<Provider::Primitives>,
     ) -> Self {
         // sanitize the percentile to be less than 100
         if oracle_config.percentile > 100 {
@@ -112,7 +112,12 @@ where
         // this is the number of blocks that we will cache the values for
         let cached_values = (oracle_config.blocks * 5).max(oracle_config.max_block_history as u32);
         let inner = Mutex::new(GasPriceOracleInner {
-            last_price: Default::default(),
+            last_price: GasPriceOracleResult {
+                block_hash: B256::ZERO,
+                price: oracle_config
+                    .default_suggested_fee
+                    .unwrap_or_else(|| GasPriceOracleResult::default().price),
+            },
             lowest_effective_tip_cache: EffectiveTipLruCache(LruMap::new(ByLength::new(
                 cached_values,
             ))),
@@ -199,10 +204,10 @@ where
         };
 
         // constrain to the max price
-        if let Some(max_price) = self.oracle_config.max_price {
-            if price > max_price {
-                price = max_price;
-            }
+        if let Some(max_price) = self.oracle_config.max_price &&
+            price > max_price
+        {
+            price = max_price;
         }
 
         inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price };
@@ -249,10 +254,10 @@ where
             };
 
             // ignore transactions with a tip under the configured threshold
-            if let Some(ignore_under) = self.ignore_price {
-                if effective_tip < Some(ignore_under) {
-                    continue
-                }
+            if let Some(ignore_under) = self.ignore_price &&
+                effective_tip < Some(ignore_under)
+            {
+                continue
             }
 
             // check if the sender was the coinbase, if so, ignore
@@ -271,6 +276,77 @@ where
         }
 
         Ok(Some((parent_hash, prices)))
+    }
+
+    /// Suggests a max priority fee value using a simplified and more predictable algorithm
+    /// appropriate for chains like Optimism with a single known block builder.
+    ///
+    /// It returns either:
+    /// - The minimum suggested priority fee when blocks have capacity
+    /// - 10% above the median effective priority fee from the last block when at capacity
+    ///
+    /// A block is considered at capacity if its total gas used plus the maximum single transaction
+    /// gas would exceed the block's gas limit.
+    pub async fn op_suggest_tip_cap(&self, min_suggested_priority_fee: U256) -> EthResult<U256> {
+        let header = self
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
+            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+
+        let mut inner = self.inner.lock().await;
+
+        // if we have stored a last price, then we check whether or not it was for the same head
+        if inner.last_price.block_hash == header.hash() {
+            return Ok(inner.last_price.price);
+        }
+
+        let mut suggestion = min_suggested_priority_fee;
+
+        // find the maximum gas used by any of the transactions in the block to use as the
+        // capacity margin for the block, if no receipts are found return the
+        // suggested_min_priority_fee
+        let receipts = self
+            .cache
+            .get_receipts(header.hash())
+            .await?
+            .ok_or(EthApiError::ReceiptsNotFound(BlockId::latest()))?;
+
+        let mut max_tx_gas_used = 0u64;
+        let mut last_cumulative_gas = 0;
+        for receipt in receipts.as_ref() {
+            let cumulative_gas = receipt.cumulative_gas_used();
+            // get the gas used by each transaction in the block, by subtracting the
+            // cumulative gas used of the previous transaction from the cumulative gas used of
+            // the current transaction. This is because there is no gas_used()
+            // method on the Receipt trait.
+            let gas_used = cumulative_gas - last_cumulative_gas;
+            max_tx_gas_used = max_tx_gas_used.max(gas_used);
+            last_cumulative_gas = cumulative_gas;
+        }
+
+        // if the block is at capacity, the suggestion must be increased
+        if header.gas_used() + max_tx_gas_used > header.gas_limit() {
+            let Some(median_tip) = self.get_block_median_tip(header.hash()).await? else {
+                return Ok(suggestion);
+            };
+
+            let new_suggestion = median_tip + median_tip / U256::from(10);
+
+            if new_suggestion > suggestion {
+                suggestion = new_suggestion;
+            }
+        }
+
+        // constrain to the max price
+        if let Some(max_price) = self.oracle_config.max_price &&
+            suggestion > max_price
+        {
+            suggestion = max_price;
+        }
+
+        inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price: suggestion };
+
+        Ok(suggestion)
     }
 
     /// Get the median tip value for the given block. This is useful for determining

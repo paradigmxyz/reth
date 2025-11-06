@@ -11,7 +11,7 @@ pub struct ForwardInMemoryCursor<'a, K, V> {
 impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
     /// Create new forward cursor positioned at the beginning of the collection.
     ///
-    /// The cursor expects all of the entries have been sorted in advance.
+    /// The cursor expects all of the entries to have been sorted in advance.
     #[inline]
     pub fn new(entries: &'a [(K, V)]) -> Self {
         Self { entries: entries.iter(), is_empty: entries.is_empty() }
@@ -23,8 +23,9 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
         self.is_empty
     }
 
+    /// Returns the current entry pointed to be the cursor, or `None` if no entries are left.
     #[inline]
-    fn peek(&self) -> Option<&(K, V)> {
+    pub fn current(&self) -> Option<&(K, V)> {
         self.entries.clone().next()
     }
 
@@ -59,7 +60,7 @@ where
     fn advance_while(&mut self, predicate: impl Fn(&K) -> bool) -> Option<(K, V)> {
         let mut entry;
         loop {
-            entry = self.peek();
+            entry = self.current();
             if entry.is_some_and(|(k, _)| predicate(k)) {
                 self.next();
             } else {
@@ -77,20 +78,21 @@ mod tests {
     #[test]
     fn test_cursor() {
         let mut cursor = ForwardInMemoryCursor::new(&[(1, ()), (2, ()), (3, ()), (4, ()), (5, ())]);
+        assert_eq!(cursor.current(), Some(&(1, ())));
 
         assert_eq!(cursor.seek(&0), Some((1, ())));
-        assert_eq!(cursor.peek(), Some(&(1, ())));
+        assert_eq!(cursor.current(), Some(&(1, ())));
 
         assert_eq!(cursor.seek(&3), Some((3, ())));
-        assert_eq!(cursor.peek(), Some(&(3, ())));
+        assert_eq!(cursor.current(), Some(&(3, ())));
 
         assert_eq!(cursor.seek(&3), Some((3, ())));
-        assert_eq!(cursor.peek(), Some(&(3, ())));
+        assert_eq!(cursor.current(), Some(&(3, ())));
 
         assert_eq!(cursor.seek(&4), Some((4, ())));
-        assert_eq!(cursor.peek(), Some(&(4, ())));
+        assert_eq!(cursor.current(), Some(&(4, ())));
 
         assert_eq!(cursor.seek(&6), None);
-        assert_eq!(cursor.peek(), None);
+        assert_eq!(cursor.current(), None);
     }
 }

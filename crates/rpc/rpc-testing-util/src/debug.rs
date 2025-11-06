@@ -15,7 +15,7 @@ use alloy_rpc_types_trace::{
 };
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_ethereum_primitives::Receipt;
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
@@ -77,7 +77,9 @@ pub trait DebugApiExt {
 
 impl<T> DebugApiExt for T
 where
-    T: EthApiClient<Transaction, Block, Receipt, Header> + DebugApiClient + Sync,
+    T: EthApiClient<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>
+        + DebugApiClient<TransactionRequest>
+        + Sync,
 {
     type Provider = T;
 

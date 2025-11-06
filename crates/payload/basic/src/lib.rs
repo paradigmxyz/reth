@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_eips::merge::SLOT_DURATION;
@@ -455,6 +455,10 @@ where
         Ok(self.config.attributes.clone())
     }
 
+    fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
+        Ok(self.config.attributes.timestamp())
+    }
+
     fn resolve_kind(
         &mut self,
         kind: PayloadKind,
@@ -583,15 +587,15 @@ where
         let this = self.get_mut();
 
         // check if there is a better payload before returning the best payload
-        if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                this.maybe_better = None;
-                if let Ok(Some(payload)) = res.map(|out| out.into_payload())
-                    .inspect_err(|err| warn!(target: "payload_builder", %err, "failed to resolve pending payload"))
-                {
-                    debug!(target: "payload_builder", "resolving better payload");
-                    return Poll::Ready(Ok(payload))
-                }
+        if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            this.maybe_better = None;
+            if let Ok(Some(payload)) = res.map(|out| out.into_payload()).inspect_err(
+                |err| warn!(target: "payload_builder", %err, "failed to resolve pending payload"),
+            ) {
+                debug!(target: "payload_builder", "resolving better payload");
+                return Poll::Ready(Ok(payload))
             }
         }
 
@@ -600,20 +604,20 @@ where
             return Poll::Ready(Ok(best))
         }
 
-        if let Some(fut) = Pin::new(&mut this.empty_payload).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                this.empty_payload = None;
-                return match res {
-                    Ok(res) => {
-                        if let Err(err) = &res {
-                            warn!(target: "payload_builder", %err, "failed to resolve empty payload");
-                        } else {
-                            debug!(target: "payload_builder", "resolving empty payload");
-                        }
-                        Poll::Ready(res)
+        if let Some(fut) = Pin::new(&mut this.empty_payload).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            this.empty_payload = None;
+            return match res {
+                Ok(res) => {
+                    if let Err(err) = &res {
+                        warn!(target: "payload_builder", %err, "failed to resolve empty payload");
+                    } else {
+                        debug!(target: "payload_builder", "resolving empty payload");
                     }
-                    Err(err) => Poll::Ready(Err(err.into())),
+                    Poll::Ready(res)
                 }
+                Err(err) => Poll::Ready(Err(err.into())),
             }
         }
 
@@ -852,10 +856,12 @@ pub trait PayloadBuilder: Send + Sync + Clone {
 /// Tells the payload builder how to react to payload request if there's no payload available yet.
 ///
 /// This situation can occur if the CL requests a payload before the first payload has been built.
+#[derive(Default)]
 pub enum MissingPayloadBehaviour<Payload> {
     /// Await the regular scheduled payload process.
     AwaitInProgress,
     /// Race the in progress payload process with an empty payload.
+    #[default]
     RaceEmptyPayload,
     /// Race the in progress payload process with this job.
     RacePayload(Box<dyn FnOnce() -> Result<Payload, PayloadBuilderError> + Send>),
@@ -870,12 +876,6 @@ impl<Payload> fmt::Debug for MissingPayloadBehaviour<Payload> {
             }
             Self::RacePayload(_) => write!(f, "RacePayload"),
         }
-    }
-}
-
-impl<Payload> Default for MissingPayloadBehaviour<Payload> {
-    fn default() -> Self {
-        Self::RaceEmptyPayload
     }
 }
 

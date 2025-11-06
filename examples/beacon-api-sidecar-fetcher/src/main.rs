@@ -1,7 +1,7 @@
 //! Run with
 //!
 //! ```sh
-//! cargo run -p beacon-api-beacon-sidecar-fetcher --node --full
+//! cargo run -p example-beacon-api-sidecar-fetcher -- node --full
 //! ```
 //!
 //! This launches a regular reth instance and subscribes to payload attributes event stream.
@@ -85,10 +85,7 @@ pub struct BeaconSidecarConfig {
 impl Default for BeaconSidecarConfig {
     /// Default setup for lighthouse client
     fn default() -> Self {
-        Self {
-            cl_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), // Equivalent to Ipv4Addr::LOCALHOST
-            cl_port: 5052,
-        }
+        Self { cl_addr: IpAddr::V4(Ipv4Addr::LOCALHOST), cl_port: 5052 }
     }
 }
 

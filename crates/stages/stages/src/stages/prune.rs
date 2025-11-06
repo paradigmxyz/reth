@@ -1,7 +1,7 @@
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
+    BlockReader, ChainStateBlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory,
 };
 use reth_prune::{
@@ -42,7 +42,10 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
-        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
+        + ChainStateBlockReader
+        + StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        >,
 {
     fn id(&self) -> StageId {
         StageId::Prune
@@ -100,9 +103,18 @@ where
         // We cannot recover the data that was pruned in `execute`, so we just update the
         // checkpoints.
         let prune_checkpoints = provider.get_prune_checkpoints()?;
+        let unwind_to_last_tx =
+            provider.block_body_indices(input.unwind_to)?.map(|i| i.last_tx_num());
+
         for (segment, mut checkpoint) in prune_checkpoints {
-            checkpoint.block_number = Some(input.unwind_to);
-            provider.save_prune_checkpoint(segment, checkpoint)?;
+            // Only update the checkpoint if unwind_to is lower than the existing checkpoint.
+            if let Some(block) = checkpoint.block_number &&
+                input.unwind_to < block
+            {
+                checkpoint.block_number = Some(input.unwind_to);
+                checkpoint.tx_number = unwind_to_last_tx;
+                provider.save_prune_checkpoint(segment, checkpoint)?;
+            }
         }
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
@@ -119,7 +131,7 @@ impl PruneSenderRecoveryStage {
     /// Create new prune sender recovery stage with the given prune mode and commit threshold.
     pub fn new(prune_mode: PruneMode, commit_threshold: usize) -> Self {
         Self(PruneStage::new(
-            PruneModes { sender_recovery: Some(prune_mode), ..PruneModes::none() },
+            PruneModes { sender_recovery: Some(prune_mode), ..PruneModes::default() },
             commit_threshold,
         ))
     }
@@ -131,7 +143,10 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
-        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
+        + ChainStateBlockReader
+        + StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        >,
 {
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery

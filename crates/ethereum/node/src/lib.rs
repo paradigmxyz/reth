@@ -9,7 +9,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use reth_revm as _;
 use revm as _;
@@ -17,11 +17,14 @@ use revm as _;
 pub use reth_ethereum_engine_primitives::EthEngineTypes;
 
 pub mod evm;
-pub use evm::{EthEvmConfig, EthExecutorProvider};
+pub use evm::EthEvmConfig;
+
+#[allow(deprecated)]
+pub use evm::EthExecutorProvider;
 
 pub use reth_ethereum_consensus as consensus;
 pub mod node;
-pub use node::{EthereumEthApiBuilder, EthereumNode};
+pub use node::*;
 
 pub mod payload;
 

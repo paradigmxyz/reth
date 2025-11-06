@@ -19,16 +19,16 @@ const STORAGE_SHARD_KEY_BYTES_SIZE: usize = 20 + 32 + 8;
 /// Sometimes data can be too big to be saved for a single key. This helps out by dividing the data
 /// into different shards. Example:
 ///
-/// `Address | StorageKey | 200` -> data is from transition 0 to 200.
+/// `Address | StorageKey | 200` -> data is from block 0 to 200.
 ///
-/// `Address | StorageKey | 300` -> data is from transition 201 to 300.
+/// `Address | StorageKey | 300` -> data is from block 201 to 300.
 #[derive(
     Debug, Default, Clone, Eq, Ord, PartialOrd, PartialEq, AsRef, Serialize, Deserialize, Hash,
 )]
 pub struct StorageShardedKey {
     /// Storage account address.
     pub address: Address,
-    /// Storage slot with highest transition id.
+    /// Storage slot with highest block number.
     #[as_ref]
     pub sharded_key: ShardedKey<B256>,
 }
@@ -70,14 +70,14 @@ impl Decode for StorageShardedKey {
         if value.len() != STORAGE_SHARD_KEY_BYTES_SIZE {
             return Err(DatabaseError::Decode)
         }
-        let tx_num_index = value.len() - 8;
+        let block_num_index = value.len() - 8;
 
-        let highest_tx_number = u64::from_be_bytes(
-            value[tx_num_index..].try_into().map_err(|_| DatabaseError::Decode)?,
+        let highest_block_number = u64::from_be_bytes(
+            value[block_num_index..].try_into().map_err(|_| DatabaseError::Decode)?,
         );
         let address = Address::decode(&value[..20])?;
         let storage_key = B256::decode(&value[20..52])?;
 
-        Ok(Self { address, sharded_key: ShardedKey::new(storage_key, highest_tx_number) })
+        Ok(Self { address, sharded_key: ShardedKey::new(storage_key, highest_block_number) })
     }
 }

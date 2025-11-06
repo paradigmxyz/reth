@@ -1,35 +1,23 @@
 //! Loads chain metadata.
 
-use alloy_primitives::{Address, U256, U64};
+use alloy_primitives::{U256, U64};
 use alloy_rpc_types_eth::{Stage, SyncInfo, SyncStatus};
 use futures::Future;
-use reth_chainspec::{ChainInfo, ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::ChainInfo;
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
-use reth_storage_api::{BlockNumReader, StageCheckpointReader};
+use reth_rpc_convert::RpcTxReq;
+use reth_storage_api::{BlockNumReader, StageCheckpointReader, TransactionsProvider};
 
-use crate::{helpers::EthSigner, RpcNodeCore};
+use crate::{helpers::EthSigner, EthApiTypes, RpcNodeCore};
 
 /// `Eth` API trait.
 ///
 /// Defines core functionality of the `eth` API implementation.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait EthApiSpec:
-    RpcNodeCore<
-    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
-                  + BlockNumReader
-                  + StageCheckpointReader,
-    Network: NetworkInfo,
->
-{
-    /// The transaction type signers are using.
-    type Transaction;
-
+pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
     /// Returns the block node is started on.
     fn starting_block(&self) -> U256;
-
-    /// Returns a handle to the signers owned by provider.
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Self::Transaction>>>>;
 
     /// Returns the current ethereum protocol version.
     fn protocol_version(&self) -> impl Future<Output = RethResult<U64>> + Send {
@@ -47,11 +35,6 @@ pub trait EthApiSpec:
     /// Returns provider chain info
     fn chain_info(&self) -> RethResult<ChainInfo> {
         Ok(self.provider().chain_info()?)
-    }
-
-    /// Returns a list of addresses owned by provider.
-    fn accounts(&self) -> Vec<Address> {
-        self.signers().read().iter().flat_map(|s| s.accounts()).collect()
     }
 
     /// Returns `true` if the network is undergoing sync.
@@ -88,3 +71,9 @@ pub trait EthApiSpec:
         Ok(status)
     }
 }
+
+/// A handle to [`EthSigner`]s with its generics set from [`TransactionsProvider`] and
+/// [`reth_rpc_convert::RpcTypes`].
+pub type SignersForRpc<Provider, Rpc> = parking_lot::RwLock<
+    Vec<Box<dyn EthSigner<<Provider as TransactionsProvider>::Transaction, RpcTxReq<Rpc>>>>,
+>;

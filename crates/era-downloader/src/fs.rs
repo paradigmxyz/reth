@@ -17,16 +17,16 @@ pub fn read_dir(
             (|| {
                 let path = entry?.path();
 
-                if path.extension() == Some("era1".as_ref()) {
-                    if let Some(last) = path.components().next_back() {
-                        let str = last.as_os_str().to_string_lossy().to_string();
-                        let parts = str.split('-').collect::<Vec<_>>();
+                if path.extension() == Some("era1".as_ref()) &&
+                    let Some(last) = path.components().next_back()
+                {
+                    let str = last.as_os_str().to_string_lossy().to_string();
+                    let parts = str.split('-').collect::<Vec<_>>();
 
-                        if parts.len() == 3 {
-                            let number = usize::from_str(parts[1])?;
+                    if parts.len() == 3 {
+                        let number = usize::from_str(parts[1])?;
 
-                            return Ok(Some((number, path.into_boxed_path())));
-                        }
+                        return Ok(Some((number, path.into_boxed_path())));
                     }
                 }
                 if path.file_name() == Some("checksums.txt".as_ref()) {
@@ -45,7 +45,7 @@ pub fn read_dir(
 
     entries.sort_by(|(left, _), (right, _)| left.cmp(right));
 
-    Ok(stream::iter(entries.into_iter().skip((start_from / BLOCKS_PER_FILE) as usize).map(
+    Ok(stream::iter(entries.into_iter().skip(start_from as usize / BLOCKS_PER_FILE).map(
         move |(_, path)| {
             let expected_checksum =
                 checksums.next().transpose()?.ok_or_eyre("Got less checksums than ERA files")?;

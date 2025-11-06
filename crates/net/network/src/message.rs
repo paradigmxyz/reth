@@ -107,6 +107,15 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a receipts request.
         response: oneshot::Receiver<RequestResult<Receipts<N::Receipt>>>,
     },
+    /// Represents a response to a request for receipts.
+    ///
+    /// This is a variant of `Receipts` that was introduced in `eth/69`.
+    /// The difference is that this variant does not require the inclusion of bloom filters in the
+    /// response, making it more lightweight.
+    Receipts69 {
+        /// The receiver channel for the response to a receipts request.
+        response: oneshot::Receiver<RequestResult<Receipts69<N::Receipt>>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -138,6 +147,9 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
             }
             Self::Receipts { response } => {
                 poll_request!(response, Receipts, cx)
+            }
+            Self::Receipts69 { response } => {
+                poll_request!(response, Receipts69, cx)
             }
         };
         Poll::Ready(res)

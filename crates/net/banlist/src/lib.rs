@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 type PeerId = alloy_primitives::B512;
 
@@ -59,11 +59,11 @@ impl BanList {
     pub fn evict_peers(&mut self, now: Instant) -> Vec<PeerId> {
         let mut evicted = Vec::new();
         self.banned_peers.retain(|peer, until| {
-            if let Some(until) = until {
-                if now > *until {
-                    evicted.push(*peer);
-                    return false
-                }
+            if let Some(until) = until &&
+                now > *until
+            {
+                evicted.push(*peer);
+                return false
             }
             true
         });
@@ -74,11 +74,11 @@ impl BanList {
     pub fn evict_ips(&mut self, now: Instant) -> Vec<IpAddr> {
         let mut evicted = Vec::new();
         self.banned_ips.retain(|peer, until| {
-            if let Some(until) = until {
-                if now > *until {
-                    evicted.push(*peer);
-                    return false
-                }
+            if let Some(until) = until &&
+                now > *until
+            {
+                evicted.push(*peer);
+                return false
             }
             true
         });
@@ -125,11 +125,14 @@ impl BanList {
     /// Bans the IP until the timestamp.
     ///
     /// This does not ban non-global IPs.
+    /// If the IP is already banned, the timeout will be updated to the new value.
     pub fn ban_ip_until(&mut self, ip: IpAddr, until: Instant) {
         self.ban_ip_with(ip, Some(until));
     }
 
-    /// Bans the peer until the timestamp
+    /// Bans the peer until the timestamp.
+    ///
+    /// If the peer is already banned, the timeout will be updated to the new value.
     pub fn ban_peer_until(&mut self, node_id: PeerId, until: Instant) {
         self.ban_peer_with(node_id, Some(until));
     }
@@ -147,6 +150,8 @@ impl BanList {
     }
 
     /// Bans the peer indefinitely or until the given timeout.
+    ///
+    /// If the peer is already banned, the timeout will be updated to the new value.
     pub fn ban_peer_with(&mut self, node_id: PeerId, until: Option<Instant>) {
         self.banned_peers.insert(node_id, until);
     }
@@ -154,6 +159,7 @@ impl BanList {
     /// Bans the ip indefinitely or until the given timeout.
     ///
     /// This does not ban non-global IPs.
+    /// If the IP is already banned, the timeout will be updated to the new value.
     pub fn ban_ip_with(&mut self, ip: IpAddr, until: Option<Instant>) {
         if is_global(&ip) {
             self.banned_ips.insert(ip, until);
@@ -167,7 +173,7 @@ mod tests {
 
     #[test]
     fn can_ban_unban_peer() {
-        let peer = PeerId::random();
+        let peer = PeerId::new([1; 64]);
         let mut banlist = BanList::default();
         banlist.ban_peer(peer);
         assert!(banlist.is_banned_peer(&peer));

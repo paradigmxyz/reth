@@ -100,14 +100,14 @@ fn account_cursor_correct_order() {
 
     let db = create_test_rw_db();
     db.update(|tx| {
-        for (key, account) in accounts.iter().filter(|x| x.0[31] % 2 == 0) {
+        for (key, account) in accounts.iter().filter(|x| x.0[31].is_multiple_of(2)) {
             tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
         }
     })
     .unwrap();
 
     let mut hashed_post_state = HashedPostState::default();
-    for (hashed_address, account) in accounts.iter().filter(|x| x.0[31] % 2 != 0) {
+    for (hashed_address, account) in accounts.iter().filter(|x| !x.0[31].is_multiple_of(2)) {
         hashed_post_state.accounts.insert(*hashed_address, Some(*account));
     }
 
@@ -127,14 +127,14 @@ fn removed_accounts_are_discarded() {
 
     let db = create_test_rw_db();
     db.update(|tx| {
-        for (key, account) in accounts.iter().filter(|x| x.0[31] % 2 == 0) {
+        for (key, account) in accounts.iter().filter(|x| x.0[31].is_multiple_of(2)) {
             tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
         }
     })
     .unwrap();
 
     let mut hashed_post_state = HashedPostState::default();
-    for (hashed_address, account) in accounts.iter().filter(|x| x.0[31] % 2 != 0) {
+    for (hashed_address, account) in accounts.iter().filter(|x| !x.0[31].is_multiple_of(2)) {
         hashed_post_state.accounts.insert(
             *hashed_address,
             if removed_keys.contains(hashed_address) { None } else { Some(*account) },
@@ -227,7 +227,7 @@ fn storage_is_empty() {
         (0..10).map(|key| (B256::with_last_byte(key), U256::from(key))).collect::<BTreeMap<_, _>>();
     db.update(|tx| {
         for (slot, value) in &db_storage {
-            // insert zero value accounts to the database
+            // insert storage entries to the database
             tx.put::<tables::HashedStorages>(address, StorageEntry { key: *slot, value: *value })
                 .unwrap();
         }
@@ -338,14 +338,17 @@ fn zero_value_storage_entries_are_discarded() {
         (0..10).map(|key| (B256::with_last_byte(key), U256::from(key))).collect::<BTreeMap<_, _>>(); // every even number is changed to zero value
     let post_state_storage = (0..10)
         .map(|key| {
-            (B256::with_last_byte(key), if key % 2 == 0 { U256::ZERO } else { U256::from(key) })
+            (
+                B256::with_last_byte(key),
+                if key.is_multiple_of(2) { U256::ZERO } else { U256::from(key) },
+            )
         })
         .collect::<BTreeMap<_, _>>();
 
     let db = create_test_rw_db();
     db.update(|tx| {
         for (slot, value) in db_storage {
-            // insert zero value accounts to the database
+            // insert storage entries to the database
             tx.put::<tables::HashedStorages>(address, StorageEntry { key: slot, value }).unwrap();
         }
     })

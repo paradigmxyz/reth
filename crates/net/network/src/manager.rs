@@ -29,6 +29,7 @@ use crate::{
     peers::PeersManager,
     poll_nested_stream_with_budget,
     protocol::IntoRlpxSubProtocol,
+    required_block_filter::RequiredBlockFilter,
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
@@ -89,7 +90,7 @@ use tracing::{debug, error, trace, warn};
 ///     subgraph Swarm
 ///         direction TB
 ///         B1[(Session Manager)]
-///         B2[(Connection Lister)]
+///         B2[(Connection Listener)]
 ///         B3[(Network State)]
 ///     end
 ///  end
@@ -250,6 +251,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             transactions_manager_config: _,
             nat,
             handshake,
+            required_block_hashes,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -334,6 +336,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             event_sender.clone(),
             nat,
         );
+
+        // Spawn required block peer filter if configured
+        if !required_block_hashes.is_empty() {
+            let filter = RequiredBlockFilter::new(handle.clone(), required_block_hashes);
+            filter.spawn();
+        }
 
         Ok(Self {
             swarm,
@@ -457,6 +465,11 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 genesis: status.genesis,
                 config: Default::default(),
             },
+            capabilities: hello_message
+                .protocols
+                .into_iter()
+                .map(|protocol| protocol.cap)
+                .collect(),
         }
     }
 
@@ -507,6 +520,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             }
             PeerRequest::GetReceipts { request, response } => {
                 self.delegate_eth_request(IncomingEthRequest::GetReceipts {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetReceipts69 { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetReceipts69 {
                     peer_id,
                     request,
                     response,
@@ -825,8 +845,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     "Session disconnected"
                 );
 
-                let mut reason = None;
-                if let Some(ref err) = error {
+                let reason = if let Some(ref err) = error {
                     // If the connection was closed due to an error, we report
                     // the peer
                     self.swarm.state_mut().peers_mut().on_active_session_dropped(
@@ -834,11 +853,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         &peer_id,
                         err,
                     );
-                    reason = err.as_disconnected();
+                    err.as_disconnected()
                 } else {
                     // Gracefully disconnected
                     self.swarm.state_mut().peers_mut().on_active_session_gracefully_closed(peer_id);
-                }
+                    None
+                };
                 self.metrics.closed_sessions.increment(1);
                 self.update_active_connection_metrics();
 

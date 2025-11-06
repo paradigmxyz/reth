@@ -1,34 +1,68 @@
 //! Caching and prewarming related functionality.
+//!
+//! Prewarming executes transactions in parallel before the actual block execution
+//! to populate the execution cache with state that will likely be accessed during
+//! block processing.
+//!
+//! ## How Prewarming Works
+//!
+//! 1. Incoming transactions are split into two streams: one for prewarming (executed in parallel)
+//!    and one for actual execution (executed sequentially)
+//! 2. Prewarming tasks execute transactions in parallel using shared caches
+//! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCaches, SavedCache},
+    cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
-        executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache,
+        executor::WorkloadExecutor, multiproof::MultiProofMessage,
+        ExecutionCache as PayloadExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
-    StateProviderBuilder,
+    ExecutionEnv, StateProviderBuilder,
 };
-use alloy_consensus::transaction::Recovered;
+use alloy_consensus::transaction::TxHashRef;
+use alloy_eips::Typed2718;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
-use itertools::Itertools;
-use metrics::{Gauge, Histogram};
-use reth_evm::{ConfigureEvm, Evm, EvmFor, SpecFor};
+use crossbeam_channel::Sender as CrossbeamSender;
+use metrics::{Counter, Gauge, Histogram};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, SignedTransaction};
-use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
+use reth_primitives_traits::NodePrimitives;
+use reth_provider::{BlockReader, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
 use reth_trie::MultiProofTargets;
 use std::{
-    collections::VecDeque,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{self, channel, Receiver, Sender},
         Arc,
     },
     time::Instant,
 };
-use tracing::{debug, trace};
+use tracing::{debug, debug_span, instrument, trace, warn};
+
+/// A wrapper for transactions that includes their index in the block.
+#[derive(Clone)]
+struct IndexedTransaction<Tx> {
+    /// The transaction index in the block.
+    index: usize,
+    /// The wrapped transaction.
+    tx: Tx,
+}
+
+/// Maximum standard Ethereum transaction type value.
+///
+/// Standard transaction types are:
+/// - Type 0: Legacy transactions (original Ethereum)
+/// - Type 1: EIP-2930 (access list transactions)
+/// - Type 2: EIP-1559 (dynamic fee transactions)
+/// - Type 3: EIP-4844 (blob transactions)
+/// - Type 4: EIP-7702 (set code authorization transactions)
+///
+/// Any transaction with a type > 4 is considered a non-standard/system transaction,
+/// typically used by L2s for special purposes (e.g., Optimism deposit transactions use type 126).
+const MAX_STANDARD_TX_TYPE: u8 = 4;
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
@@ -42,154 +76,265 @@ where
     /// The executor used to spawn execution tasks.
     executor: WorkloadExecutor,
     /// Shared execution cache.
-    execution_cache: ExecutionCache,
-    /// Transactions pending execution.
-    pending: VecDeque<Recovered<N::SignedTx>>,
+    execution_cache: PayloadExecutionCache,
     /// Context provided to execution tasks
     ctx: PrewarmContext<N, P, Evm>,
     /// How many transactions should be executed in parallel
     max_concurrency: usize,
+    /// The number of transactions to be processed
+    transaction_count_hint: usize,
     /// Sender to emit evm state outcome messages, if any.
-    to_multi_proof: Option<Sender<MultiProofMessage>>,
+    to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
-    /// Sender the transactions use to send their result back
-    actions_tx: Sender<PrewarmTaskEvent>,
-    /// Total prewarming tasks spawned
-    prewarm_outcomes_left: usize,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
+    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
     pub(super) fn new(
         executor: WorkloadExecutor,
-        execution_cache: ExecutionCache,
+        execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        to_multi_proof: Option<Sender<MultiProofMessage>>,
-        pending: VecDeque<Recovered<N::SignedTx>>,
-    ) -> Self {
+        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        transaction_count_hint: usize,
+        max_concurrency: usize,
+    ) -> (Self, Sender<PrewarmTaskEvent>) {
         let (actions_tx, actions_rx) = channel();
-        Self {
-            executor,
-            execution_cache,
-            pending,
-            ctx,
-            max_concurrency: 64,
-            to_multi_proof,
-            actions_rx,
-            actions_tx,
-            prewarm_outcomes_left: 0,
-        }
-    }
 
-    /// Returns the sender that can communicate with this task.
-    pub(super) fn actions_tx(&self) -> Sender<PrewarmTaskEvent> {
-        self.actions_tx.clone()
+        trace!(
+            target: "engine::tree::payload_processor::prewarm",
+            max_concurrency,
+            transaction_count_hint,
+            "Initialized prewarm task"
+        );
+
+        (
+            Self {
+                executor,
+                execution_cache,
+                ctx,
+                max_concurrency,
+                transaction_count_hint,
+                to_multi_proof,
+                actions_rx,
+            },
+            actions_tx,
+        )
     }
 
     /// Spawns all pending transactions as blocking tasks by first chunking them.
-    fn spawn_all(&mut self) {
-        let chunk_size = (self.pending.len() / self.max_concurrency).max(1);
+    ///
+    /// For Optimism chains, special handling is applied to the first transaction if it's a
+    /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
+    /// subsequent transactions in the block.
+    fn spawn_all<Tx>(&self, pending: mpsc::Receiver<Tx>, actions_tx: Sender<PrewarmTaskEvent>)
+    where
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+    {
+        let executor = self.executor.clone();
+        let ctx = self.ctx.clone();
+        let max_concurrency = self.max_concurrency;
+        let transaction_count_hint = self.transaction_count_hint;
+        let span = tracing::Span::current();
 
-        for chunk in &self.pending.drain(..).chunks(chunk_size) {
-            let sender = self.actions_tx.clone();
-            let ctx = self.ctx.clone();
-            let pending_chunk = chunk.collect::<Vec<_>>();
+        self.executor.spawn_blocking(move || {
+            let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
-            self.prewarm_outcomes_left += pending_chunk.len();
-            self.executor.spawn_blocking(move || {
-                ctx.transact_batch(&pending_chunk, sender);
-            });
-        }
+            let (done_tx, done_rx) = mpsc::channel();
+
+            // When transaction_count_hint is 0, it means the count is unknown. In this case, spawn
+            // max workers to handle potentially many transactions in parallel rather
+            // than bottlenecking on a single worker.
+            let workers_needed = if transaction_count_hint == 0 {
+                max_concurrency
+            } else {
+                transaction_count_hint.min(max_concurrency)
+            };
+
+            // Initialize worker handles container
+            let mut handles = Vec::with_capacity(workers_needed);
+
+            // Only spawn initial workers as needed
+            for i in 0..workers_needed {
+                handles.push(ctx.spawn_worker(i, &executor, actions_tx.clone(), done_tx.clone()));
+            }
+
+            // Distribute transactions to workers
+            let mut tx_index = 0usize;
+            while let Ok(tx) = pending.recv() {
+                // Stop distributing if termination was requested
+                if ctx.terminate_execution.load(Ordering::Relaxed) {
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        "Termination requested, stopping transaction distribution"
+                    );
+                    break;
+                }
+
+                let indexed_tx = IndexedTransaction { index: tx_index, tx };
+                let is_system_tx = indexed_tx.tx.tx().ty() > MAX_STANDARD_TX_TYPE;
+
+                // System transactions (type > 4) in the first position set critical metadata
+                // that affects all subsequent transactions (e.g., L1 block info on L2s).
+                // Broadcast the first system transaction to all workers to ensure they have
+                // the critical state. This is particularly important for L2s like Optimism
+                // where the first deposit transaction (type 126) contains essential block metadata.
+                if tx_index == 0 && is_system_tx {
+                    for handle in &handles {
+                        // Ignore send errors: workers listen to terminate_execution and may
+                        // exit early when signaled. Sending to a disconnected worker is
+                        // possible and harmless and should happen at most once due to
+                        //  the terminate_execution check above.
+                        let _ = handle.send(indexed_tx.clone());
+                    }
+                } else {
+                    // Round-robin distribution for all other transactions
+                    let worker_idx = tx_index % workers_needed;
+                    // Ignore send errors: workers listen to terminate_execution and may
+                    // exit early when signaled. Sending to a disconnected worker is
+                    // possible and harmless and should happen at most once due to
+                    //  the terminate_execution check above.
+                    let _ = handles[worker_idx].send(indexed_tx);
+                }
+
+                tx_index += 1;
+            }
+
+            // drop handle and wait for all tasks to finish and drop theirs
+            drop(done_tx);
+            drop(handles);
+            while done_rx.recv().is_ok() {}
+
+            let _ = actions_tx
+                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_index });
+        });
+    }
+
+    /// Returns true if prewarming was terminated and no more transactions should be prewarmed.
+    fn is_execution_terminated(&self) -> bool {
+        self.ctx.terminate_execution.load(Ordering::Relaxed)
     }
 
     /// If configured and the tx returned proof targets, emit the targets the transaction produced
     fn send_multi_proof_targets(&self, targets: Option<MultiProofTargets>) {
+        if self.is_execution_terminated() {
+            // if execution is already terminated then we dont need to send more proof fetch
+            // messages
+            return
+        }
+
         if let Some((proof_targets, to_multi_proof)) = targets.zip(self.to_multi_proof.as_ref()) {
             let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(proof_targets));
         }
     }
 
-    /// Save the state to the shared cache for the given block.
+    /// This method calls `ExecutionCache::update_with_guard` which requires exclusive access.
+    /// It should only be called after ensuring that:
+    /// 1. All prewarming tasks have completed execution
+    /// 2. No other concurrent operations are accessing the cache
+    ///
+    /// Saves the warmed caches back into the shared slot after prewarming completes.
+    ///
+    /// This consumes the `SavedCache` held by the task, which releases its usage guard and allows
+    /// the new, warmed cache to be inserted.
+    ///
+    /// This method is called from `run()` only after all execution tasks are complete.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
-        let cache = SavedCache::new(
-            self.ctx.header.hash(),
-            self.ctx.cache.clone(),
-            self.ctx.cache_metrics.clone(),
-        );
-        if cache.cache().insert_state(&state).is_err() {
-            return
-        }
 
-        cache.update_metrics();
+        let Self { execution_cache, ctx: PrewarmContext { env, metrics, saved_cache, .. }, .. } =
+            self;
+        let hash = env.hash;
 
-        debug!(target: "engine::caching", "Updated state caches");
+        debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
+        // Perform all cache operations atomically under the lock
+        execution_cache.update_with_guard(|cached| {
+            // consumes the `SavedCache` held by the prewarming task, which releases its usage guard
+            let (caches, cache_metrics) = saved_cache.split();
+            let new_cache = SavedCache::new(hash, caches, cache_metrics);
 
-        // update the cache for the executed block
-        self.execution_cache.save_cache(cache);
-        self.ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
-    }
+            // Insert state into cache while holding the lock
+            if new_cache.cache().insert_state(&state).is_err() {
+                // Clear the cache on error to prevent having a polluted cache
+                *cached = None;
+                debug!(target: "engine::caching", "cleared execution cache on update error");
+                return;
+            }
 
-    /// Removes the `actions_tx` currently stored in the struct, replacing it with a new one that
-    /// does not point to any active receiver.
-    ///
-    /// This is used to drop the `actions_tx` after all tasks have been spawned, and should not be
-    /// used in any context other than the `run` method.
-    fn drop_actions_tx(&mut self) {
-        self.actions_tx = channel().0;
+            new_cache.update_metrics();
+
+            // Replace the shared cache with the new one; the previous cache (if any) is dropped.
+            *cached = Some(new_cache);
+        });
+
+        let elapsed = start.elapsed();
+        debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+
+        metrics.cache_saving_duration.set(elapsed.as_secs_f64());
     }
 
     /// Executes the task.
     ///
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
-    pub(super) fn run(mut self) {
-        self.ctx.metrics.transactions.set(self.pending.len() as f64);
-        self.ctx.metrics.transactions_histogram.record(self.pending.len() as f64);
-
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::prewarm",
+        name = "prewarm",
+        skip_all
+    )]
+    pub(super) fn run(
+        self,
+        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        actions_tx: Sender<PrewarmTaskEvent>,
+    ) {
         // spawn execution tasks.
-        self.spawn_all();
-
-        // drop the actions sender after we've spawned all execution tasks. This is so that the
-        // following loop can terminate even if one of the prewarm tasks ends in an error (i.e.,
-        // does not return an Outcome) or panics.
-        self.drop_actions_tx();
+        self.spawn_all(pending, actions_tx);
 
         let mut final_block_output = None;
+        let mut finished_execution = false;
         while let Ok(event) = self.actions_rx.recv() {
             match event {
                 PrewarmTaskEvent::TerminateTransactionExecution => {
                     // stop tx processing
+                    debug!(target: "engine::tree::prewarm", "Terminating prewarm execution");
                     self.ctx.terminate_execution.store(true, Ordering::Relaxed);
                 }
                 PrewarmTaskEvent::Outcome { proof_targets } => {
                     // completed executing a set of transactions
                     self.send_multi_proof_targets(proof_targets);
+                }
+                PrewarmTaskEvent::Terminate { block_output } => {
+                    trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
+                    final_block_output = Some(block_output);
 
-                    // decrement the number of tasks left
-                    self.prewarm_outcomes_left -= 1;
-
-                    if self.prewarm_outcomes_left == 0 && final_block_output.is_some() {
-                        // all tasks are done, and we have the block output, we can exit
+                    if finished_execution {
+                        // all tasks are done, we can exit, which will save caches and exit
                         break
                     }
                 }
-                PrewarmTaskEvent::Terminate { block_output } => {
-                    final_block_output = Some(block_output);
+                PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
+                    trace!(target: "engine::tree::payload_processor::prewarm", "Finished prewarm execution signal");
+                    self.ctx.metrics.transactions.set(executed_transactions as f64);
+                    self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);
 
-                    if self.prewarm_outcomes_left == 0 {
+                    finished_execution = true;
+
+                    if final_block_output.is_some() {
                         // all tasks are done, we can exit, which will save caches and exit
                         break
                     }
                 }
             }
         }
+
+        debug!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
 
         // save caches and finish
         if let Some(Some(state)) = final_block_output {
@@ -205,10 +350,9 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    pub(super) header: SealedHeaderFor<N>,
+    pub(super) env: ExecutionEnv<Evm>,
     pub(super) evm_config: Evm,
-    pub(super) cache: ProviderCaches,
-    pub(super) cache_metrics: CachedStateMetrics,
+    pub(super) saved_cache: SavedCache,
     /// Provider to obtain the state
     pub(super) provider: StateProviderBuilder<N, P>,
     pub(super) metrics: PrewarmMetrics,
@@ -221,19 +365,17 @@ where
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
+    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Splits this context into an evm, an evm config, metrics, and the atomic bool for terminating
     /// execution.
-    fn evm_for_ctx(
-        self,
-    ) -> Option<(EvmFor<Evm, impl Database>, Evm, PrewarmMetrics, Arc<AtomicBool>)> {
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
+    fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>)> {
         let Self {
-            header,
+            env,
             evm_config,
-            cache: caches,
-            cache_metrics,
+            saved_cache,
             provider,
             metrics,
             terminate_execution,
@@ -245,7 +387,7 @@ where
             Ok(provider) => provider,
             Err(err) => {
                 trace!(
-                    target: "engine::tree",
+                    target: "engine::tree::payload_processor::prewarm",
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
@@ -254,12 +396,14 @@ where
         };
 
         // Use the caches to create a new provider with caching
+        let caches = saved_cache.cache().clone();
+        let cache_metrics = saved_cache.metrics().clone();
         let state_provider =
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
         let state_provider = StateProviderDatabase::new(state_provider);
 
-        let mut evm_env = evm_config.evm_env(&header);
+        let mut evm_env = env.evm_env;
 
         // we must disable the nonce check so that we can execute the transaction even if the nonce
         // doesn't match what's on chain.
@@ -270,62 +414,126 @@ where
         let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
         if !precompile_cache_disabled {
-            evm.precompiles_mut().map_precompiles(|address, precompile| {
+            // Only cache pure precompiles to avoid issues with stateful precompiles
+            evm.precompiles_mut().map_pure_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,
                     precompile_cache_map.cache_for_address(*address),
                     spec_id,
+                    None, // No metrics for prewarm
                 )
             });
         }
 
-        Some((evm, evm_config, metrics, terminate_execution))
+        Some((evm, metrics, terminate_execution))
     }
 
-    /// Transacts the vec of transactions and returns the state outcome.
+    /// Accepts an [`mpsc::Receiver`] of transactions and a handle to prewarm task. Executes
+    /// transactions and streams [`PrewarmTaskEvent::Outcome`] messages for each transaction.
     ///
     /// Returns `None` if executing the transactions failed to a non Revert error.
     /// Returns the touched+modified state of the transaction.
     ///
-    /// Note: Since here are no ordering guarantees this won't the state the txs produce when
-    /// executed sequentially.
-    fn transact_batch(self, txs: &[Recovered<N::SignedTx>], sender: Sender<PrewarmTaskEvent>) {
-        let Some((mut evm, evm_config, metrics, terminate_execution)) = self.evm_for_ctx() else {
-            return
-        };
+    /// Note: There are no ordering guarantees; this does not reflect the state produced by
+    /// sequential execution.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
+    fn transact_batch<Tx>(
+        self,
+        txs: mpsc::Receiver<IndexedTransaction<Tx>>,
+        sender: Sender<PrewarmTaskEvent>,
+        done_tx: Sender<()>,
+    ) where
+        Tx: ExecutableTxFor<Evm>,
+    {
+        let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
-        for tx in txs {
+        while let Ok(IndexedTransaction { index, tx }) = {
+            let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx")
+                .entered();
+            txs.recv()
+        } {
+            let _enter =
+                debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
+                    .entered();
+
+            // create the tx env
+            let start = Instant::now();
+
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
             if terminate_execution.load(Ordering::Relaxed) {
                 let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: None });
-                return
+                break
             }
 
-            // create the tx env
-            let tx_env = evm_config.tx_env(tx);
-            let start = Instant::now();
-            let res = match evm.transact(tx_env) {
+            let res = match evm.transact(&tx) {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
-                        target: "engine::tree",
+                        target: "engine::tree::payload_processor::prewarm",
                         %err,
-                        tx_hash=%tx.tx_hash(),
+                        tx_hash=%tx.tx().tx_hash(),
                         sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
-                    return
+                    // Track transaction execution errors
+                    metrics.transaction_errors.increment(1);
+                    // skip error because we can ignore these errors and continue with the next tx
+                    continue
                 }
             };
             metrics.execution_duration.record(start.elapsed());
 
-            let (targets, storage_targets) = multiproof_targets_from_state(res.state);
-            metrics.prefetch_storage_targets.record(storage_targets as f64);
-            metrics.total_runtime.record(start.elapsed());
+            drop(_enter);
 
-            let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
+            // If the task was cancelled, stop execution, send an empty result to notify the task,
+            // and exit.
+            if terminate_execution.load(Ordering::Relaxed) {
+                let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: None });
+                break
+            }
+
+            // Only send outcome for transactions after the first txn
+            // as the main execution will be just as fast
+            if index > 0 {
+                let _enter =
+                    debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm outcome", index, tx_hash=%tx.tx().tx_hash())
+                        .entered();
+                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+                metrics.prefetch_storage_targets.record(storage_targets as f64);
+                let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
+                drop(_enter);
+            }
+
+            metrics.total_runtime.record(start.elapsed());
         }
+
+        // send a message to the main task to flag that we're done
+        let _ = done_tx.send(());
+    }
+
+    /// Spawns a worker task for transaction execution and returns its sender channel.
+    fn spawn_worker<Tx>(
+        &self,
+        idx: usize,
+        executor: &WorkloadExecutor,
+        actions_tx: Sender<PrewarmTaskEvent>,
+        done_tx: Sender<()>,
+    ) -> mpsc::Sender<IndexedTransaction<Tx>>
+    where
+        Tx: ExecutableTxFor<Evm> + Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        let ctx = self.clone();
+        let span =
+            debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm worker", idx);
+
+        executor.spawn_blocking(move || {
+            let _enter = span.entered();
+            ctx.transact_batch(rx, actions_tx, done_tx);
+        });
+
+        tx
     }
 }
 
@@ -379,6 +587,11 @@ pub(super) enum PrewarmTaskEvent {
         /// The prepared proof targets based on the evm state outcome
         proof_targets: Option<MultiProofTargets>,
     },
+    /// Finished executing all transactions
+    FinishedTxExecution {
+        /// Number of transactions executed
+        executed_transactions: usize,
+    },
 }
 
 /// Metrics for transactions prewarming.
@@ -397,4 +610,6 @@ pub(crate) struct PrewarmMetrics {
     pub(crate) prefetch_storage_targets: Histogram,
     /// A histogram of duration for cache saving
     pub(crate) cache_saving_duration: Gauge,
+    /// Counter for transaction execution errors during prewarming
+    pub(crate) transaction_errors: Counter,
 }

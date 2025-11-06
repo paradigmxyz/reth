@@ -1,5 +1,5 @@
 use crate::BeaconSidecarConfig;
-use alloy_consensus::{BlockHeader, Signed, Transaction as _, TxEip4844WithSidecar, Typed2718};
+use alloy_consensus::{Signed, Transaction as _, TxEip4844WithSidecar, Typed2718};
 use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
@@ -103,7 +103,7 @@ where
             .body()
             .transactions()
             .filter(|tx| tx.is_eip4844())
-            .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
+            .map(|tx| (tx.clone(), tx.blob_count().unwrap_or(0) as usize))
             .collect();
 
         let mut all_blobs_available = true;
@@ -202,9 +202,9 @@ where
                                     .map(|tx| {
                                         let transaction_hash = *tx.tx_hash();
                                         let block_metadata = BlockMetadata {
-                                            block_hash: new.tip().hash(),
-                                            block_number: new.tip().number(),
-                                            gas_used: new.tip().gas_used(),
+                                            block_hash: block.hash(),
+                                            block_number: block.number,
+                                            gas_used: block.gas_used,
                                         };
                                         BlobTransactionEvent::Reorged(ReorgedBlob {
                                             transaction_hash,

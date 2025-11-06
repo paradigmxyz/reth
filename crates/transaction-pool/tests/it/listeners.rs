@@ -82,7 +82,7 @@ async fn txpool_listener_queued_event() {
     assert_matches!(events.next().await, Some(TransactionEvent::Queued));
 
     // The listener of all should receive queued event as well.
-    assert_matches!(all_tx_events.next().await, Some(FullTransactionEvent::Queued(hash)) if hash == *transaction.get_hash());
+    assert_matches!(all_tx_events.next().await, Some(FullTransactionEvent::Queued(hash,_ )) if hash == *transaction.get_hash());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -113,7 +113,7 @@ async fn txpool_listener_all() {
 
     let added_result =
         txpool.add_transaction(TransactionOrigin::External, transaction.transaction.clone()).await;
-    assert_matches!(added_result, Ok(hash) if hash == *transaction.transaction.get_hash());
+    assert_matches!(added_result, Ok(outcome) if outcome.hash == *transaction.transaction.get_hash());
 
     assert_matches!(
         all_tx_events.next().await,

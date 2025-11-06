@@ -18,7 +18,6 @@ reth-primitives-traits.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-engine-primitives.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-errors.workspace = true
 reth-metrics.workspace = true
 reth-storage-api.workspace = true
@@ -29,28 +28,31 @@ reth-network-api.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-revm = { workspace = true, features = ["witness"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
-reth-rpc-types-compat.workspace = true
+reth-rpc-convert.workspace = true
 revm-inspectors.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network-types.workspace = true
 reth-consensus.workspace = true
+reth-consensus-common.workspace = true
 reth-node-api.workspace = true
 reth-trie-common.workspace = true
 
 # ethereum
-alloy-evm.workspace = true
+alloy-evm = { workspace = true, features = ["overrides"] }
 alloy-consensus.workspace = true
 alloy-signer.workspace = true
-alloy-signer-local.workspace = true
+alloy-signer-local = { workspace = true, features = ["mnemonic"] }
 alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-dyn-abi.workspace = true
 alloy-genesis.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-rpc-client.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
 alloy-rpc-types.workspace = true
 alloy-rpc-types-eth = { workspace = true, features = ["serde"] }
@@ -59,9 +61,9 @@ alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-mev.workspace = true
 alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-admin.workspace = true
-alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["kzg"] }
 alloy-serde.workspace = true
-revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee"] }
+revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee", "memory_limit"] }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
@@ -82,6 +84,7 @@ pin-project.workspace = true
 parking_lot.workspace = true
 
 # misc
+dyn-clone.workspace = true
 tracing.workspace = true
 tracing-futures.workspace = true
 futures.workspace = true
@@ -89,18 +92,22 @@ serde.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
+itertools.workspace = true
 
 [dev-dependencies]
-reth-evm-ethereum.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-testing-utils.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-db-api.workspace = true
 
-alloy-consensus.workspace = true
 rand.workspace = true
 
-jsonrpsee-types.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
 
 [features]
-js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
+js-tracer = [
+    "revm-inspectors/js-tracer",
+    "reth-rpc-eth-types/js-tracer",
+    "reth-rpc-eth-api/js-tracer",
+]

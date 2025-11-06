@@ -16,7 +16,6 @@
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_network_p2p::test_utils::{TestBodiesClient, TestHeadersClient};
-//! # use reth_evm_ethereum::execute::EthExecutorProvider;
 //! # use alloy_primitives::B256;
 //! # use reth_chainspec::MAINNET;
 //! # use reth_prune_types::PruneModes;
@@ -47,7 +46,7 @@
 //! #    provider_factory.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
-//! # let executor_provider = EthExecutorProvider::mainnet();
+//! # let executor_provider = EthEvmConfig::mainnet();
 //! # let static_file_producer = StaticFileProducer::new(
 //! #    provider_factory.clone(),
 //! #    PruneModes::default()
@@ -80,7 +79,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 #[expect(missing_docs)]

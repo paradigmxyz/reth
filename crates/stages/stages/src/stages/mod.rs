@@ -16,9 +16,9 @@ mod index_account_history;
 mod index_storage_history;
 /// Stage for computing state root.
 mod merkle;
+/// Stage for computing merkle changesets.
+mod merkle_changesets;
 mod prune;
-/// The s3 download stage
-mod s3;
 /// The sender recovery stage.
 mod sender_recovery;
 /// The transaction lookup stage
@@ -34,8 +34,8 @@ pub use headers::*;
 pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
+pub use merkle_changesets::*;
 pub use prune::*;
-pub use s3::*;
 pub use sender_recovery::*;
 pub use tx_lookup::*;
 
@@ -64,15 +64,15 @@ mod tests {
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_primitives::Block;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_exex::ExExManagerHandle;
     use reth_primitives_traits::{Account, Bytecode, SealedBlock};
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::MockNodeTypesWithDB,
-        AccountExtReader, BlockBodyIndicesProvider, DatabaseProviderFactory, ProviderFactory,
-        ProviderResult, ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory,
-        StorageReader,
+        AccountExtReader, BlockBodyIndicesProvider, BlockWriter, DatabaseProviderFactory,
+        ProviderFactory, ProviderResult, ReceiptProvider, StageCheckpointWriter,
+        StaticFileProviderFactory, StorageReader,
     };
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_stages_api::{
@@ -96,8 +96,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider_rw.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider_rw.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(genesis.try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(block.clone().try_recover().unwrap()).unwrap();
 
         // Fill with bogus blocks to respect PruneMode distance.
         let mut head = block.hash();
@@ -109,7 +109,7 @@ mod tests {
                 generators::BlockParams { parent: Some(head), ..Default::default() },
             );
             head = nblock.hash();
-            provider_rw.insert_historical_block(nblock.try_recover().unwrap()).unwrap();
+            provider_rw.insert_block(nblock.try_recover().unwrap()).unwrap();
         }
         provider_rw
             .static_file_provider()
@@ -157,7 +157,7 @@ mod tests {
             // Check execution and create receipts and changesets according to the pruning
             // configuration
             let mut execution_stage = ExecutionStage::new(
-                EthExecutorProvider::ethereum(Arc::new(
+                EthEvmConfig::ethereum(Arc::new(
                     ChainSpecBuilder::mainnet().berlin_activated().build(),
                 )),
                 Arc::new(EthBeaconConsensus::new(Arc::new(
@@ -169,7 +169,7 @@ mod tests {
                     max_cumulative_gas: None,
                     max_duration: None,
                 },
-                MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+                MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
                 ExExManagerHandle::empty(),
             );
 
@@ -213,7 +213,7 @@ mod tests {
 
             if prune_modes.storage_history == Some(PruneMode::Full) {
                 // Full is not supported
-                assert!(acc_indexing_stage.execute(&provider, input).is_err());
+                assert!(storage_indexing_stage.execute(&provider, input).is_err());
             } else {
                 storage_indexing_stage.execute(&provider, input).unwrap();
 
@@ -228,7 +228,7 @@ mod tests {
 
         // In an unpruned configuration there is 1 receipt, 3 changed accounts and 1 changed
         // storage.
-        let mut prune = PruneModes::none();
+        let mut prune = PruneModes::default();
         check_pruning(test_db.factory.clone(), prune.clone(), 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Full);
@@ -280,7 +280,7 @@ mod tests {
         for block in &blocks {
             let mut block_receipts = Vec::with_capacity(block.transaction_count());
             for transaction in &block.body().transactions {
-                block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0))));
+                block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0), None)));
                 tx_num += 1;
             }
             receipts.push((block.number, block_receipts));

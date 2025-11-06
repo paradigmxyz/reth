@@ -14,7 +14,7 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
     /// Returns decompressed data.
     fn decompress(&self, value: &[u8]) -> Result<Vec<u8>, NippyJarError>;
 
-    /// Appends compressed data from `src` to `dest`. `dest`. Requires `dest` to have sufficient
+    /// Appends compressed data from `src` to `dest`. Requires `dest` to have sufficient
     /// capacity.
     ///
     /// Returns number of bytes written to `dest`.

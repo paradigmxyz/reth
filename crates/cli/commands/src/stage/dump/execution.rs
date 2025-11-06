@@ -42,7 +42,7 @@ where
                 Arc::new(output_db),
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
-            ),
+            )?,
             to,
             from,
             evm_config,
@@ -64,13 +64,6 @@ fn import_tables_with_range<N: NodeTypesWithDB>(
 
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::CanonicalHeaders, _>(
-            &db_tool.provider_factory.db_ref().tx()?,
-            Some(from),
-            to,
-        )
-    })??;
-    output_db.update(|tx| {
-        tx.import_table_with_range::<tables::HeaderTerminalDifficulties, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from),
             to,

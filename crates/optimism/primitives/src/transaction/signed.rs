@@ -4,7 +4,7 @@
 use crate::transaction::OpTransaction;
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable},
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
     Sealed, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
     Typed2718,
 };
@@ -127,17 +127,8 @@ impl SignerRecoverable for OpTransactionSigned {
         let signature_hash = signature_hash(transaction);
         recover_signer_unchecked(signature, signature_hash)
     }
-}
 
-impl SignedTransaction for OpTransactionSigned {
-    fn tx_hash(&self) -> &TxHash {
-        self.hash.get_or_init(|| self.recalculate_hash())
-    }
-
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
+    fn recover_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Result<Address, RecoveryError> {
         match &self.transaction {
             // Optimism's Deposit transaction does not have a signature. Directly return the
             // `from` address.
@@ -149,7 +140,15 @@ impl SignedTransaction for OpTransactionSigned {
         };
         recover_signer_unchecked(&self.signature, keccak256(buf))
     }
+}
 
+impl TxHashRef for OpTransactionSigned {
+    fn tx_hash(&self) -> &TxHash {
+        self.hash.get_or_init(|| self.recalculate_hash())
+    }
+}
+
+impl SignedTransaction for OpTransactionSigned {
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
     }
