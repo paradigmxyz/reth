@@ -5,6 +5,7 @@ use alloy_rpc_types_engine::PayloadId;
 use core::mem;
 use eyre::{bail, OptionExt};
 use reth_primitives_traits::{Recovered, SignedTransaction};
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, ops::Deref};
 use tokio::sync::broadcast;
 use tracing::{debug, trace, warn};
@@ -171,7 +172,7 @@ where
 /// Ensures invariants of a complete flashblocks sequence.
 /// If this entire sequence of flashblocks was executed on top of latest block, this also includes
 /// the computed state root.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlashBlockCompleteSequence {
     inner: Vec<FlashBlock>,
     /// Optional state root for the current sequence
