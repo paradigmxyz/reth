@@ -86,7 +86,11 @@ impl<H: BlockHeader> EthChainSpec for ChainSpec<H> {
     }
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
-        if let Some(blob_param) = self.blob_params.active_scheduled_params_at_timestamp(timestamp) {
+        if self.is_amsterdam_active_at_timestamp(timestamp) {
+            Some(self.blob_params.osaka)
+        } else if let Some(blob_param) =
+            self.blob_params.active_scheduled_params_at_timestamp(timestamp)
+        {
             Some(*blob_param)
         } else if self.is_osaka_active_at_timestamp(timestamp) {
             Some(self.blob_params.osaka)

@@ -99,7 +99,6 @@ impl TryFrom<OpTransactionError> for OpInvalidTransactionError {
             OpTransactionError::HaltedDepositPostRegolith => Ok(Self::HaltedDepositPostRegolith),
             OpTransactionError::MissingEnvelopedTx => Ok(Self::MissingEnvelopedTx),
             OpTransactionError::Base(err) => Err(err),
-            OpTransactionError::MissingEnvelopedTx => todo!(),
         }
     }
 }
