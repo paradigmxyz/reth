@@ -40,6 +40,8 @@ assert_matches.workspace = true
 default = ["std"]
 std = [
     "reth-chainspec/std",
+    "reth-execution-types/std",
+    "reth-trie-common/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-rpc-types-engine/std",
