@@ -1,5 +1,7 @@
 mod manager;
-pub use manager::{StaticFileAccess, StaticFileProvider, StaticFileWriter};
+pub use manager::{
+    StaticFileAccess, StaticFileProvider, StaticFileProviderBuilder, StaticFileWriter,
+};
 
 mod jar;
 pub use jar::StaticFileJarProvider;
@@ -55,6 +57,7 @@ impl Deref for LoadedJar {
 mod tests {
     use super::*;
     use crate::{
+        providers::static_file::manager::StaticFileProviderBuilder,
         test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
@@ -157,9 +160,11 @@ mod tests {
 
         // [ Headers Creation and Commit ]
         {
-            let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
-                .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+            let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)
+                .expect("Failed to create static file provider builder")
+                .with_blocks_per_file(blocks_per_file)
+                .build()
+                .expect("Failed to build static file provider");
 
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers).unwrap();
 
@@ -251,9 +256,11 @@ mod tests {
 
         // Test cases execution
         {
-            let sf_rw = StaticFileProvider::read_write(&static_dir)
-                .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+            let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
+                .expect("Failed to create static file provider builder")
+                .with_blocks_per_file(blocks_per_file)
+                .build()
+                .expect("Failed to build static file provider");
 
             assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), Some(tip));
             assert_eq!(
@@ -466,15 +473,19 @@ mod tests {
         for segment in segments {
             let (static_dir, _) = create_test_static_files_dir();
 
-            let sf_rw = StaticFileProvider::read_write(&static_dir)
-                .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+            let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
+                .expect("Failed to create static file provider builder")
+                .with_blocks_per_file(blocks_per_file)
+                .build()
+                .expect("Failed to build static file provider");
 
             setup_tx_based_scenario(&sf_rw, segment, blocks_per_file);
 
-            let sf_rw = StaticFileProvider::read_write(&static_dir)
-                .expect("Failed to create static file provider")
-                .with_custom_blocks_per_file(blocks_per_file);
+            let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
+                .expect("Failed to create static file provider builder")
+                .with_blocks_per_file(blocks_per_file)
+                .build()
+                .expect("Failed to build static file provider");
             let highest_tx = sf_rw.get_highest_static_file_tx(segment).unwrap();
 
             // Test cases

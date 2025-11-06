@@ -2,7 +2,10 @@
 //!
 //! See also <https://github.com/status-im/nimbus-eth2/blob/stable/docs/e2store.md>
 
-use crate::e2s_types::{E2sError, Entry, Version};
+use crate::e2s::{
+    error::E2sError,
+    types::{Entry, Version},
+};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
 /// A reader for `E2Store` files that wraps a [`BufReader`].
@@ -107,7 +110,7 @@ impl<W: Write> E2StoreWriter<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::e2s_types::{SLOT_INDEX, VERSION};
+    use crate::e2s::types::{SLOT_INDEX, VERSION};
     use std::io::Cursor;
 
     fn create_slot_index_data(starting_slot: u64, offsets: &[i64]) -> Vec<u8> {

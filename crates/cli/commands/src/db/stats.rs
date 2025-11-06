@@ -192,7 +192,8 @@ impl Command {
             ) = (0, 0, 0, 0, 0, 0);
 
             for (block_range, tx_range) in &ranges {
-                let fixed_block_range = static_file_provider.find_fixed_range(block_range.start());
+                let fixed_block_range =
+                    static_file_provider.find_fixed_range(segment, block_range.start());
                 let jar_provider = static_file_provider
                     .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
                     .ok_or_else(|| {

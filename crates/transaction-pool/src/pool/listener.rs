@@ -1,7 +1,10 @@
 //! Listeners for the transaction-pool
 
 use crate::{
-    pool::events::{FullTransactionEvent, NewTransactionEvent, TransactionEvent},
+    pool::{
+        events::{FullTransactionEvent, NewTransactionEvent, TransactionEvent},
+        QueuedReason,
+    },
     traits::{NewBlobSidecar, PropagateKind},
     PoolTransaction, ValidPoolTransaction,
 };
@@ -17,6 +20,7 @@ use tokio::sync::mpsc::{
     self as mpsc, error::TrySendError, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
 use tracing::debug;
+
 /// The size of the event channel used to propagate transaction events.
 const TX_POOL_EVENT_CHANNEL_SIZE: usize = 1024;
 
@@ -164,8 +168,12 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
     }
 
     /// Notify listeners about a transaction that was added to the queued pool.
-    pub(crate) fn queued(&mut self, tx: &TxHash) {
-        self.broadcast_event(tx, TransactionEvent::Queued, FullTransactionEvent::Queued(*tx));
+    pub(crate) fn queued(&mut self, tx: &TxHash, reason: Option<QueuedReason>) {
+        self.broadcast_event(
+            tx,
+            TransactionEvent::Queued,
+            FullTransactionEvent::Queued(*tx, reason),
+        );
     }
 
     /// Notify listeners about a transaction that was propagated.
