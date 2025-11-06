@@ -5,7 +5,7 @@ mod conn;
 mod counter;
 mod handle;
 mod types;
-pub use types::{BlockRangeInfo, BlockRangeInfoExt};
+pub use types::BlockRangeInfo;
 
 use crate::{
     message::PeerMessage,
