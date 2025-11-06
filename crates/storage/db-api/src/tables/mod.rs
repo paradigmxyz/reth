@@ -540,6 +540,13 @@ tables! {
         type Key = ChainStateKey;
         type Value = BlockNumber;
     }
+
+    /// Stores generic node metadata as key-value pairs.
+    /// Can store feature flags, configuration markers, and other node-specific data.
+    table Metadata {
+        type Key = String;
+        type Value = Vec<u8>;
+    }
 }
 
 /// Keys for the `ChainState` table.
