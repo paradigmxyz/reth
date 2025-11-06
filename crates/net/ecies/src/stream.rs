@@ -67,8 +67,7 @@ where
         secret_key: SecretKey,
         remote_id: PeerId,
     ) -> Result<Self, ECIESError> {
-        let ecies = ECIESCodec::new_client(secret_key, remote_id)
-            .map_err(|_| io::Error::other("invalid handshake"))?;
+        let ecies = ECIESCodec::new_client(secret_key, remote_id)?;
 
         let mut transport = ecies.framed(transport);
 
@@ -241,5 +240,21 @@ mod tests {
         assert!(
             matches!(connect_result, Err(e) if e.to_string() == ECIESErrorImpl::StreamTimeout.to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn connect_with_invalid_remote_id_propagates_secp256k1_error() {
+        use alloy_primitives::B512 as PeerId;
+        use tokio::io::duplex;
+
+        // Use an in-memory duplex stream; construction should fail before any IO is used.
+        let (client, _server) = duplex(64);
+
+        let client_key = SecretKey::new(&mut rand_08::thread_rng());
+        let bad_id: PeerId = Default::default();
+
+        let res = ECIESStream::connect_without_timeout(client, client_key, bad_id).await;
+
+        assert!(matches!(res, Err(e) if matches!(e.inner(), ECIESErrorImpl::Secp256k1(_))));
     }
 }
