@@ -492,9 +492,11 @@ where
                 .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
                 .with_additional_tasks(ctx.config().txpool.additional_validation_tasks);
 
-        if !blobs_disabled {
-            validator_builder = validator_builder.kzg_settings(ctx.kzg_settings()?);
-        }
+        validator_builder = if blobs_disabled {
+            validator_builder.no_eip4844()
+        } else {
+            validator_builder.kzg_settings(ctx.kzg_settings()?)
+        };
 
         let validator =
             validator_builder.build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
