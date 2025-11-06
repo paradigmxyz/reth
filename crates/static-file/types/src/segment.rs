@@ -4,10 +4,9 @@ use alloc::{
     string::{String, ToString},
 };
 use alloy_primitives::TxNumber;
-use core::{ops::RangeInclusive, str::FromStr};
-use derive_more::Display;
+use core::{fmt, ops::RangeInclusive, str::FromStr};
 use serde::{Deserialize, Serialize};
-use strum::{AsRefStr, EnumIs, EnumString};
+use strum::{EnumIs, EnumString};
 
 #[derive(
     Debug,
@@ -21,36 +20,36 @@ use strum::{AsRefStr, EnumIs, EnumString};
     Deserialize,
     Serialize,
     EnumString,
-    AsRefStr,
-    Display,
     EnumIs,
 )]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Segment of the data that can be moved to static files.
 pub enum StaticFileSegment {
-    #[strum(serialize = "headers")]
     /// Static File segment responsible for the `CanonicalHeaders`, `Headers`,
     /// `HeaderTerminalDifficulties` tables.
     Headers,
-    #[strum(serialize = "transactions")]
     /// Static File segment responsible for the `Transactions` table.
     Transactions,
-    #[strum(serialize = "receipts")]
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
-    #[strum(serialize = "transaction-senders")]
     /// Static File segment responsible for the `TransactionSenders` table.
     TransactionSenders,
 }
 
+impl fmt::Display for StaticFileSegment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 impl StaticFileSegment {
-    /// Returns the segment as a string.
+    /// Returns a string representation of the segment.
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
             Self::Receipts => "receipts",
-            Self::TransactionSenders => "transaction_senders",
+            Self::TransactionSenders => "transaction-senders",
         }
     }
 
@@ -77,7 +76,7 @@ impl StaticFileSegment {
     pub fn filename(&self, block_range: &SegmentRangeInclusive) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`].
-        format!("static_file_{}_{}_{}", self.as_ref(), block_range.start(), block_range.end())
+        format!("static_file_{}_{}_{}", self.as_str(), block_range.start(), block_range.end())
     }
 
     /// Returns file name for the provided segment and range, alongside filters, compression.
@@ -475,6 +474,39 @@ mod tests {
                 },
                 receipts.user_header()
             );
+        }
+    }
+
+    #[test]
+    fn test_static_file_segment_string() {
+        for segment in StaticFileSegment::iter() {
+            let static_str = segment.as_str();
+            let display_str = segment.to_string();
+            match segment {
+                StaticFileSegment::Headers => assert_eq!(static_str, "headers"),
+                StaticFileSegment::Transactions => assert_eq!(static_str, "transactions"),
+                StaticFileSegment::Receipts => assert_eq!(static_str, "receipts"),
+                StaticFileSegment::TransactionSenders => {
+                    assert_eq!(static_str, "transaction-senders")
+                }
+            }
+            assert_eq!(static_str, display_str);
+        }
+    }
+
+    #[test]
+    fn test_static_file_segment_serde() {
+        for segment in StaticFileSegment::iter() {
+            let ser = serde_json::to_string(&segment).unwrap();
+            match segment {
+                StaticFileSegment::Headers => assert_eq!(ser, "\"Headers\""),
+                StaticFileSegment::Transactions => assert_eq!(ser, "\"Transactions\""),
+                StaticFileSegment::Receipts => assert_eq!(ser, "\"Receipts\""),
+                StaticFileSegment::TransactionSenders => {
+                    assert_eq!(ser, "\"TransactionSenders\"")
+                }
+            }
+            assert_eq!(serde_json::from_str(&ser).unwrap(), segment);
         }
     }
 }

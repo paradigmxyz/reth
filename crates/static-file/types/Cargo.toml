@@ -15,12 +15,12 @@ workspace = true
 alloy-primitives.workspace = true
 
 clap = { workspace = true, features = ["derive"], optional = true }
-derive_more.workspace = true
 serde = { workspace = true, features = ["derive"] }
 strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 reth-nippy-jar.workspace = true
+serde_json.workspace = true
 
 [features]
 default = ["std"]
