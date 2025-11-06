@@ -33,7 +33,7 @@ const fn main() {}
 const MAINNET: &str = "mainnet";
 /// Default mainnet url
 /// for downloading mainnet `.era1` files
-const MAINNET_URL: &str = "https://era.ithaca.xyz/era1/";
+const ERA1_MAINNET_URL: &str = "https://era.ithaca.xyz/era1/";
 
 /// Succinct list of mainnet files we want to download
 /// from <https://era.ithaca.xyz/era1/>
@@ -54,7 +54,7 @@ const SEPOLIA: &str = "sepolia";
 
 /// Default sepolia url
 /// for downloading sepolia `.era1` files
-const SEPOLIA_URL: &str = "https://era.ithaca.xyz/sepolia-era1/";
+const ERA1_SEPOLIA_URL: &str = "https://era.ithaca.xyz/sepolia-era1/";
 
 /// Succinct list of sepolia files we want to download
 /// from <https://era.ithaca.xyz/sepolia-era1/>
@@ -110,8 +110,8 @@ impl Era1TestDownloader {
 
         // initialize the client and build url config
         let url = match network {
-            MAINNET => MAINNET_URL,
-            SEPOLIA => SEPOLIA_URL,
+            MAINNET => ERA1_MAINNET_URL,
+            SEPOLIA => ERA1_SEPOLIA_URL,
             _ => {
                 return Err(eyre!(
                     "Unknown network: {}. Only mainnet and sepolia are supported.",
