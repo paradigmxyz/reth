@@ -413,45 +413,33 @@ mod tests {
     }
 
     #[test]
-    fn test_deleted_entries_limit_left_saturates_when_overrun() {
+    fn test_deleted_entries_limit_left_saturation_and_normal() {
+        // less than limit → no saturation
         let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
-        // Delete more than the limit
-        limiter.increment_deleted_entries_count_by(12);
-        // Remaining should saturate to 0 (no underflow/panic)
-        assert_eq!(limiter.deleted_entries_limit_left(), Some(0));
-    }
+        limiter.increment_deleted_entries_count_by(3);
+        assert_eq!(limiter.deleted_entries_limit_left(), Some(7));
 
-    #[test]
-    fn test_deleted_entries_limit_left_zero_when_equal() {
+        // equal to limit → saturates to 0
         let mut limiter = PruneLimiter::default().set_deleted_entries_limit(3);
         limiter.increment_deleted_entries_count_by(3);
         assert_eq!(limiter.deleted_entries_limit_left(), Some(0));
-    }
 
-    #[test]
-    fn test_deleted_entries_limit_left_after_lowering_limit_with_set() {
-        // Start with higher limit and some deletions
+        // overrun past limit → saturates to 0
+        let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
+        limiter.increment_deleted_entries_count_by(12);
+        assert_eq!(limiter.deleted_entries_limit_left(), Some(0));
+
+        // lowering limit via set → saturates to 0 if below deleted
         let mut limiter = PruneLimiter::default().set_deleted_entries_limit(20);
         limiter.increment_deleted_entries_count_by(15);
-        assert_eq!(limiter.deleted_entries_limit_left(), Some(5));
-
-        // Lower the limit below the current deleted count
-        limiter = limiter.set_deleted_entries_limit(10);
-        // Remaining should saturate to 0
+        let limiter = limiter.set_deleted_entries_limit(10);
         assert_eq!(limiter.deleted_entries_limit_left(), Some(0));
-    }
 
-    #[test]
-    fn test_deleted_entries_limit_left_after_lowering_limit_with_floor() {
-        // Start with limit 15 and delete 14
+        // lowering limit via floor → saturates to 0 if below deleted
         let mut limiter = PruneLimiter::default().set_deleted_entries_limit(15);
         limiter.increment_deleted_entries_count_by(14);
-
-        // Floor to the largest multiple of 8 <= 15, which is 8
         let denominator = NonZeroUsize::new(8).unwrap();
         let limiter = limiter.floor_deleted_entries_limit_to_multiple_of(denominator);
-
-        // Since deleted (14) > new limit (8), remaining should be 0 (saturating)
         assert_eq!(limiter.deleted_entries_limit_left(), Some(0));
     }
 }
