@@ -106,12 +106,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     let result = executor.execute_one(&block)?;
 
                     if let Err(err) = consensus
-                        .validate_block_post_execution(&block, &result)
+                        .validate_block_post_execution(&block, &result);
                         .wrap_err_with(|| format!("Failed to validate block {}", block.number()))
                     {
-                        let correct_receipts = provider_factory
-                            .receipts_by_block(block.number().into())?
-                            .ok_or_else(|| eyre::eyre!("receipts for block {} not found", block.number()))?;
+                        let correct_receipts =
+                            provider_factory.receipts_by_block(block.number().into())?.ok_or_else(
+                                || eyre::eyre!("receipts for block {} not found", block.number()),
+                            )?;
 
                         // Helper function to calculate gas used for a specific transaction
                         fn calculate_gas_used(receipts: &[impl TxReceipt], index: usize) -> u64 {
