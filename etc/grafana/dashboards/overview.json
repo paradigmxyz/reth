@@ -1129,171 +1129,12 @@
             "uid": "${datasource}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v1{$instance_label=\"$instance\", quantile=\"0\"}",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV1 min",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v1{$instance_label=\"$instance\", quantile=\"0.5\"}",
+          "editorMode": "code",
+          "expr": "reth_consensus_engine_beacon_forkchoice_updated_latency{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV1 p50",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v1{$instance_label=\"$instance\", quantile=\"0.9\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV1 p90",
-          "range": true,
-          "refId": "C",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v1{$instance_label=\"$instance\", quantile=\"0.95\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV1 p95",
-          "range": true,
-          "refId": "D",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v1{$instance_label=\"$instance\", quantile=\"0.99\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV1 p99",
-          "range": true,
-          "refId": "E",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v2{$instance_label=\"$instance\", quantile=\"0\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV2 min",
-          "range": true,
-          "refId": "F",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v2{$instance_label=\"$instance\", quantile=\"0.5\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV2 p50",
-          "range": true,
-          "refId": "G",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v2{$instance_label=\"$instance\", quantile=\"0.9\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV2 p90",
-          "range": true,
-          "refId": "H",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v2{$instance_label=\"$instance\", quantile=\"0.95\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV2 p95",
-          "range": true,
-          "refId": "I",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v2{$instance_label=\"$instance\", quantile=\"0.99\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV2 p99",
-          "range": true,
-          "refId": "J",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v3{$instance_label=\"$instance\", quantile=\"0\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV3 min",
+          "legendFormat": "min",
           "range": true,
           "refId": "K",
           "useBackend": false
@@ -1304,12 +1145,12 @@
             "uid": "${datasource}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v3{$instance_label=\"$instance\", quantile=\"0.5\"}",
+          "editorMode": "code",
+          "expr": "reth_consensus_engine_beacon_forkchoice_updated_latency{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV3 p50",
+          "legendFormat": "p50",
           "range": true,
           "refId": "L",
           "useBackend": false
@@ -1320,12 +1161,12 @@
             "uid": "${datasource}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v3{$instance_label=\"$instance\", quantile=\"0.9\"}",
+          "editorMode": "code",
+          "expr": "reth_consensus_engine_beacon_forkchoice_updated_latency{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV3 p90",
+          "legendFormat": "p90",
           "range": true,
           "refId": "M",
           "useBackend": false
@@ -1336,12 +1177,12 @@
             "uid": "${datasource}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v3{$instance_label=\"$instance\", quantile=\"0.95\"}",
+          "editorMode": "code",
+          "expr": "reth_consensus_engine_beacon_forkchoice_updated_latency{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV3 p95",
+          "legendFormat": "p95",
           "range": true,
           "refId": "N",
           "useBackend": false
@@ -1352,12 +1193,12 @@
             "uid": "${datasource}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v3{$instance_label=\"$instance\", quantile=\"0.99\"}",
+          "editorMode": "code",
+          "expr": "reth_consensus_engine_beacon_forkchoice_updated_latency{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
-          "legendFormat": "engine_forkchoiceUpdatedV3 p99",
+          "legendFormat": "p99",
           "range": true,
           "refId": "O",
           "useBackend": false
@@ -1478,251 +1319,12 @@
             "uid": "${datasource}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v1{$instance_label=\"$instance\", quantile=\"0\"}",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV1 min",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v1{$instance_label=\"$instance\", quantile=\"0.5\"}",
+          "editorMode": "code",
+          "expr": "reth_consensus_engine_beacon_new_payload_latency{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV1 p50",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v1{$instance_label=\"$instance\", quantile=\"0.9\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV1 p90",
-          "range": true,
-          "refId": "C",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v1{$instance_label=\"$instance\", quantile=\"0.95\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV1 p95",
-          "range": true,
-          "refId": "D",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v1{$instance_label=\"$instance\", quantile=\"0.99\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV1 p99",
-          "range": true,
-          "refId": "E",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v2{$instance_label=\"$instance\", quantile=\"0\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV2 min",
-          "range": true,
-          "refId": "F",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v2{$instance_label=\"$instance\", quantile=\"0.5\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV2 p50",
-          "range": true,
-          "refId": "G",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v2{$instance_label=\"$instance\", quantile=\"0.9\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV2 p90",
-          "range": true,
-          "refId": "H",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v2{$instance_label=\"$instance\", quantile=\"0.95\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV2 p95",
-          "range": true,
-          "refId": "I",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v2{$instance_label=\"$instance\", quantile=\"0.99\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV2 p99",
-          "range": true,
-          "refId": "J",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v3{$instance_label=\"$instance\", quantile=\"0\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV3 min",
-          "range": true,
-          "refId": "K",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v3{$instance_label=\"$instance\", quantile=\"0.5\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV3 p50",
-          "range": true,
-          "refId": "L",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v3{$instance_label=\"$instance\", quantile=\"0.9\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV3 p90",
-          "range": true,
-          "refId": "M",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v3{$instance_label=\"$instance\", quantile=\"0.95\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV3 p95",
-          "range": true,
-          "refId": "N",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v3{$instance_label=\"$instance\", quantile=\"0.99\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV3 p99",
-          "range": true,
-          "refId": "O",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v4{$instance_label=\"$instance\", quantile=\"0\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV4 min",
+          "legendFormat": "min",
           "range": true,
           "refId": "P",
           "useBackend": false
@@ -1733,12 +1335,12 @@
             "uid": "${datasource}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v4{$instance_label=\"$instance\", quantile=\"0.5\"}",
+          "editorMode": "code",
+          "expr": "reth_consensus_engine_beacon_new_payload_latency{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV4 p50",
+          "legendFormat": "p50",
           "range": true,
           "refId": "Q",
           "useBackend": false
@@ -1749,12 +1351,12 @@
             "uid": "${datasource}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v4{$instance_label=\"$instance\", quantile=\"0.9\"}",
+          "editorMode": "code",
+          "expr": "reth_consensus_engine_beacon_new_payload_latency{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV4 p90",
+          "legendFormat": "p90",
           "range": true,
           "refId": "R",
           "useBackend": false
@@ -1765,12 +1367,12 @@
             "uid": "${datasource}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v4{$instance_label=\"$instance\", quantile=\"0.95\"}",
+          "editorMode": "code",
+          "expr": "reth_consensus_engine_beacon_new_payload_latency{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV4 p95",
+          "legendFormat": "p95",
           "range": true,
           "refId": "S",
           "useBackend": false
@@ -1781,12 +1383,12 @@
             "uid": "${datasource}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v4{$instance_label=\"$instance\", quantile=\"0.99\"}",
+          "editorMode": "code",
+          "expr": "reth_consensus_engine_beacon_new_payload_latency{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
-          "legendFormat": "engine_newPayloadV4 p99",
+          "legendFormat": "p99",
           "range": true,
           "refId": "T",
           "useBackend": false
@@ -1882,7 +1484,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.5\"}",
+          "expr": "reth_consensus_engine_beacon_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "p50",
           "range": true,
           "refId": "A"
@@ -1893,7 +1495,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.9\"}",
+          "expr": "reth_consensus_engine_beacon_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "hide": false,
           "legendFormat": "p90",
           "range": true,
@@ -1905,7 +1507,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.95\"}",
+          "expr": "reth_consensus_engine_beacon_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "hide": false,
           "legendFormat": "p95",
           "range": true,
@@ -1917,7 +1519,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.99\"}",
+          "expr": "reth_consensus_engine_beacon_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "hide": false,
           "legendFormat": "p99",
           "range": true,
@@ -2014,7 +1616,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.5\"}",
+          "expr": "reth_consensus_engine_beacon_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "p50",
           "range": true,
           "refId": "A"
@@ -2025,7 +1627,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.9\"}",
+          "expr": "reth_consensus_engine_beacon_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "hide": false,
           "legendFormat": "p90",
           "range": true,
@@ -2037,7 +1639,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.95\"}",
+          "expr": "reth_consensus_engine_beacon_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "hide": false,
           "legendFormat": "p95",
           "range": true,
@@ -2049,7 +1651,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.99\"}",
+          "expr": "reth_consensus_engine_beacon_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "hide": false,
           "legendFormat": "p99",
           "range": true,
@@ -2342,7 +1944,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg(reth_sync_block_validation_state_root_duration{$instance_label=\"$instance\"})",
+          "expr": "reth_sync_block_validation_state_root_duration{$instance_label=\"$instance\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -2358,7 +1960,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg(reth_sync_execution_execution_duration{$instance_label=\"$instance\"})",
+          "expr": "reth_sync_execution_execution_duration{$instance_label=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -3535,7 +3137,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg(reth_sync_block_validation_state_root_duration{$instance_label=\"$instance\"})",
+          "expr": "reth_sync_block_validation_state_root_duration{$instance_label=\"$instance\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -3551,7 +3153,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg(reth_sync_execution_execution_duration{$instance_label=\"$instance\"})",
+          "expr": "reth_sync_execution_execution_duration{$instance_label=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -3796,7 +3398,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "avg by(quantile) (reth_sync_block_validation_trie_input_duration{$instance_label=\"$instance\", quantile=~\"(0|0.5|0.9|0.95|1)\"})",
+          "expr": "reth_sync_block_validation_trie_input_duration{$instance_label=\"$instance\", quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -3930,7 +3532,7 @@
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "{{address}}",
+          "legendFormat": "Precompile cache hits",
           "range": true,
           "refId": "A",
           "useBackend": false
@@ -4141,7 +3743,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg by (quantile) (reth_tree_root_proof_calculation_duration_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"})",
+          "expr": "reth_tree_root_proof_calculation_duration_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -4241,11 +3843,11 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_pending_storage_multiproofs_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_tree_root_pending_account_multiproofs_histogram{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "instant": false,
-          "legendFormat": "storage {{quantile}} percentile",
+          "legendFormat": "accounts p50",
           "range": true,
-          "refId": "Storage"
+          "refId": "Branch Nodes"
         },
         {
           "datasource": {
@@ -4253,11 +3855,90 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_pending_account_multiproofs_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_tree_root_pending_account_multiproofs_histogram{$instance_label=\"$instance\", quantile=\"0.9\"}",
+          "hide": false,
           "instant": false,
-          "legendFormat": "account {{quantile}} percentile",
+          "legendFormat": "accounts p90",
           "range": true,
-          "refId": "Account"
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_pending_account_multiproofs_histogram{$instance_label=\"$instance\", quantile=\"0.95\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "accounts p95",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_pending_account_multiproofs_histogram{$instance_label=\"$instance\", quantile=\"0.99\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "accounts p99",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_pending_storage_multiproofs_histogram{$instance_label=\"$instance\", quantile=\"0.5\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "storage p50",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_pending_storage_multiproofs_histogram{$instance_label=\"$instance\", quantile=\"0.9\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "storage p90",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_pending_storage_multiproofs_histogram{$instance_label=\"$instance\", quantile=\"0.95\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "storage p95",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_pending_storage_multiproofs_histogram{$instance_label=\"$instance\", quantile=\"0.99\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "storage p99",
+          "range": true,
+          "refId": "G"
         }
       ],
       "title": "Pending MultiProof requests",
@@ -4323,38 +4004,7 @@
           },
           "unit": "none"
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Max storage workers"
-            },
-            "properties": [
-              {
-                "id": "custom.lineStyle",
-                "value": {
-                  "dash": [10, 10],
-                  "fill": "dash"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Max account workers"
-            },
-            "properties": [
-              {
-                "id": "custom.lineStyle",
-                "value": {
-                  "dash": [10, 10],
-                  "fill": "dash"
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -4362,7 +4012,6 @@
         "x": 12,
         "y": 104
       },
-      "description": "The max metrics (Max storage workers and Max account workers) are displayed as dotted lines to highlight the configured upper limits.",
       "id": 256,
       "options": {
         "legend": {
@@ -4385,9 +4034,9 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_active_storage_workers_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_tree_root_active_account_workers_histogram{$instance_label=\"$instance\",quantile=\"0.5\"}",
           "instant": false,
-          "legendFormat": "Storage workers {{quantile}} percentile",
+          "legendFormat": "accounts p50",
           "range": true,
           "refId": "A"
         },
@@ -4397,9 +4046,10 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_active_account_workers_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_tree_root_active_account_workers_histogram{$instance_label=\"$instance\",quantile=\"0.9\"}",
+          "hide": false,
           "instant": false,
-          "legendFormat": "Account workers {{quantile}} percentile",
+          "legendFormat": "accounts p90",
           "range": true,
           "refId": "B"
         },
@@ -4409,9 +4059,10 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_max_storage_workers{$instance_label=\"$instance\"}",
+          "expr": "reth_tree_root_active_account_workers_histogram{$instance_label=\"$instance\",quantile=\"0.95\"}",
+          "hide": false,
           "instant": false,
-          "legendFormat": "Max storage workers",
+          "legendFormat": "accounts p95",
           "range": true,
           "refId": "C"
         },
@@ -4421,14 +4072,66 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_max_account_workers{$instance_label=\"$instance\"}",
+          "expr": "reth_tree_root_active_account_workers_histogram{$instance_label=\"$instance\",quantile=\"0.99\"}",
+          "hide": false,
           "instant": false,
-          "legendFormat": "Max account workers",
+          "legendFormat": "accounts p99",
           "range": true,
           "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_active_storage_workers_histogram{$instance_label=\"$instance\",quantile=\"0.5\"}",
+          "instant": false,
+          "legendFormat": "storages p50",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_active_storage_workers_histogram{$instance_label=\"$instance\",quantile=\"0.9\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "storages p90",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_active_storage_workers_histogram{$instance_label=\"$instance\",quantile=\"0.95\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "storages p95",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_active_storage_workers_histogram{$instance_label=\"$instance\",quantile=\"0.99\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "storages p99",
+          "range": true,
+          "refId": "H"
         }
       ],
-      "title": "Active MultiProof Workers",
+      "title": "Active multiproof workers",
       "type": "timeseries"
     },
     {
@@ -4923,7 +4626,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg by (quantile) (reth_tree_root_multiproof_task_total_duration_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"})",
+          "expr": "reth_tree_root_multiproof_task_total_duration_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Task duration {{quantile}} percentile",
@@ -12167,6 +11870,6 @@
   "timezone": "",
   "title": "Reth",
   "uid": "2k8BXz24x",
-  "version": 3,
+  "version": 4,
   "weekStart": ""
 }
