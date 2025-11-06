@@ -121,7 +121,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 receipts[index - 1].cumulative_gas_used()
                             };
                             receipts[index].cumulative_gas_used() - prev_gas
-                        };
+                        }
 
                         for (i, (receipt, correct_receipt)) in
                             result.receipts.iter().zip(correct_receipts.iter()).enumerate()
