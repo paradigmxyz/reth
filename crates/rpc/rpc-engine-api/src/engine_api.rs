@@ -21,8 +21,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload, PayloadOrAttributes,
-    PayloadTypes,
+    validate_payload_timestamp, EngineApiMessageVersion, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
@@ -161,12 +160,9 @@ where
         payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
-        let gas_used = payload.gas_used();
-
         let res = Self::new_payload_v1(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v1.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         res
     }
 
@@ -197,12 +193,9 @@ where
         payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
-        let gas_used = payload.gas_used();
-
         let res = Self::new_payload_v2(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v2.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         res
     }
 
@@ -234,12 +227,10 @@ where
         payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
-        let gas_used = payload.gas_used();
 
         let res = Self::new_payload_v3(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v3.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -271,13 +262,10 @@ where
         payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
-        let gas_used = payload.gas_used();
-
         let res = Self::new_payload_v4(self, payload).await;
 
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v4.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -316,13 +304,11 @@ where
         payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
-        let gas_used = payload.gas_used();
 
         let res = Self::new_payload_v5(self, payload).await;
 
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v5.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 }
@@ -360,7 +346,6 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v1(self, state, payload_attrs).await;
         self.inner.metrics.latency.fork_choice_updated_v1.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
         res
     }
 
@@ -386,7 +371,6 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v2(self, state, payload_attrs).await;
         self.inner.metrics.latency.fork_choice_updated_v2.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
         res
     }
 
@@ -412,7 +396,6 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v3(self, state, payload_attrs).await;
         self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
         res
     }
 

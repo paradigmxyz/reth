@@ -132,7 +132,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             db,
             self.chain.clone(),
             static_file_provider,
-        )
+        )?
         .with_prune_modes(prune_modes.clone());
 
         // Check for consistency between database and static files.

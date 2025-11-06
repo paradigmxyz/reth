@@ -21,12 +21,14 @@ use serde::{Deserialize, Serialize};
 pub mod accounts;
 pub mod blocks;
 pub mod integer_list;
+pub mod metadata;
 pub mod sharded_key;
 pub mod storage_sharded_key;
 
 pub use accounts::*;
 pub use blocks::*;
 pub use integer_list::IntegerList;
+pub use metadata::*;
 pub use reth_db_models::{
     AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StoredBlockBodyIndices,
     StoredBlockWithdrawals,

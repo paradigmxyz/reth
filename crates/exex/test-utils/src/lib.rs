@@ -244,7 +244,7 @@ pub async fn test_exex_context_with_chain_spec(
         db,
         chain_spec.clone(),
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
-    );
+    )?;
 
     let genesis_hash = init_genesis(&provider_factory)?;
     let provider = BlockchainProvider::new(provider_factory.clone())?;
