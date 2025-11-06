@@ -144,7 +144,7 @@ impl StaticFileSegment {
 }
 
 /// A segment header that contains information common to all segments. Used for storage.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Copy)]
 pub struct SegmentHeader {
     /// Defines the expected block range for a static file segment. This attribute is crucial for
     /// scenarios where the file contains no data, allowing for a representation beyond a

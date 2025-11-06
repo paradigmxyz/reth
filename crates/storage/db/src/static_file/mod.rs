@@ -38,8 +38,8 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
             if let Some(block_range) = jar.user_header().block_range() {
                 static_files
                     .entry(segment)
-                    .and_modify(|headers| headers.push((block_range, jar.user_header().clone())))
-                    .or_insert_with(|| vec![(block_range, jar.user_header().clone())]);
+                    .and_modify(|headers| headers.push((block_range, *jar.user_header())))
+                    .or_insert_with(|| vec![(block_range, *jar.user_header())]);
             }
         }
     }

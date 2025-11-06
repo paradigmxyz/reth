@@ -636,7 +636,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             NippyJar::<SegmentHeader>::load(&file).map_err(ProviderError::other)?
         };
 
-        let header = jar.user_header().clone();
+        let header = *jar.user_header();
         jar.delete().map_err(ProviderError::other)?;
 
         // SAFETY: this is currently necessary to ensure that certain indexes like
