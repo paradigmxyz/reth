@@ -5,19 +5,19 @@ use std::time::Duration;
 use crate::EthApi;
 use alloy_consensus::BlobTransactionValidationError;
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, BlockId, Typed2718};
-use alloy_primitives::{hex, Bytes, B256};
+use alloy_primitives::{hex, B256};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_primitives_traits::AlloyBlockHeader;
+use reth_primitives_traits::{AlloyBlockHeader, Recovered, WithEncoded};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
     FromEvmError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{error::RpcPoolError, utils::recover_raw_transaction, EthApiError};
+use reth_rpc_eth_types::{error::RpcPoolError, EthApiError};
 use reth_storage_api::BlockReaderIdExt;
 use reth_transaction_pool::{
     error::Eip4844PoolTransactionError, AddedTransactionOutcome, EthBlobTransactionSidecar,
-    EthPoolTransaction, PoolTransaction, TransactionPool,
+    EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
 };
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
@@ -36,12 +36,11 @@ where
         self.inner.send_raw_transaction_sync_timeout()
     }
 
-    /// Decodes and recovers the transaction and submits it to the pool.
-    ///
-    /// Returns the hash of the transaction.
-    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
-        let recovered = recover_raw_transaction(&tx)?;
-
+    async fn send_transaction(
+        &self,
+        tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
+    ) -> Result<B256, Self::Error> {
+        let (tx, recovered) = tx.split();
         let mut pool_transaction =
             <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
@@ -147,6 +146,7 @@ mod tests {
     };
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use revm_primitives::Bytes;
     use std::collections::HashMap;
 
     fn mock_eth_api(
