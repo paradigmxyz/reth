@@ -7,7 +7,7 @@ use crate::{
         TreeConfig,
     },
 };
-use alloy_consensus::Header;
+
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
     map::{HashMap, HashSet},
