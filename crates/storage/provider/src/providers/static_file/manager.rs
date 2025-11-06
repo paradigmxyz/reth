@@ -111,6 +111,15 @@ impl<N: NodePrimitives> StaticFileProviderBuilder<N> {
         StaticFileProviderInner::new(path, StaticFileAccess::RO).map(|inner| Self { inner })
     }
 
+    /// Set custom blocks per file for specific segments.
+    pub fn with_blocks_per_file_for_segments(
+        mut self,
+        segments: HashMap<StaticFileSegment, u64>,
+    ) -> Self {
+        self.inner.blocks_per_file.extend(segments);
+        self
+    }
+
     /// Set a custom number of blocks per file for all segments.
     pub fn with_blocks_per_file(mut self, blocks_per_file: u64) -> Self {
         for segment in StaticFileSegment::iter() {

@@ -2,7 +2,9 @@
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
+use reth_static_file_types::StaticFileSegment;
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -29,6 +31,9 @@ pub struct Config {
     pub peers: PeersConfig,
     /// Configuration for peer sessions.
     pub sessions: SessionsConfig,
+    /// Configuration for static files.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub static_files: StaticFilesConfig,
 }
 
 impl Config {
@@ -408,6 +413,65 @@ impl EtlConfig {
     pub const fn default_file_size() -> usize {
         // 500 MB
         500 * (1024 * 1024)
+    }
+}
+
+/// Static files configuration.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct StaticFilesConfig {
+    /// Number of blocks per file for the headers segment.
+    pub headers_blocks_per_file: Option<u64>,
+    /// Number of blocks per file for the transactions segment.
+    pub transactions_blocks_per_file: Option<u64>,
+    /// Number of blocks per file for the receipts segment.
+    pub receipts_blocks_per_file: Option<u64>,
+}
+
+impl StaticFilesConfig {
+    /// Validates the static files configuration.
+    ///
+    /// Returns an error if any blocks per file value is zero.
+    pub fn validate(&self) -> eyre::Result<()> {
+        let Self {
+            headers_blocks_per_file,
+            transactions_blocks_per_file,
+            receipts_blocks_per_file,
+        } = self;
+        eyre::ensure!(
+            *headers_blocks_per_file != Some(0),
+            "Headers segment blocks per file must be greater than 0"
+        );
+        eyre::ensure!(
+            *transactions_blocks_per_file != Some(0),
+            "Transactions segment blocks per file must be greater than 0"
+        );
+        eyre::ensure!(
+            *receipts_blocks_per_file != Some(0),
+            "Receipts segment blocks per file must be greater than 0"
+        );
+        Ok(())
+    }
+
+    /// Converts the blocks per file configuration into a [`HashMap`] per segment.
+    pub fn as_blocks_per_file_map(&self) -> HashMap<StaticFileSegment, u64> {
+        let Self {
+            headers_blocks_per_file,
+            transactions_blocks_per_file,
+            receipts_blocks_per_file,
+        } = self;
+        let mut map = HashMap::new();
+        if let Some(blocks_per_file) = headers_blocks_per_file {
+            map.insert(StaticFileSegment::Headers, *blocks_per_file);
+        }
+        if let Some(blocks_per_file) = transactions_blocks_per_file {
+            map.insert(StaticFileSegment::Transactions, *blocks_per_file);
+        }
+        if let Some(blocks_per_file) = receipts_blocks_per_file {
+            map.insert(StaticFileSegment::Receipts, *blocks_per_file);
+        }
+        map
     }
 }
 
