@@ -1611,7 +1611,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
-        // Write receipts to static files only if we don't have receipts pruning
+        // Write receipts to static files only if they're explicitly enabled or we don't have
+        // receipts pruning
         let mut receipts_writer = if self.storage_settings.read().receipts_in_static_files ||
             !self.prune_modes.has_receipts_pruning()
         {
