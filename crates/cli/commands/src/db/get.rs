@@ -1,4 +1,3 @@
-use alloy_consensus::Header;
 use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
@@ -12,7 +11,7 @@ use reth_db_api::{
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
 use reth_db_common::DbTool;
-use reth_node_api::{ReceiptTy, TxTy};
+use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
@@ -66,9 +65,10 @@ impl Command {
             }
             Subcommand::StaticFile { segment, key, raw } => {
                 let (key, mask): (u64, _) = match segment {
-                    StaticFileSegment::Headers => {
-                        (table_key::<tables::Headers>(&key)?, <HeaderWithHashMask<Header>>::MASK)
-                    }
+                    StaticFileSegment::Headers => (
+                        table_key::<tables::Headers>(&key)?,
+                        <HeaderWithHashMask<HeaderTy<N>>>::MASK,
+                    ),
                     StaticFileSegment::Transactions => {
                         (table_key::<tables::Transactions>(&key)?, <TransactionMask<TxTy<N>>>::MASK)
                     }
@@ -77,17 +77,15 @@ impl Command {
                     }
                 };
 
-                let content = tool.provider_factory.static_file_provider().find_static_file(
-                    segment,
-                    |provider| {
-                        let mut cursor = provider.cursor()?;
-                        cursor.get(key.into(), mask).map(|result| {
-                            result.map(|vec| {
-                                vec.iter().map(|slice| slice.to_vec()).collect::<Vec<_>>()
-                            })
-                        })
-                    },
-                )?;
+                let content = tool
+                    .provider_factory
+                    .static_file_provider()
+                    .get_segment_provider(segment, key)?
+                    .cursor()?
+                    .get(key.into(), mask)
+                    .map(|result| {
+                        result.map(|vec| vec.iter().map(|slice| slice.to_vec()).collect::<Vec<_>>())
+                    })?;
 
                 match content {
                     Some(content) => {
@@ -96,7 +94,7 @@ impl Command {
                         } else {
                             match segment {
                                 StaticFileSegment::Headers => {
-                                    let header = Header::decompress(content[0].as_slice())?;
+                                    let header = HeaderTy::<N>::decompress(content[0].as_slice())?;
                                     let block_hash = BlockHash::decompress(content[1].as_slice())?;
                                     println!(
                                         "Header\n{}\n\nBlockHash\n{}",

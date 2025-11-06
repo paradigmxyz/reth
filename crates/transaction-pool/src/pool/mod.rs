@@ -612,10 +612,10 @@ where
             // A newly added transaction may be immediately discarded, so we need to
             // adjust the result here
             for res in &mut added {
-                if let Ok(AddedTransactionOutcome { hash, .. }) = res {
-                    if discarded_hashes.contains(hash) {
-                        *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
-                    }
+                if let Ok(AddedTransactionOutcome { hash, .. }) = res &&
+                    discarded_hashes.contains(hash)
+                {
+                    *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
                 }
             }
         }
@@ -747,8 +747,8 @@ where
                     listener.discarded(tx.hash());
                 }
             }
-            AddedTransaction::Parked { transaction, replaced, .. } => {
-                listener.queued(transaction.hash());
+            AddedTransaction::Parked { transaction, replaced, queued_reason, .. } => {
+                listener.queued(transaction.hash(), queued_reason.clone());
                 if let Some(replaced) = replaced {
                     listener.replaced(replaced.clone(), *transaction.hash());
                 }

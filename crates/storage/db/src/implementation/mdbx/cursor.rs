@@ -345,3 +345,110 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        mdbx::{DatabaseArguments, DatabaseEnv, DatabaseEnvKind},
+        tables::StorageChangeSets,
+        Database,
+    };
+    use alloy_primitives::{address, Address, B256, U256};
+    use reth_db_api::{
+        cursor::{DbCursorRO, DbDupCursorRW},
+        models::{BlockNumberAddress, ClientVersion},
+        table::TableImporter,
+        transaction::{DbTx, DbTxMut},
+    };
+    use reth_primitives_traits::StorageEntry;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    fn create_test_db() -> Arc<DatabaseEnv> {
+        let path = TempDir::new().unwrap();
+        let mut db = DatabaseEnv::open(
+            path.path(),
+            DatabaseEnvKind::RW,
+            DatabaseArguments::new(ClientVersion::default()),
+        )
+        .unwrap();
+        db.create_tables().unwrap();
+        Arc::new(db)
+    }
+
+    #[test]
+    fn test_import_table_with_range_works_on_dupsort() {
+        let addr1 = address!("0000000000000000000000000000000000000001");
+        let addr2 = address!("0000000000000000000000000000000000000002");
+        let addr3 = address!("0000000000000000000000000000000000000003");
+        let source_db = create_test_db();
+        let target_db = create_test_db();
+        let test_data = vec![
+            (
+                BlockNumberAddress((100, addr1)),
+                StorageEntry { key: B256::with_last_byte(1), value: U256::from(100) },
+            ),
+            (
+                BlockNumberAddress((100, addr1)),
+                StorageEntry { key: B256::with_last_byte(2), value: U256::from(200) },
+            ),
+            (
+                BlockNumberAddress((100, addr1)),
+                StorageEntry { key: B256::with_last_byte(3), value: U256::from(300) },
+            ),
+            (
+                BlockNumberAddress((101, addr1)),
+                StorageEntry { key: B256::with_last_byte(1), value: U256::from(400) },
+            ),
+            (
+                BlockNumberAddress((101, addr2)),
+                StorageEntry { key: B256::with_last_byte(1), value: U256::from(500) },
+            ),
+            (
+                BlockNumberAddress((101, addr2)),
+                StorageEntry { key: B256::with_last_byte(2), value: U256::from(600) },
+            ),
+            (
+                BlockNumberAddress((102, addr3)),
+                StorageEntry { key: B256::with_last_byte(1), value: U256::from(700) },
+            ),
+        ];
+
+        // setup data
+        let tx = source_db.tx_mut().unwrap();
+        {
+            let mut cursor = tx.cursor_dup_write::<StorageChangeSets>().unwrap();
+            for (key, value) in &test_data {
+                cursor.append_dup(*key, *value).unwrap();
+            }
+        }
+        tx.commit().unwrap();
+
+        // import data from source db to target
+        let source_tx = source_db.tx().unwrap();
+        let target_tx = target_db.tx_mut().unwrap();
+
+        target_tx
+            .import_table_with_range::<StorageChangeSets, _>(
+                &source_tx,
+                Some(BlockNumberAddress((100, Address::ZERO))),
+                BlockNumberAddress((102, Address::repeat_byte(0xff))),
+            )
+            .unwrap();
+        target_tx.commit().unwrap();
+
+        // fetch all data from target db
+        let verify_tx = target_db.tx().unwrap();
+        let mut cursor = verify_tx.cursor_dup_read::<StorageChangeSets>().unwrap();
+        let copied: Vec<_> = cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+
+        // verify each entry matches the test data
+        assert_eq!(copied.len(), test_data.len(), "Should copy all entries including duplicates");
+        for ((copied_key, copied_value), (expected_key, expected_value)) in
+            copied.iter().zip(test_data.iter())
+        {
+            assert_eq!(copied_key, expected_key);
+            assert_eq!(copied_value, expected_value);
+        }
+    }
+}

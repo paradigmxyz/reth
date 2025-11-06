@@ -10,7 +10,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 /// Various provider traits.
 mod traits;
@@ -21,35 +21,34 @@ pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
-    StaticFileAccess, StaticFileWriter,
+    StaticFileAccess, StaticFileProviderBuilder, StaticFileWriter,
 };
+
+pub mod changesets_utils;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.
 pub mod test_utils;
-/// Re-export provider error.
-pub use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
-pub use reth_static_file_types as static_file;
-pub use static_file::StaticFileSegment;
-
-pub use reth_execution_types::*;
-
-pub mod bundle_state;
-
-/// Re-export `OriginalValuesKnown`
-pub use revm_database::states::OriginalValuesKnown;
-
-/// Writer standalone type.
-pub mod writer;
+pub mod either_writer;
+pub use either_writer::*;
 
 pub use reth_chain_state::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
     CanonStateNotifications, CanonStateSubscriptions,
 };
-
+pub use reth_execution_types::*;
+/// Re-export `OriginalValuesKnown`
+pub use revm_database::states::OriginalValuesKnown;
 // reexport traits to avoid breaking changes
-pub use reth_storage_api::{HistoryWriter, StatsReader};
+pub use reth_static_file_types as static_file;
+pub use reth_storage_api::{
+    HistoryWriter, MetadataProvider, MetadataWriter, StatsReader, StorageSettings,
+    StorageSettingsCache,
+};
+/// Re-export provider error.
+pub use reth_storage_errors::provider::{ProviderError, ProviderResult};
+pub use static_file::StaticFileSegment;
 
 pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
     let start = match bounds.start_bound() {

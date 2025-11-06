@@ -80,6 +80,16 @@ impl<T, H> Proof<T, H> {
         self.collect_branch_node_masks = branch_node_masks;
         self
     }
+
+    /// Get a reference to the trie cursor factory.
+    pub const fn trie_cursor_factory(&self) -> &T {
+        &self.trie_cursor_factory
+    }
+
+    /// Get a reference to the hashed cursor factory.
+    pub const fn hashed_cursor_factory(&self) -> &H {
+        &self.hashed_cursor_factory
+    }
 }
 
 impl<T, H> Proof<T, H>
@@ -121,7 +131,7 @@ where
             .with_updates(self.collect_branch_node_masks);
 
         // Initialize all storage multiproofs as empty.
-        // Storage multiproofs for non empty tries will be overwritten if necessary.
+        // Storage multiproofs for non-empty tries will be overwritten if necessary.
         let mut storages: B256Map<_> =
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);

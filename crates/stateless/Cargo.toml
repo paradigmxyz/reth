@@ -36,3 +36,11 @@ thiserror.workspace = true
 itertools.workspace = true
 serde.workspace = true
 serde_with.workspace = true
+
+k256 = { workspace = true, optional = true }
+secp256k1 = { workspace = true, optional = true }
+
+[features]
+default = ["k256"]
+k256 = ["dep:k256"]
+secp256k1 = ["dep:secp256k1"]

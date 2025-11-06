@@ -3,13 +3,17 @@
 //! This also includes general purpose staging types that provide builder style functions that lead
 //! up to the intended build target.
 
-use crate::{providers::StaticFileProvider, ProviderFactory};
+use crate::{
+    providers::{NodeTypesForProvider, StaticFileProvider},
+    ProviderFactory,
+};
 use reth_db::{
     mdbx::{DatabaseArguments, MaxReadTransactionDuration},
     open_db_read_only, DatabaseEnv,
 };
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
+use reth_storage_errors::provider::ProviderResult;
 use std::{
     marker::PhantomData,
     path::{Path, PathBuf},
@@ -48,10 +52,9 @@ impl<N> ProviderFactoryBuilder<N> {
     ///
     /// ```no_run
     /// use reth_chainspec::MAINNET;
-    /// use reth_node_types::NodeTypes;
-    /// use reth_provider::providers::ProviderFactoryBuilder;
+    /// use reth_provider::providers::{NodeTypesForProvider, ProviderFactoryBuilder};
     ///
-    /// fn demo<N: NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>() {
+    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>() {
     ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
     ///         .open_read_only(MAINNET.clone(), "datadir")
     ///         .unwrap();
@@ -64,11 +67,9 @@ impl<N> ProviderFactoryBuilder<N> {
     ///
     /// ```no_run
     /// use reth_chainspec::MAINNET;
-    /// use reth_node_types::NodeTypes;
+    /// use reth_provider::providers::{NodeTypesForProvider, ProviderFactoryBuilder, ReadOnlyConfig};
     ///
-    /// use reth_provider::providers::{ProviderFactoryBuilder, ReadOnlyConfig};
-    ///
-    /// fn demo<N: NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>() {
+    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>() {
     ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
     ///         .open_read_only(MAINNET.clone(), ReadOnlyConfig::from_datadir("datadir").no_watch())
     ///         .unwrap();
@@ -84,11 +85,9 @@ impl<N> ProviderFactoryBuilder<N> {
     ///
     /// ```no_run
     /// use reth_chainspec::MAINNET;
-    /// use reth_node_types::NodeTypes;
+    /// use reth_provider::providers::{NodeTypesForProvider, ProviderFactoryBuilder, ReadOnlyConfig};
     ///
-    /// use reth_provider::providers::{ProviderFactoryBuilder, ReadOnlyConfig};
-    ///
-    /// fn demo<N: NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>() {
+    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>() {
     ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
     ///         .open_read_only(
     ///             MAINNET.clone(),
@@ -103,15 +102,15 @@ impl<N> ProviderFactoryBuilder<N> {
         config: impl Into<ReadOnlyConfig>,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
     where
-        N: NodeTypes,
+        N: NodeTypesForProvider,
     {
         let ReadOnlyConfig { db_dir, db_args, static_files_dir, watch_static_files } =
             config.into();
-        Ok(self
-            .db(Arc::new(open_db_read_only(db_dir, db_args)?))
+        self.db(Arc::new(open_db_read_only(db_dir, db_args)?))
             .chainspec(chainspec)
             .static_file(StaticFileProvider::read_only(static_files_dir, watch_static_files)?)
-            .build_provider_factory())
+            .build_provider_factory()
+            .map_err(Into::into)
     }
 }
 
@@ -320,11 +319,13 @@ impl<N, Val1, Val2, Val3> TypesAnd3<N, Val1, Val2, Val3> {
 
 impl<N, DB> TypesAnd3<N, DB, Arc<N::ChainSpec>, StaticFileProvider<N::Primitives>>
 where
-    N: NodeTypes,
+    N: NodeTypesForProvider,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     /// Creates the [`ProviderFactory`].
-    pub fn build_provider_factory(self) -> ProviderFactory<NodeTypesWithDBAdapter<N, DB>> {
+    pub fn build_provider_factory(
+        self,
+    ) -> ProviderResult<ProviderFactory<NodeTypesWithDBAdapter<N, DB>>> {
         let Self { _types, val_1, val_2, val_3 } = self;
         ProviderFactory::new(val_1, val_2, val_3)
     }

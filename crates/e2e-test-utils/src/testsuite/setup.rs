@@ -82,11 +82,6 @@ impl<I> Setup<I>
 where
     I: EngineTypes,
 {
-    /// Create a new setup with default values
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Set the chain specification
     pub fn with_chain_spec(mut self, chain_spec: Arc<ChainSpec>) -> Self {
         self.chain_spec = Some(chain_spec);
@@ -142,7 +137,7 @@ where
         rlp_path: &Path,
     ) -> Result<()>
     where
-        N: NodeBuilderHelper,
+        N: NodeBuilderHelper<Payload = I>,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
@@ -158,7 +153,7 @@ where
         rlp_path: &Path,
     ) -> Result<()>
     where
-        N: NodeBuilderHelper,
+        N: NodeBuilderHelper<Payload = I>,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
@@ -175,6 +170,7 @@ where
                 .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
             let auth = node.auth_server_handle();
             let url = node.rpc_url();
+            // TODO: Pass beacon_engine_handle once import system supports generic types
             node_clients.push(crate::testsuite::NodeClient::new(rpc, auth, url));
         }
 
@@ -189,7 +185,7 @@ where
     /// Apply the setup to the environment
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
-        N: NodeBuilderHelper,
+        N: NodeBuilderHelper<Payload = I>,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
@@ -201,7 +197,7 @@ where
     /// Apply the setup to the environment
     async fn apply_<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
-        N: NodeBuilderHelper,
+        N: NodeBuilderHelper<Payload = I>,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
@@ -219,7 +215,7 @@ where
         let is_dev = self.is_dev;
         let node_count = self.network.node_count;
 
-        let attributes_generator = self.create_attributes_generator::<N>();
+        let attributes_generator = Self::create_static_attributes_generator::<N>();
 
         let result = setup_engine_with_connection::<N>(
             node_count,
@@ -236,13 +232,7 @@ where
             Ok((nodes, executor, _wallet)) => {
                 // create HTTP clients for each node's RPC and Engine API endpoints
                 for node in &nodes {
-                    let rpc = node
-                        .rpc_client()
-                        .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
-                    let auth = node.auth_server_handle();
-                    let url = node.rpc_url();
-
-                    node_clients.push(crate::testsuite::NodeClient::new(rpc, auth, url));
+                    node_clients.push(node.to_node_client()?);
                 }
 
                 // spawn a separate task just to handle the shutdown
@@ -274,7 +264,7 @@ where
         rlp_path: &Path,
     ) -> Result<crate::setup_import::ChainImportResult>
     where
-        N: NodeBuilderHelper,
+        N: NodeBuilderHelper<Payload = I>,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
@@ -304,12 +294,13 @@ where
         .await
     }
 
-    /// Create the attributes generator function
-    fn create_attributes_generator<N>(
-        &self,
-    ) -> impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Copy
+    /// Create a static attributes generator that doesn't capture any instance data
+    fn create_static_attributes_generator<N>(
+    ) -> impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes
+           + Copy
+           + use<N, I>
     where
-        N: NodeBuilderHelper,
+        N: NodeBuilderHelper<Payload = I>,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
@@ -332,7 +323,7 @@ where
     async fn finalize_setup(
         &self,
         env: &mut Environment<I>,
-        node_clients: Vec<crate::testsuite::NodeClient>,
+        node_clients: Vec<crate::testsuite::NodeClient<I>>,
         use_latest_block: bool,
     ) -> Result<()> {
         if node_clients.is_empty() {
@@ -394,10 +385,13 @@ where
     }
 
     /// Wait for all nodes to be ready to accept RPC requests
-    async fn wait_for_nodes_ready(
+    async fn wait_for_nodes_ready<P>(
         &self,
-        node_clients: &[crate::testsuite::NodeClient],
-    ) -> Result<()> {
+        node_clients: &[crate::testsuite::NodeClient<P>],
+    ) -> Result<()>
+    where
+        P: PayloadTypes,
+    {
         for (idx, client) in node_clients.iter().enumerate() {
             let mut retry_count = 0;
             const MAX_RETRIES: usize = 10;
@@ -423,11 +417,14 @@ where
     }
 
     /// Get block info for a given block number or tag
-    async fn get_block_info(
+    async fn get_block_info<P>(
         &self,
-        client: &crate::testsuite::NodeClient,
+        client: &crate::testsuite::NodeClient<P>,
         block: BlockNumberOrTag,
-    ) -> Result<crate::testsuite::BlockInfo> {
+    ) -> Result<crate::testsuite::BlockInfo>
+    where
+        P: PayloadTypes,
+    {
         let block = client
             .get_block_by_number(block)
             .await?

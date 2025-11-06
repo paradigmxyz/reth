@@ -30,8 +30,8 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    writer::UnifiedStorageWriter, ChainSpecProvider, DatabaseProviderFactory,
-    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    ChainSpecProvider, DBProvider, DatabaseProviderFactory, StageCheckpointReader,
+    StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{
@@ -116,7 +116,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let components = components(provider_factory.chain_spec());
 
         if let Some(listen_addr) = self.metrics {
-            info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             let config = MetricServerConfig::new(
                 listen_addr,
                 VersionInfo {
@@ -151,7 +150,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
 
         let etl_config = config.stages.etl.clone();
-        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
+        let prune_modes = config.prune.segments.clone();
 
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
@@ -342,7 +341,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 }
 
                 if self.commit {
-                    UnifiedStorageWriter::commit_unwind(provider_rw)?;
+                    provider_rw.commit()?;
                     provider_rw = provider_factory.database_provider_rw()?;
                 }
             }
@@ -365,7 +364,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
             }
             if self.commit {
-                UnifiedStorageWriter::commit(provider_rw)?;
+                provider_rw.commit()?;
                 provider_rw = provider_factory.database_provider_rw()?;
             }
 

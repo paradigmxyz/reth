@@ -7,7 +7,9 @@ pub use client::FetchClient;
 use crate::{message::BlockRequest, session::BlockRangeInfo};
 use alloy_primitives::B256;
 use futures::StreamExt;
-use reth_eth_wire::{EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives};
+use reth_eth_wire::{
+    Capabilities, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives,
+};
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
@@ -29,7 +31,7 @@ use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H>>>;
-type InflightBodiesRequest<B> = Request<Vec<B256>, PeerRequestResult<Vec<B>>>;
+type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
 
 /// Manages data fetching operations.
 ///
@@ -80,6 +82,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         peer_id: PeerId,
         best_hash: B256,
         best_number: u64,
+        capabilities: Arc<Capabilities>,
         timeout: Arc<AtomicU64>,
         range_info: Option<BlockRangeInfo>,
     ) {
@@ -89,6 +92,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 state: PeerState::Idle,
                 best_hash,
                 best_number,
+                capabilities,
                 timeout,
                 last_response_likely_bad: false,
                 range_info,
@@ -116,12 +120,12 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     ///
     /// Returns `true` if this a newer block
     pub(crate) fn update_peer_block(&mut self, peer_id: &PeerId, hash: B256, number: u64) -> bool {
-        if let Some(peer) = self.peers.get_mut(peer_id) {
-            if number > peer.best_number {
-                peer.best_hash = hash;
-                peer.best_number = number;
-                return true
-            }
+        if let Some(peer) = self.peers.get_mut(peer_id) &&
+            number > peer.best_number
+        {
+            peer.best_hash = hash;
+            peer.best_number = number;
+            return true
         }
         false
     }
@@ -237,7 +241,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 })
             }
             DownloadRequest::GetBlockBodies { request, response, .. } => {
-                let inflight = Request { request: request.clone(), response };
+                let inflight = Request { request: (), response };
                 self.inflight_bodies_requests.insert(peer_id, inflight);
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
             }
@@ -341,6 +345,9 @@ struct Peer {
     best_hash: B256,
     /// Tracks the best number of the peer.
     best_number: u64,
+    /// Capabilities announced by the peer.
+    #[allow(dead_code)]
+    capabilities: Arc<Capabilities>,
     /// Tracks the current timeout value we use for the peer.
     timeout: Arc<AtomicU64>,
     /// Tracks whether the peer has recently responded with a likely bad response.
@@ -511,8 +518,23 @@ mod tests {
         // Add a few random peers
         let peer1 = B512::random();
         let peer2 = B512::random();
-        fetcher.new_active_peer(peer1, B256::random(), 1, Arc::new(AtomicU64::new(1)), None);
-        fetcher.new_active_peer(peer2, B256::random(), 2, Arc::new(AtomicU64::new(1)), None);
+        let capabilities = Arc::new(Capabilities::from(vec![]));
+        fetcher.new_active_peer(
+            peer1,
+            B256::random(),
+            1,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(1)),
+            None,
+        );
+        fetcher.new_active_peer(
+            peer2,
+            B256::random(),
+            2,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(1)),
+            None,
+        );
 
         let first_peer = fetcher.next_best_peer().unwrap();
         assert!(first_peer == peer1 || first_peer == peer2);
@@ -539,9 +561,31 @@ mod tests {
 
         let peer2_timeout = Arc::new(AtomicU64::new(300));
 
-        fetcher.new_active_peer(peer1, B256::random(), 1, Arc::new(AtomicU64::new(30)), None);
-        fetcher.new_active_peer(peer2, B256::random(), 2, Arc::clone(&peer2_timeout), None);
-        fetcher.new_active_peer(peer3, B256::random(), 3, Arc::new(AtomicU64::new(50)), None);
+        let capabilities = Arc::new(Capabilities::from(vec![]));
+        fetcher.new_active_peer(
+            peer1,
+            B256::random(),
+            1,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(30)),
+            None,
+        );
+        fetcher.new_active_peer(
+            peer2,
+            B256::random(),
+            2,
+            Arc::clone(&capabilities),
+            Arc::clone(&peer2_timeout),
+            None,
+        );
+        fetcher.new_active_peer(
+            peer3,
+            B256::random(),
+            3,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(50)),
+            None,
+        );
 
         // Must always get peer1 (lowest timeout)
         assert_eq!(fetcher.next_best_peer(), Some(peer1));
@@ -609,6 +653,7 @@ mod tests {
             peer_id,
             Default::default(),
             Default::default(),
+            Arc::new(Capabilities::from(vec![])),
             Default::default(),
             None,
         );
