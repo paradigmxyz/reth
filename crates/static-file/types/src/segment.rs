@@ -7,7 +7,7 @@ use alloy_primitives::TxNumber;
 use core::{ops::RangeInclusive, str::FromStr};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use strum::{AsRefStr, EnumIs, EnumString};
+use strum::{EnumIs, EnumString};
 
 #[derive(
     Debug,
@@ -21,21 +21,18 @@ use strum::{AsRefStr, EnumIs, EnumString};
     Deserialize,
     Serialize,
     EnumString,
-    AsRefStr,
     Display,
     EnumIs,
 )]
+#[strum(serialize_all = "kebab-case")]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Segment of the data that can be moved to static files.
 pub enum StaticFileSegment {
-    #[strum(serialize = "headers")]
     /// Static File segment responsible for the `CanonicalHeaders`, `Headers`,
     /// `HeaderTerminalDifficulties` tables.
     Headers,
-    #[strum(serialize = "transactions")]
     /// Static File segment responsible for the `Transactions` table.
     Transactions,
-    #[strum(serialize = "receipts")]
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
 }
@@ -43,6 +40,8 @@ pub enum StaticFileSegment {
 impl StaticFileSegment {
     /// Returns the segment as a string.
     pub const fn as_str(&self) -> &'static str {
+        // `strum` doesn't generate a doc comment for `into_str` when using `IntoStaticStr` derive
+        // macro, so we need to manually implement it.
         match self {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
@@ -73,7 +72,7 @@ impl StaticFileSegment {
     pub fn filename(&self, block_range: &SegmentRangeInclusive) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`].
-        format!("static_file_{}_{}_{}", self.as_ref(), block_range.start(), block_range.end())
+        format!("static_file_{}_{}_{}", self.as_str(), block_range.start(), block_range.end())
     }
 
     /// Returns file name for the provided segment and range, alongside filters, compression.
@@ -471,6 +470,38 @@ mod tests {
                 },
                 receipts.user_header()
             );
+        }
+    }
+
+    /// Used in filename writing/parsing
+    #[test]
+    fn test_static_file_segment_str_roundtrip() {
+        for segment in StaticFileSegment::iter() {
+            let static_str = segment.as_str();
+            assert_eq!(StaticFileSegment::from_str(static_str).unwrap(), segment);
+
+            let expected_str = match segment {
+                StaticFileSegment::Headers => "headers",
+                StaticFileSegment::Transactions => "transactions",
+                StaticFileSegment::Receipts => "receipts",
+            };
+            assert_eq!(static_str, expected_str);
+        }
+    }
+
+    /// Used in segment headers serialize/deserialize
+    #[test]
+    fn test_static_file_segment_serde_roundtrip() {
+        for segment in StaticFileSegment::iter() {
+            let ser = serde_json::to_string(&segment).unwrap();
+            assert_eq!(serde_json::from_str::<StaticFileSegment>(&ser).unwrap(), segment);
+
+            let expected_str = match segment {
+                StaticFileSegment::Headers => "Headers",
+                StaticFileSegment::Transactions => "Transactions",
+                StaticFileSegment::Receipts => "Receipts",
+            };
+            assert_eq!(ser, format!("\"{expected_str}\""));
         }
     }
 }
