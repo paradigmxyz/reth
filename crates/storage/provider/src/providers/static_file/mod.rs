@@ -565,7 +565,7 @@ mod tests {
 
         {
             let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
-                .with_blocks_per_file(00)
+                .with_blocks_per_file(10)
                 .build()?;
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
 
