@@ -453,7 +453,16 @@ where
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let pool_config = ctx.pool_config();
 
-        let blob_cache_size = if let Some(blob_cache_size) = pool_config.blob_cache_size {
+        let blobs_disabled = ctx.config().txpool.disable_blobs_support ||
+            ctx.config().txpool.blobpool_max_count == 0;
+
+        if blobs_disabled {
+            info!(target: "reth::cli", "Blob transaction support disabled");
+        }
+
+        let blob_cache_size = if blobs_disabled {
+            None
+        } else if let Some(blob_cache_size) = pool_config.blob_cache_size {
             Some(blob_cache_size)
         } else {
             // get the current blob params for the current timestamp, fallback to default Cancun
@@ -473,18 +482,24 @@ where
         let blob_store =
             reth_node_builder::components::create_blob_store_with_cache(ctx, blob_cache_size)?;
 
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
-            .with_head_timestamp(ctx.head().timestamp)
-            .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
-            .kzg_settings(ctx.kzg_settings()?)
-            .with_local_transactions_config(pool_config.local_transactions_config.clone())
-            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
-            .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
-            .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
-            .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+        let mut validator_builder =
+            TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
+                .with_head_timestamp(ctx.head().timestamp)
+                .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
+                .with_local_transactions_config(pool_config.local_transactions_config.clone())
+                .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
+                .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
+                .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
+                .with_additional_tasks(ctx.config().txpool.additional_validation_tasks);
 
-        if validator.validator().eip4844() {
+        if !blobs_disabled {
+            validator_builder = validator_builder.kzg_settings(ctx.kzg_settings()?);
+        }
+
+        let validator =
+            validator_builder.build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+
+        if validator.validator().eip4844() && !blobs_disabled {
             // initializing the KZG settings can be expensive, this should be done upfront so that
             // it doesn't impact the first block or the first gossiped blob transaction, so we
             // initialize this in the background
