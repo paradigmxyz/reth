@@ -37,7 +37,7 @@ use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
     DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
-use reth_storage_api::{BlockBodyIndicesProvider, DBProvider};
+use reth_storage_api::{BlockBodyIndicesProvider, DBProvider, StorageSettingsCache};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
@@ -837,7 +837,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         has_receipt_pruning: bool,
     ) -> ProviderResult<Option<PipelineTarget>>
     where
-        Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
+        Provider: DBProvider
+            + BlockReader
+            + StageCheckpointReader
+            + ChainSpecProvider
+            + StorageSettingsCache,
         N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
     {
         // OVM historical import is broken and does not work with this check. It's importing
@@ -874,6 +878,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         for segment in StaticFileSegment::iter() {
             if has_receipt_pruning && segment.is_receipts() {
                 // Pruned nodes (including full node) do not store receipts as static files.
+                continue
+            }
+
+            if segment.is_transaction_senders() &&
+                !provider.cached_storage_settings().senders_in_static_files
+            {
                 continue
             }
 

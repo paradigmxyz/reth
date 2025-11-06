@@ -87,9 +87,26 @@ where
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
 
+        let static_file_provider = provider.static_file_provider();
+        let mut destination = if provider.cached_storage_settings().senders_in_static_files {
+            WriteDestination::StaticFile(
+                static_file_provider
+                    .get_writer(*block_range.start(), StaticFileSegment::TransactionSenders)?,
+            )
+        } else {
+            WriteDestination::Database(
+                provider.tx_ref().cursor_write::<tables::TransactionSenders>()?,
+            )
+        };
+
         // No transactions to walk over
         if tx_range.is_empty() {
             info!(target: "sync::stages::sender_recovery", ?tx_range, "Target transaction already reached");
+            // Drain block range to increment the destination block number
+            for block in block_range {
+                destination.increment_block(block)?;
+            }
+
             return Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(end_block)
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
@@ -108,18 +125,6 @@ where
 
         let tx_batch_sender = setup_range_recovery(provider);
 
-        let static_file_provider = provider.static_file_provider();
-        let mut destination = if provider.cached_storage_settings().senders_in_static_files {
-            WriteDestination::StaticFile(
-                static_file_provider
-                    .get_writer(*block_range.start(), StaticFileSegment::TransactionSenders)?,
-            )
-        } else {
-            WriteDestination::Database(
-                provider.tx_ref().cursor_write::<tables::TransactionSenders>()?,
-            )
-        };
-
         let mut block_body_indices =
             block_range.clone().zip(provider.block_body_indices_range(block_range)?);
 
@@ -131,6 +136,11 @@ where
                 tx_batch_sender.clone(),
                 &mut destination,
             )?;
+        }
+
+        // Drain block body indices to increment the destination block number
+        for (block_number, _) in block_body_indices {
+            destination.increment_block(block_number)?;
         }
 
         Ok(ExecOutput {

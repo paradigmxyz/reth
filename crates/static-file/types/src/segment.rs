@@ -136,6 +136,11 @@ impl StaticFileSegment {
         matches!(self, Self::Receipts)
     }
 
+    /// Returns `true` if the segment is `StaticFileSegment::TransactionSenders`.
+    pub const fn is_transaction_senders(&self) -> bool {
+        matches!(self, Self::TransactionSenders)
+    }
+
     /// Returns `true` if a segment row is linked to a transaction.
     pub const fn is_tx_based(&self) -> bool {
         matches!(self, Self::Receipts | Self::Transactions | Self::TransactionSenders)
