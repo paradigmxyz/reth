@@ -2291,7 +2291,7 @@ mod tests {
                 $(
                     let val: RethRpcModule  = $s.parse().unwrap();
                     assert_eq!(val, $v);
-                    assert_eq!(val.to_string().as_str(), $s);
+                    assert_eq!(val.to_string(), $s);
                 )*
             };
         }

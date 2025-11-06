@@ -275,6 +275,6 @@ mod tests {
         let ip = NatResolver::ExternalIp(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
         let s = "extip:0.0.0.0";
         assert_eq!(ip, s.parse().unwrap());
-        assert_eq!(ip.to_string().as_str(), s);
+        assert_eq!(ip.to_string(), s);
     }
 }

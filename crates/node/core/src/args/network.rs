@@ -643,7 +643,7 @@ mod tests {
             let args = CommandParser::<NetworkArgs>::parse_from([
                 "reth",
                 "--dns-retries",
-                retries.to_string().as_str(),
+                &retries.to_string(),
             ])
             .args;
 
