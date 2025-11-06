@@ -42,7 +42,7 @@ pub use revm_database::states::OriginalValuesKnown;
 
 /// Writer standalone type.
 pub mod write_destination;
-pub use write_destination::{StaticFilesConfigurationProvider, WriteDestination};
+pub use write_destination::WriteDestination;
 
 pub use reth_chain_state::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,

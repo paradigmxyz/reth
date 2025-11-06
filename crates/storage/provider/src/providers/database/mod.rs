@@ -460,11 +460,19 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.provider()?.senders_by_tx_range(range)
+        if self.storage_settings.read().senders_in_static_files {
+            self.static_file_provider.senders_by_tx_range(range)
+        } else {
+            self.provider()?.senders_by_tx_range(range)
+        }
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        self.provider()?.transaction_sender(id)
+        if self.storage_settings.read().senders_in_static_files {
+            self.static_file_provider.transaction_sender(id)
+        } else {
+            self.provider()?.transaction_sender(id)
+        }
     }
 }
 

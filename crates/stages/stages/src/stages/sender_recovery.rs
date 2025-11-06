@@ -12,8 +12,8 @@ use reth_db_api::{
 use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
     providers::StaticFileWriter, BlockBodyIndicesProvider, BlockReader, DBProvider, HeaderProvider,
-    ProviderError, PruneCheckpointReader, StaticFileProviderFactory,
-    StaticFilesConfigurationProvider, StatsReader, TransactionsProvider, WriteDestination,
+    ProviderError, PruneCheckpointReader, StaticFileProviderFactory, StatsReader,
+    StorageSettingsCache, TransactionsProvider, WriteDestination,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_api::{
@@ -66,7 +66,7 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + StatsReader
         + PruneCheckpointReader
-        + StaticFilesConfigurationProvider,
+        + StorageSettingsCache,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -109,7 +109,7 @@ where
         let tx_batch_sender = setup_range_recovery(provider);
 
         let static_file_provider = provider.static_file_provider();
-        let mut destination = if provider.static_files_v2_enabled() {
+        let mut destination = if provider.cached_storage_settings().senders_in_static_files {
             WriteDestination::StaticFile(
                 static_file_provider
                     .get_writer(*block_range.start(), StaticFileSegment::TransactionSenders)?,
@@ -121,7 +121,7 @@ where
         };
 
         let mut block_body_indices =
-            block_range.clone().into_iter().zip(provider.block_body_indices_range(block_range)?);
+            block_range.clone().zip(provider.block_body_indices_range(block_range)?);
 
         for range in batch {
             recover_range(

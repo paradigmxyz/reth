@@ -1800,7 +1800,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        self.get_segment_provider_from_transaction(StaticFileSegment::TransactionSenders, id, None)
+        self.get_segment_provider_for_transaction(StaticFileSegment::TransactionSenders, id, None)
             .and_then(|provider| provider.transaction_sender(id))
             .or_else(|err| {
                 if let ProviderError::MissingStaticFileTx(_, _) = err {
