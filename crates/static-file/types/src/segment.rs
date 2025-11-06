@@ -335,11 +335,6 @@ impl SegmentRangeInclusive {
         self.end
     }
 
-    /// Checks if the value is within the inclusive range.
-    pub const fn contains(&self, value: u64) -> bool {
-        value >= self.start && value <= self.end
-    }
-
     /// Returns the length of the inclusive range.
     pub const fn len(&self) -> u64 {
         self.end.saturating_sub(self.start).saturating_add(1)
