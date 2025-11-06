@@ -42,7 +42,7 @@ pub struct ConvertReceiptInput<'a, N: NodePrimitives> {
 }
 
 /// A type that knows how to convert primitive receipts to RPC representations.
-pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
+pub trait ReceiptConverter<N: NodePrimitives>: 'static {
     /// RPC representation.
     type RpcReceipt;
 
@@ -65,10 +65,40 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         self.convert_receipts(receipts)
     }
+
+    /// Maps the RPC receipt type.
+    fn map<R>(
+        self,
+        f: impl Fn(Self::RpcReceipt) -> R + 'static,
+    ) -> impl Fn(Vec<ConvertReceiptInput<'_, N>>) -> Result<Vec<R>, Self::Error> + 'static
+    where
+        Self: Sized,
+    {
+        move |inputs| {
+            #[expect(clippy::redundant_closure)]
+            Ok(self.convert_receipts(inputs)?.into_iter().map(|receipt| f(receipt)).collect())
+        }
+    }
+}
+
+impl<N, F, Rpc, Err> ReceiptConverter<N> for F
+where
+    N: NodePrimitives,
+    F: Fn(Vec<ConvertReceiptInput<'_, N>>) -> Result<Vec<Rpc>, Err> + 'static,
+{
+    type RpcReceipt = Rpc;
+    type Error = Err;
+
+    fn convert_receipts(
+        &self,
+        inputs: Vec<ConvertReceiptInput<'_, N>>,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
+        self(inputs)
+    }
 }
 
 /// A type that knows how to convert a consensus header into an RPC header.
-pub trait HeaderConverter<Consensus, Rpc>: Debug + Send + Sync + Unpin + Clone + 'static {
+pub trait HeaderConverter<Consensus, Rpc>: Send + Sync + Unpin + Clone + 'static {
     /// An associated RPC conversion error.
     type Err: error::Error;
 
@@ -290,7 +320,7 @@ where
 /// One should prefer to implement [`IntoRpcTx`] for `Tx` to get the `RpcTxConverter` implementation
 /// for free, thanks to the blanket implementation, unless the conversion requires more context. For
 /// example, some configuration parameters or access handles to database, network, etc.
-pub trait RpcTxConverter<Tx, RpcTx, TxInfo>: Clone + Debug + Unpin + Send + Sync + 'static {
+pub trait RpcTxConverter<Tx, RpcTx, TxInfo>: Clone + Unpin + Send + Sync + 'static {
     /// An associated error that can happen during the conversion.
     type Err;
 
@@ -318,7 +348,7 @@ where
 
 impl<Tx, RpcTx, F, TxInfo, E> RpcTxConverter<Tx, RpcTx, TxInfo> for F
 where
-    F: Fn(Tx, Address, TxInfo) -> Result<RpcTx, E> + Clone + Debug + Unpin + Send + Sync + 'static,
+    F: Fn(Tx, Address, TxInfo) -> Result<RpcTx, E> + Clone + Unpin + Send + Sync + 'static,
 {
     type Err = E;
 
@@ -342,7 +372,7 @@ where
 /// implementation for free, thanks to the blanket implementation, unless the conversion requires
 /// more context. For example, some configuration parameters or access handles to database, network,
 /// etc.
-pub trait SimTxConverter<TxReq, SimTx>: Clone + Debug + Unpin + Send + Sync + 'static {
+pub trait SimTxConverter<TxReq, SimTx>: Clone + Unpin + Send + Sync + 'static {
     /// An associated error that can occur during the conversion.
     type Err: Error;
 
@@ -367,7 +397,7 @@ impl<TxReq, SimTx, F, E> SimTxConverter<TxReq, SimTx> for F
 where
     TxReq: Debug,
     E: Error,
-    F: Fn(TxReq) -> Result<SimTx, E> + Clone + Debug + Unpin + Send + Sync + 'static,
+    F: Fn(TxReq) -> Result<SimTx, E> + Clone + Unpin + Send + Sync + 'static,
 {
     type Err = E;
 
@@ -434,9 +464,7 @@ impl TryIntoSimTx<EthereumTxEnvelope<TxEip4844>> for TransactionRequest {
 /// implementation for free, thanks to the blanket implementation, unless the conversion requires
 /// more context. For example, some configuration parameters or access handles to database, network,
 /// etc.
-pub trait TxEnvConverter<TxReq, Evm: ConfigureEvm>:
-    Debug + Send + Sync + Unpin + Clone + 'static
-{
+pub trait TxEnvConverter<TxReq, Evm: ConfigureEvm>: Send + Sync + Unpin + Clone + 'static {
     /// An associated error that can occur during conversion.
     type Error;
 
@@ -470,7 +498,6 @@ where
 impl<F, TxReq, E, Evm> TxEnvConverter<TxReq, Evm> for F
 where
     F: Fn(TxReq, &EvmEnvFor<Evm>) -> Result<TxEnvFor<Evm>, E>
-        + Debug
         + Send
         + Sync
         + Unpin
@@ -627,7 +654,7 @@ pub struct TransactionConversionError(String);
 ///   implemented for a dedicated struct that is assigned to `Map`. If [`FromConsensusTx::TxInfo`]
 ///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input
 ///   object.
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 pub struct RpcConverter<
     Network,
     Evm,
@@ -640,11 +667,17 @@ pub struct RpcConverter<
 > {
     network: PhantomData<Network>,
     evm: PhantomData<Evm>,
+    #[debug("...")]
     receipt_converter: Receipt,
+    #[debug("...")]
     header_converter: Header,
+    #[debug("...")]
     mapper: Map,
+    #[debug("...")]
     tx_env_converter: TxEnv,
+    #[debug("...")]
     sim_tx_converter: SimTx,
+    #[debug("...")]
     rpc_tx_converter: RpcTx,
 }
 
@@ -918,8 +951,7 @@ where
         > + Send
         + Sync
         + Unpin
-        + Clone
-        + Debug,
+        + Clone,
     Header: HeaderConverter<HeaderTy<N>, RpcHeader<Network>>,
     Map: TxInfoMapper<TxTy<N>> + Clone + Debug + Unpin + Send + Sync + 'static,
     SimTx: SimTxConverter<RpcTxReq<Network>, TxTy<N>>,

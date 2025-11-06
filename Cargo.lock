@@ -10177,6 +10177,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-signer",
  "auto_impl",
+ "derive_more",
  "dyn-clone",
  "jsonrpsee-types",
  "op-alloy-consensus",

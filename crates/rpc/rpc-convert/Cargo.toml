@@ -43,6 +43,7 @@ jsonrpsee-types.workspace = true
 thiserror.workspace = true
 
 auto_impl.workspace = true
+derive_more.workspace = true
 dyn-clone.workspace = true
 
 [dev-dependencies]
