@@ -73,7 +73,7 @@ where
 
         Self::default()
             // Bodies - run first since file deletion is fast
-            .segment_opt(bodies_history.map(Bodies::new))
+            .segment_opt(bodies_history.map(|mode| Bodies::new(mode, transaction_lookup)))
             // Merkle changesets
             .segment(MerkleChangeSets::new(merkle_changesets))
             // Account history

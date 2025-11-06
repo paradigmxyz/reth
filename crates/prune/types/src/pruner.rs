@@ -48,7 +48,7 @@ impl SegmentOutput {
         Self { progress: PruneProgress::Finished, pruned: 0, checkpoint: None }
     }
 
-    /// Returns a [`SegmentOutput`] with `done = false`, `pruned = 0` and `checkpoint = None`.
+    /// Returns a [`SegmentOutput`] with `done = false`, `pruned = 0` and the given checkpoint.
     /// Use when pruning is needed but cannot be done.
     pub const fn not_done(
         reason: PruneInterruptReason,
@@ -97,6 +97,8 @@ pub enum PruneInterruptReason {
     Timeout,
     /// Limit on the number of deleted entries (rows in the database) per prune run was reached.
     DeletedEntriesLimitReached,
+    /// Waiting for another segment to finish pruning before this segment can proceed.
+    WaitingOnSegment(PruneSegment),
     /// Unknown reason for stopping prune run.
     Unknown,
 }

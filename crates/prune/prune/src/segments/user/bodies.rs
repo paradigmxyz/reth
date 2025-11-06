@@ -2,11 +2,15 @@ use crate::{
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_provider::{BlockReader, StaticFileProviderFactory};
+use alloy_primitives::BlockNumber;
+use reth_provider::{BlockReader, PruneCheckpointReader, StaticFileProviderFactory};
 use reth_prune_types::{
-    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+    PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
+    SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
+use std::ops::Not;
+use tracing::debug;
 
 /// Segment responsible for pruning transactions in static files.
 ///
@@ -14,18 +18,44 @@ use reth_static_file_types::StaticFileSegment;
 #[derive(Debug)]
 pub struct Bodies {
     mode: PruneMode,
+    /// Transaction lookup prune mode. Used to determine if we need to wait for tx lookup pruning
+    /// before deleting transaction bodies.
+    tx_lookup_mode: Option<PruneMode>,
 }
 
 impl Bodies {
-    /// Creates a new [`Bodies`] segment with the given prune mode.
-    pub const fn new(mode: PruneMode) -> Self {
-        Self { mode }
+    /// Creates a new [`Bodies`] segment with the given prune mode and optional transaction lookup
+    /// prune mode for coordination.
+    pub const fn new(mode: PruneMode, tx_lookup_mode: Option<PruneMode>) -> Self {
+        Self { mode, tx_lookup_mode }
+    }
+
+    /// Returns whether transaction lookup pruning is done with blocks up to the target.
+    fn is_tx_lookup_done<Provider>(
+        &self,
+        provider: &Provider,
+        target: BlockNumber,
+    ) -> Result<bool, PrunerError>
+    where
+        Provider: PruneCheckpointReader,
+    {
+        let Some(tx_lookup_mode) = self.tx_lookup_mode else { return Ok(true) };
+
+        let tx_lookup_checkpoint = provider
+            .get_prune_checkpoint(PruneSegment::TransactionLookup)?
+            .and_then(|cp| cp.block_number);
+
+        // Check if tx_lookup will eventually need to prune any blocks <= our target
+        Ok(tx_lookup_mode
+            .next_pruned_block(tx_lookup_checkpoint)
+            .is_some_and(|next_block| next_block <= target)
+            .not())
     }
 }
 
 impl<Provider> Segment<Provider> for Bodies
 where
-    Provider: StaticFileProviderFactory + BlockReader,
+    Provider: StaticFileProviderFactory + BlockReader + PruneCheckpointReader,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::Bodies
@@ -40,12 +70,29 @@ where
     }
 
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+        if !self.is_tx_lookup_done(provider, input.to_block)? {
+            debug!(
+                to_block = input.to_block,
+                "Transaction lookup still has work to be done up to target block"
+            );
+            return Ok(SegmentOutput::not_done(
+                PruneInterruptReason::WaitingOnSegment(PruneSegment::TransactionLookup),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
+
         let deleted_headers = provider
             .static_file_provider()
             .delete_segment_below_block(StaticFileSegment::Transactions, input.to_block + 1)?;
 
         if deleted_headers.is_empty() {
-            return Ok(SegmentOutput::done())
+            return Ok(SegmentOutput {
+                progress: PruneProgress::Finished,
+                pruned: 0,
+                checkpoint: input
+                    .previous_checkpoint
+                    .map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            })
         }
 
         let tx_ranges = deleted_headers.iter().filter_map(|header| header.tx_range());
@@ -71,7 +118,8 @@ mod tests {
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        ProviderFactory, StaticFileWriter,
+        DBProvider, DatabaseProviderFactory, ProviderFactory, PruneCheckpointWriter,
+        StaticFileWriter,
     };
     use reth_prune_types::{PruneMode, PruneProgress, PruneSegment};
     use reth_static_file_types::{
@@ -126,7 +174,7 @@ mod tests {
         test_case: PruneTestCase,
         tip: BlockNumber,
     ) {
-        let bodies = Bodies::new(test_case.prune_mode);
+        let bodies = Bodies::new(test_case.prune_mode, None);
         let segments: Vec<Box<dyn Segment<_>>> = vec![Box::new(bodies)];
 
         let mut pruner = Pruner::new_with_factory(
@@ -322,6 +370,182 @@ mod tests {
                 .unwrap();
 
             assert_eq!(deleted.len(), expected_deleted);
+        }
+    }
+
+    #[test]
+    fn bodies_with_tx_lookup_coordination() {
+        // Test that bodies pruning correctly coordinates with tx lookup pruning
+        // Using tip = 1_523_000 creates 4 static file jars:
+        // - Jar 0: blocks 0-499_999, txs 0-999
+        // - Jar 1: blocks 500_000-999_999, txs 1000-1999
+        // - Jar 2: blocks 1_000_000-1_499_999, txs 2000-2999
+        // - Jar 3: blocks 1_500_000-1_523_000, txs 3000-3999
+        let tip = 1_523_000;
+
+        struct TestCase {
+            tx_lookup_mode: Option<PruneMode>,
+            tx_lookup_checkpoint_block: Option<BlockNumber>,
+            bodies_mode: PruneMode,
+            expected_pruned: usize,
+            expected_lowest_range_end: Option<BlockNumber>,
+            expected_progress: PruneProgress,
+        }
+
+        let test_cases = vec![
+            // Scenario 1: tx_lookup disabled, bodies can prune freely (deletes jar 0)
+            TestCase {
+                tx_lookup_mode: None,
+                tx_lookup_checkpoint_block: None,
+                bodies_mode: PruneMode::Before(600_000),
+                expected_pruned: 1000,
+                expected_lowest_range_end: Some(999_999),
+                expected_progress: PruneProgress::Finished,
+            },
+            // Scenario 2: tx_lookup enabled but not run yet, bodies cannot prune
+            TestCase {
+                tx_lookup_mode: Some(PruneMode::Before(600_000)),
+                tx_lookup_checkpoint_block: None,
+                bodies_mode: PruneMode::Before(600_000),
+                expected_pruned: 0,
+                expected_lowest_range_end: Some(499_999), // No jars deleted, jar 0 ends at 499_999
+                expected_progress: PruneProgress::HasMoreData(
+                    PruneInterruptReason::WaitingOnSegment(PruneSegment::TransactionLookup),
+                ),
+            },
+            // Scenario 3: tx_lookup caught up to its target, bodies can prune freely
+            TestCase {
+                tx_lookup_mode: Some(PruneMode::Before(600_000)),
+                tx_lookup_checkpoint_block: Some(599_999),
+                bodies_mode: PruneMode::Before(600_000),
+                expected_pruned: 1000,
+                expected_lowest_range_end: Some(999_999),
+                expected_progress: PruneProgress::Finished,
+            },
+            // Scenario 4: tx_lookup behind its target, bodies limited to tx_lookup checkpoint
+            // tx_lookup should prune up to 599_999, but checkpoint is only at 250_000
+            // bodies wants to prune up to 599_999, but limited to 250_000
+            // No jars deleted because jar 0 (0-499_999) ends beyond 250_000
+            TestCase {
+                tx_lookup_mode: Some(PruneMode::Before(600_000)),
+                tx_lookup_checkpoint_block: Some(250_000),
+                bodies_mode: PruneMode::Before(600_000),
+                expected_pruned: 0,
+                expected_lowest_range_end: Some(499_999), // No jars deleted
+                expected_progress: PruneProgress::HasMoreData(
+                    PruneInterruptReason::WaitingOnSegment(PruneSegment::TransactionLookup),
+                ),
+            },
+            // Scenario 5: Both use Distance, tx_lookup caught up
+            // With tip=1_523_000, Distance(500_000) targets block 1_023_000
+            TestCase {
+                tx_lookup_mode: Some(PruneMode::Distance(500_000)),
+                tx_lookup_checkpoint_block: Some(1_023_000),
+                bodies_mode: PruneMode::Distance(500_000),
+                expected_pruned: 2000,
+                expected_lowest_range_end: Some(1_499_999),
+                expected_progress: PruneProgress::Finished,
+            },
+            // Scenario 6: Both use Distance, tx_lookup less aggressive (bigger distance) than
+            // bodies With tip=1_523_000:
+            // - tx_lookup: Distance(1_000_000) targets block 523_000, checkpoint at 523_000
+            // - bodies: Distance(500_000) targets block 1_023_000
+            // So bodies must wait for tx_lookup to process more blocks
+            TestCase {
+                tx_lookup_mode: Some(PruneMode::Distance(1_000_000)),
+                tx_lookup_checkpoint_block: Some(523_000),
+                bodies_mode: PruneMode::Distance(500_000),
+                expected_pruned: 0, // Can't prune, waiting on tx_lookup
+                expected_lowest_range_end: Some(499_999), // No jars deleted
+                expected_progress: PruneProgress::HasMoreData(
+                    PruneInterruptReason::WaitingOnSegment(PruneSegment::TransactionLookup),
+                ),
+            },
+            // Scenario 7: tx_lookup more aggressive than bodies (deletes jar 0, 1, and 2)
+            // tx_lookup: Before(1_100_000) -> prune up to 1_099_999
+            // bodies: Before(1_100_000) -> wants to prune up to 1_099_999
+            TestCase {
+                tx_lookup_mode: Some(PruneMode::Before(1_100_000)),
+                tx_lookup_checkpoint_block: Some(1_099_999),
+                bodies_mode: PruneMode::Before(1_100_000),
+                expected_pruned: 2000,
+                expected_lowest_range_end: Some(1_499_999), // Jars 0 and 1 deleted
+                expected_progress: PruneProgress::Finished,
+            },
+            // Scenario 8: tx_lookup has lower target than bodies, but is done
+            // tx_lookup: Before(600_000) -> prune up to 599_999 (checkpoint at 599_999, DONE)
+            // bodies: Before(1_100_000) -> wants to prune up to 1_099_999
+            // Since tx_lookup is done (next_pruned_block returns None), bodies can prune freely
+            TestCase {
+                tx_lookup_mode: Some(PruneMode::Before(600_000)),
+                tx_lookup_checkpoint_block: Some(599_999),
+                bodies_mode: PruneMode::Before(1_100_000),
+                expected_pruned: 2000,
+                expected_lowest_range_end: Some(1_499_999), // Jars 0 and 1 deleted
+                expected_progress: PruneProgress::Finished,
+            },
+        ];
+
+        let (_, finished_exex_height_rx) = tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+
+        for (i, t) in test_cases.into_iter().enumerate() {
+            let test_num = i + 1;
+
+            // Reset factory state
+            let factory = create_test_provider_factory();
+            setup_static_file_jars(&factory, tip);
+
+            // Set up tx lookup checkpoint if provided
+            if let Some(checkpoint_block) = t.tx_lookup_checkpoint_block {
+                let provider = factory.database_provider_rw().unwrap();
+                provider
+                    .save_prune_checkpoint(
+                        PruneSegment::TransactionLookup,
+                        reth_prune_types::PruneCheckpoint {
+                            block_number: Some(checkpoint_block),
+                            tx_number: Some(checkpoint_block), // Simplified for test
+                            prune_mode: t.tx_lookup_mode.unwrap(),
+                        },
+                    )
+                    .unwrap();
+                provider.commit().unwrap();
+            }
+
+            // Run bodies pruning
+            let bodies = Bodies::new(t.bodies_mode, t.tx_lookup_mode);
+            let segments: Vec<Box<dyn Segment<_>>> = vec![Box::new(bodies)];
+
+            let mut pruner = Pruner::new_with_factory(
+                factory.clone(),
+                segments,
+                5,
+                10000,
+                None,
+                finished_exex_height_rx.clone(),
+            );
+
+            let result = pruner.run(tip).expect("pruner run");
+
+            assert_eq!(result.progress, t.expected_progress, "Test case {}", test_num);
+            assert_eq!(result.segments.len(), 1, "Test case {}", test_num);
+
+            let (segment, output) = &result.segments[0];
+            assert_eq!(*segment, PruneSegment::Bodies, "Test case {}", test_num);
+            assert_eq!(
+                output.pruned, t.expected_pruned,
+                "Test case {} - expected {} pruned, got {}",
+                test_num, t.expected_pruned, output.pruned
+            );
+
+            let static_provider = factory.static_file_provider();
+            assert_eq!(
+                static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+                t.expected_lowest_range_end,
+                "Test case {} - expected lowest range end {:?}, got {:?}",
+                test_num,
+                t.expected_lowest_range_end,
+                static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions)
+            );
         }
     }
 }
