@@ -155,15 +155,26 @@ impl EraId {
         self
     }
 
+    /// Calculate which era number the file starts at
+    pub const fn era_number(&self) -> u64 {
+        self.start_slot / SLOTS_PER_HISTORICAL_ROOT
+    }
+
     // Helper function to calculate the number of eras per era1 file,
     // If the user can decide how many blocks per era1 file there are, we need to calculate it.
     // Most of the time it should be 1, but it can never be more than 2 eras per file
     // as there is a maximum of 8192 blocks per era1 file.
-    const fn calculate_era_count(&self, first_era: u64) -> u64 {
-        // Calculate the actual last block number in the range
-        let last_block = self.start_slot + self.slot_count as u64 - 1;
+    const fn calculate_era_count(&self) -> u64 {
+        if self.slot_count == 0 {
+            return 0;
+        }
+
+        let first_era = self.era_number();
+
+        // Calculate the actual last slot number in the range
+        let last_slot = self.start_slot + self.slot_count as u64 - 1;
         // Find which era the last block belongs to
-        let last_era = last_block / SLOTS_PER_HISTORICAL_ROOT as u64;
+        let last_era = last_slot / SLOTS_PER_HISTORICAL_ROOT as u64;
         // Count how many eras we span
         last_era - first_era + 1
     }
@@ -186,10 +197,10 @@ impl EraFileId for EraId {
     /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
     /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
     fn to_file_name(&self) -> String {
-        // Find which era the first block belongs to
-        // TODO: double check we can use `start_slot` instead of `start_block`
-        let era_number = self.start_slot / SLOTS_PER_HISTORICAL_ROOT as u64;
-        let era_count = self.calculate_era_count(era_number);
+
+        let era_number = self.era_number();
+        let era_count = self.calculate_era_count();
+        
         if let Some(hash) = self.hash {
             format!(
                 "{}-{:05}-{:05}-{:02x}{:02x}{:02x}{:02x}.era1",
