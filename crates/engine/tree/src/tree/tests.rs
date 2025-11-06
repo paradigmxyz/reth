@@ -344,7 +344,6 @@ impl TestHarness {
         }
 
         self.provider.extend_blocks(block_data);
-        self.provider.extend_headers(headers_data);
     }
 }
 
