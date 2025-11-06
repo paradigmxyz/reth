@@ -6,14 +6,20 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>.
 
 use crate::{
-    consensus_types::{
-        CompressedBeaconState, CompressedSignedBeaconBlock, COMPRESSED_BEACON_STATE,
-        COMPRESSED_SIGNED_BEACON_BLOCK,
+    common::file_ops::{EraFileFormat, FileReader, StreamReader, StreamWriter},
+    e2s::{
+        error::E2sError,
+        file::{E2StoreReader, E2StoreWriter},
+        types::{Entry, IndexEntry, Version, SLOT_INDEX},
     },
-    e2s_file::{E2StoreReader, E2StoreWriter},
-    e2s_types::{E2sError, Entry, IndexEntry, Version, SLOT_INDEX},
-    era_file_ops::{EraFileFormat, FileReader, StreamReader, StreamWriter},
-    era_types::{EraGroup, EraId, SlotIndex},
+    era::types::{
+        consensus::{
+            CompressedBeaconState, CompressedSignedBeaconBlock, COMPRESSED_BEACON_STATE,
+            COMPRESSED_SIGNED_BEACON_BLOCK,
+        },
+        group::{EraGroup, EraId, SlotIndex},
+    },
+    era1::types::execution::BlockTuple,
 };
 
 use std::{
@@ -267,10 +273,7 @@ impl<W: Write> StreamWriter<W> for EraWriter<W> {
 
 impl<W: Write> EraWriter<W> {
     /// Write for a single slot
-    pub fn write_slot(
-        &mut self,
-        block_tuple: &crate::execution_types::BlockTuple,
-    ) -> Result<(), E2sError> {
+    pub fn write_slot(&mut self, block_tuple: &BlockTuple) -> Result<(), E2sError> {
         if !self.has_written_version {
             self.write_version()?;
         }

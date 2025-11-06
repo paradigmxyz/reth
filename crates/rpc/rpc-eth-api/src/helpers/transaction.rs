@@ -307,10 +307,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 return Ok(Some(self.tx_resp_builder().fill_pending(transaction)?));
             }
 
-            // Check if the sender is a contract
-            if !self.get_code(sender, None).await?.is_empty() {
-                return Ok(None);
-            }
+            // Note: we can't optimize for contracts (account with code) and cannot shortcircuit if
+            // the address has code, because with 7702 EOAs can also have code
 
             let highest = self.transaction_count(sender, None).await?.saturating_to::<u64>();
 

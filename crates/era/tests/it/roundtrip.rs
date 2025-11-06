@@ -10,12 +10,16 @@
 use alloy_consensus::{BlockBody, BlockHeader, Header, ReceiptWithBloom};
 use rand::{prelude::IndexedRandom, rng};
 use reth_era::{
-    e2s_types::IndexEntry,
-    era1_file::{Era1File, Era1Reader, Era1Writer},
-    era1_types::{Era1Group, Era1Id},
-    era_file_ops::{EraFileFormat, StreamReader, StreamWriter},
-    execution_types::{
-        BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+    common::file_ops::{EraFileFormat, StreamReader, StreamWriter},
+    e2s::types::IndexEntry,
+    era1::{
+        file::{Era1File, Era1Reader, Era1Writer},
+        types::{
+            execution::{
+                BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+            },
+            group::{Era1Group, Era1Id},
+        },
     },
 };
 use reth_ethereum_primitives::TransactionSigned;

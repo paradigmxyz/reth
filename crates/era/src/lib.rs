@@ -12,30 +12,10 @@
 //! - Era format: <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
 //! - Era1 format: <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
-pub mod consensus_types;
-pub mod e2s_file;
-pub mod e2s_types;
-pub mod era1_file;
-pub mod era1_types;
-pub mod era_file;
-pub mod era_file_ops;
-pub mod era_types;
-pub mod execution_types;
+pub mod common;
+pub mod e2s;
+pub mod era;
+pub mod era1;
+
 #[cfg(test)]
 pub(crate) mod test_utils;
-
-use crate::e2s_types::E2sError;
-use alloy_rlp::Decodable;
-use ssz::Decode;
-
-/// Extension trait for generic decoding from compressed data
-pub trait DecodeCompressed {
-    /// Decompress and decode the data into the given type
-    fn decode<T: Decodable>(&self) -> Result<T, E2sError>;
-}
-
-/// Extension trait for generic decoding from compressed ssz data
-pub trait DecodeCompressedSsz {
-    /// Decompress and decode the SSZ data into the given type
-    fn decode<T: Decode>(&self) -> Result<T, E2sError>;
-}
