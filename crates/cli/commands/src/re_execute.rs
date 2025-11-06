@@ -109,8 +109,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         .validate_block_post_execution(&block, &result)
                         .wrap_err_with(|| format!("Failed to validate block {}", block.number()))
                     {
-                        let correct_receipts =
-                            provider_factory.receipts_by_block(block.number().into())?.unwrap();
+                        let correct_receipts = provider_factory
+                            .receipts_by_block(block.number().into())?
+                            .ok_or_else(|| eyre::eyre!("receipts for block {} not found", block.number()))?;
+
+                        // Helper function to calculate gas used for a specific transaction
+                        let calculate_gas_used = |receipts: &[_], index: usize| -> u64 {
+                            let prev_gas = if index == 0 {
+                                0
+                            } else {
+                                receipts[index - 1].cumulative_gas_used()
+                            };
+                            receipts[index].cumulative_gas_used() - prev_gas
+                        };
 
                         for (i, (receipt, correct_receipt)) in
                             result.receipts.iter().zip(correct_receipts.iter()).enumerate()
