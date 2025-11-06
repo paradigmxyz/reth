@@ -7,7 +7,7 @@ use alloy_primitives::TxNumber;
 use core::{ops::RangeInclusive, str::FromStr};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use strum::{AsRefStr, EnumIs, EnumString};
+use strum::{EnumIs, EnumString};
 
 #[derive(
     Debug,
@@ -21,21 +21,18 @@ use strum::{AsRefStr, EnumIs, EnumString};
     Deserialize,
     Serialize,
     EnumString,
-    AsRefStr,
     Display,
     EnumIs,
 )]
+#[strum(serialize_all = "kebab-case")]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Segment of the data that can be moved to static files.
 pub enum StaticFileSegment {
-    #[strum(serialize = "headers")]
     /// Static File segment responsible for the `CanonicalHeaders`, `Headers`,
     /// `HeaderTerminalDifficulties` tables.
     Headers,
-    #[strum(serialize = "transactions")]
     /// Static File segment responsible for the `Transactions` table.
     Transactions,
-    #[strum(serialize = "receipts")]
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
 }
@@ -43,6 +40,8 @@ pub enum StaticFileSegment {
 impl StaticFileSegment {
     /// Returns the segment as a string.
     pub const fn as_str(&self) -> &'static str {
+        // `strum` doesn't generate a comment for `into_str` when using `IntoStaticStr` derive
+        // macro, so we need to manually implement it.
         match self {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
@@ -474,6 +473,7 @@ mod tests {
         }
     }
 
+    /// Used in filename writing/parsing
     #[test]
     fn test_static_file_segment_str_roundtrip() {
         for segment in StaticFileSegment::iter() {
@@ -489,6 +489,7 @@ mod tests {
         }
     }
 
+    /// Used in segment headers serialize/deserialize
     #[test]
     fn test_static_file_segment_serde_roundtrip() {
         for segment in StaticFileSegment::iter() {

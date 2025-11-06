@@ -30,5 +30,6 @@ std = [
     "derive_more/std",
     "serde/std",
     "strum/std",
+    "serde_json/std",
 ]
 clap = ["dep:clap"]
