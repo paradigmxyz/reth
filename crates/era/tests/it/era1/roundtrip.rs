@@ -26,12 +26,12 @@ use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;
 
 use crate::{
-    Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES, MAINNET, SEPOLIA,
+    EraTestDownloader, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES, MAINNET, SEPOLIA,
 };
 
 // Helper function to test roundtrip compression/encoding for a specific file
 async fn test_file_roundtrip(
-    downloader: &Era1TestDownloader,
+    downloader: &EraTestDownloader,
     filename: &str,
     network: &str,
 ) -> eyre::Result<()> {
@@ -259,7 +259,7 @@ async fn test_file_roundtrip(
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]
 async fn test_roundtrip_compression_encoding_mainnet() -> eyre::Result<()> {
-    let downloader = Era1TestDownloader::new().await?;
+    let downloader = EraTestDownloader::new().await?;
 
     let mut rng = rng();
 
@@ -279,7 +279,7 @@ async fn test_roundtrip_compression_encoding_mainnet() -> eyre::Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]
 async fn test_roundtrip_compression_encoding_sepolia() -> eyre::Result<()> {
-    let downloader = Era1TestDownloader::new().await?;
+    let downloader = EraTestDownloader::new().await?;
 
     // Test all Sepolia files
     for &filename in &ERA1_SEPOLIA_FILES_NAMES {

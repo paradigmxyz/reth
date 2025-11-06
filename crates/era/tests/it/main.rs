@@ -10,6 +10,7 @@ use reqwest::{Client, Url};
 use reth_era::{
     common::file_ops::FileReader,
     e2s::error::E2sError,
+    era::file::{EraFile, EraReader},
     era1::file::{Era1File, Era1Reader},
 };
 use reth_era_downloader::EraClient;
@@ -23,9 +24,8 @@ use std::{
 use eyre::{eyre, Result};
 use tempfile::TempDir;
 
-mod dd;
-mod genesis;
-mod roundtrip;
+mod era;
+mod era1;
 
 const fn main() {}
 
@@ -66,18 +66,34 @@ const ERA1_SEPOLIA_FILES_NAMES: [&str; 4] = [
     "sepolia-00182-a4f0a8a1.era1 ",
 ];
 
+const HOODI: &str = "hoodi";
+
+/// Default sepolia url
+/// for downloading sepolia `.era1` files
+const ERA_HOODI_URL: &str = "https://hoodi.era.nimbus.team/";
+
+/// Succinct list of sepolia files we want to download
+/// from <https://hoodi.era.nimbus.team/>
+/// for testing purposes
+const ERA_HOODI_FILES_NAMES: [&str; 4] = [
+    "hoodi-00000-212f13fc.era",
+    "hoodi-00021-857e418b.era",
+    "hoodi-00175-202aaa6d.era",
+    "hoodi-00201-0d521fc8.era",
+];
+
 /// Utility for downloading `.era1` files for tests
 /// in a temporary directory
 /// and caching them in memory
 #[derive(Debug)]
-struct Era1TestDownloader {
+struct EraTestDownloader {
     /// Temporary directory for storing downloaded files
     temp_dir: TempDir,
     /// Cache mapping file names to their paths
     file_cache: Arc<Mutex<HashMap<String, PathBuf>>>,
 }
 
-impl Era1TestDownloader {
+impl EraTestDownloader {
     /// Create a new downloader instance with a temporary directory
     async fn new() -> Result<Self> {
         let temp_dir =
@@ -97,29 +113,9 @@ impl Era1TestDownloader {
         }
 
         // check if the filename is supported
-        if !ERA1_MAINNET_FILES_NAMES.contains(&filename) &&
-            !ERA1_SEPOLIA_FILES_NAMES.contains(&filename)
-        {
-            return Err(eyre!(
-                "Unknown file: {}. Only the following files are supported: {:?} or {:?}",
-                filename,
-                ERA1_MAINNET_FILES_NAMES,
-                ERA1_SEPOLIA_FILES_NAMES
-            ));
-        }
+        self.validate_filename(filename, network)?;
 
-        // initialize the client and build url config
-        let url = match network {
-            MAINNET => ERA1_MAINNET_URL,
-            SEPOLIA => ERA1_SEPOLIA_URL,
-            _ => {
-                return Err(eyre!(
-                    "Unknown network: {}. Only mainnet and sepolia are supported.",
-                    network
-                ));
-            }
-        };
-
+        let url = self.get_network_url(network)?;
         let final_url = Url::from_str(url).map_err(|e| eyre!("Failed to parse URL: {}", e))?;
 
         let folder = self.temp_dir.path();
@@ -151,18 +147,76 @@ impl Era1TestDownloader {
         Ok(downloaded_path.to_path_buf())
     }
 
+    /// Validate that filename is in the supported list for the network
+    fn validate_filename(&self, filename: &str, network: &str) -> Result<()> {
+        let is_valid = match network {
+            MAINNET => ERA1_MAINNET_FILES_NAMES.contains(&filename),
+            SEPOLIA => ERA1_SEPOLIA_FILES_NAMES.contains(&filename),
+            HOODI => ERA_HOODI_FILES_NAMES.contains(&filename),
+            _ => {
+                return Err(eyre!(
+                    "Unknown network: {}. Supported networks: {}, {}, {}",
+                    network,
+                    MAINNET,
+                    SEPOLIA,
+                    HOODI
+                ));
+            }
+        };
+
+        if !is_valid {
+            let supported_files = match network {
+                MAINNET => &ERA1_MAINNET_FILES_NAMES[..],
+                SEPOLIA => &ERA1_SEPOLIA_FILES_NAMES[..],
+                HOODI => &ERA_HOODI_FILES_NAMES[..],
+                _ => &[],
+            };
+
+            return Err(eyre!(
+                "Unknown file: '{}' for network '{}'. Supported files: {:?}",
+                filename,
+                network,
+                supported_files
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Get the base URL for a network
+    fn get_network_url(&self, network: &str) -> Result<&'static str> {
+        match network {
+            MAINNET => Ok(ERA1_MAINNET_URL),
+            SEPOLIA => Ok(ERA1_SEPOLIA_URL),
+            HOODI => Ok(ERA_HOODI_URL),
+            _ => Err(eyre!(
+                "Unknown network: {}. Supported networks: {}, {}, {}",
+                network,
+                MAINNET,
+                SEPOLIA,
+                HOODI
+            )),
+        }
+    }
+
     /// open .era1 file, downloading it if necessary
     async fn open_era1_file(&self, filename: &str, network: &str) -> Result<Era1File> {
         let path = self.download_file(filename, network).await?;
         Era1Reader::open(&path, network).map_err(|e| eyre!("Failed to open Era1 file: {e}"))
     }
+
+    /// open .era file, downloading it if necessary
+    #[allow(dead_code)]
+    async fn open_era_file(&self, filename: &str, network: &str) -> Result<EraFile> {
+        let path = self.download_file(filename, network).await?;
+        EraReader::open(&path, network).map_err(|e| eyre!("Failed to open Era1 file: {e}"))
+    }
 }
 
-/// Open a test file by name,
-/// downloading only if it is necessary
-async fn open_test_file(
+/// Open a test era1 file by name, downloading only if it is necessary
+async fn open_era1_test_file(
     file_path: &str,
-    downloader: &Era1TestDownloader,
+    downloader: &EraTestDownloader,
     network: &str,
 ) -> Result<Era1File> {
     let filename = Path::new(file_path)
@@ -171,4 +225,19 @@ async fn open_test_file(
         .ok_or_else(|| eyre!("Invalid file path: {}", file_path))?;
 
     downloader.open_era1_file(filename, network).await
+}
+
+/// Open a test era file by name, downloading only if it is necessary
+#[allow(dead_code)]
+async fn open_era_test_file(
+    file_path: &str,
+    downloader: &EraTestDownloader,
+    network: &str,
+) -> Result<EraFile> {
+    let filename = Path::new(file_path)
+        .file_name()
+        .and_then(|os_str| os_str.to_str())
+        .ok_or_else(|| eyre!("Invalid file path: {}", file_path))?;
+
+    downloader.open_era_file(filename, network).await
 }
