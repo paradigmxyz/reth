@@ -421,12 +421,21 @@ impl EtlConfig {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct StaticFilesConfig {
+    /// Number of blocks per file for each segment.
+    pub blocks_per_file: BlocksPerFileConfig,
+}
+
+/// Configuration for the number of blocks per file for each segment.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct BlocksPerFileConfig {
     /// Number of blocks per file for the headers segment.
-    pub headers_blocks_per_file: Option<u64>,
+    pub headers: Option<u64>,
     /// Number of blocks per file for the transactions segment.
-    pub transactions_blocks_per_file: Option<u64>,
+    pub transactions: Option<u64>,
     /// Number of blocks per file for the receipts segment.
-    pub receipts_blocks_per_file: Option<u64>,
+    pub receipts: Option<u64>,
 }
 
 impl StaticFilesConfig {
@@ -434,21 +443,14 @@ impl StaticFilesConfig {
     ///
     /// Returns an error if any blocks per file value is zero.
     pub fn validate(&self) -> eyre::Result<()> {
-        let Self {
-            headers_blocks_per_file,
-            transactions_blocks_per_file,
-            receipts_blocks_per_file,
-        } = self;
+        let BlocksPerFileConfig { headers, transactions, receipts } = self.blocks_per_file;
+        eyre::ensure!(headers != Some(0), "Headers segment blocks per file must be greater than 0");
         eyre::ensure!(
-            *headers_blocks_per_file != Some(0),
-            "Headers segment blocks per file must be greater than 0"
-        );
-        eyre::ensure!(
-            *transactions_blocks_per_file != Some(0),
+            transactions != Some(0),
             "Transactions segment blocks per file must be greater than 0"
         );
         eyre::ensure!(
-            *receipts_blocks_per_file != Some(0),
+            receipts != Some(0),
             "Receipts segment blocks per file must be greater than 0"
         );
         Ok(())
@@ -456,20 +458,16 @@ impl StaticFilesConfig {
 
     /// Converts the blocks per file configuration into a [`HashMap`] per segment.
     pub fn as_blocks_per_file_map(&self) -> HashMap<StaticFileSegment, u64> {
-        let Self {
-            headers_blocks_per_file,
-            transactions_blocks_per_file,
-            receipts_blocks_per_file,
-        } = self;
+        let BlocksPerFileConfig { headers, transactions, receipts } = self.blocks_per_file;
         let mut map = HashMap::new();
-        if let Some(blocks_per_file) = headers_blocks_per_file {
-            map.insert(StaticFileSegment::Headers, *blocks_per_file);
+        if let Some(blocks_per_file) = headers {
+            map.insert(StaticFileSegment::Headers, blocks_per_file);
         }
-        if let Some(blocks_per_file) = transactions_blocks_per_file {
-            map.insert(StaticFileSegment::Transactions, *blocks_per_file);
+        if let Some(blocks_per_file) = transactions {
+            map.insert(StaticFileSegment::Transactions, blocks_per_file);
         }
-        if let Some(blocks_per_file) = receipts_blocks_per_file {
-            map.insert(StaticFileSegment::Receipts, *blocks_per_file);
+        if let Some(blocks_per_file) = receipts {
+            map.insert(StaticFileSegment::Receipts, blocks_per_file);
         }
         map
     }

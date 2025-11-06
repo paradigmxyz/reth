@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for static files configuration
 
 use clap::Args;
-use reth_config::config::StaticFilesConfig;
+use reth_config::config::{BlocksPerFileConfig, StaticFilesConfig};
 
 /// Parameters for static files configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
@@ -30,9 +30,11 @@ impl StaticFilesArgs {
     /// Converts the CLI arguments to a [`StaticFilesConfig`].
     pub const fn to_config(&self) -> StaticFilesConfig {
         StaticFilesConfig {
-            headers_blocks_per_file: self.blocks_per_file_headers,
-            transactions_blocks_per_file: self.blocks_per_file_transactions,
-            receipts_blocks_per_file: self.blocks_per_file_receipts,
+            blocks_per_file: BlocksPerFileConfig {
+                headers: self.blocks_per_file_headers,
+                transactions: self.blocks_per_file_transactions,
+                receipts: self.blocks_per_file_receipts,
+            },
         }
     }
 
@@ -40,15 +42,13 @@ impl StaticFilesArgs {
     /// args.
     pub fn merge_with_config(&self, config: StaticFilesConfig) -> StaticFilesConfig {
         StaticFilesConfig {
-            headers_blocks_per_file: self
-                .blocks_per_file_headers
-                .or(config.headers_blocks_per_file),
-            transactions_blocks_per_file: self
-                .blocks_per_file_transactions
-                .or(config.transactions_blocks_per_file),
-            receipts_blocks_per_file: self
-                .blocks_per_file_receipts
-                .or(config.receipts_blocks_per_file),
+            blocks_per_file: BlocksPerFileConfig {
+                headers: self.blocks_per_file_headers.or(config.blocks_per_file.headers),
+                transactions: self
+                    .blocks_per_file_transactions
+                    .or(config.blocks_per_file.transactions),
+                receipts: self.blocks_per_file_receipts.or(config.blocks_per_file.receipts),
+            },
         }
     }
 }
