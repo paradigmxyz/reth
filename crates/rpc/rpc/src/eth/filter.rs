@@ -414,9 +414,6 @@ where
         Ok(self.logs_for_filter(filter, self.inner.query_limits).await?)
     }
 
-    /// Returns logs matching given filter object with cursor-based pagination.
-    ///
-    /// Handler for `eth_getLogsWithCursor`
     async fn logs_with_cursor(
         &self,
         filter: Filter,
@@ -424,31 +421,22 @@ where
     ) -> RpcResult<LogsWithCursor> {
         trace!(target: "rpc::eth", "Serving eth_getLogsWithCursor");
 
-        // Get all matching logs first (with same logic as logs_for_filter)
         let all_logs = self.logs_for_filter(filter, self.inner.query_limits).await?;
-
-        // Decode cursor if provided
         let start_position = cursor.as_ref().and_then(|c| CursorPosition::decode(c));
-
         let page_size = self.inner.query_limits.cursor_page_size;
 
-        // Filter logs based on cursor position and page size
         let mut filtered_logs = Vec::new();
         let mut found_more = false;
 
         for log in all_logs {
-            // Skip logs before the cursor position
             if let Some(start_pos) = start_position {
                 let log_pos =
                     CursorPosition::new(log.block_number.unwrap_or(0), log.log_index.unwrap_or(0));
-
-                // Only include logs after the cursor position
                 if !start_pos.is_before(&log_pos) {
                     continue;
                 }
             }
 
-            // Check if we've reached page size limit
             if filtered_logs.len() >= page_size {
                 found_more = true;
                 break;
@@ -457,7 +445,6 @@ where
             filtered_logs.push(log);
         }
 
-        // Generate next cursor if there are more results
         let next_cursor = (found_more && !filtered_logs.is_empty()).then(|| {
             let last_log = filtered_logs.last().unwrap();
             let position = CursorPosition::new(

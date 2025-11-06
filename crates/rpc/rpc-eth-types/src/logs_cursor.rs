@@ -7,28 +7,22 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogsWithCursor {
-    /// The logs matching the filter criteria
     pub logs: Vec<Log>,
-    /// Pagination cursor for fetching next batch, None if no more results
     pub cursor: Option<String>,
 }
 
 /// Cursor position for pagination
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CursorPosition {
-    /// Block number of the log
     pub block_number: u64,
-    /// Index of the log within the block
     pub log_index: u64,
 }
 
 impl CursorPosition {
-    /// Creates a new cursor position
     pub const fn new(block_number: u64, log_index: u64) -> Self {
         Self { block_number, log_index }
     }
 
-    /// Encodes the cursor position to a base64 string
     pub fn encode(&self) -> String {
         let mut bytes = [0u8; 16];
         bytes[0..8].copy_from_slice(&self.block_number.to_le_bytes());
@@ -36,7 +30,6 @@ impl CursorPosition {
         alloy_primitives::hex::encode_prefixed(bytes)
     }
 
-    /// Decodes a cursor position from a base64 string
     pub fn decode(cursor: &str) -> Option<Self> {
         let bytes = alloy_primitives::hex::decode(cursor).ok()?;
         if bytes.len() != 16 {
@@ -51,7 +44,6 @@ impl CursorPosition {
         Some(Self { block_number, log_index })
     }
 
-    /// Checks if this cursor comes before another
     pub const fn is_before(&self, other: &Self) -> bool {
         self.block_number < other.block_number ||
             (self.block_number == other.block_number && self.log_index < other.log_index)
@@ -59,22 +51,18 @@ impl CursorPosition {
 }
 
 impl LogsWithCursor {
-    /// Creates a new `LogsWithCursor` response
     pub fn new(logs: Vec<Log>, cursor: Option<String>) -> Self {
         Self { logs, cursor }
     }
 
-    /// Creates a response with no cursor (end of pagination)
     pub fn final_page(logs: Vec<Log>) -> Self {
         Self { logs, cursor: None }
     }
 
-    /// Creates an empty response
     pub const fn empty() -> Self {
         Self { logs: Vec::new(), cursor: None }
     }
 
-    /// Creates a `LogsWithCursor` from logs with automatic cursor generation
     pub fn with_pagination(logs: Vec<Log>, has_more: bool) -> Self {
         let cursor = (has_more && !logs.is_empty()).then(|| {
             let last_log = logs.last().unwrap();
