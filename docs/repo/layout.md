@@ -40,7 +40,7 @@ All binaries are stored in [`bin`](../../bin).
 These crates are related to the database.
 
 - [`storage/codecs`](../../crates/storage/codecs): Different storage codecs.
-- [`storage/libmdbx-rs`](../../crates/storage/libmdbx-rs): Rust bindings for [libmdbx](https://libmdbx.dqdkfa.ru). A fork of an earlier Apache-licensed version of [libmdbx-rs][libmdbx-rs].
+- [`storage/libmdbx-rs`](../../crates/storage/libmdbx-rs): Rust bindings for [libmdbx](https://github.com/erthink/libmdbx). A fork of an earlier Apache-licensed version of [libmdbx-rs][libmdbx-rs].
 - [`storage/db`](../../crates/storage/db): Strongly typed Database abstractions (transactions, cursors, tables) over lower level database backends.
   - Implemented backends: mdbx
 - [`storage/provider`](../../crates/storage/provider): Traits which provide a higher level api over the database to access the Ethereum state and historical data (transactions, blocks etc.)
