@@ -14,26 +14,26 @@ pub struct StorageSettings {
     /// Whether this node always writes receipts to static files.
     ///
     /// If this is set to FALSE AND receipt pruning IS ENABLED, all receipts should be written to DB. Otherwise, they should be written to static files. This ensures that older nodes do not need to migrate their current DB tables to static files. For more, read: <https://github.com/paradigmxyz/reth/issues/18890#issuecomment-3457760097>
-    pub receipts_on_static_files: bool,
+    pub receipts_in_static_files: bool,
 }
 
 impl StorageSettings {
     /// Creates a new `StorageSettings` with default values.
     pub const fn new() -> Self {
-        Self { receipts_on_static_files: false }
+        Self { receipts_in_static_files: false }
     }
 
     /// Creates `StorageSettings` for legacy nodes.
     ///
-    /// This explicitly sets `receipts_on_static_files` to `false`, ensuring older nodes
+    /// This explicitly sets `receipts_in_static_files` to `false`, ensuring older nodes
     /// continue writing receipts to the database when receipt pruning is enabled.
     pub const fn legacy() -> Self {
-        Self { receipts_on_static_files: false }
+        Self { receipts_in_static_files: false }
     }
 
     /// Sets the `receipts_static_files` flag to true.
-    pub const fn with_receipts_on_static_files(mut self) -> Self {
-        self.receipts_on_static_files = true;
+    pub const fn with_receipts_in_static_files(mut self) -> Self {
+        self.receipts_in_static_files = true;
         self
     }
 }

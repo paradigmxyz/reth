@@ -118,7 +118,6 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
     /// Add multiple blocks to local block store
     pub fn extend_blocks(&self, iter: impl IntoIterator<Item = (B256, T::Block)>) {
         for (hash, block) in iter {
-            self.add_header(hash, block.header().clone());
             self.add_block(hash, block)
         }
     }

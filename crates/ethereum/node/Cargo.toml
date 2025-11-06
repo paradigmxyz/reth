@@ -49,7 +49,7 @@ tokio.workspace = true
 
 # revm with required ethereum features
 # Note: this must be kept to ensure all features are properly enabled/forwarded
-revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit"] }
 
 # misc
 eyre.workspace = true
@@ -82,7 +82,12 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "revm/asm-keccak",
 ]
-js-tracer = ["reth-node-builder/js-tracer"]
+js-tracer = [
+    "reth-node-builder/js-tracer",
+    "reth-rpc/js-tracer",
+    "reth-rpc-eth-api/js-tracer",
+    "reth-rpc-eth-types/js-tracer",
+]
 test-utils = [
     "reth-node-builder/test-utils",
     "reth-chainspec/test-utils",

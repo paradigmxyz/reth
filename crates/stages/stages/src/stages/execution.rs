@@ -194,7 +194,7 @@ where
         // On old nodes, if there's any receipts pruning configured, receipts are written directly
         // to database and inconsistencies are expected.
         if provider.prune_modes_ref().has_receipts_pruning() &&
-            !provider.cached_storage_settings().receipts_on_static_files
+            !provider.cached_storage_settings().receipts_in_static_files
         {
             return Ok(())
         }

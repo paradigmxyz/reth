@@ -405,6 +405,11 @@ RPC:
 
           [default: 50000000]
 
+      --rpc.evm-memory-limit <MEMORY_LIMIT>
+          Maximum memory the EVM can allocate per RPC request
+
+          [default: 4294967295]
+
       --rpc.txfeecap <TX_FEE_CAP>
           Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
 
@@ -696,6 +701,11 @@ Debug:
       --ethstats <ETHSTATS>
           The URL of the ethstats server to connect to. Example: `nodename:secret@host:port`
 
+      --debug.startup-sync-state-idle
+          Set the node to idle state when the backfill is not running.
+
+          This makes the `eth_syncing` RPC return "Idle" when the node has just started or finished the backfill, but did not yet receive any new blocks.
+
 Database:
       --db.log-level <LOG_LEVEL>
           Database logging level. Levels higher than "notice" require a debug build
@@ -716,7 +726,11 @@ Database:
           [possible values: true, false]
 
       --db.max-size <MAX_SIZE>
-          Maximum database size (e.g., 4TB, 8MB)
+          Maximum database size (e.g., 4TB, 8TB).
+
+          This sets the "map size" of the database. If the database grows beyond this limit, the node will stop with an "environment map size limit reached" error.
+
+          The default value is 8TB.
 
       --db.growth-step <GROWTH_STEP>
           Database growth step (e.g., 4GB, 4KB)

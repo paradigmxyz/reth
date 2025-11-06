@@ -506,7 +506,6 @@ where
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine::tree", "invoked new payload");
-        self.metrics.engine.new_payload_messages.increment(1);
 
         // start timing for the new payload process
         let start = Instant::now();
@@ -985,7 +984,7 @@ where
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
 
         // Record metrics
-        self.record_forkchoice_metrics(&attrs);
+        self.record_forkchoice_metrics();
 
         // Pre-validation of forkchoice state
         if let Some(early_result) = self.validate_forkchoice_state(state)? {
@@ -1008,11 +1007,7 @@ where
     }
 
     /// Records metrics for forkchoice updated calls
-    fn record_forkchoice_metrics(&self, attrs: &Option<T::PayloadAttributes>) {
-        self.metrics.engine.forkchoice_updated_messages.increment(1);
-        if attrs.is_some() {
-            self.metrics.engine.forkchoice_with_attributes_updated_messages.increment(1);
-        }
+    fn record_forkchoice_metrics(&self) {
         self.canonical_in_memory_state.on_forkchoice_update_received();
     }
 
@@ -1286,7 +1281,7 @@ where
             .map(|b| b.recovered_block().num_hash())
             .expect("Checked non-empty persisting blocks");
 
-        debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
+        debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
         let (tx, rx) = oneshot::channel();
         let _ = self.persistence.save_blocks(blocks_to_persist, tx);
 
@@ -1393,6 +1388,9 @@ where
                                 tx,
                                 version,
                             } => {
+                                let has_attrs = payload_attrs.is_some();
+
+                                let start = Instant::now();
                                 let mut output =
                                     self.on_forkchoice_updated(state, payload_attrs, version);
 
@@ -1412,6 +1410,12 @@ where
                                     self.on_maybe_tree_event(res.event.take())?;
                                 }
 
+                                let elapsed = start.elapsed();
+                                self.metrics
+                                    .engine
+                                    .forkchoice_updated
+                                    .update_response_metrics(has_attrs, &output, elapsed);
+
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(Into::into))
                                 {
@@ -1423,7 +1427,14 @@ where
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
+                                let start = Instant::now();
+                                let gas_used = payload.gas_used();
                                 let mut output = self.on_new_payload(payload);
+                                let elapsed = start.elapsed();
+                                self.metrics
+                                    .engine
+                                    .new_payload
+                                    .update_response_metrics(&output, gas_used, elapsed);
 
                                 let maybe_event =
                                     output.as_mut().ok().and_then(|out| out.event.take());
@@ -1573,6 +1584,32 @@ where
             )));
             return Ok(())
         };
+
+        // Check if there are more blocks to sync between current head and FCU target
+        if let Some(lowest_buffered) =
+            self.state.buffer.lowest_ancestor(&sync_target_state.head_block_hash)
+        {
+            let current_head_num = self.state.tree_state.current_canonical_head.number;
+            let target_head_num = lowest_buffered.number();
+
+            if let Some(distance) = self.distance_from_local_tip(current_head_num, target_head_num)
+            {
+                // There are blocks between current head and FCU target, download them
+                debug!(
+                    target: "engine::tree",
+                    %current_head_num,
+                    %target_head_num,
+                    %distance,
+                    "Backfill complete, downloading remaining blocks to reach FCU target"
+                );
+
+                self.emit_event(EngineApiEvent::Download(DownloadRequest::BlockRange(
+                    lowest_buffered.parent_hash(),
+                    distance,
+                )));
+                return Ok(());
+            }
+        }
 
         // try to close the gap by executing buffered blocks that are child blocks of the new head
         self.try_connect_buffered_blocks(self.state.tree_state.current_canonical_head)
@@ -2458,8 +2495,7 @@ where
             Ok(is_fork) => is_fork,
         };
 
-        let ctx =
-            TreeCtx::new(&mut self.state, &self.persistence_state, &self.canonical_in_memory_state);
+        let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
 
         let start = Instant::now();
 
@@ -2801,31 +2837,4 @@ pub enum InsertPayloadOk {
     AlreadySeen(BlockStatus),
     /// The payload was valid and inserted into the tree.
     Inserted(BlockStatus),
-}
-
-/// Whether or not the blocks are currently persisting and the input block is a descendant.
-#[derive(Debug, Clone, Copy)]
-pub enum PersistingKind {
-    /// The blocks are not currently persisting.
-    NotPersisting,
-    /// The blocks are currently persisting but the input block is not a descendant.
-    PersistingNotDescendant,
-    /// The blocks are currently persisting and the input block is a descendant.
-    PersistingDescendant,
-}
-
-impl PersistingKind {
-    /// Returns true if the parallel state root can be run.
-    ///
-    /// We only run the parallel state root if we are not currently persisting any blocks or
-    /// persisting blocks that are all ancestors of the one we are calculating the state root for.
-    pub const fn can_run_parallel_state_root(&self) -> bool {
-        matches!(self, Self::NotPersisting | Self::PersistingDescendant)
-    }
-
-    /// Returns true if the blocks are currently being persisted and the input block is a
-    /// descendant.
-    pub const fn is_descendant(&self) -> bool {
-        matches!(self, Self::PersistingDescendant)
-    }
 }

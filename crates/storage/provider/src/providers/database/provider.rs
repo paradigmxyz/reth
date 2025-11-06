@@ -370,7 +370,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
 
         if !self.prune_modes.has_receipts_pruning() ||
-            self.cached_storage_settings().receipts_on_static_files
+            self.cached_storage_settings().receipts_in_static_files
         {
             let static_file_receipt_num =
                 self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
@@ -1614,7 +1614,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         let write_to_db = self.prune_modes.has_receipts_pruning() &&
-            !self.cached_storage_settings().receipts_on_static_files;
+            !self.cached_storage_settings().receipts_in_static_files;
 
         // Prepare receipts cursor if we are going to write receipts to the database
         //
@@ -1636,7 +1636,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // Receipts can only be skipped if we're dealing with legacy nodes that write them to
         // Database. On newer nodes pruning will occur separately either by the PruneStage or the
         // Pruner.
-        let prunable_receipts = !self.cached_storage_settings().receipts_on_static_files &&
+        let prunable_receipts = !self.cached_storage_settings().receipts_in_static_files &&
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
 
         for (idx, (receipts, first_tx_index)) in
@@ -3037,10 +3037,13 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(self
-            .tx
-            .cursor_read::<tables::PruneCheckpoints>()?
-            .walk(None)?
+        Ok(PruneSegment::variants()
+            .filter_map(|segment| {
+                self.tx
+                    .get::<tables::PruneCheckpoints>(segment)
+                    .transpose()
+                    .map(|chk| chk.map(|chk| (segment, chk)))
+            })
             .collect::<Result<_, _>>()?)
     }
 }

@@ -4,13 +4,13 @@ use alloy_evm::eth::spec::EthExecutorSpec;
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
     ethereum::SEPOLIA_PARIS_TTD,
-    holesky, hoodi,
+    holesky, hoodi, mainnet,
     mainnet::{MAINNET_PARIS_BLOCK, MAINNET_PARIS_TTD},
     sepolia,
     sepolia::SEPOLIA_PARIS_BLOCK,
     EthChainSpec,
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
@@ -113,7 +113,10 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         deposit_contract: Some(MAINNET_DEPOSIT_CONTRACT),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
-        blob_params: BlobScheduleBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default().with_scheduled([
+            (mainnet::MAINNET_BPO1_TIMESTAMP, BlobParams::bpo1()),
+            (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
+        ]),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -440,7 +443,26 @@ impl<H: BlockHeader> ChainSpec<H> {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(self.hardforks.forks_iter())
+        // Create an iterator with hardfork, condition, and optional blob metadata
+        let hardforks_with_meta = self.hardforks.forks_iter().map(|(fork, condition)| {
+            // Generate blob metadata for timestamp-based hardforks that have blob params
+            let metadata = match condition {
+                ForkCondition::Timestamp(timestamp) => {
+                    // Try to get blob params for this timestamp
+                    // This automatically handles all hardforks with blob support
+                    EthChainSpec::blob_params_at_timestamp(self, timestamp).map(|params| {
+                        format!(
+                            "blob: (target: {}, max: {}, fraction: {})",
+                            params.target_blob_count, params.max_blob_count, params.update_fraction
+                        )
+                    })
+                }
+                _ => None,
+            };
+            (fork, condition, metadata)
+        });
+
+        DisplayHardforks::with_meta(hardforks_with_meta)
     }
 
     /// Get the fork id for the given hardfork.
@@ -1157,8 +1179,11 @@ Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-- Cancun                           @1710338135
-- Prague                           @1746612311"
+- Cancun                           @1710338135          blob: (target: 3, max: 6, fraction: 3338477)
+- Prague                           @1746612311          blob: (target: 6, max: 9, fraction: 5007716)
+- Osaka                            @1764798551          blob: (target: 6, max: 9, fraction: 5007716)
+- Bpo1                             @1765290071          blob: (target: 10, max: 15, fraction: 8346193)
+- Bpo2                             @1767747671          blob: (target: 14, max: 21, fraction: 11684671)"
         );
     }
 
@@ -1402,7 +1427,10 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     EthereumHardfork::Prague,
-                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                    ForkId {
+                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
+                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
+                    },
                 ),
             ],
         );
@@ -1545,13 +1573,23 @@ Post-merge hard forks (timestamp based):
                 ),
                 // First Prague block
                 (
-                    Head { number: 20000002, timestamp: 1746612311, ..Default::default() },
-                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                    Head { number: 20000004, timestamp: 1746612311, ..Default::default() },
+                    ForkId {
+                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
+                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
+                    },
                 ),
-                // Future Prague block
+                // Osaka block
                 (
-                    Head { number: 20000002, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                    Head {
+                        number: 20000004,
+                        timestamp: mainnet::MAINNET_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0x5167e2a6")),
+                        next: mainnet::MAINNET_BPO1_TIMESTAMP,
+                    },
                 ),
             ],
         );
@@ -1860,11 +1898,22 @@ Post-merge hard forks (timestamp based):
                 ), // First Prague block
                 (
                     Head { number: 20000004, timestamp: 1746612311, ..Default::default() },
-                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
-                ), // Future Prague block
+                    ForkId {
+                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
+                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
+                    },
+                ),
+                // Osaka block
                 (
-                    Head { number: 20000004, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                    Head {
+                        number: 20000004,
+                        timestamp: mainnet::MAINNET_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0x5167e2a6")),
+                        next: mainnet::MAINNET_BPO1_TIMESTAMP,
+                    },
                 ),
             ],
         );
@@ -2521,10 +2570,8 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn latest_eth_mainnet_fork_id() {
-        assert_eq!(
-            ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
-            MAINNET.latest_fork_id()
-        )
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x07c9462e")), next: 0 }, MAINNET.latest_fork_id())
     }
 
     #[test]
