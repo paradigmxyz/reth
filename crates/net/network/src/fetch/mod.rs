@@ -519,25 +519,9 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
         }
     }
 
-    /// Returns true if this request requires that the remote peer can serve the full block wrt
-    /// eth69.
-    const fn requires_full_block_availability(&self) -> bool {
-        matches!(self, Self::GetBlockBodies { .. })
-    }
-
     /// Returns `true` if this request is normal priority.
     const fn is_normal_priority(&self) -> bool {
         self.get_priority().is_normal()
-    }
-
-    /// Returns the range hint for block bodies requests, if any.
-    /// This is only applicable for `GetBlockBodies` requests and indicates the block number range
-    /// that the requested bodies belong to.
-    pub fn get_range_hint(&self) -> Option<RangeInclusive<u64>> {
-        match self {
-            Self::GetBlockHeaders { .. } => None,
-            Self::GetBlockBodies { range_hint, .. } => range_hint.clone(),
-        }
     }
 
     /// Returns the best peer requirements for this request.
