@@ -966,19 +966,23 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         for segment in StaticFileSegment::iter() {
-            if has_receipt_pruning && segment.is_receipts() {
-                // Pruned nodes (including full node) do not store receipts as static files.
-                continue
-            }
+            match segment {
+                StaticFileSegment::Headers | StaticFileSegment::Transactions => {}
+                StaticFileSegment::Receipts => {
+                    if has_receipt_pruning {
+                        // Pruned nodes (including full node) do not store receipts as static files.
+                        continue
+                    }
 
-            if segment.is_receipts() &&
-                (NamedChain::Gnosis == provider.chain_spec().chain_id() ||
-                    NamedChain::Chiado == provider.chain_spec().chain_id())
-            {
-                // Gnosis and Chiado's historical import is broken and does not work with this
-                // check. They are importing receipts along with importing
-                // headers/bodies.
-                continue;
+                    if NamedChain::Gnosis == provider.chain_spec().chain_id() ||
+                        NamedChain::Chiado == provider.chain_spec().chain_id()
+                    {
+                        // Gnosis and Chiado's historical import is broken and does not work with
+                        // this check. They are importing receipts along
+                        // with importing headers/bodies.
+                        continue;
+                    }
+                }
             }
 
             let initial_highest_block = self.get_highest_static_file_block(segment);
