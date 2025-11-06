@@ -112,12 +112,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 }
 
 impl<N: NodeTypesWithDB> ProviderFactory<N> {
-    /// Enables metrics on the static file provider.
-    pub fn with_static_files_metrics(mut self) -> Self {
-        self.static_file_provider = self.static_file_provider.with_metrics();
-        self
-    }
-
     /// Sets the pruning configuration for an existing [`ProviderFactory`].
     pub const fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
         self.prune_modes = prune_modes;
