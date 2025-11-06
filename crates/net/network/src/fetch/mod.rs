@@ -179,8 +179,11 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
         let request = self.queued_requests.pop_front().expect("not empty");
         let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
+            // need to put back the the request
+            self.queued_requests.push_front(request);
             return PollAction::NoPeersAvailable
         };
+
         let request = self.prepare_block_request(peer_id, request);
 
         PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
