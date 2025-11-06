@@ -11,8 +11,8 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
-    providers::StaticFileWriter, BlockBodyIndicesProvider, BlockReader, DBProvider, EitherWriter,
-    HeaderProvider, ProviderError, PruneCheckpointReader, StaticFileProviderFactory, StatsReader,
+    providers::StaticFileWriter, BlockReader, DBProvider, EitherWriter, HeaderProvider,
+    ProviderError, PruneCheckpointReader, StaticFileProviderFactory, StatsReader,
     StorageSettingsCache, TransactionsProvider,
 };
 use reth_prune_types::PruneSegment;
@@ -178,11 +178,7 @@ fn recover_range<Provider, CURSOR>(
     writer: &mut EitherWriter<'_, CURSOR, Provider::Primitives>,
 ) -> Result<(), StageError>
 where
-    Provider: DBProvider
-        + HeaderProvider
-        + TransactionsProvider
-        + BlockBodyIndicesProvider
-        + StaticFileProviderFactory,
+    Provider: DBProvider + HeaderProvider + TransactionsProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
