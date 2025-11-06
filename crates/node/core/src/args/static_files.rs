@@ -8,20 +8,14 @@ use reth_config::config::{BlocksPerFileConfig, StaticFilesConfig};
 #[command(next_help_heading = "Static Files")]
 pub struct StaticFilesArgs {
     /// Number of blocks per file for the headers segment.
-    ///
-    /// Defaults to 500,000 blocks if not specified.
     #[arg(long = "static-files.blocks-per-file.headers")]
     pub blocks_per_file_headers: Option<u64>,
 
     /// Number of blocks per file for the transactions segment.
-    ///
-    /// Defaults to 500,000 blocks if not specified.
     #[arg(long = "static-files.blocks-per-file.transactions")]
     pub blocks_per_file_transactions: Option<u64>,
 
     /// Number of blocks per file for the receipts segment.
-    ///
-    /// Defaults to 500,000 blocks if not specified.
     #[arg(long = "static-files.blocks-per-file.receipts")]
     pub blocks_per_file_receipts: Option<u64>,
 }
