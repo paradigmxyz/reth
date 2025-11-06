@@ -599,6 +599,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// CAUTION: destructive. Deletes files on disk.
     ///
     /// This will re-initialize the index after deletion, so all files are tracked.
+    ///
+    /// Returns the `SegmentHeader` of the deleted jar.
     pub fn delete_jar(
         &self,
         segment: StaticFileSegment,
