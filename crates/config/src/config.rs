@@ -459,15 +459,20 @@ impl StaticFilesConfig {
     /// Converts the blocks per file configuration into a [`HashMap`] per segment.
     pub fn as_blocks_per_file_map(&self) -> HashMap<StaticFileSegment, u64> {
         let BlocksPerFileConfig { headers, transactions, receipts } = self.blocks_per_file;
+
         let mut map = HashMap::new();
-        if let Some(blocks_per_file) = headers {
-            map.insert(StaticFileSegment::Headers, blocks_per_file);
-        }
-        if let Some(blocks_per_file) = transactions {
-            map.insert(StaticFileSegment::Transactions, blocks_per_file);
-        }
-        if let Some(blocks_per_file) = receipts {
-            map.insert(StaticFileSegment::Receipts, blocks_per_file);
+        // Iterating over all possible segments allows us to do an exhaustive match here,
+        // to not forget to configure new segments in the future.
+        for segment in StaticFileSegment::iter() {
+            let blocks_per_file = match segment {
+                StaticFileSegment::Headers => headers,
+                StaticFileSegment::Transactions => transactions,
+                StaticFileSegment::Receipts => receipts,
+            };
+
+            if let Some(blocks_per_file) = blocks_per_file {
+                map.insert(segment, blocks_per_file);
+            }
         }
         map
     }
