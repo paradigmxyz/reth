@@ -112,6 +112,16 @@ impl<N: NodePrimitives> StaticFileProviderBuilder<N> {
     }
 
     /// Set custom blocks per file for specific segments.
+    ///
+    /// Each static file segment is stored across multiple files, and each of these files contains
+    /// up to the specified number of blocks of data. When the file gets full, a new file is
+    /// created with the new block range.
+    ///
+    /// This setting affects the size of each static file, and can be set per segment.
+    ///
+    /// If it is changed for an existing node, existing static files will not be affected and will
+    /// be finished with the old blocks per file setting, but new static files will use the new
+    /// setting.
     pub fn with_blocks_per_file_for_segments(
         mut self,
         segments: HashMap<StaticFileSegment, u64>,
