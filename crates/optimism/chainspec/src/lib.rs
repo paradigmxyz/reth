@@ -338,7 +338,14 @@ impl OpHardforks for OpChainSpec {
 }
 
 impl From<Genesis> for OpChainSpec {
-    fn from(genesis: Genesis) -> Self {
+    fn from(mut genesis: Genesis) -> Self {
+
+        // If legacyXLayerBlock is specified in config, override genesis.number
+        if let Some(legacy_block_value) = genesis.config.extra_fields.get("legacyXLayerBlock") {
+            if let Some(legacy_block) = legacy_block_value.as_u64() {
+                genesis.number = Some(legacy_block);
+            }
+        }
         use reth_optimism_forks::OpHardfork;
         let optimism_genesis_info = OpGenesisInfo::extract_from(&genesis);
         let genesis_info =
@@ -938,6 +945,106 @@ mod tests {
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 50));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 51));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 52));
+    }
+
+    #[test]
+    fn test_legacy_xlayer_block_overrides_genesis_header_number() {
+        let geth_genesis = r#"
+    {
+      "config": {
+        "chainId": 901,
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "berlinBlock": 0,
+        "londonBlock": 0,
+        "optimism": {
+          "eip1559Elasticity": 6,
+          "eip1559Denominator": 50
+        },
+        "legacyXLayerBlock": 1000
+      },
+      "nonce": "0x0",
+      "timestamp": "0x0",
+      "extraData": "0x",
+      "gasLimit": "0x1c9c380",
+      "difficulty": "0x0",
+      "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "coinbase": "0x0000000000000000000000000000000000000000",
+      "alloc": {},
+      "number": "0x0",
+      "gasUsed": "0x0",
+      "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "baseFeePerGas": "0x3b9aca00"
+    }
+    "#;
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+
+        // Verify legacyXLayerBlock is parsed correctly
+        let actual_legacy_block = genesis.config.extra_fields.get("legacyXLayerBlock");
+        assert_eq!(actual_legacy_block, Some(serde_json::Value::from(1000)).as_ref());
+
+        // Convert to OpChainSpec
+        let chain_spec: OpChainSpec = genesis.into();
+
+        // Verify genesis_header number is overridden by legacyXLayerBlock
+        assert_eq!(chain_spec.genesis_header().number(), 1000);
+
+        // Verify that genesis.number is also updated to match legacyXLayerBlock
+        assert_eq!(chain_spec.genesis().number, Some(1000));
+    }
+
+    #[test]
+    fn test_legacy_xlayer_block_without_field_uses_genesis_number() {
+        let geth_genesis = r#"
+    {
+      "config": {
+        "chainId": 901,
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "berlinBlock": 0,
+        "londonBlock": 0,
+        "optimism": {
+          "eip1559Elasticity": 6,
+          "eip1559Denominator": 50
+        }
+      },
+      "nonce": "0x0",
+      "timestamp": "0x0",
+      "extraData": "0x",
+      "gasLimit": "0x1c9c380",
+      "difficulty": "0x0",
+      "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "coinbase": "0x0000000000000000000000000000000000000000",
+      "alloc": {},
+      "number": "0x0",
+      "gasUsed": "0x0",
+      "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "baseFeePerGas": "0x3b9aca00"
+    }
+    "#;
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+
+        // Verify legacyXLayerBlock is not present
+        let actual_legacy_block = genesis.config.extra_fields.get("legacyXLayerBlock");
+        assert_eq!(actual_legacy_block, None);
+
+        // Convert to OpChainSpec
+        let chain_spec: OpChainSpec = genesis.into();
+
+        // Verify genesis_header number uses default genesis.number (0)
+        assert_eq!(chain_spec.genesis_header().number(), 0);
     }
 
     #[test]
