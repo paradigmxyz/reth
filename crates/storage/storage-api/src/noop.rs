@@ -273,10 +273,6 @@ impl<C: Send + Sync, N: NodePrimitives> TransactionsProvider for NoopProvider<C,
         Ok(None)
     }
 
-    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        Ok(None)
-    }
-
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
