@@ -171,6 +171,12 @@ impl TrieInputSorted {
             prefix_sets: input.prefix_sets,
         }
     }
+
+    /// Append sorted state to the input by reference and extend the prefix sets.
+    pub fn append_ref(&mut self, state: &HashedPostStateSorted) {
+        self.prefix_sets.extend(state.construct_prefix_sets());
+        Arc::make_mut(&mut self.state).extend_ref(state);
+    }
 }
 
 #[cfg(test)]
