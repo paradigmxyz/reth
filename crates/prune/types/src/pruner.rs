@@ -99,6 +99,9 @@ pub enum PruneInterruptReason {
     DeletedEntriesLimitReached,
     /// Waiting for another segment to finish pruning before this segment can proceed.
     WaitingOnSegment(PruneSegment),
+    /// No data was pruned due to static file boundaries (e.g., target block doesn't align with jar
+    /// boundaries).
+    StaticFileBoundary,
     /// Unknown reason for stopping prune run.
     Unknown,
 }
