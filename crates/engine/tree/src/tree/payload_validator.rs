@@ -931,14 +931,14 @@ where
 
         // Extend with contents of parent in-memory blocks directly in sorted form.
         let mut input = TrieInputSorted::default();
-        let mut blocks_iter = blocks.iter().rev();
+        let mut blocks_iter = blocks.iter().rev().peekable();
 
         if let Some(first) = blocks_iter.next() {
             input.state = Arc::clone(&first.hashed_state);
             input.nodes = Arc::clone(&first.trie_updates);
 
-            // Only clone and mutate if there are multiple in-memory blocks.
-            if blocks.len() > 1 {
+            // Only clone and mutate if there are more in-memory blocks.
+            if blocks_iter.peek().is_some() {
                 let state_mut = Arc::make_mut(&mut input.state);
                 let nodes_mut = Arc::make_mut(&mut input.nodes);
                 for block in blocks_iter {
