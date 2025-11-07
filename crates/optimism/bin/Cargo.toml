@@ -19,6 +19,7 @@ reth-optimism-evm.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-forks.workspace = true
+reth-apollo.workspace = true
 
 clap = { workspace = true, features = ["derive", "env"] }
 tracing.workspace = true
