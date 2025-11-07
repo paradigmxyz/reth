@@ -41,6 +41,9 @@ pub use storage::{StorageTrieEntry, TrieChangeSetsEntry};
 mod subnode;
 pub use subnode::StoredSubNode;
 
+mod trie;
+pub use trie::{SparseTrieNode, TrieMasks};
+
 /// The implementation of a container for storing intermediate changes to a trie.
 /// The container indicates when the trie has been modified.
 pub mod prefix_set;
