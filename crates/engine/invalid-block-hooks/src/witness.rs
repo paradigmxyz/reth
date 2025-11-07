@@ -269,10 +269,12 @@ where
         block_prefix: &str,
     ) -> eyre::Result<()> {
         if re_executed_state != original_state {
-            let original_filename = format!("{}.bundle_state.original.json", block_prefix);
-            let original_path = self.save_file(original_filename, original_state)?;
-            let re_executed_filename = format!("{}.bundle_state.re_executed.json", block_prefix);
-            let re_executed_path = self.save_file(re_executed_filename, re_executed_state)?;
+            let (original_path, re_executed_path) = self.save_comparison_files(
+                block_prefix,
+                "bundle_state",
+                original_state,
+                re_executed_state,
+            )?;
 
             // Convert bundle state to sorted format for deterministic comparison
             let bundle_state_sorted = sort_bundle_state_for_comparison(re_executed_state);
@@ -319,12 +321,10 @@ where
             }
 
             if &trie_output != original_updates {
-                let original_path = self.save_file(
-                    format!("{}.trie_updates.original.json", block_prefix),
+                let (original_path, re_executed_path) = self.save_comparison_files(
+                    block_prefix,
+                    "trie_updates",
                     &original_updates.into_sorted_ref(),
-                )?;
-                let re_executed_path = self.save_file(
-                    format!("{}.trie_updates.re_executed.json", block_prefix),
                     &trie_output.into_sorted_ref(),
                 )?;
                 warn!(
@@ -370,6 +370,21 @@ where
         File::create(&path)?.write_all(serde_json::to_string(value)?.as_bytes())?;
 
         Ok(path)
+    }
+
+    /// Saves both original and re-executed comparison files with the given file type prefix
+    fn save_comparison_files<T: Serialize>(
+        &self,
+        block_prefix: &str,
+        file_type: &str,
+        original: &T,
+        re_executed: &T,
+    ) -> eyre::Result<(PathBuf, PathBuf)> {
+        let original_path =
+            self.save_file(format!("{}.{}.original.json", block_prefix, file_type), original)?;
+        let re_executed_path = self
+            .save_file(format!("{}.{}.re_executed.json", block_prefix, file_type), re_executed)?;
+        Ok((original_path, re_executed_path))
     }
 
     /// Compares two values and saves their diff to a file in the output directory
@@ -731,8 +746,8 @@ mod tests {
 
         // Modify the state to create a mismatch
         let addr = Address::from([1u8; 20]);
-        if let Some(account) = modified_state.state.get_mut(&addr) &&
-            let Some(ref mut info) = account.info
+        if let Some(account) = modified_state.state.get_mut(&addr)
+            && let Some(ref mut info) = account.info
         {
             info.balance = U256::from(999);
         }
