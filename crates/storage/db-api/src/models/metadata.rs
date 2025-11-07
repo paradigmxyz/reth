@@ -31,9 +31,9 @@ impl StorageSettings {
         Self { receipts_in_static_files: false }
     }
 
-    /// Sets the `receipts_static_files` flag to true.
-    pub const fn with_receipts_in_static_files(mut self) -> Self {
-        self.receipts_in_static_files = true;
+    /// Sets the `receipts_static_files` flag.
+    pub const fn with_receipts_in_static_files(mut self, value: bool) -> Self {
+        self.receipts_in_static_files = value;
         self
     }
 }

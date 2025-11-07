@@ -42,7 +42,7 @@ use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_db_common::init::{init_genesis, InitStorageError};
+use reth_db_common::init::{init_genesis_with_storage_settings, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
@@ -67,7 +67,7 @@ use reth_node_metrics::{
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
     BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
+    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettings,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -628,13 +628,17 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        init_genesis(self.provider_factory())?;
+        self.init_genesis()?;
         Ok(self)
     }
 
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
-        init_genesis(self.provider_factory())
+        // Build storage settings from CLI args
+        let storage_settings = StorageSettings::default()
+            .with_receipts_in_static_files(self.node_config().static_files.receipts);
+
+        init_genesis_with_storage_settings(self.provider_factory(), Some(storage_settings))
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the
