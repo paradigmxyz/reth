@@ -35,7 +35,7 @@ RUN OUTPUT_DIR=$(if [ "$BUILD_PROFILE" = "dev" ] || [ "$BUILD_PROFILE" = "test" 
 FROM ubuntu:24.04 AS runtime
 
 RUN apt-get update && \
-    apt-get install -y ca-certificates libssl-dev pkg-config strace && \
+    apt-get install -y ca-certificates libssl-dev pkg-config strace curl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

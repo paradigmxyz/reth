@@ -21,7 +21,8 @@ where
     Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
     EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
         + EthTransactions
-        + TraceExt,
+        + TraceExt
+        + reth_rpc_eth_api::helpers::LegacyRpc,
 {
     /// Injects a raw transaction into the node tx pool via RPC server
     pub async fn inject_tx(&self, raw_tx: Bytes) -> Result<B256, EthApi::Error> {

@@ -38,12 +38,14 @@ alloy-transport.workspace = true
 alloy-rpc-client = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types-eth.workspace = true
 alloy-network.workspace = true
+alloy-serde.workspace = true
 revm.workspace = true
 revm-inspectors.workspace = true
 
 # rpc
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
+jsonrpsee = { workspace = true, features = ["http-client"] }
 
 # async
 futures.workspace = true
@@ -62,6 +64,7 @@ schnellru.workspace = true
 rand.workspace = true
 tracing.workspace = true
 itertools.workspace = true
+humantime-serde = "1.1"
 
 [dev-dependencies]
 serde_json.workspace = true

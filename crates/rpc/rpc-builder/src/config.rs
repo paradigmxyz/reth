@@ -92,6 +92,13 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn eth_config(&self) -> EthConfig {
+        // XLayer: Build legacy RPC config from CLI arguments
+        let legacy_rpc_config = crate::legacy_xlayer::build_legacy_rpc_config(
+            self.legacy_rpc_url.as_ref(),
+            self.legacy_cutoff_block,
+            self.legacy_rpc_timeout.as_ref(),
+        );
+
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
             .max_trace_filter_blocks(self.rpc_max_trace_filter_blocks)
@@ -105,6 +112,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .proof_permits(self.rpc_proof_permits)
             .pending_block_kind(self.rpc_pending_block)
             .raw_tx_forwarder(self.rpc_forwarder.clone())
+            .with_legacy_rpc(legacy_rpc_config)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {

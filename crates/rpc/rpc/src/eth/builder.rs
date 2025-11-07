@@ -43,6 +43,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     max_batch_size: usize,
     pending_block_kind: PendingBlockKind,
     raw_tx_forwarder: ForwardConfig,
+    legacy_rpc_config: Option<reth_rpc_eth_types::LegacyRpcConfig>,
     send_raw_transaction_sync_timeout: Duration,
 }
 
@@ -93,6 +94,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             max_batch_size,
             pending_block_kind,
             raw_tx_forwarder,
+            legacy_rpc_config,
             send_raw_transaction_sync_timeout,
         } = self;
         EthApiBuilder {
@@ -113,6 +115,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             max_batch_size,
             pending_block_kind,
             raw_tx_forwarder,
+            legacy_rpc_config,
             send_raw_transaction_sync_timeout,
         }
     }
@@ -144,6 +147,7 @@ where
             max_batch_size: 1,
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
+            legacy_rpc_config: None,
             send_raw_transaction_sync_timeout: Duration::from_secs(30),
         }
     }
@@ -156,6 +160,15 @@ where
     /// Configures the task spawner used to spawn additional tasks.
     pub fn task_spawner(mut self, spawner: impl TaskSpawner + 'static) -> Self {
         self.task_spawner = Box::new(spawner);
+        self
+    }
+
+    /// Configures legacy RPC support for routing historical data.
+    pub fn with_legacy_rpc_config(
+        mut self,
+        config: Option<reth_rpc_eth_types::LegacyRpcConfig>,
+    ) -> Self {
+        self.legacy_rpc_config = config;
         self
     }
 
@@ -182,6 +195,7 @@ where
             max_batch_size,
             pending_block_kind,
             raw_tx_forwarder,
+            legacy_rpc_config,
             send_raw_transaction_sync_timeout,
         } = self;
         EthApiBuilder {
@@ -202,6 +216,7 @@ where
             max_batch_size,
             pending_block_kind,
             raw_tx_forwarder,
+            legacy_rpc_config,
             send_raw_transaction_sync_timeout,
         }
     }
@@ -229,6 +244,7 @@ where
             max_batch_size,
             pending_block_kind,
             raw_tx_forwarder,
+            legacy_rpc_config,
             send_raw_transaction_sync_timeout,
         } = self;
         EthApiBuilder {
@@ -249,6 +265,7 @@ where
             max_batch_size,
             pending_block_kind,
             raw_tx_forwarder,
+            legacy_rpc_config,
             send_raw_transaction_sync_timeout,
         }
     }
@@ -476,6 +493,7 @@ where
             max_batch_size,
             pending_block_kind,
             raw_tx_forwarder,
+            legacy_rpc_config,
             send_raw_transaction_sync_timeout,
         } = self;
 
@@ -516,6 +534,7 @@ where
             max_batch_size,
             pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
+            legacy_rpc_config,
             send_raw_transaction_sync_timeout,
         )
     }

@@ -2,7 +2,8 @@
 //! the `eth_` namespace.
 use crate::{
     helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
-    RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
+    route_by_block_id, route_by_block_id_opt, route_by_number, try_local_then_legacy, RpcBlock,
+    RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
@@ -390,7 +391,7 @@ impl<T>
         RpcHeader<T::NetworkTypes>,
     > for T
 where
-    T: FullEthApi,
+    T: FullEthApi + crate::helpers::LegacyRpc,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`
@@ -437,7 +438,10 @@ where
         full: bool,
     ) -> RpcResult<Option<RpcBlock<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, ?full, "Serving eth_getBlockByHash");
-        Ok(EthBlocks::rpc_block(self, hash.into(), full).await?)
+        // XLayer: Legacy RPC routing
+        try_local_then_legacy!("eth_getBlockByHash", self, hash,
+            EthBlocks::rpc_block(self, hash.into(), full).await?,
+            self.legacy_rpc_client().unwrap().get_block_by_hash(hash, full))
     }
 
     /// Handler for: `eth_getBlockByNumber`
@@ -447,13 +451,19 @@ where
         full: bool,
     ) -> RpcResult<Option<RpcBlock<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?number, ?full, "Serving eth_getBlockByNumber");
-        Ok(EthBlocks::rpc_block(self, number.into(), full).await?)
+        // XLayer: Legacy RPC routing
+        route_by_number!("eth_getBlockByNumber", self, number,
+            self.legacy_rpc_client().unwrap().get_block_by_number(number, full),
+            Ok(EthBlocks::rpc_block(self, number.into(), full).await?))
     }
 
     /// Handler for: `eth_getBlockTransactionCountByHash`
     async fn block_transaction_count_by_hash(&self, hash: B256) -> RpcResult<Option<U256>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getBlockTransactionCountByHash");
-        Ok(EthBlocks::block_transaction_count(self, hash.into()).await?.map(U256::from))
+        // XLayer: Legacy RPC routing
+        try_local_then_legacy!("eth_getBlockTransactionCountByHash", self, hash,
+            EthBlocks::block_transaction_count(self, hash.into()).await?.map(U256::from),
+            self.legacy_rpc_client().unwrap().get_block_transaction_count_by_hash(hash))
     }
 
     /// Handler for: `eth_getBlockTransactionCountByNumber`
@@ -462,7 +472,10 @@ where
         number: BlockNumberOrTag,
     ) -> RpcResult<Option<U256>> {
         trace!(target: "rpc::eth", ?number, "Serving eth_getBlockTransactionCountByNumber");
-        Ok(EthBlocks::block_transaction_count(self, number.into()).await?.map(U256::from))
+        // XLayer: Legacy RPC routing
+        route_by_number!("eth_getBlockTransactionCountByNumber", self, number,
+            self.legacy_rpc_client().unwrap().get_block_transaction_count_by_number(number),
+            Ok(EthBlocks::block_transaction_count(self, number.into()).await?.map(U256::from)))
     }
 
     /// Handler for: `eth_getUncleCountByBlockHash`
@@ -496,7 +509,10 @@ where
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<RpcReceipt<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
-        Ok(EthBlocks::block_receipts(self, block_id).await?)
+        // XLayer: Legacy RPC routing
+        route_by_block_id!("eth_getBlockReceipts", self, block_id,
+            self.legacy_rpc_client().unwrap().get_block_receipts(block_id),
+            Ok(EthBlocks::block_receipts(self, block_id).await?))
     }
 
     /// Handler for: `eth_getUncleByBlockHashAndIndex`
@@ -522,7 +538,10 @@ where
     /// Handler for: `eth_getRawTransactionByHash`
     async fn raw_transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getRawTransactionByHash");
-        Ok(EthTransactions::raw_transaction_by_hash(self, hash).await?)
+        // XLayer: Legacy RPC routing
+        try_local_then_legacy!("eth_getRawTransactionByHash", self, hash,
+            EthTransactions::raw_transaction_by_hash(self, hash).await?,
+            self.legacy_rpc_client().unwrap().get_raw_transaction_by_hash(hash))
     }
 
     /// Handler for: `eth_getTransactionByHash`
@@ -531,10 +550,11 @@ where
         hash: B256,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
-        Ok(EthTransactions::transaction_by_hash(self, hash)
-            .await?
-            .map(|tx| tx.into_transaction(self.tx_resp_builder()))
-            .transpose()?)
+        // XLayer: Legacy RPC routing
+        try_local_then_legacy!("eth_getTransactionByHash", self, hash,
+            EthTransactions::transaction_by_hash(self, hash).await?
+                .map(|tx| tx.into_transaction(self.tx_resp_builder())).transpose()?,
+            self.legacy_rpc_client().unwrap().get_transaction_by_hash(hash))
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
@@ -544,8 +564,10 @@ where
         index: Index,
     ) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getRawTransactionByBlockHashAndIndex");
-        Ok(EthTransactions::raw_transaction_by_block_and_tx_index(self, hash.into(), index.into())
-            .await?)
+        // XLayer: Legacy RPC routing
+        try_local_then_legacy!("eth_getRawTransactionByBlockHashAndIndex", self, hash,
+            EthTransactions::raw_transaction_by_block_and_tx_index(self, hash.into(), index.into()).await?,
+            self.legacy_rpc_client().unwrap().get_raw_transaction_by_block_hash_and_index(hash, index))
     }
 
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
@@ -555,8 +577,10 @@ where
         index: Index,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
-        Ok(EthTransactions::transaction_by_block_and_tx_index(self, hash.into(), index.into())
-            .await?)
+        // XLayer: Legacy RPC routing
+        try_local_then_legacy!("eth_getTransactionByBlockHashAndIndex", self, hash,
+            EthTransactions::transaction_by_block_and_tx_index(self, hash.into(), index.into()).await?,
+            self.legacy_rpc_client().unwrap().get_transaction_by_block_hash_and_index(hash, index))
     }
 
     /// Handler for: `eth_getRawTransactionByBlockNumberAndIndex`
@@ -566,12 +590,10 @@ where
         index: Index,
     ) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getRawTransactionByBlockNumberAndIndex");
-        Ok(EthTransactions::raw_transaction_by_block_and_tx_index(
-            self,
-            number.into(),
-            index.into(),
-        )
-        .await?)
+        // XLayer: Legacy RPC routing
+        route_by_number!("eth_getRawTransactionByBlockNumberAndIndex", self, number,
+            self.legacy_rpc_client().unwrap().get_raw_transaction_by_block_number_and_index(number, index),
+            Ok(EthTransactions::raw_transaction_by_block_and_tx_index(self, number.into(), index.into()).await?))
     }
 
     /// Handler for: `eth_getTransactionByBlockNumberAndIndex`
@@ -581,8 +603,10 @@ where
         index: Index,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getTransactionByBlockNumberAndIndex");
-        Ok(EthTransactions::transaction_by_block_and_tx_index(self, number.into(), index.into())
-            .await?)
+        // XLayer: Legacy RPC routing
+        route_by_number!("eth_getTransactionByBlockNumberAndIndex", self, number,
+            self.legacy_rpc_client().unwrap().get_transaction_by_block_number_and_index(number, index),
+            Ok(EthTransactions::transaction_by_block_and_tx_index(self, number.into(), index.into()).await?))
     }
 
     /// Handler for: `eth_getTransactionBySenderAndNonce`
@@ -602,13 +626,19 @@ where
         hash: B256,
     ) -> RpcResult<Option<RpcReceipt<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
-        Ok(EthTransactions::transaction_receipt(self, hash).await?)
+        // XLayer: Legacy RPC routing
+        try_local_then_legacy!("eth_getTransactionReceipt", self, hash,
+            EthTransactions::transaction_receipt(self, hash).await?,
+            self.legacy_rpc_client().unwrap().get_transaction_receipt(hash))
     }
 
     /// Handler for: `eth_getBalance`
     async fn balance(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getBalance");
-        Ok(EthState::balance(self, address, block_number).await?)
+        // XLayer: Legacy RPC routing
+        route_by_block_id_opt!("eth_getBalance", self, block_number,
+            self.legacy_rpc_client().unwrap().get_balance(address, block_number),
+            Ok(EthState::balance(self, address, block_number).await?))
     }
 
     /// Handler for: `eth_getStorageAt`
@@ -619,7 +649,10 @@ where
         block_number: Option<BlockId>,
     ) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
-        Ok(EthState::storage_at(self, address, index, block_number).await?)
+        // XLayer: Legacy RPC routing
+        route_by_block_id_opt!("eth_getStorageAt", self, block_number,
+            self.legacy_rpc_client().unwrap().get_storage_at(address, index, block_number),
+            Ok(EthState::storage_at(self, address, index, block_number).await?))
     }
 
     /// Handler for: `eth_getTransactionCount`
@@ -629,13 +662,19 @@ where
         block_number: Option<BlockId>,
     ) -> RpcResult<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getTransactionCount");
-        Ok(EthState::transaction_count(self, address, block_number).await?)
+        // XLayer: Legacy RPC routing
+        route_by_block_id_opt!("eth_getTransactionCount", self, block_number,
+            self.legacy_rpc_client().unwrap().get_transaction_count(address, block_number),
+            Ok(EthState::transaction_count(self, address, block_number).await?))
     }
 
     /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<Bytes> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getCode");
-        Ok(EthState::get_code(self, address, block_number).await?)
+        // XLayer: Legacy RPC routing
+        route_by_block_id_opt!("eth_getCode", self, block_number,
+            self.legacy_rpc_client().unwrap().get_code(address, block_number),
+            Ok(EthState::get_code(self, address, block_number).await?))
     }
 
     /// Handler for: `eth_getHeaderByNumber`
@@ -644,13 +683,19 @@ where
         block_number: BlockNumberOrTag,
     ) -> RpcResult<Option<RpcHeader<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
-        Ok(EthBlocks::rpc_block_header(self, block_number.into()).await?)
+        // XLayer: Legacy RPC routing
+        route_by_number!("eth_getHeaderByNumber", self, block_number,
+            self.legacy_rpc_client().unwrap().get_header_by_number(block_number),
+            Ok(EthBlocks::rpc_block_header(self, block_number.into()).await?))
     }
 
     /// Handler for: `eth_getHeaderByHash`
     async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<RpcHeader<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
-        Ok(EthBlocks::rpc_block_header(self, hash.into()).await?)
+        // XLayer: Legacy RPC routing
+        try_local_then_legacy!("eth_getHeaderByHash", self, hash,
+            EthBlocks::rpc_block_header(self, hash.into()).await?,
+            self.legacy_rpc_client().unwrap().get_header_by_hash(hash))
     }
 
     /// Handler for: `eth_simulateV1`

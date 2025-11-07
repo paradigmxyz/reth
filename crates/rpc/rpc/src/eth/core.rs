@@ -154,6 +154,7 @@ where
         max_batch_size: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: ForwardConfig,
+        legacy_rpc_config: Option<reth_rpc_eth_types::LegacyRpcConfig>,
         send_raw_transaction_sync_timeout: Duration,
     ) -> Self {
         let inner = EthApiInner::new(
@@ -172,6 +173,7 @@ where
             max_batch_size,
             pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
+            legacy_rpc_config,
             send_raw_transaction_sync_timeout,
         );
 
@@ -315,6 +317,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Timeout duration for `send_raw_transaction_sync` RPC method.
     send_raw_transaction_sync_timeout: Duration,
+
+    /// XLayer: Optional legacy RPC client for routing historical data.
+    pub(crate) legacy_rpc_client: Option<Arc<reth_rpc_eth_types::LegacyRpcClient>>,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -340,6 +345,7 @@ where
         max_batch_size: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: Option<RpcClient>,
+        legacy_rpc_config: Option<reth_rpc_eth_types::LegacyRpcConfig>,
         send_raw_transaction_sync_timeout: Duration,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
@@ -361,6 +367,20 @@ where
             BatchTxProcessor::new(components.pool().clone(), max_batch_size);
         task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
 
+        // XLayer: Initialize legacy RPC client if configured
+        let legacy_rpc_client = legacy_rpc_config.and_then(|config| {
+            match reth_rpc_eth_types::LegacyRpcClient::from_config(&config) {
+                Ok(client) => {
+                    tracing::info!(cutoff = config.cutoff_block, endpoint = %config.endpoint, "Legacy RPC initialized");
+                    Some(Arc::new(client))
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, endpoint = %config.endpoint, "Legacy RPC init failed");
+                    None
+                }
+            }
+        });
+
         Self {
             components,
             signers,
@@ -381,6 +401,7 @@ where
             next_env_builder: Box::new(next_env),
             tx_batch_sender,
             pending_block_kind,
+            legacy_rpc_client,
             send_raw_transaction_sync_timeout,
         }
     }

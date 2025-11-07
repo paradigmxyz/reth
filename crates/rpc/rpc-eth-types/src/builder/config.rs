@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::{
     EthStateCacheConfig, FeeHistoryCacheConfig, ForwardConfig, GasPriceOracleConfig,
-    RPC_DEFAULT_GAS_CAP,
+    LegacyRpcConfig, RPC_DEFAULT_GAS_CAP,
 };
 use reqwest::Url;
 use reth_rpc_server_types::constants::{
@@ -93,6 +93,8 @@ pub struct EthConfig {
     pub pending_block_kind: PendingBlockKind,
     /// The raw transaction forwarder.
     pub raw_tx_forwarder: ForwardConfig,
+    /// XLayer: Legacy RPC configuration for routing historical data
+    pub legacy_rpc_config: Option<LegacyRpcConfig>,
     /// Timeout duration for `send_raw_transaction_sync` RPC method.
     pub send_raw_transaction_sync_timeout: Duration,
 }
@@ -125,6 +127,7 @@ impl Default for EthConfig {
             max_batch_size: 1,
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
+            legacy_rpc_config: None, // XLayer: Legacy RPC configuration for routing historical data
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
         }
     }

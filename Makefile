@@ -518,3 +518,6 @@ check-features:
 		--package reth-primitives-traits \
 		--package reth-primitives \
 		--feature-powerset
+
+build-docker:
+	docker build -t op-reth:latest -f DockerfileOp .

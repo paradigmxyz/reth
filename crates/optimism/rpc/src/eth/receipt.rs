@@ -71,6 +71,12 @@ where
         inputs: Vec<ConvertReceiptInput<'_, N>>,
         block: &SealedBlock<N::Block>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
+        // XLayer: Handle empty blocks (e.g., cutoff block in migration scenario)
+        if inputs.is_empty() {
+            tracing::warn!(target: "rpc::eth::receipts", block = block.header().number(), hash = ?block.hash(), "Empty block, returning empty receipts");
+            return Ok(vec![]);
+        }
+
         let mut l1_block_info = match reth_optimism_evm::extract_l1_info(block.body()) {
             Ok(l1_block_info) => l1_block_info,
             Err(err) => {

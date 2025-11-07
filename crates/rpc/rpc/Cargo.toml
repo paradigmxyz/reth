@@ -103,7 +103,8 @@ reth-db-api.workspace = true
 
 rand.workspace = true
 
-jsonrpsee = { workspace = true, features = ["client"] }
+jsonrpsee = { workspace = true, features = ["client", "server"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
