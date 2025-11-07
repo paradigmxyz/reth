@@ -69,8 +69,7 @@ use reth_trie::{
         TrieCursorIter,
     },
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    BranchNodeCompact, HashedPostStateSorted, Nibbles, StoredNibbles, StoredNibblesSubKey,
-    TrieChangeSetsEntry,
+    HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
 };
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
@@ -2120,17 +2119,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         // Wrap the cursor in DatabaseAccountTrieCursor
         let mut db_account_cursor = DatabaseAccountTrieCursor::new(curr_values_cursor);
 
-        // Static empty array for when updates_overlay is None
-        static EMPTY_ACCOUNT_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
-
-        // Get the overlay updates for account trie, or use an empty array
-        let account_overlay_updates = updates_overlay
-            .map(|overlay| overlay.account_nodes_ref())
-            .unwrap_or(&EMPTY_ACCOUNT_UPDATES);
+        // Create empty TrieUpdatesSorted for when updates_overlay is None
+        let empty_updates = TrieUpdatesSorted::default();
+        let overlay = updates_overlay.unwrap_or(&empty_updates);
 
         // Wrap the cursor in InMemoryTrieCursor with the overlay
         let mut in_memory_account_cursor =
-            InMemoryTrieCursor::new(Some(&mut db_account_cursor), account_overlay_updates);
+            InMemoryTrieCursor::new_account(&mut db_account_cursor, overlay);
 
         for (path, _) in trie_updates.account_nodes_ref() {
             num_entries += 1;
@@ -2368,8 +2363,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
             B256::default(), // Will be set per iteration
         );
 
-        // Static empty array for when updates_overlay is None
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+        // Create empty TrieUpdatesSorted for when updates_overlay is None
+        let empty_updates = TrieUpdatesSorted::default();
 
         for (hashed_address, storage_trie_updates) in storage_tries {
             let changeset_key = BlockNumberHashedAddress((block_number, *hashed_address));
@@ -2378,15 +2373,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
             changed_curr_values_cursor =
                 DatabaseStorageTrieCursor::new(changed_curr_values_cursor.cursor, *hashed_address);
 
-            // Get the overlay updates for this storage trie, or use an empty array
-            let overlay_updates = updates_overlay
-                .and_then(|overlay| overlay.storage_tries_ref().get(hashed_address))
-                .map(|updates| updates.storage_nodes_ref())
-                .unwrap_or(&EMPTY_UPDATES);
+            // Get the overlay updates, or use empty updates
+            let overlay = updates_overlay.unwrap_or(&empty_updates);
 
             // Wrap the cursor in InMemoryTrieCursor with the overlay
-            let mut in_memory_changed_cursor =
-                InMemoryTrieCursor::new(Some(&mut changed_curr_values_cursor), overlay_updates);
+            let mut in_memory_changed_cursor = InMemoryTrieCursor::new_storage(
+                &mut changed_curr_values_cursor,
+                overlay,
+                *hashed_address,
+            );
 
             // Create an iterator which produces the current values of all updated paths, or None if
             // they are currently unset.
@@ -2402,8 +2397,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
                     DatabaseStorageTrieCursor::new(wiped_nodes_cursor.cursor, *hashed_address);
 
                 // Wrap the wiped nodes cursor in InMemoryTrieCursor with the overlay
-                let mut in_memory_wiped_cursor =
-                    InMemoryTrieCursor::new(Some(&mut wiped_nodes_cursor), overlay_updates);
+                let mut in_memory_wiped_cursor = InMemoryTrieCursor::new_storage(
+                    &mut wiped_nodes_cursor,
+                    overlay,
+                    *hashed_address,
+                );
 
                 let all_nodes = TrieCursorIter::new(&mut in_memory_wiped_cursor);
 
