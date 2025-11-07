@@ -3158,6 +3158,7 @@ mod tests {
         BlockWriter,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
+    use reth_trie::Nibbles;
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {

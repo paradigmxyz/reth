@@ -821,7 +821,7 @@ mod tests {
                 let db_nodes_arc = Arc::new(db_nodes_map);
                 let visited_keys = Arc::new(Mutex::new(Vec::new()));
                 let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
-                let trie_updates = TrieUpdatesSorted::new(in_memory_nodes.clone(), Default::default());
+                let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
                 let mut test_cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
                 // Test: seek to the beginning first

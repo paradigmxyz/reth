@@ -479,7 +479,7 @@ mod tests {
                 // Create a HashedPostStateSorted with the storage data
                 let hashed_address = B256::ZERO;
                 let storage_sorted = reth_trie_common::HashedStorageSorted {
-                    storage_slots: post_state_nodes.clone(),
+                    storage_slots: post_state_nodes,
                     wiped: false,
                 };
                 let mut storages = alloy_primitives::map::B256Map::default();
