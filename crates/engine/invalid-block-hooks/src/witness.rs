@@ -364,12 +364,15 @@ where
         Ok(())
     }
 
+    fn write_file(&self, filename: String, contents: &[u8]) -> eyre::Result<PathBuf> {
+        let path = self.output_directory.join(filename);
+        File::create(&path)?.write_all(contents)?;
+        Ok(path)
+    }
+
     /// Serializes and saves a value to a JSON file in the output directory
     fn save_file<T: Serialize>(&self, filename: String, value: &T) -> eyre::Result<PathBuf> {
-        let path = self.output_directory.join(filename);
-        File::create(&path)?.write_all(serde_json::to_string(value)?.as_bytes())?;
-
-        Ok(path)
+        self.write_file(filename, serde_json::to_string(value)?.as_bytes())
     }
 
     /// Compares two values and saves their diff to a file in the output directory
@@ -379,11 +382,8 @@ where
         original: &T,
         new: &T,
     ) -> eyre::Result<PathBuf> {
-        let path = self.output_directory.join(filename);
         let diff = Comparison::new(original, new);
-        File::create(&path)?.write_all(diff.to_string().as_bytes())?;
-
-        Ok(path)
+        self.write_file(filename, diff.to_string().as_bytes())
     }
 }
 
