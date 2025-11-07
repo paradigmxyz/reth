@@ -9,7 +9,7 @@ use alloy_primitives::{
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use derive_more::derive::Deref;
-use metrics::Histogram;
+use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -19,7 +19,10 @@ use reth_trie::{
 };
 use reth_trie_parallel::{
     proof::ParallelProof,
-    proof_task::{AccountMultiproofInput, ProofResultMessage, ProofWorkerHandle},
+    proof_task::{
+        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        StorageProofInput,
+    },
 };
 use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
@@ -54,8 +57,8 @@ impl SparseTrieUpdate {
 }
 
 /// Common configuration for multi proof tasks
-#[derive(Debug, Clone)]
-pub(super) struct MultiProofConfig {
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MultiProofConfig {
     /// The sorted collection of cached in-memory intermediate trie nodes that
     /// can be reused for computation.
     pub nodes_sorted: Arc<TrieUpdatesSorted>,
@@ -72,7 +75,7 @@ impl MultiProofConfig {
     ///
     /// This returns a cleared [`TrieInput`] so that we can reuse any allocated space in the
     /// [`TrieInput`].
-    pub(super) fn from_input(mut input: TrieInput) -> (TrieInput, Self) {
+    pub(crate) fn from_input(mut input: TrieInput) -> (TrieInput, Self) {
         let config = Self {
             nodes_sorted: Arc::new(input.nodes.drain_into_sorted()),
             state_sorted: Arc::new(input.state.drain_into_sorted()),
@@ -286,7 +289,6 @@ impl StorageMultiproofInput {
 /// Input parameters for dispatching a multiproof calculation.
 #[derive(Debug)]
 struct MultiproofInput {
-    config: MultiProofConfig,
     source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
     proof_targets: MultiProofTargets,
@@ -317,8 +319,6 @@ impl MultiproofInput {
 ///    `ProofSequencer`.
 #[derive(Debug)]
 pub struct MultiproofManager {
-    /// Currently running calculations.
-    inflight: usize,
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,
     /// Cached storage proof roots for missed leaves; this maps
@@ -347,8 +347,11 @@ impl MultiproofManager {
         proof_worker_handle: ProofWorkerHandle,
         proof_result_tx: CrossbeamSender<ProofResultMessage>,
     ) -> Self {
+        // Initialize the max worker gauges with the worker pool sizes
+        metrics.max_storage_workers.set(proof_worker_handle.total_storage_workers() as f64);
+        metrics.max_account_workers.set(proof_worker_handle.total_account_workers() as f64);
+
         Self {
-            inflight: 0,
             metrics,
             proof_worker_handle,
             missed_leaves_storage_roots: Default::default(),
@@ -357,7 +360,7 @@ impl MultiproofManager {
     }
 
     /// Dispatches a new multiproof calculation to worker pools.
-    fn dispatch(&mut self, input: PendingMultiproofTask) {
+    fn dispatch(&self, input: PendingMultiproofTask) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets_is_empty() {
             debug!(
@@ -379,7 +382,7 @@ impl MultiproofManager {
     }
 
     /// Dispatches a single storage proof calculation to worker pool.
-    fn dispatch_storage_proof(&mut self, storage_multiproof_input: StorageMultiproofInput) {
+    fn dispatch_storage_proof(&self, storage_multiproof_input: StorageMultiproofInput) {
         let StorageMultiproofInput {
             hashed_state_update,
             hashed_address,
@@ -408,7 +411,7 @@ impl MultiproofManager {
         let prefix_set = prefix_set.freeze();
 
         // Build computation input (data only)
-        let input = reth_trie_parallel::proof_task::StorageProofInput::new(
+        let input = StorageProofInput::new(
             hashed_address,
             prefix_set,
             proof_targets,
@@ -419,7 +422,7 @@ impl MultiproofManager {
         // Dispatch to storage worker
         if let Err(e) = self.proof_worker_handle.dispatch_storage_proof(
             input,
-            reth_trie_parallel::proof_task::ProofResultContext::new(
+            ProofResultContext::new(
                 self.proof_result_tx.clone(),
                 proof_sequence_number,
                 hashed_state_update,
@@ -430,8 +433,12 @@ impl MultiproofManager {
             return;
         }
 
-        self.inflight += 1;
-        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        self.metrics
+            .active_storage_workers_histogram
+            .record(self.proof_worker_handle.active_storage_workers() as f64);
+        self.metrics
+            .active_account_workers_histogram
+            .record(self.proof_worker_handle.active_account_workers() as f64);
         self.metrics
             .pending_storage_multiproofs_histogram
             .record(self.proof_worker_handle.pending_storage_tasks() as f64);
@@ -441,9 +448,13 @@ impl MultiproofManager {
     }
 
     /// Signals that a multiproof calculation has finished.
-    fn on_calculation_complete(&mut self) {
-        self.inflight = self.inflight.saturating_sub(1);
-        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+    fn on_calculation_complete(&self) {
+        self.metrics
+            .active_storage_workers_histogram
+            .record(self.proof_worker_handle.active_storage_workers() as f64);
+        self.metrics
+            .active_account_workers_histogram
+            .record(self.proof_worker_handle.active_account_workers() as f64);
         self.metrics
             .pending_storage_multiproofs_histogram
             .record(self.proof_worker_handle.pending_storage_tasks() as f64);
@@ -453,9 +464,8 @@ impl MultiproofManager {
     }
 
     /// Dispatches a single multiproof calculation to worker pool.
-    fn dispatch_multiproof(&mut self, multiproof_input: MultiproofInput) {
+    fn dispatch_multiproof(&self, multiproof_input: MultiproofInput) {
         let MultiproofInput {
-            config,
             source,
             hashed_state_update,
             proof_targets,
@@ -482,7 +492,7 @@ impl MultiproofManager {
 
         // Extend prefix sets with targets
         let frozen_prefix_sets =
-            ParallelProof::extend_prefix_sets_with_targets(&config.prefix_sets, &proof_targets);
+            ParallelProof::extend_prefix_sets_with_targets(&Default::default(), &proof_targets);
 
         // Dispatch account multiproof to worker pool with result sender
         let input = AccountMultiproofInput {
@@ -492,7 +502,7 @@ impl MultiproofManager {
             multi_added_removed_keys,
             missed_leaves_storage_roots,
             // Workers will send ProofResultMessage directly to proof_result_rx
-            proof_result_sender: reth_trie_parallel::proof_task::ProofResultContext::new(
+            proof_result_sender: ProofResultContext::new(
                 self.proof_result_tx.clone(),
                 proof_sequence_number,
                 hashed_state_update,
@@ -505,8 +515,12 @@ impl MultiproofManager {
             return;
         }
 
-        self.inflight += 1;
-        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        self.metrics
+            .active_storage_workers_histogram
+            .record(self.proof_worker_handle.active_storage_workers() as f64);
+        self.metrics
+            .active_account_workers_histogram
+            .record(self.proof_worker_handle.active_account_workers() as f64);
         self.metrics
             .pending_storage_multiproofs_histogram
             .record(self.proof_worker_handle.pending_storage_tasks() as f64);
@@ -519,8 +533,14 @@ impl MultiproofManager {
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
 pub(crate) struct MultiProofTaskMetrics {
-    /// Histogram of inflight multiproofs.
-    pub inflight_multiproofs_histogram: Histogram,
+    /// Histogram of active storage workers processing proofs.
+    pub active_storage_workers_histogram: Histogram,
+    /// Histogram of active account workers processing proofs.
+    pub active_account_workers_histogram: Histogram,
+    /// Gauge for the maximum number of storage workers in the pool.
+    pub max_storage_workers: Gauge,
+    /// Gauge for the maximum number of account workers in the pool.
+    pub max_account_workers: Gauge,
     /// Histogram of pending storage multiproofs in the queue.
     pub pending_storage_multiproofs_histogram: Histogram,
     /// Histogram of pending account multiproofs in the queue.
@@ -582,7 +602,6 @@ pub(crate) struct MultiProofTaskMetrics {
 ///    ▼                                                           │
 /// ┌──────────────────────────────────────────────────────────────┐ │
 /// │             MultiproofManager                                │ │
-/// │  - Tracks inflight calculations                              │ │
 /// │  - Deduplicates against fetched_proof_targets                │ │
 /// │  - Routes to appropriate worker pool                         │ │
 /// └──┬───────────────────────────────────────────────────────────┘ │
@@ -623,7 +642,6 @@ pub(crate) struct MultiProofTaskMetrics {
 ///
 /// - **[`MultiproofManager`]**: Calculation orchestrator
 ///   - Decides between fast path ([`EmptyProof`]) and worker dispatch
-///   - Tracks inflight calculations
 ///   - Routes storage-only vs full multiproofs to appropriate workers
 ///   - Records metrics for monitoring
 ///
@@ -668,8 +686,6 @@ pub(super) struct MultiProofTask {
     /// The size of proof targets chunk to spawn in one calculation.
     /// If None, chunking is disabled and all targets are processed in a single proof.
     chunk_size: Option<usize>,
-    /// Task configuration.
-    config: MultiProofConfig,
     /// Receiver for state root related messages (prefetch, state updates, finish signal).
     rx: CrossbeamReceiver<MultiProofMessage>,
     /// Sender for state root related messages.
@@ -693,7 +709,6 @@ pub(super) struct MultiProofTask {
 impl MultiProofTask {
     /// Creates a new multi proof task with the unified message channel
     pub(super) fn new(
-        config: MultiProofConfig,
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
         chunk_size: Option<usize>,
@@ -704,7 +719,6 @@ impl MultiProofTask {
 
         Self {
             chunk_size,
-            config,
             rx,
             tx,
             proof_result_rx,
@@ -729,7 +743,12 @@ impl MultiProofTask {
     /// Handles request for proof prefetch.
     ///
     /// Returns a number of proofs that were spawned.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip_all, fields(accounts = targets.len()))]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::multiproof",
+        skip_all,
+        fields(accounts = targets.len(), chunks = 0)
+    )]
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
@@ -750,15 +769,15 @@ impl MultiProofTask {
         // Process proof targets in chunks.
         let mut chunks = 0;
 
-        // Only chunk if account or storage workers are available to take advantage of parallelism.
-        let should_chunk =
-            self.multiproof_manager.proof_worker_handle.has_available_account_workers() ||
-                self.multiproof_manager.proof_worker_handle.has_available_storage_workers();
+        // Only chunk if multiple account or storage workers are available to take advantage of
+        // parallelism.
+        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
+            1 ||
+            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
 
         let mut dispatch = |proof_targets| {
             self.multiproof_manager.dispatch(
                 MultiproofInput {
-                    config: self.config.clone(),
                     source: None,
                     hashed_state_update: Default::default(),
                     proof_targets,
@@ -771,10 +790,16 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if should_chunk && let Some(chunk_size) = self.chunk_size {
+        if should_chunk &&
+            let Some(chunk_size) = self.chunk_size &&
+            proof_targets.chunking_length() > chunk_size
+        {
+            let mut chunks = 0usize;
             for proof_targets_chunk in proof_targets.chunks(chunk_size) {
                 dispatch(proof_targets_chunk);
+                chunks += 1;
             }
+            tracing::Span::current().record("chunks", chunks);
         } else {
             dispatch(proof_targets);
         }
@@ -860,7 +885,12 @@ impl MultiProofTask {
     /// Handles state updates.
     ///
     /// Returns a number of proofs that were spawned.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::multiproof", skip(self, update), fields(accounts = update.len()))]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::multiproof",
+        skip(self, update),
+        fields(accounts = update.len(), chunks = 0)
+    )]
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
@@ -891,10 +921,11 @@ impl MultiProofTask {
 
         let mut spawned_proof_targets = MultiProofTargets::default();
 
-        // Only chunk if account or storage workers are available to take advantage of parallelism.
-        let should_chunk =
-            self.multiproof_manager.proof_worker_handle.has_available_account_workers() ||
-                self.multiproof_manager.proof_worker_handle.has_available_storage_workers();
+        // Only chunk if multiple account or storage workers are available to take advantage of
+        // parallelism.
+        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
+            1 ||
+            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
 
         let mut dispatch = |hashed_state_update| {
             let proof_targets = get_proof_targets(
@@ -906,7 +937,6 @@ impl MultiProofTask {
 
             self.multiproof_manager.dispatch(
                 MultiproofInput {
-                    config: self.config.clone(),
                     source: Some(source),
                     hashed_state_update,
                     proof_targets,
@@ -920,10 +950,16 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if should_chunk && let Some(chunk_size) = self.chunk_size {
+        if should_chunk &&
+            let Some(chunk_size) = self.chunk_size &&
+            not_fetched_state_update.chunking_length() > chunk_size
+        {
+            let mut chunks = 0usize;
             for chunk in not_fetched_state_update.chunks(chunk_size) {
                 dispatch(chunk);
+                chunks += 1;
             }
+            tracing::Span::current().record("chunks", chunks);
         } else {
             dispatch(not_fetched_state_update);
         }
@@ -1017,7 +1053,64 @@ impl MultiProofTask {
         loop {
             trace!(target: "engine::tree::payload_processor::multiproof", "entering main channel receiving loop");
 
-            crossbeam_channel::select! {
+            crossbeam_channel::select_biased! {
+                recv(self.proof_result_rx) -> proof_msg => {
+                    match proof_msg {
+                        Ok(proof_result) => {
+                            proofs_processed += 1;
+
+                            self.metrics
+                                .proof_calculation_duration_histogram
+                                .record(proof_result.elapsed);
+
+                            self.multiproof_manager.on_calculation_complete();
+
+                            // Convert ProofResultMessage to SparseTrieUpdate
+                            match proof_result.result {
+                                Ok(proof_result_data) => {
+                                    debug!(
+                                        target: "engine::tree::payload_processor::multiproof",
+                                        sequence = proof_result.sequence_number,
+                                        total_proofs = proofs_processed,
+                                        "Processing calculated proof from worker"
+                                    );
+
+                                    let update = SparseTrieUpdate {
+                                        state: proof_result.state,
+                                        multiproof: proof_result_data.into_multiproof(),
+                                    };
+
+                                    if let Some(combined_update) =
+                                        self.on_proof(proof_result.sequence_number, update)
+                                    {
+                                        let _ = self.to_sparse_trie.send(combined_update);
+                                    }
+                                }
+                                Err(error) => {
+                                    error!(target: "engine::tree::payload_processor::multiproof", ?error, "proof calculation error from worker");
+                                    return
+                                }
+                            }
+
+                            if self.is_done(
+                                proofs_processed,
+                                state_update_proofs_requested,
+                                prefetch_proofs_requested,
+                                updates_finished,
+                            ) {
+                                debug!(
+                                    target: "engine::tree::payload_processor::multiproof",
+                                    "State updates finished and all proofs processed, ending calculation"
+                                );
+                                break
+                            }
+                        }
+                        Err(_) => {
+                            error!(target: "engine::tree::payload_processor::multiproof", "Proof result channel closed unexpectedly");
+                            return
+                        }
+                    }
+                },
                 recv(self.rx) -> message => {
                     match message {
                         Ok(msg) => match msg {
@@ -1117,63 +1210,6 @@ impl MultiProofTask {
                             return
                         }
                     }
-                },
-                recv(self.proof_result_rx) -> proof_msg => {
-                    match proof_msg {
-                        Ok(proof_result) => {
-                            proofs_processed += 1;
-
-                            self.metrics
-                                .proof_calculation_duration_histogram
-                                .record(proof_result.elapsed);
-
-                            self.multiproof_manager.on_calculation_complete();
-
-                            // Convert ProofResultMessage to SparseTrieUpdate
-                            match proof_result.result {
-                                Ok((multiproof, _stats)) => {
-                                    debug!(
-                                        target: "engine::tree::payload_processor::multiproof",
-                                        sequence = proof_result.sequence_number,
-                                        total_proofs = proofs_processed,
-                                        "Processing calculated proof from worker"
-                                    );
-
-                                    let update = SparseTrieUpdate {
-                                        state: proof_result.state,
-                                        multiproof,
-                                    };
-
-                                    if let Some(combined_update) =
-                                        self.on_proof(proof_result.sequence_number, update)
-                                    {
-                                        let _ = self.to_sparse_trie.send(combined_update);
-                                    }
-                                }
-                                Err(error) => {
-                                    error!(target: "engine::tree::payload_processor::multiproof", ?error, "proof calculation error from worker");
-                                    return
-                                }
-                            }
-
-                            if self.is_done(
-                                proofs_processed,
-                                state_update_proofs_requested,
-                                prefetch_proofs_requested,
-                                updates_finished,
-                            ) {
-                                debug!(
-                                    target: "engine::tree::payload_processor::multiproof",
-                                    "State updates finished and all proofs processed, ending calculation"
-                                );
-                                break
-                            }
-                        }
-                        Err(_) => {
-                            error!(target: "engine::tree::payload_processor::multiproof", "Proof result channel closed unexpectedly");
-                            return
-                        }
-                    }
                 }
             }
         }
@@ -1250,10 +1286,11 @@ mod tests {
     use super::*;
     use alloy_primitives::map::B256Set;
     use reth_provider::{
-        providers::ConsistentDbView, test_utils::create_test_provider_factory, BlockReader,
-        DatabaseProviderFactory,
+        providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
+        BlockReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
+        TrieReader,
     };
-    use reth_trie::{MultiProof, TrieInput};
+    use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
     use std::sync::OnceLock;
@@ -1272,20 +1309,19 @@ mod tests {
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
     where
-        F: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
+        F: DatabaseProviderFactory<
+                Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            > + Clone
+            + Send
+            + 'static,
     {
         let rt_handle = get_test_runtime_handle();
-        let (_trie_input, config) = MultiProofConfig::from_input(TrieInput::default());
-        let task_ctx = ProofTaskCtx::new(
-            config.nodes_sorted.clone(),
-            config.state_sorted.clone(),
-            config.prefix_sets.clone(),
-        );
-        let consistent_view = ConsistentDbView::new(factory, None);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, consistent_view, task_ctx, 1, 1);
+        let overlay_factory = OverlayStateProviderFactory::new(factory);
+        let task_ctx = ProofTaskCtx::new(overlay_factory);
+        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
 
-        MultiProofTask::new(config, proof_handle, to_sparse_trie, Some(1))
+        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1))
     }
 
     #[test]

@@ -6,8 +6,7 @@
 use alloy_primitives::{Address, U256};
 use futures::TryStreamExt;
 use jsonrpsee::{
-    core::SubscriptionResult, proc_macros::rpc, tracing, PendingSubscriptionSink,
-    SubscriptionMessage,
+    core::SubscriptionResult, proc_macros::rpc, PendingSubscriptionSink, SubscriptionMessage,
 };
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},

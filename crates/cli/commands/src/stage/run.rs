@@ -116,7 +116,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let components = components(provider_factory.chain_spec());
 
         if let Some(listen_addr) = self.metrics {
-            info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             let config = MetricServerConfig::new(
                 listen_addr,
                 VersionInfo {

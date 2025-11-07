@@ -175,7 +175,6 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// and resetting the trie to only contain an empty root node.
     ///
     /// Note: This method will error if the trie is blinded.
-    #[instrument(target = "trie::sparse", skip_all)]
     pub fn wipe(&mut self) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.wipe();
@@ -192,7 +191,6 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     ///
     /// - `Some(B256)` with the calculated root hash if the trie is revealed.
     /// - `None` if the trie is still blind.
-    #[instrument(target = "trie::sparse", skip_all)]
     pub fn root(&mut self) -> Option<B256> {
         Some(self.as_revealed_mut()?.root())
     }
@@ -232,7 +230,7 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// # Errors
     ///
     /// Returns an error if the trie is still blind, or if the update fails.
-    #[instrument(target = "trie::sparse", skip_all)]
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
     pub fn update_leaf(
         &mut self,
         path: Nibbles,
@@ -249,7 +247,7 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// # Errors
     ///
     /// Returns an error if the trie is still blind, or if the leaf cannot be removed
-    #[instrument(target = "trie::sparse", skip_all)]
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
     pub fn remove_leaf(
         &mut self,
         path: &Nibbles,
@@ -258,22 +256,6 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.remove_leaf(path, provider)?;
         Ok(())
-    }
-
-    /// Returns the allocated capacity for sparse trie nodes.
-    pub fn node_capacity(&self) -> usize {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => trie.node_capacity(),
-            _ => 0,
-        }
-    }
-
-    /// Returns the allocated capacity for sparse trie values.
-    pub fn value_capacity(&self) -> usize {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => trie.value_capacity(),
-            _ => 0,
-        }
     }
 
     /// Shrinks the capacity of the sparse trie's node storage.
@@ -615,7 +597,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
-    #[instrument(target = "trie::sparse::serial", skip(self, provider))]
+    #[instrument(level = "trace", target = "trie::sparse::serial", skip(self, provider))]
     fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
@@ -753,7 +735,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
-    #[instrument(target = "trie::sparse::serial", skip(self, provider))]
+    #[instrument(level = "trace", target = "trie::sparse::serial", skip(self, provider))]
     fn remove_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: &Nibbles,
@@ -992,6 +974,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
         // Helper function to check if a value matches the expected value
+        #[inline]
         fn check_value_match(
             actual_value: &Vec<u8>,
             expected_value: Option<&Vec<u8>>,
@@ -1101,14 +1084,6 @@ impl SparseTrieInterface for SerialSparseTrie {
 
         // If we get here, there's no leaf at the target path
         Ok(LeafLookup::NonExistent)
-    }
-
-    fn node_capacity(&self) -> usize {
-        self.nodes.capacity()
-    }
-
-    fn value_capacity(&self) -> usize {
-        self.values.capacity()
     }
 
     fn shrink_nodes_to(&mut self, size: usize) {
@@ -1385,7 +1360,7 @@ impl SerialSparseTrie {
     ///
     /// This function identifies all nodes that have changed (based on the prefix set) at the given
     /// depth and recalculates their RLP representation.
-    #[instrument(target = "trie::sparse::serial", skip(self))]
+    #[instrument(level = "trace", target = "trie::sparse::serial", skip(self))]
     pub fn update_rlp_node_level(&mut self, depth: usize) {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
@@ -1431,7 +1406,7 @@ impl SerialSparseTrie {
     ///   specified depth.
     /// - A `PrefixSetMut` containing paths shallower than the specified depth that still need to be
     ///   tracked for future updates.
-    #[instrument(target = "trie::sparse::serial", skip(self))]
+    #[instrument(level = "trace", target = "trie::sparse::serial", skip(self))]
     fn get_changed_nodes_at_depth(
         &self,
         prefix_set: &mut PrefixSet,
@@ -1518,7 +1493,7 @@ impl SerialSparseTrie {
     /// # Panics
     ///
     /// If the node at provided path does not exist.
-    #[instrument(target = "trie::sparse::serial", skip_all, ret(level = "trace"))]
+    #[instrument(level = "trace", target = "trie::sparse::serial", skip_all, ret(level = "trace"))]
     pub fn rlp_node(
         &mut self,
         prefix_set: &mut PrefixSet,
@@ -2381,7 +2356,7 @@ mod tests {
     use reth_primitives_traits::Account;
     use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
     use reth_trie::{
-        hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
+        hashed_cursor::{noop::NoopHashedCursor, HashedPostStateCursor},
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
@@ -2441,8 +2416,8 @@ mod tests {
             .into_sorted();
         let mut node_iter = TrieNodeIter::state_trie(
             walker,
-            HashedPostStateAccountCursor::new(
-                NoopHashedAccountCursor::default(),
+            HashedPostStateCursor::new(
+                Option::<NoopHashedCursor<Account>>::None,
                 hashed_post_state.accounts(),
             ),
         );

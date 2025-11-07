@@ -99,7 +99,11 @@ pub struct MockHashedCursor<T> {
 }
 
 impl<T> MockHashedCursor<T> {
-    fn new(values: Arc<BTreeMap<B256, T>>, visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>) -> Self {
+    /// Creates a new mock hashed cursor with the given values and key tracking.
+    pub fn new(
+        values: Arc<BTreeMap<B256, T>>,
+        visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>,
+    ) -> Self {
         Self { current_key: None, values, visited_keys }
     }
 }
