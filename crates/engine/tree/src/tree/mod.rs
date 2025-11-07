@@ -1410,11 +1410,12 @@ where
                                     self.on_maybe_tree_event(res.event.take())?;
                                 }
 
-                                let elapsed = start.elapsed();
-                                self.metrics
-                                    .engine
-                                    .forkchoice_updated
-                                    .update_response_metrics(has_attrs, &output, elapsed);
+                                self.metrics.engine.forkchoice_updated.update_response_metrics(
+                                    start,
+                                    &mut self.metrics.engine.new_payload.latest_at,
+                                    has_attrs,
+                                    &output,
+                                );
 
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(Into::into))
@@ -1430,11 +1431,10 @@ where
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let mut output = self.on_new_payload(payload);
-                                let elapsed = start.elapsed();
                                 self.metrics
                                     .engine
                                     .new_payload
-                                    .update_response_metrics(&output, gas_used, elapsed);
+                                    .update_response_metrics(start, &output, gas_used);
 
                                 let maybe_event =
                                     output.as_mut().ok().and_then(|out| out.event.take());
