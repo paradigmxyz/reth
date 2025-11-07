@@ -661,6 +661,49 @@ impl HashedStorageSorted {
     }
 }
 
+impl From<HashedStorageSorted> for HashedStorage {
+    fn from(sorted: HashedStorageSorted) -> Self {
+        let mut storage = B256Map::default();
+
+        // Add all non-zero valued slots
+        for (slot, value) in sorted.non_zero_valued_slots {
+            storage.insert(slot, value);
+        }
+
+        // Add all zero valued slots
+        for slot in sorted.zero_valued_slots {
+            storage.insert(slot, U256::ZERO);
+        }
+
+        Self { wiped: sorted.wiped, storage }
+    }
+}
+
+impl From<HashedPostStateSorted> for HashedPostState {
+    fn from(sorted: HashedPostStateSorted) -> Self {
+        let mut accounts = B256Map::default();
+
+        // Add all updated accounts
+        for (address, account) in sorted.accounts.accounts {
+            accounts.insert(address, Some(account));
+        }
+
+        // Add all destroyed accounts
+        for address in sorted.accounts.destroyed_accounts {
+            accounts.insert(address, None);
+        }
+
+        // Convert storages
+        let storages = sorted
+            .storages
+            .into_iter()
+            .map(|(address, storage)| (address, storage.into()))
+            .collect();
+
+        Self { accounts, storages }
+    }
+}
+
 /// An iterator that yields chunks of the state updates of at most `size` account and storage
 /// targets.
 ///
