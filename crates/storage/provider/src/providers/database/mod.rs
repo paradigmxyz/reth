@@ -431,10 +431,6 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         self.provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        self.provider()?.transaction_block(id)
-    }
-
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,

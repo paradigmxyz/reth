@@ -964,14 +964,6 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.storage_provider.transaction_by_hash_with_meta(tx_hash)
     }
 
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        self.get_in_memory_or_storage_by_tx(
-            id.into(),
-            |provider| provider.transaction_block(id),
-            |_, _, block_state| Ok(Some(block_state.block_ref().recovered_block().number())),
-        )
-    }
-
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
