@@ -544,14 +544,9 @@ impl From<HashedStorageSorted> for HashedStorage {
     fn from(sorted: HashedStorageSorted) -> Self {
         let mut storage = B256Map::default();
 
-        // Add all non-zero valued slots
-        for (slot, value) in sorted.non_zero_valued_slots {
+        // Add all storage slots (including zero-valued ones which indicate deletion)
+        for (slot, value) in sorted.storage_slots {
             storage.insert(slot, value);
-        }
-
-        // Add all zero valued slots
-        for slot in sorted.zero_valued_slots {
-            storage.insert(slot, U256::ZERO);
         }
 
         Self { wiped: sorted.wiped, storage }
@@ -562,14 +557,9 @@ impl From<HashedPostStateSorted> for HashedPostState {
     fn from(sorted: HashedPostStateSorted) -> Self {
         let mut accounts = B256Map::default();
 
-        // Add all updated accounts
-        for (address, account) in sorted.accounts.accounts {
-            accounts.insert(address, Some(account));
-        }
-
-        // Add all destroyed accounts
-        for address in sorted.accounts.destroyed_accounts {
-            accounts.insert(address, None);
+        // Add all accounts (Some for updated, None for destroyed)
+        for (address, account) in sorted.accounts {
+            accounts.insert(address, account);
         }
 
         // Convert storages
