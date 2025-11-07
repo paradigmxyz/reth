@@ -476,18 +476,17 @@ where
         let blob_store =
             reth_node_builder::components::create_blob_store_with_cache(ctx, blob_cache_size)?;
 
-        let validator =
-            TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
-                .with_head_timestamp(ctx.head().timestamp)
-                .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
-                .with_local_transactions_config(pool_config.local_transactions_config.clone())
-                .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
-                .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
-                .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
-                .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-                .set_eip4844(!blobs_disabled)
-                .kzg_settings(ctx.kzg_settings()?)
-                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
+            .with_head_timestamp(ctx.head().timestamp)
+            .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
+            .with_local_transactions_config(pool_config.local_transactions_config.clone())
+            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
+            .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
+            .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
+            .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+            .set_eip4844(!blobs_disabled)
+            .kzg_settings(ctx.kzg_settings()?)
+            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         if !blobs_disabled && validator.validator().eip4844() {
             // initializing the KZG settings can be expensive, this should be done upfront so that
