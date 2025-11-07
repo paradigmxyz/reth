@@ -1,84 +1,81 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::{map::B256Set, B256};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use reth_engine_tree::tree::{select_dynamic_chunk_size, WorkerSnapshot};
-use reth_trie::MultiProofTargets;
+use std::cmp::min;
 
 const DEFAULT_BASE_CHUNK: usize = 10;
+const PER_CHUNK_OVERHEAD_NS: f64 = 50_000.0;
+const PER_TARGET_COST_NS: f64 = 3_000.0;
+const PER_CHUNK_SPIN: usize = 200_000;
+const WORK_UNITS: usize = 512 * 4;
 
-fn make_targets(accounts: usize, slots: usize) -> MultiProofTargets {
-    let mut targets = MultiProofTargets::default();
-    for account in 0..accounts {
-        let hashed = make_hash(account as u64);
-        let mut storage = B256Set::default();
-        for slot in 0..slots {
-            storage.insert(make_hash((account * slots + slot) as u64));
-        }
-        targets.insert(hashed, storage);
+fn simulate_processing(work_units: usize, chunk_size: usize, workers: usize) -> u64 {
+    if workers == 0 {
+        return 0;
     }
-    targets
+    let mut worker_times = vec![0f64; workers];
+    let mut spin = 0u64;
+    let mut remaining = work_units;
+    while remaining > 0 {
+        let current = min(remaining, chunk_size) as f64;
+        remaining -= current as usize;
+        let duration = PER_CHUNK_OVERHEAD_NS + current * PER_TARGET_COST_NS;
+        for _ in 0..PER_CHUNK_SPIN {
+            spin = spin.wrapping_add(1);
+        }
+        let mut idx = 0usize;
+        let mut min_time = worker_times[0];
+        for (i, time) in worker_times.iter().enumerate().skip(1) {
+            if *time < min_time {
+                min_time = *time;
+                idx = i;
+            }
+        }
+        worker_times[idx] = min_time + duration;
+    }
+    worker_times.into_iter().fold(0f64, f64::max) as u64 + spin
 }
 
-fn make_hash(value: u64) -> B256 {
-    let mut bytes = [0u8; 32];
-    bytes[24..].copy_from_slice(&value.to_be_bytes());
-    B256::from(bytes)
-}
-
-fn count_chunks(targets: &MultiProofTargets, chunk_size: usize) -> usize {
-    targets.clone().chunks(chunk_size).count()
-}
-
-/// Benchmarks how many chunks the dynamic policy emits for different idle worker counts.
+/// Benchmarks simulated processing time for static vs dynamic chunking.
 fn bench_chunking(c: &mut Criterion) {
-    let targets = make_targets(512, 4);
-    let work_units = targets.chunking_length();
-
+    let work_units = WORK_UNITS;
     let scenarios = [
-        ("static", None),
+        ("static_idle_8", 8, None),
         (
             "dynamic_idle_8",
-            select_dynamic_chunk_size(
-                Some(DEFAULT_BASE_CHUNK),
-                work_units,
-                WorkerSnapshot {
-                    available_accounts: 8,
-                    available_storage: 6,
-                    pending_accounts: 0,
-                    pending_storage: 0,
-                },
-            ),
+            8,
+            Some(WorkerSnapshot {
+                available_accounts: 8,
+                available_storage: 6,
+                pending_accounts: 0,
+                pending_storage: 0,
+            }),
         ),
         (
             "dynamic_idle_2",
-            select_dynamic_chunk_size(
-                Some(DEFAULT_BASE_CHUNK),
-                work_units,
-                WorkerSnapshot {
-                    available_accounts: 2,
-                    available_storage: 1,
-                    pending_accounts: 0,
-                    pending_storage: 0,
-                },
-            ),
+            2,
+            Some(WorkerSnapshot {
+                available_accounts: 2,
+                available_storage: 1,
+                pending_accounts: 0,
+                pending_storage: 0,
+            }),
         ),
     ];
 
     let mut group = c.benchmark_group("multiproof_chunking");
-    for (label, dynamic_size) in scenarios {
-        match dynamic_size {
-            Some(size) => {
-                group.bench_with_input(BenchmarkId::new("dynamic", label), &size, |b, size| {
-                    b.iter(|| count_chunks(&targets, *size));
-                });
-            }
-            None => {
-                group.bench_function(BenchmarkId::new("static", label), |b| {
-                    b.iter(|| count_chunks(&targets, DEFAULT_BASE_CHUNK));
-                });
-            }
-        }
+    for (label, workers, snapshot) in scenarios {
+        let chunk_size = snapshot
+            .and_then(|snap| select_dynamic_chunk_size(Some(DEFAULT_BASE_CHUNK), work_units, snap))
+            .unwrap_or(DEFAULT_BASE_CHUNK);
+        group.bench_with_input(
+            BenchmarkId::new("processing_time_ns", label),
+            &(chunk_size, workers),
+            |b, &(chunk_size, workers)| {
+                b.iter(|| black_box(simulate_processing(WORK_UNITS, chunk_size, workers)));
+            },
+        );
     }
     group.finish();
 }
