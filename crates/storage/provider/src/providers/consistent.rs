@@ -487,10 +487,14 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             // This should only be more than 0 once, in case of a partial range inside a block.
             let skip = (tx_range.start() - in_memory_tx_num) as usize;
 
-            items.extend(fetch_from_block_state(
-                skip..=skip + (remaining.min(block_tx_count - skip) - 1),
-                block_state,
-            )?);
+            // Calculate the number of transactions to fetch from this block.
+            // Use saturating_sub to prevent underflow when skip >= block_tx_count.
+            let count = remaining.min(block_tx_count.saturating_sub(skip));
+
+            // Only fetch if there are transactions to retrieve
+            if count > 0 {
+                items.extend(fetch_from_block_state(skip..=skip + count - 1, block_state)?);
+            }
 
             in_memory_tx_num += block_tx_count as u64;
 
@@ -1502,7 +1506,7 @@ mod tests {
     use reth_ethereum_primitives::Block;
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock};
-    use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader};
+    use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, TransactionsProvider};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
     };
@@ -1853,6 +1857,65 @@ mod tests {
                 .map(|(address, account, _)| AccountBeforeTx { address, info: Some(account) })
                 .collect::<Vec<_>>()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_transaction_range_by_block_boundary() -> eyre::Result<()> {
+        // Regression test for underflow bug when transaction range starts exactly at block
+        // boundary. Previously, when skip == block_tx_count, the calculation
+        // `remaining.min(block_tx_count - skip) - 1` would underflow (0 - 1).
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+
+        // Create one database block with transactions
+        let database_blocks = random_block_range(
+            &mut rng,
+            0..=0,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+
+        // Create one in-memory block with transactions
+        let in_memory_blocks = random_block_range(
+            &mut rng,
+            1..=1,
+            BlockRangeParams {
+                parent: Some(database_blocks.last().unwrap().hash()),
+                tx_count: 2..3,
+                ..Default::default()
+            },
+        );
+
+        // Insert database block
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.insert_block(
+            database_blocks[0].clone().try_recover().expect("failed to recover block"),
+        )?;
+        provider_rw.commit()?;
+
+        // Setup in-memory state
+        let provider = BlockchainProvider::new(factory)?;
+        let senders = in_memory_blocks[0].senders().expect("failed to recover senders");
+        provider.canonical_in_memory_state.update_chain(NewCanonicalChain::Commit {
+            new: vec![ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                    in_memory_blocks[0].clone(),
+                    senders,
+                )),
+                ..Default::default()
+            }],
+        });
+
+        let consistent_provider = provider.consistent_provider()?;
+
+        // Request transactions starting exactly at in-memory block boundary
+        let db_tx_count = database_blocks[0].body().transactions().count();
+        let result = consistent_provider
+            .transactions_by_tx_range(db_tx_count as u64..=db_tx_count as u64)?;
+
+        // Should successfully return first transaction from in-memory block without underflow
+        assert_eq!(result.len(), 1);
 
         Ok(())
     }
