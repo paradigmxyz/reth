@@ -2,6 +2,7 @@
 
 //! clap [Args](clap::Args) for optimism rollup configuration
 
+use crate::XLayerArgs;
 use op_alloy_consensus::interop::SafetyLevel;
 use reth_optimism_txpool::supervisor::DEFAULT_SUPERVISOR_URL;
 use url::Url;
@@ -74,6 +75,10 @@ pub struct RollupArgs {
     /// block tag will use the pending state based on flashblocks.
     #[arg(long)]
     pub flashblocks_url: Option<Url>,
+
+    /// X Layer specific configuration
+    #[command(flatten)]
+    pub xlayer_args: XLayerArgs,
 }
 
 impl Default for RollupArgs {
@@ -90,6 +95,7 @@ impl Default for RollupArgs {
             historical_rpc: None,
             min_suggested_priority_fee: 1_000_000,
             flashblocks_url: None,
+            xlayer_args: XLayerArgs::default(),
         }
     }
 }

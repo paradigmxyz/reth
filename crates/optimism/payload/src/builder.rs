@@ -3,6 +3,7 @@
 use crate::{
     config::{OpBuilderConfig, OpDAConfig},
     error::OpPayloadBuilderError,
+    intercept_xlayer::BridgeInterceptConfig,
     payload::OpBuiltPayload,
     OpAttributes, OpPayloadBuilderAttributes, OpPayloadPrimitives,
 };
@@ -63,6 +64,8 @@ pub struct OpPayloadBuilder<
     pub client: Client,
     /// Settings for the builder, e.g. DA settings.
     pub config: OpBuilderConfig,
+    /// Bridge transaction interception configuration
+    pub bridge_intercept: BridgeInterceptConfig,
     /// The type responsible for yielding the best transactions for the payload if mempool
     /// transactions are allowed.
     pub best_transactions: Txs,
@@ -83,6 +86,7 @@ where
             pool: self.pool.clone(),
             client: self.client.clone(),
             config: self.config.clone(),
+            bridge_intercept: self.bridge_intercept.clone(),
             best_transactions: self.best_transactions.clone(),
             compute_pending_block: self.compute_pending_block,
             _pd: PhantomData,
@@ -95,7 +99,13 @@ impl<Pool, Client, Evm, Attrs> OpPayloadBuilder<Pool, Client, Evm, (), Attrs> {
     ///
     /// Configures the builder with the default settings.
     pub fn new(pool: Pool, client: Client, evm_config: Evm) -> Self {
-        Self::with_builder_config(pool, client, evm_config, Default::default())
+        Self::with_builder_config(
+            pool,
+            client,
+            evm_config,
+            BridgeInterceptConfig::default(),
+            Default::default(),
+        )
     }
 
     /// Configures the builder with the given [`OpBuilderConfig`].
@@ -103,6 +113,7 @@ impl<Pool, Client, Evm, Attrs> OpPayloadBuilder<Pool, Client, Evm, (), Attrs> {
         pool: Pool,
         client: Client,
         evm_config: Evm,
+        bridge_intercept: BridgeInterceptConfig,
         config: OpBuilderConfig,
     ) -> Self {
         Self {
@@ -111,6 +122,7 @@ impl<Pool, Client, Evm, Attrs> OpPayloadBuilder<Pool, Client, Evm, (), Attrs> {
             compute_pending_block: true,
             evm_config,
             config,
+            bridge_intercept,
             best_transactions: (),
             _pd: PhantomData,
         }
@@ -130,12 +142,15 @@ impl<Pool, Client, Evm, Txs, Attrs> OpPayloadBuilder<Pool, Client, Evm, Txs, Att
         self,
         best_transactions: T,
     ) -> OpPayloadBuilder<Pool, Client, Evm, T, Attrs> {
-        let Self { pool, client, compute_pending_block, evm_config, config, .. } = self;
+        let Self {
+            pool, client, compute_pending_block, evm_config, config, bridge_intercept, ..
+        } = self;
         OpPayloadBuilder {
             pool,
             client,
             compute_pending_block,
             evm_config,
+            bridge_intercept,
             best_transactions,
             config,
             _pd: PhantomData,
@@ -186,6 +201,7 @@ where
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
             da_config: self.config.da_config.clone(),
+            bridge_intercept: self.bridge_intercept.clone(),
             chain_spec: self.client.chain_spec(),
             config,
             cancel,
@@ -224,6 +240,7 @@ where
             da_config: self.config.da_config.clone(),
             chain_spec: self.client.chain_spec(),
             config,
+            bridge_intercept: self.bridge_intercept.clone(),
             cancel: Default::default(),
             best_payload: Default::default(),
         };
@@ -354,7 +371,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         // 3. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool() {
             let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
-            if ctx.execute_best_transactions(&mut info, &mut builder, best_txs)?.is_some() {
+            if ctx.execute_best_transactions_xlayer(&mut info, &mut builder, best_txs)?.is_some() {
                 return Ok(BuildOutcomeKind::Cancelled)
             }
 
@@ -541,6 +558,8 @@ pub struct OpPayloadBuilderCtx<
     pub chain_spec: Arc<ChainSpec>,
     /// How to build the payload.
     pub config: PayloadConfig<Attrs, HeaderTy<Evm::Primitives>>,
+    /// Bridge transaction interception configuration
+    pub bridge_intercept: BridgeInterceptConfig,
     /// Marker to check whether the job has been cancelled.
     pub cancel: CancelOnDrop,
     /// The currently best payload.
