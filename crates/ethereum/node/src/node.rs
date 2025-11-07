@@ -456,9 +456,7 @@ where
         let blobs_disabled = ctx.config().txpool.disable_blobs_support ||
             ctx.config().txpool.blobpool_max_count == 0;
 
-        let blob_cache_size = if blobs_disabled {
-            None
-        } else if let Some(blob_cache_size) = pool_config.blob_cache_size {
+        let blob_cache_size = if let Some(blob_cache_size) = pool_config.blob_cache_size {
             Some(blob_cache_size)
         } else {
             // get the current blob params for the current timestamp, fallback to default Cancun
@@ -478,7 +476,7 @@ where
         let blob_store =
             reth_node_builder::components::create_blob_store_with_cache(ctx, blob_cache_size)?;
 
-        let mut validator_builder =
+        let validator =
             TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
                 .with_head_timestamp(ctx.head().timestamp)
                 .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
@@ -486,18 +484,12 @@ where
                 .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
                 .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
                 .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
-                .with_additional_tasks(ctx.config().txpool.additional_validation_tasks);
+                .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+                .set_eip4844(!blobs_disabled)
+                .kzg_settings(ctx.kzg_settings()?)
+                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
-        validator_builder = if blobs_disabled {
-            validator_builder.no_eip4844()
-        } else {
-            validator_builder.kzg_settings(ctx.kzg_settings()?)
-        };
-
-        let validator =
-            validator_builder.build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
-
-        if validator.validator().eip4844() && !blobs_disabled {
+        if !blobs_disabled && validator.validator().eip4844() {
             // initializing the KZG settings can be expensive, this should be done upfront so that
             // it doesn't impact the first block or the first gossiped blob transaction, so we
             // initialize this in the background
