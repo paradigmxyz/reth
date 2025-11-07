@@ -456,10 +456,6 @@ where
         let blobs_disabled = ctx.config().txpool.disable_blobs_support ||
             ctx.config().txpool.blobpool_max_count == 0;
 
-        if blobs_disabled {
-            info!(target: "reth::cli", "Blob transaction support disabled");
-        }
-
         let blob_cache_size = if blobs_disabled {
             None
         } else if let Some(blob_cache_size) = pool_config.blob_cache_size {
