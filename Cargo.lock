@@ -10540,7 +10540,6 @@ version = "1.9.1"
 dependencies = [
  "alloy-primitives",
  "clap",
- "derive_more",
  "reth-nippy-jar",
  "serde",
  "serde_json",

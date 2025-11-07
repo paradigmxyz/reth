@@ -20,7 +20,6 @@ use strum::{EnumIs, EnumString};
     Deserialize,
     Serialize,
     EnumString,
-    Display,
     EnumIs,
 )]
 #[strum(serialize_all = "kebab-case")]
