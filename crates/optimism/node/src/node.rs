@@ -158,6 +158,7 @@ impl OpNode {
     /// Configure the gas limit configuration for the OP builder.
     pub fn with_gas_limit_config(mut self, gas_limit_config: OpGasLimitConfig) -> Self {
         self.gas_limit_config = gas_limit_config;
+        self
     }
 
     /// Configure X Layer specific settings
@@ -187,7 +188,7 @@ impl OpNode {
             .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block)
                     .with_da_config(self.da_config.clone())
-                    .with_gas_limit_config(self.gas_limit_config.clone()),
+                    .with_gas_limit_config(self.gas_limit_config.clone())
                     .with_xlayer_args(self.xlayer_args.clone()),
             ))
             .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
@@ -1089,6 +1090,7 @@ impl OpPayloadBuilder {
     /// Configure the gas limit configuration for the OP payload builder.
     pub fn with_gas_limit_config(mut self, gas_limit_config: OpGasLimitConfig) -> Self {
         self.gas_limit_config = gas_limit_config;
+        self
     }
 
     /// Configure X Layer specific settings
