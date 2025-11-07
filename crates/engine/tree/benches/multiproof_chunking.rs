@@ -20,7 +20,7 @@ fn simulate_processing(work_units: usize, chunk_size: usize, workers: usize) -> 
     while remaining > 0 {
         let current = min(remaining, chunk_size) as f64;
         remaining -= current as usize;
-        let duration = PER_CHUNK_OVERHEAD_NS + current * PER_TARGET_COST_NS;
+        let duration = current.mul_add(PER_TARGET_COST_NS, PER_CHUNK_OVERHEAD_NS);
         for _ in 0..PER_CHUNK_SPIN {
             spin = spin.wrapping_add(1);
         }
