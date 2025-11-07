@@ -326,3 +326,92 @@ impl GitManager {
         &self.repo_root
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::GitManager;
+    use eyre::{eyre, Result};
+    use std::{fs, path::Path, process::Command};
+    use tempfile::TempDir;
+
+    fn run_git(dir: &Path, args: &[&str]) -> Result<()> {
+        let out = Command::new("git").args(args).current_dir(dir).output()?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(eyre!("git {:?} failed: {}", args, stderr));
+        }
+        Ok(())
+    }
+
+    fn git_out(dir: &Path, args: &[&str]) -> Result<String> {
+        let out = Command::new("git").args(args).current_dir(dir).output()?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(eyre!("git {:?} failed: {}", args, stderr));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    // Creates a bare origin and a working clone; returns (origin, work)
+    fn setup_repo() -> Result<(TempDir, std::path::PathBuf, std::path::PathBuf)> {
+        let base = TempDir::new()?;
+        let base_path = base.path().to_path_buf();
+        let origin_path = base_path.join("origin.git");
+        // git init --bare <origin>
+        run_git(&base_path, &["init", "--bare", origin_path.to_str().unwrap()])?;
+
+        // git clone <origin> work
+        run_git(&base_path, &["clone", origin_path.to_str().unwrap(), "work"])?;
+        let work_path = base_path.join("work");
+
+        // Configure identity
+        run_git(&work_path, &["config", "user.email", "test@example.com"])?;
+        run_git(&work_path, &["config", "user.name", "Test User"])?;
+
+        // Initial commit on default branch
+        fs::write(work_path.join("README.md"), "init\n")?;
+        run_git(&work_path, &["add", "."])?;
+        run_git(&work_path, &["commit", "-m", "init"])?;
+
+        // Remember the current branch name (main or master)
+        let _ = git_out(&work_path, &["rev-parse", "--abbrev-ref", "HEAD"]); // ensure branch exists
+
+        // Push base branch
+        run_git(&work_path, &["push", "-u", "origin", "HEAD"])?;
+
+        Ok((base, origin_path, work_path))
+    }
+
+    #[test]
+    fn validate_remote_only_branch_succeeds() -> Result<()> {
+        let (_tmp, _origin, work) = setup_repo()?;
+
+        // Create a branch, push it, then delete the local branch to make it remote-only
+        run_git(&work, &["checkout", "-b", "yk/compute_trie2"])?;
+        fs::write(work.join("feature.txt"), "feature\n")?;
+        run_git(&work, &["add", "."])?;
+        run_git(&work, &["commit", "-m", "feature"])?;
+        run_git(&work, &["push", "-u", "origin", "HEAD"])?;
+
+        // Switch back to base branch (whatever it is) and delete local feature branch
+        let base_branch = git_out(&work, &["rev-parse", "--abbrev-ref", "@{-1}"])?;
+        run_git(&work, &["checkout", &base_branch])?;
+        run_git(&work, &["branch", "-D", "yk/compute_trie2"])?;
+        // Ensure remote-tracking refs are present locally
+        run_git(&work, &["fetch", "--all", "--prune"])?;
+
+        // Point GitManager at the clone's root and validate
+        let gm = GitManager { repo_root: work.to_string_lossy().into_owned() };
+        gm.validate_refs(&["yk/compute_trie2"]) ?;
+        Ok(())
+    }
+
+    #[test]
+    fn validate_invalid_ref_fails() -> Result<()> {
+        let (_tmp, _origin, work) = setup_repo()?;
+        let gm = GitManager { repo_root: work.to_string_lossy().into_owned() };
+        let res = gm.validate_refs(&["definitely-does-not-exist-branch-name-123"]);
+        assert!(res.is_err());
+        Ok(())
+    }
+}
