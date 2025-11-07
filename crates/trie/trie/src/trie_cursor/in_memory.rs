@@ -45,13 +45,13 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         // if the storage trie has no updates then we use this as the in-memory overlay.
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+        const EMPTY_UPDATES: &[(Nibbles, Option<BranchNodeCompact>)] = &[];
 
         let storage_trie_updates =
             self.trie_updates.as_ref().storage_tries_ref().get(&hashed_address);
         let (storage_nodes, cleared) = storage_trie_updates
             .map(|u| (u.storage_nodes_ref(), u.is_deleted()))
-            .unwrap_or((&EMPTY_UPDATES, false));
+            .unwrap_or((EMPTY_UPDATES, false));
 
         let cursor = if cleared {
             None
