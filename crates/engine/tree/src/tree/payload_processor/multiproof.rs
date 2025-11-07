@@ -530,6 +530,71 @@ impl MultiproofManager {
     }
 }
 
+/// Snapshot of current worker pool utilization used by chunking logic.
+#[derive(Debug, Clone, Copy)]
+#[doc(hidden)]
+pub struct WorkerSnapshot {
+    /// Currently idle account workers.
+    pub available_accounts: usize,
+    /// Currently idle storage workers.
+    pub available_storage: usize,
+    /// Pending account tasks queued for workers.
+    pub pending_accounts: usize,
+    /// Pending storage tasks queued for workers.
+    pub pending_storage: usize,
+}
+
+impl WorkerSnapshot {
+    /// Captures the current worker state from the [`ProofWorkerHandle`].
+    pub(crate) fn capture(handle: &ProofWorkerHandle) -> Self {
+        Self {
+            available_accounts: handle.available_account_workers(),
+            available_storage: handle.available_storage_workers(),
+            pending_accounts: handle.pending_account_tasks(),
+            pending_storage: handle.pending_storage_tasks(),
+        }
+    }
+
+    /// Effective idle capacity considering both pools.
+    fn idle_capacity(&self) -> usize {
+        self.max_available().saturating_sub(self.max_pending())
+    }
+
+    fn max_available(&self) -> usize {
+        self.available_accounts.max(self.available_storage)
+    }
+
+    fn max_pending(&self) -> usize {
+        self.pending_accounts.max(self.pending_storage)
+    }
+}
+
+/// Selects an adaptive chunk size based on worker availability.
+#[doc(hidden)]
+pub fn select_dynamic_chunk_size(
+    configured_chunk_size: Option<usize>,
+    work_units: usize,
+    workers: WorkerSnapshot,
+) -> Option<usize> {
+    let base_chunk = configured_chunk_size?;
+    if work_units <= base_chunk || work_units <= 1 {
+        return None;
+    }
+
+    let idle_capacity = workers.idle_capacity();
+    if idle_capacity <= 1 {
+        return None;
+    }
+
+    let dynamic_size = base_chunk.saturating_mul(idle_capacity).min(work_units.saturating_sub(1));
+
+    if dynamic_size <= base_chunk {
+        return None;
+    }
+
+    Some(dynamic_size)
+}
+
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
 pub(crate) struct MultiProofTaskMetrics {
@@ -769,12 +834,6 @@ impl MultiProofTask {
         // Process proof targets in chunks.
         let mut chunks = 0;
 
-        // Only chunk if multiple account or storage workers are available to take advantage of
-        // parallelism.
-        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
-            1 ||
-            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
-
         let mut dispatch = |proof_targets| {
             self.multiproof_manager.dispatch(
                 MultiproofInput {
@@ -790,10 +849,14 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if should_chunk &&
-            let Some(chunk_size) = self.chunk_size &&
-            proof_targets.chunking_length() > chunk_size
-        {
+        let worker_snapshot = WorkerSnapshot::capture(&self.multiproof_manager.proof_worker_handle);
+        let chunk_size = select_dynamic_chunk_size(
+            self.chunk_size,
+            proof_targets.chunking_length(),
+            worker_snapshot,
+        );
+
+        if let Some(chunk_size) = chunk_size {
             let mut chunks = 0usize;
             for proof_targets_chunk in proof_targets.chunks(chunk_size) {
                 dispatch(proof_targets_chunk);
@@ -921,12 +984,6 @@ impl MultiProofTask {
 
         let mut spawned_proof_targets = MultiProofTargets::default();
 
-        // Only chunk if multiple account or storage workers are available to take advantage of
-        // parallelism.
-        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
-            1 ||
-            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
-
         let mut dispatch = |hashed_state_update| {
             let proof_targets = get_proof_targets(
                 &hashed_state_update,
@@ -950,10 +1007,14 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if should_chunk &&
-            let Some(chunk_size) = self.chunk_size &&
-            not_fetched_state_update.chunking_length() > chunk_size
-        {
+        let worker_snapshot = WorkerSnapshot::capture(&self.multiproof_manager.proof_worker_handle);
+        let chunk_size = select_dynamic_chunk_size(
+            self.chunk_size,
+            not_fetched_state_update.chunking_length(),
+            worker_snapshot,
+        );
+
+        if let Some(chunk_size) = chunk_size {
             let mut chunks = 0usize;
             for chunk in not_fetched_state_update.chunks(chunk_size) {
                 dispatch(chunk);
@@ -1295,6 +1356,46 @@ mod tests {
     use revm_primitives::{B256, U256};
     use std::sync::OnceLock;
     use tokio::runtime::{Handle, Runtime};
+
+    fn snapshot(
+        available_accounts: usize,
+        available_storage: usize,
+        pending_accounts: usize,
+        pending_storage: usize,
+    ) -> WorkerSnapshot {
+        WorkerSnapshot { available_accounts, available_storage, pending_accounts, pending_storage }
+    }
+
+    #[test]
+    fn adaptive_chunk_size_requires_parallelism() {
+        let workers = snapshot(1, 0, 0, 0);
+        assert_eq!(select_dynamic_chunk_size(Some(10), 50, workers), None);
+
+        let workers = snapshot(4, 0, 3, 0);
+        assert_eq!(select_dynamic_chunk_size(Some(10), 50, workers), None);
+    }
+
+    #[test]
+    fn adaptive_chunk_size_scales_with_idle_workers() {
+        let workers = snapshot(4, 2, 0, 0);
+        let chunk_size = select_dynamic_chunk_size(Some(10), 120, workers).unwrap();
+        assert_eq!(chunk_size, 40);
+
+        // Bounded by total work.
+        let workers = snapshot(8, 0, 0, 0);
+        let chunk_size = select_dynamic_chunk_size(Some(10), 30, workers).unwrap();
+        assert_eq!(chunk_size, 29);
+    }
+
+    #[test]
+    fn adaptive_chunk_size_respects_configured_limit() {
+        let workers = snapshot(8, 0, 0, 0);
+        // Work smaller than base chunk => no chunking.
+        assert_eq!(select_dynamic_chunk_size(Some(10), 8, workers), None);
+
+        // No chunking when chunk size would equal total work
+        assert_eq!(select_dynamic_chunk_size(Some(10), 10, workers), None);
+    }
 
     /// Get a handle to the test runtime, creating it if necessary
     fn get_test_runtime_handle() -> Handle {
