@@ -276,10 +276,10 @@ impl<T: PoolTransaction> BlobTransaction<T> {
         pending_fees: &PendingFees,
     ) -> Self {
         let priority = blob_tx_priority(
-            pending_fees.blob_fee,
             transaction.max_fee_per_blob_gas().unwrap_or_default(),
-            pending_fees.base_fee as u128,
+            pending_fees.blob_fee,
             transaction.max_fee_per_gas(),
+            pending_fees.base_fee as u128,
         );
         let ord = BlobOrd { priority, submission_id };
         Self { transaction, ord }
@@ -288,10 +288,10 @@ impl<T: PoolTransaction> BlobTransaction<T> {
     /// Updates the priority for the transaction based on the current pending fees.
     pub(crate) fn update_priority(&mut self, pending_fees: &PendingFees) {
         self.ord.priority = blob_tx_priority(
-            pending_fees.blob_fee,
             self.transaction.max_fee_per_blob_gas().unwrap_or_default(),
-            pending_fees.base_fee as u128,
+            pending_fees.blob_fee,
             self.transaction.max_fee_per_gas(),
+            pending_fees.base_fee as u128,
         );
     }
 }
@@ -787,5 +787,49 @@ mod tests {
         assert!(pool.is_empty());
         assert_eq!(pool.size(), 0);
         assert_eq!(pool.len(), 0);
+    }
+
+    #[test]
+    fn test_priority_orientation_caps_below_current_is_negative() {
+        // If the tx caps are far below current network fees, priority must be negative (e.g. -7)
+        // This specifically catches swapped (current, cap) argument order bugs.
+        let mut factory = MockTransactionFactory::default();
+        let mut pool = BlobTransactions::default();
+
+        // Transaction caps set low
+        let tx = factory.validated_arc(MockTransaction::eip4844().with_blob_fee(7).with_max_fee(7));
+        pool.add_transaction(tx);
+
+        // Network fees set high
+        let pending = PendingFees { base_fee: 17_200_000_000, blob_fee: 17_200_000_000 };
+        pool.pending_fees = pending.clone();
+        pool.reprioritize();
+
+        // Extract the single tx and assert exact priority value
+        let prio = pool.all.iter().next().expect("one tx").ord.priority;
+        assert_eq!(prio, -7, "expected negative priority when caps < current network fees");
+    }
+
+    #[test]
+    fn test_priority_orientation_caps_above_current_is_zero() {
+        // If the tx caps are far above current network fees, both deltas are positive.
+        // priority = min(delta_blob, delta_priority, 0) => 0
+        let mut factory = MockTransactionFactory::default();
+        let mut pool = BlobTransactions::default();
+
+        // Transaction caps set high
+        let tx = factory.validated_arc(
+            MockTransaction::eip4844().with_blob_fee(17_200_000_000).with_max_fee(17_200_000_000),
+        );
+        pool.add_transaction(tx);
+
+        // Network fees set low
+        let pending = PendingFees { base_fee: 7, blob_fee: 7 };
+        pool.pending_fees = pending.clone();
+        pool.reprioritize();
+
+        // Extract the single tx and assert exact priority value
+        let prio = pool.all.iter().next().expect("one tx").ord.priority;
+        assert_eq!(prio, 0, "expected zero priority when caps > current network fees");
     }
 }
