@@ -675,10 +675,6 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
     fn transactions_by_block(
         &self,
         block: BlockHashOrNumber,
@@ -1568,10 +1564,6 @@ where
         &self,
         _hash: B256,
     ) -> Result<Option<(Self::Transaction, TransactionMeta)>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn transaction_block(&self, _id: TxNumber) -> Result<Option<BlockNumber>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
 

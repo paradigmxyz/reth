@@ -1837,11 +1837,6 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        // Required data not present in static_files
-        Err(ProviderError::UnsupportedProvider)
-    }
-
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,

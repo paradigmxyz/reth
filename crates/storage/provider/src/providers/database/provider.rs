@@ -1265,11 +1265,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         Ok(None)
     }
 
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let mut cursor = self.tx.cursor_read::<tables::TransactionBlocks>()?;
-        Ok(cursor.seek(id)?.map(|(_, bn)| bn))
-    }
-
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
