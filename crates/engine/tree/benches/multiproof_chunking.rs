@@ -30,6 +30,7 @@ fn count_chunks(targets: &MultiProofTargets, chunk_size: usize) -> usize {
     targets.clone().chunks(chunk_size).count()
 }
 
+/// Benchmarks how many chunks the dynamic policy emits for different idle worker counts.
 fn bench_chunking(c: &mut Criterion) {
     let targets = make_targets(512, 4);
     let work_units = targets.chunking_length();

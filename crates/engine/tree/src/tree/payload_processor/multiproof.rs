@@ -530,7 +530,7 @@ impl MultiproofManager {
     }
 }
 
-/// Snapshot of current worker pool utilization used by chunking logic.
+/// Snapshot of the worker pools used to size multiproof chunks.
 #[derive(Debug, Clone, Copy)]
 #[doc(hidden)]
 pub struct WorkerSnapshot {
@@ -569,7 +569,7 @@ impl WorkerSnapshot {
     }
 }
 
-/// Selects an adaptive chunk size based on worker availability.
+/// Returns an adaptive chunk size driven by the latest worker snapshot.
 #[doc(hidden)]
 pub fn select_dynamic_chunk_size(
     configured_chunk_size: Option<usize>,
