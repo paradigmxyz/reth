@@ -58,6 +58,7 @@ metrics.workspace = true
 
 # misc
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 schnellru.workspace = true

@@ -1,0 +1,43 @@
+[package]
+name = "reth-apollo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-config = { path = "../config", default-features = false }
+reth-tracing = { path = "../tracing" }
+
+# apollo
+apollo-sdk = { git = "https://github.com/liushv0/apollo-rust-sdk", rev = "ed653ea7f1a217f9d2e9c421b7798482c04f06b4" }
+
+# serde for config serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+
+# async runtime
+tokio = { workspace = true, features = ["full"] }
+
+# error handling
+eyre = { workspace = true }
+thiserror = { workspace = true }
+
+# utilities
+url = { workspace = true }
+
+# async singleton
+async-once-cell = "0.5.4"
+
+# tracing
+tracing = { workspace = true }
+
+# cache
+moka = { version = "0.12.11", features = ["sync"] }
