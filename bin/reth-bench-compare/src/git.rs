@@ -181,36 +181,17 @@ impl GitManager {
     /// Validate that the specified git references exist (branches, tags, or commits)
     pub(crate) fn validate_refs(&self, refs: &[&str]) -> Result<()> {
         for &git_ref in refs {
-            // Try branch first, then tag, then commit
-            let branch_check = Command::new("git")
-                .args(["rev-parse", "--verify", &format!("refs/heads/{git_ref}")])
+            // Use git's built-in reference resolution, which handles local branches,
+            // remote branches, tags, and commits automatically (same as git checkout)
+            let ref_check = Command::new("git")
+                .args(["rev-parse", "--verify", git_ref])
                 .current_dir(&self.repo_root)
                 .output();
 
-            let tag_check = Command::new("git")
-                .args(["rev-parse", "--verify", &format!("refs/tags/{git_ref}")])
-                .current_dir(&self.repo_root)
-                .output();
-
-            let commit_check = Command::new("git")
-                .args(["rev-parse", "--verify", &format!("{git_ref}^{{commit}}")])
-                .current_dir(&self.repo_root)
-                .output();
-
-            let found = if let Ok(output) = branch_check &&
-                output.status.success()
+            let found = if let Ok(output) = ref_check
+                && output.status.success()
             {
-                info!("Validated branch exists: {}", git_ref);
-                true
-            } else if let Ok(output) = tag_check &&
-                output.status.success()
-            {
-                info!("Validated tag exists: {}", git_ref);
-                true
-            } else if let Ok(output) = commit_check &&
-                output.status.success()
-            {
-                info!("Validated commit exists: {}", git_ref);
+                info!("Validated reference exists: {}", git_ref);
                 true
             } else {
                 false
@@ -261,8 +242,8 @@ impl GitManager {
                 .current_dir(&self.repo_root)
                 .output();
 
-            if let Ok(output) = tracking_output &&
-                output.status.success()
+            if let Ok(output) = tracking_output
+                && output.status.success()
             {
                 let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !upstream.is_empty() && upstream != format!("{git_ref}@{{upstream}}") {
