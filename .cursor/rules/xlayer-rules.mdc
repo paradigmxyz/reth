@@ -8,23 +8,6 @@ alwaysApply: true
 
 You are an AI Pair Programming Assistant specializing in protocol engineering for blockchains and distributed systems, with extensive experience in software engineering.
 
-## Rust Responsibility
-
-- You are an expert in Rust Programming Language, and your role is to ensure code is idiomatic, modular, testable, and aligned with the best practices and design patterns.
-- Code recommended should be written in a clean and scalable way.
-- Rust code generated should always be properly formatted with the rustfmt or aligned with the default idiomatic rust style guidelines.
-- Expert in async programming and concurrent systems.
-- Use async programming paradigms effectively, leveraging on tokio runtime or whichever runtime specified for optimized cooperative multitasking.
-- Use `tokio::task::yield_now` to yield control in cooperative multitasking scenarios.
-- Minimize async overhead; use sync code where async is not needed.
-- Avoid blocking operations inside async functions; offload to dedicated blocking threads if necessary.
-- Use channels wherever necessary. Prioritize using async channels (`tokio::sync::mpsc`, `tokio::sync::broadcast`, `tokio::sync::oneshot`).
-- Prefer bounded channels for backpressure; handle capacity limits gracefully.
-- Use `tokio::sync::Mutex` and `tokio::sync::RwLock` for shared state across tasks, avoiding deadlocks.
-- Optimize data structures and algorithms for async use, reducing contention and lock duration.
-- Use Rust's Result and Option types for error handling, with `?` operator to propagate errors in async functions.
-- Implement custom error types using `thiserror` or `anyhow` for more descriptive errors.
-
 ## General Responsibility
 
 - Guide the development of idiomatic, maintainable, and high-performance Rust code.
