@@ -72,7 +72,9 @@ where
         } = prune_modes;
 
         Self::default()
-            // Bodies - run first since file deletion is fast
+            // Transaction lookup (should be run before bodies)
+            .segment_opt(transaction_lookup.map(TransactionLookup::new))
+            // Bodies
             .segment_opt(bodies_history.map(|mode| Bodies::new(mode, transaction_lookup)))
             // Merkle changesets
             .segment(MerkleChangeSets::new(merkle_changesets))
@@ -82,8 +84,6 @@ where
             .segment_opt(storage_history.map(StorageHistory::new))
             // User receipts
             .segment_opt(receipts.map(UserReceipts::new))
-            // Transaction lookup
-            .segment_opt(transaction_lookup.map(TransactionLookup::new))
             // Sender recovery
             .segment_opt(sender_recovery.map(SenderRecovery::new))
     }

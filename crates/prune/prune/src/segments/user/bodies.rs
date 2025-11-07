@@ -32,7 +32,7 @@ impl Bodies {
     /// Returns the next best block that bodies can prune up to considering the transaction lookup
     /// pruning configuration (if any) and progress.
     ///
-    /// Returns `None` if there's no block available to prune (e.g., waiting on tx_lookup).
+    /// Returns `None` if there's no block available to prune (e.g., waiting on `tx_lookup`).
     fn next_bodies_prune_target<Provider>(
         &self,
         provider: &Provider,
@@ -112,7 +112,7 @@ where
 
         if deleted_headers.is_empty() {
             return Ok(SegmentOutput {
-                progress: PruneProgress::HasMoreData(PruneInterruptReason::StaticFileBoundary),
+                progress: PruneProgress::Finished,
                 pruned: 0,
                 checkpoint: input
                     .previous_checkpoint
@@ -132,16 +132,8 @@ where
             .map(|range| range.end())
             .max();
 
-        // If we didn't reach the target, there's more data to process (waiting on future static
-        // file boundaries)
-        let progress = if checkpoint_block != Some(to_block) {
-            PruneProgress::HasMoreData(PruneInterruptReason::StaticFileBoundary)
-        } else {
-            PruneProgress::Finished
-        };
-
         Ok(SegmentOutput {
-            progress,
+            progress: PruneProgress::Finished,
             pruned,
             checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: checkpoint_block,
@@ -319,7 +311,8 @@ mod tests {
         let tip = 2_499_999;
         setup_static_file_jars(&factory, tip);
 
-        let (_, finished_exex_height_rx) = tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let (_, _finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
         let test_cases = vec![
             // Test 1: PruneMode::Before(750_000) → deletes jar 0 (0-499_999)
@@ -327,26 +320,15 @@ mod tests {
             TestCase::new()
                 .with_bodies_mode(PruneMode::Before(750_000))
                 .with_expected_pruned(1000)
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::StaticFileBoundary,
-                ))
                 .with_lowest_block(999_999),
             // Test 2: PruneMode::Before(850_000) → no deletion (jar 1: 500_000-999_999 contains
             // target)
-            TestCase::new()
-                .with_bodies_mode(PruneMode::Before(850_000))
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::StaticFileBoundary,
-                ))
-                .with_lowest_block(999_999),
+            TestCase::new().with_bodies_mode(PruneMode::Before(850_000)).with_lowest_block(999_999),
             // Test 3: PruneMode::Before(1_599_999) → deletes jars 0 and 1 (0-999_999)
             // Checkpoint 999_999 != target 1_599_998 -> HasMoreData
             TestCase::new()
                 .with_bodies_mode(PruneMode::Before(1_599_999))
                 .with_expected_pruned(2000)
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::StaticFileBoundary,
-                ))
                 .with_lowest_block(1_999_999),
             // Test 4: PruneMode::Distance(500_000) with tip=2_499_999 → deletes jar 3
             // (1_500_000-1_999_999) Checkpoint 1_999_999 == target 1_999_999 ->
@@ -359,9 +341,6 @@ mod tests {
             // contains target)
             TestCase::new()
                 .with_bodies_mode(PruneMode::Before(2_300_000))
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::StaticFileBoundary,
-                ))
                 .with_lowest_block(2_499_999),
         ];
 
@@ -388,22 +367,12 @@ mod tests {
 
         let (_, finished_exex_height_rx) = tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
-        let mut pruner = Pruner::new_with_factory(
-            factory.clone(),
-            segments,
-            5,
-            10000,
-            None,
-            finished_exex_height_rx,
-        );
+        let mut pruner =
+            Pruner::new_with_factory(factory, segments, 5, 10000, None, finished_exex_height_rx);
 
         let result = pruner.run(tip).expect("pruner run");
 
-        // Since checkpoint (499_999) != to_block (899_999), expect HasMoreData
-        assert_eq!(
-            result.progress,
-            PruneProgress::HasMoreData(PruneInterruptReason::StaticFileBoundary)
-        );
+        assert_eq!(result.progress, PruneProgress::Finished);
         assert_eq!(result.segments.len(), 1);
 
         let (segment, output) = &result.segments[0];
@@ -551,9 +520,6 @@ mod tests {
             TestCase::new()
                 .with_bodies_mode(PruneMode::Before(600_000))
                 .with_expected_pruned(1000)
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::StaticFileBoundary,
-                ))
                 .with_lowest_block(999_999),
             // Scenario 2: tx_lookup enabled but not run yet, bodies cannot prune
             TestCase::new()
@@ -569,9 +535,6 @@ mod tests {
                 .with_tx_lookup(PruneMode::Before(600_000), Some(599_999))
                 .with_bodies_mode(PruneMode::Before(600_000))
                 .with_expected_pruned(1000)
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::StaticFileBoundary,
-                ))
                 .with_lowest_block(999_999),
             // Scenario 4: tx_lookup behind its target, bodies limited to tx_lookup checkpoint
             // tx_lookup should prune up to 599_999, but checkpoint is only at 250_000
@@ -580,9 +543,6 @@ mod tests {
             TestCase::new()
                 .with_tx_lookup(PruneMode::Before(600_000), Some(250_000))
                 .with_bodies_mode(PruneMode::Before(600_000))
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::StaticFileBoundary,
-                ))
                 .with_lowest_block(499_999), // No jars deleted
             // Scenario 5: Both use Distance, tx_lookup caught up
             // With tip=1_523_000, Distance(500_000) targets block 1_023_000
@@ -591,9 +551,6 @@ mod tests {
                 .with_tx_lookup(PruneMode::Distance(500_000), Some(1_023_000))
                 .with_bodies_mode(PruneMode::Distance(500_000))
                 .with_expected_pruned(2000)
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::StaticFileBoundary,
-                ))
                 .with_lowest_block(1_499_999),
             // Scenario 6: Both use Distance, tx_lookup less aggressive (bigger distance) than
             // bodies With tip=1_523_000:
@@ -605,9 +562,6 @@ mod tests {
                 .with_tx_lookup(PruneMode::Distance(1_000_000), Some(523_000))
                 .with_bodies_mode(PruneMode::Distance(500_000))
                 .with_expected_pruned(1000) // Jar 0 deleted
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::StaticFileBoundary,
-                ))
                 .with_lowest_block(999_999), // Jar 0 (0-499_999) deleted
             // Scenario 7: tx_lookup more aggressive than bodies (deletes jar 0 and 1)
             // tx_lookup: Before(1_100_000) -> prune up to 1_099_999
@@ -617,9 +571,6 @@ mod tests {
                 .with_tx_lookup(PruneMode::Before(1_100_000), Some(1_099_999))
                 .with_bodies_mode(PruneMode::Before(1_100_000))
                 .with_expected_pruned(2000)
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::StaticFileBoundary,
-                ))
                 .with_lowest_block(1_499_999), // Jars 0 and 1 deleted
             // Scenario 8: tx_lookup has lower target than bodies, but is done
             // tx_lookup: Before(600_000) -> prune up to 599_999 (checkpoint at 599_999, DONE)
@@ -630,9 +581,6 @@ mod tests {
                 .with_tx_lookup(PruneMode::Before(600_000), Some(599_999))
                 .with_bodies_mode(PruneMode::Before(1_100_000))
                 .with_expected_pruned(2000)
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::StaticFileBoundary,
-                ))
                 .with_lowest_block(1_499_999), // Jars 0 and 1 deleted
             // Scenario 9: Perfect alignment - checkpoint equals target
             // bodies: Before(1_000_000) -> targets 999_999
