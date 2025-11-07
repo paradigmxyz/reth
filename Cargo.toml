@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.9.0"
+version = "1.9.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -466,17 +466,17 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "31.0.0", default-features = false }
-revm-bytecode = { version = "7.1.0", default-features = false }
-revm-database = { version = "9.0.3", default-features = false }
-revm-state = { version = "8.1.0", default-features = false }
-revm-primitives = { version = "21.0.1", default-features = false }
-revm-interpreter = { version = "29.0.0", default-features = false }
-revm-inspector = { version = "12.0.0", default-features = false }
-revm-context = { version = "11.0.0", default-features = false }
-revm-context-interface = { version = "12.0.0", default-features = false }
-revm-database-interface = { version = "8.0.4", default-features = false }
-op-revm = { version = "12.0.0", default-features = false }
+revm = { version = "31.0.1", default-features = false }
+revm-bytecode = { version = "7.1.1", default-features = false }
+revm-database = { version = "9.0.4", default-features = false }
+revm-state = { version = "8.1.1", default-features = false }
+revm-primitives = { version = "21.0.2", default-features = false }
+revm-interpreter = { version = "29.0.1", default-features = false }
+revm-inspector = { version = "12.0.1", default-features = false }
+revm-context = { version = "11.0.1", default-features = false }
+revm-context-interface = { version = "12.0.1", default-features = false }
+revm-database-interface = { version = "8.0.5", default-features = false }
+op-revm = { version = "12.0.1", default-features = false }
 revm-inspectors = "0.32.0"
 
 # eth
@@ -549,8 +549,6 @@ dirs-next = "2.0.0"
 dyn-clone = "1.0.17"
 eyre = "0.6"
 fdlimit = "0.3.0"
-# pinned until downstream crypto libs migrate to 1.0 because 0.14.8 marks all types as deprecated
-generic-array = "=0.14.7"
 humantime = "2.1"
 humantime-serde = "1.1"
 itertools = { version = "0.14", default-features = false }

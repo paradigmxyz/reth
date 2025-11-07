@@ -20,8 +20,10 @@ use strum::{EnumIs, EnumString};
     Deserialize,
     Serialize,
     EnumString,
+    Display,
     EnumIs,
 )]
+#[strum(serialize_all = "kebab-case")]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Segment of the data that can be moved to static files.
 pub enum StaticFileSegment {
@@ -45,6 +47,8 @@ impl fmt::Display for StaticFileSegment {
 impl StaticFileSegment {
     /// Returns a string representation of the segment.
     pub const fn as_str(&self) -> &'static str {
+        // `strum` doesn't generate a doc comment for `into_str` when using `IntoStaticStr` derive
+        // macro, so we need to manually implement it.
         match self {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
@@ -477,36 +481,37 @@ mod tests {
         }
     }
 
+    /// Used in filename writing/parsing
     #[test]
-    fn test_static_file_segment_string() {
+    fn test_static_file_segment_str_roundtrip() {
         for segment in StaticFileSegment::iter() {
             let static_str = segment.as_str();
-            let display_str = segment.to_string();
-            match segment {
-                StaticFileSegment::Headers => assert_eq!(static_str, "headers"),
-                StaticFileSegment::Transactions => assert_eq!(static_str, "transactions"),
-                StaticFileSegment::Receipts => assert_eq!(static_str, "receipts"),
-                StaticFileSegment::TransactionSenders => {
-                    assert_eq!(static_str, "transaction-senders")
-                }
-            }
-            assert_eq!(static_str, display_str);
+            assert_eq!(StaticFileSegment::from_str(static_str).unwrap(), segment);
+
+            let expected_str = match segment {
+                StaticFileSegment::Headers => "headers",
+                StaticFileSegment::Transactions => "transactions",
+                StaticFileSegment::Receipts => "receipts",
+                StaticFileSegment::TransactionSenders => "transaction-senders",
+            };
+            assert_eq!(static_str, expected_str);
         }
     }
 
+    /// Used in segment headers serialize/deserialize
     #[test]
-    fn test_static_file_segment_serde() {
+    fn test_static_file_segment_serde_roundtrip() {
         for segment in StaticFileSegment::iter() {
             let ser = serde_json::to_string(&segment).unwrap();
-            match segment {
-                StaticFileSegment::Headers => assert_eq!(ser, "\"Headers\""),
-                StaticFileSegment::Transactions => assert_eq!(ser, "\"Transactions\""),
-                StaticFileSegment::Receipts => assert_eq!(ser, "\"Receipts\""),
-                StaticFileSegment::TransactionSenders => {
-                    assert_eq!(ser, "\"TransactionSenders\"")
-                }
-            }
-            assert_eq!(serde_json::from_str(&ser).unwrap(), segment);
+            assert_eq!(serde_json::from_str::<StaticFileSegment>(&ser).unwrap(), segment);
+
+            let expected_str = match segment {
+                StaticFileSegment::Headers => "Headers",
+                StaticFileSegment::Transactions => "Transactions",
+                StaticFileSegment::Receipts => "Receipts",
+                StaticFileSegment::TransactionSenders => "TransactionSenders",
+            };
+            assert_eq!(ser, format!("\"{expected_str}\""));
         }
     }
 }

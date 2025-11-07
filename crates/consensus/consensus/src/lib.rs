@@ -16,7 +16,7 @@ use alloy_consensus::Header;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
-    constants::{MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
+    constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
     transaction::error::InvalidTransactionError,
     Block, GotExpected, GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock,
     SealedHeader,
@@ -349,7 +349,7 @@ pub enum ConsensusError {
     },
 
     /// Error when the child gas limit exceeds the maximum allowed increase.
-    #[error("child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024")]
+    #[error("child gas_limit {child_gas_limit} exceeds the max allowed increase ({parent_gas_limit}/{GAS_LIMIT_BOUND_DIVISOR})")]
     GasLimitInvalidIncrease {
         /// The parent gas limit.
         parent_gas_limit: u64,
@@ -378,7 +378,7 @@ pub enum ConsensusError {
     },
 
     /// Error when the child gas limit exceeds the maximum allowed decrease.
-    #[error("child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024")]
+    #[error("child gas_limit {child_gas_limit} is below the max allowed decrease ({parent_gas_limit}/{GAS_LIMIT_BOUND_DIVISOR})")]
     GasLimitInvalidDecrease {
         /// The parent gas limit.
         parent_gas_limit: u64,

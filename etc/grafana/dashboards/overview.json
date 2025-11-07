@@ -2301,7 +2301,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_engine_rpc_new_payload_forkchoice_updated_time_diff{$instance_label=\"$instance\"}",
+          "expr": "reth_consensus_engine_beacon_new_payload_forkchoice_updated_time_diff{$instance_label=\"$instance\"}",
           "legendFormat": "p{{quantile}}",
           "range": true,
           "refId": "A"
@@ -7820,7 +7820,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(reth_rpc_server_calls_successful_total{instance =~ \"$instance\"}[$__rate_interval])) by (method) > 0",
+          "expr": "sum(rate(reth_rpc_server_calls_successful_total{$instance_label=\"$instance\"}[$__rate_interval])) by (method) > 0",
           "instant": false,
           "legendFormat": "{{method}}",
           "range": true,

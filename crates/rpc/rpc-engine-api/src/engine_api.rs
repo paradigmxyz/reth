@@ -16,7 +16,6 @@ use alloy_rpc_types_engine::{
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
-use parking_lot::Mutex;
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
 use reth_payload_builder::PayloadStore;
@@ -106,7 +105,6 @@ where
             capabilities,
             tx_pool,
             validator,
-            latest_new_payload_response: Mutex::new(None),
             accept_execution_requests_hash,
         });
         Self { inner }
@@ -146,12 +144,7 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
 
-        Ok(self
-            .inner
-            .beacon_consensus
-            .new_payload(payload)
-            .await
-            .inspect(|_| self.inner.on_new_payload_response())?)
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
     /// Metered version of `new_payload_v1`.
@@ -179,12 +172,7 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
-        Ok(self
-            .inner
-            .beacon_consensus
-            .new_payload(payload)
-            .await
-            .inspect(|_| self.inner.on_new_payload_response())?)
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
     /// Metered version of `new_payload_v2`.
@@ -213,12 +201,7 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V3, payload_or_attrs)?;
 
-        Ok(self
-            .inner
-            .beacon_consensus
-            .new_payload(payload)
-            .await
-            .inspect(|_| self.inner.on_new_payload_response())?)
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
     /// Metrics version of `new_payload_v3`
@@ -248,12 +231,7 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
-        Ok(self
-            .inner
-            .beacon_consensus
-            .new_payload(payload)
-            .await
-            .inspect(|_| self.inner.on_new_payload_response())?)
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
     /// Metrics version of `new_payload_v4`
@@ -703,8 +681,6 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.inner.record_elapsed_time_on_fcu();
-
         if let Some(ref attrs) = payload_attrs {
             let attr_validation_res =
                 self.inner.validator.ensure_well_formed_attributes(version, attrs);
@@ -1171,29 +1147,7 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     tx_pool: Pool,
     /// Engine validator.
     validator: Validator,
-    /// Start time of the latest payload request
-    latest_new_payload_response: Mutex<Option<Instant>>,
     accept_execution_requests_hash: bool,
-}
-
-impl<Provider, PayloadT, Pool, Validator, ChainSpec>
-    EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>
-where
-    PayloadT: PayloadTypes,
-{
-    /// Tracks the elapsed time between the new payload response and the received forkchoice update
-    /// request.
-    fn record_elapsed_time_on_fcu(&self) {
-        if let Some(start_time) = self.latest_new_payload_response.lock().take() {
-            let elapsed_time = start_time.elapsed();
-            self.metrics.latency.new_payload_forkchoice_updated_time_diff.record(elapsed_time);
-        }
-    }
-
-    /// Updates the timestamp for the latest new payload response.
-    fn on_new_payload_response(&self) {
-        self.latest_new_payload_response.lock().replace(Instant::now());
-    }
 }
 
 #[cfg(test)]
