@@ -7,10 +7,7 @@ use alloy_primitives::{Address, TxHash, U256};
 use futures_util::StreamExt;
 use reth_ethereum::{
     node::api::{FullNodeComponents, NodeTypes},
-    pool::{
-        AddedTransactionOutcome, PoolTransaction, TransactionEvent, TransactionOrigin,
-        TransactionPool,
-    },
+    pool::{AddedTransactionOutcome, TransactionEvent, TransactionOrigin, TransactionPool},
     primitives::SignerRecoverable,
     rpc::eth::primitives::TransactionRequest,
     EthPrimitives, TransactionSigned,
