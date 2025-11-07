@@ -100,11 +100,11 @@ pub struct NetworkArgs {
     #[arg(long = "port", value_name = "PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
 
-    /// Maximum number of outbound requests. default: 100
+    /// Maximum number of outbound peers. default: 100
     #[arg(long)]
     pub max_outbound_peers: Option<usize>,
 
-    /// Maximum number of inbound requests. default: 30
+    /// Maximum number of inbound peers. default: 30
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
 
