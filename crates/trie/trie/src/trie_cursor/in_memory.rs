@@ -86,6 +86,10 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         cursor: Option<C>,
         trie_updates: &'a [(Nibbles, Option<BranchNodeCompact>)],
     ) -> Self {
+        debug_assert!(
+            trie_updates.is_sorted_by_key(|(k, _)| k),
+            "Overlay values must be sorted by path"
+        );
         let in_memory_cursor = ForwardInMemoryCursor::new(trie_updates);
         Self { cursor, cursor_entry: None, in_memory_cursor, last_key: None, seeked: false }
     }

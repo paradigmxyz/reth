@@ -355,10 +355,6 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
         self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        self.consistent_provider()?.transaction_block(id)
-    }
-
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -2397,7 +2393,7 @@ mod tests {
             ),
             (
                 ONE,
-                transaction_block,
+                block_by_transaction_id,
                 |block: &SealedBlock<Block>, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
                     Some(block.number)

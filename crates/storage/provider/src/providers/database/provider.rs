@@ -1263,11 +1263,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         Ok(None)
     }
 
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let mut cursor = self.tx.cursor_read::<tables::TransactionBlocks>()?;
-        Ok(cursor.seek(id)?.map(|(_, bn)| bn))
-    }
-
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -1789,10 +1784,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
+        for (hashed_address, account) in hashed_state.accounts() {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(hashed_address, &account)?;
-            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts_cursor.upsert(*hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
         }
@@ -1806,8 +1801,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage.storage_slots_sorted() {
-                let entry = StorageEntry { key: hashed_slot, value };
+            for (hashed_slot, value) in storage.storage_slots_ref() {
+                let entry = StorageEntry { key: *hashed_slot, value: *value };
+
                 if let Some(db_entry) =
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
                     db_entry.key == entry.key
