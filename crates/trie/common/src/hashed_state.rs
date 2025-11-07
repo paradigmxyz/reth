@@ -560,6 +560,38 @@ impl HashedPostStateSorted {
         self.accounts.destroyed_accounts.clear();
         self.storages.clear();
     }
+
+    /// Construct [`TriePrefixSetsMut`] from sorted hashed post state.
+    /// The prefix sets contain the hashed account and storage keys that have been changed in the
+    /// post state.
+    pub fn construct_prefix_sets(&self) -> TriePrefixSetsMut {
+        // Populate account prefix set from both live and destroyed accounts.
+        let mut account_prefix_set = PrefixSetMut::with_capacity(
+            self.accounts.accounts.len() + self.accounts.destroyed_accounts.len(),
+        );
+
+        for (hashed_address, _) in &self.accounts.accounts {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+        }
+
+        for hashed_address in &self.accounts.destroyed_accounts {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+        }
+
+        // Populate storage prefix sets.
+        let mut storage_prefix_sets =
+            HashMap::with_capacity_and_hasher(self.storages.len(), Default::default());
+        for (hashed_address, hashed_storage) in &self.storages {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            storage_prefix_sets.insert(*hashed_address, hashed_storage.construct_prefix_set());
+        }
+
+        TriePrefixSetsMut {
+            account_prefix_set,
+            storage_prefix_sets,
+            destroyed_accounts: self.accounts.destroyed_accounts.clone(),
+        }
+    }
 }
 
 impl AsRef<Self> for HashedPostStateSorted {
@@ -658,6 +690,24 @@ impl HashedStorageSorted {
 
         // Merge zero valued slots sets
         self.zero_valued_slots.extend(&other.zero_valued_slots);
+    }
+
+    /// Construct [`PrefixSetMut`] from sorted hashed storage.
+    pub fn construct_prefix_set(&self) -> PrefixSetMut {
+        if self.wiped {
+            PrefixSetMut::all()
+        } else {
+            let mut prefix_set = PrefixSetMut::with_capacity(
+                self.non_zero_valued_slots.len() + self.zero_valued_slots.len(),
+            );
+            for (hashed_slot, _) in &self.non_zero_valued_slots {
+                prefix_set.insert(Nibbles::unpack(hashed_slot));
+            }
+            for hashed_slot in &self.zero_valued_slots {
+                prefix_set.insert(Nibbles::unpack(hashed_slot));
+            }
+            prefix_set
+        }
     }
 }
 
