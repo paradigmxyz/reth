@@ -189,8 +189,8 @@ impl GitManager {
                 .current_dir(&self.repo_root)
                 .output();
 
-            let found = if let Ok(output) = ref_check
-                && output.status.success()
+            let found = if let Ok(output) = ref_check &&
+                output.status.success()
             {
                 info!("Validated reference exists: {}", git_ref);
                 true
@@ -202,8 +202,8 @@ impl GitManager {
                     .current_dir(&self.repo_root)
                     .output();
 
-                if let Ok(output) = origin_check
-                    && output.status.success()
+                if let Ok(output) = origin_check &&
+                    output.status.success()
                 {
                     info!("Validated remote reference exists: origin/{}", git_ref);
                     true
@@ -259,8 +259,8 @@ impl GitManager {
                 .current_dir(&self.repo_root)
                 .output();
 
-            if let Ok(output) = tracking_output
-                && output.status.success()
+            if let Ok(output) = tracking_output &&
+                output.status.success()
             {
                 let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !upstream.is_empty() && upstream != format!("{git_ref}@{{upstream}}") {
@@ -326,4 +326,3 @@ impl GitManager {
         &self.repo_root
     }
 }
-
