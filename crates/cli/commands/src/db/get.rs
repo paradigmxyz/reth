@@ -77,17 +77,15 @@ impl Command {
                     }
                 };
 
-                let content = tool.provider_factory.static_file_provider().find_static_file(
-                    segment,
-                    |provider| {
-                        let mut cursor = provider.cursor()?;
-                        cursor.get(key.into(), mask).map(|result| {
-                            result.map(|vec| {
-                                vec.iter().map(|slice| slice.to_vec()).collect::<Vec<_>>()
-                            })
-                        })
-                    },
-                )?;
+                let content = tool
+                    .provider_factory
+                    .static_file_provider()
+                    .get_segment_provider(segment, key)?
+                    .cursor()?
+                    .get(key.into(), mask)
+                    .map(|result| {
+                        result.map(|vec| vec.iter().map(|slice| slice.to_vec()).collect::<Vec<_>>())
+                    })?;
 
                 match content {
                     Some(content) => {

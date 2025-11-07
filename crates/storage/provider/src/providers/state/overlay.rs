@@ -116,16 +116,18 @@ where
             return Ok(false)
         }
 
-        // Extract the lower bound from prune checkpoint if available
+        // Extract the lower bound from prune checkpoint if available.
+        //
+        // If not available we assume pruning has never ran and so there is no lower bound. This
+        // should not generally happen, since MerkleChangeSets always have pruning enabled, but when
+        // starting a new node from scratch (e.g. in a test case or benchmark) it can surface.
+        //
         // The prune checkpoint's block_number is the highest pruned block, so data is available
         // starting from the next block
         let lower_bound = prune_checkpoint
             .and_then(|chk| chk.block_number)
             .map(|block_number| block_number + 1)
-            .ok_or_else(|| ProviderError::InsufficientChangesets {
-                requested: requested_block,
-                available: 0..=upper_bound,
-            })?;
+            .unwrap_or_default();
 
         let available_range = lower_bound..=upper_bound;
 

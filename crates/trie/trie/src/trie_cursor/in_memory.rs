@@ -75,7 +75,6 @@ pub struct InMemoryTrieCursor<'a, C> {
     in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>,
     /// The key most recently returned from the Cursor.
     last_key: Option<Nibbles>,
-    #[cfg(debug_assertions)]
     /// Whether an initial seek was called.
     seeked: bool,
 }
@@ -92,14 +91,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             "Overlay values must be sorted by path"
         );
         let in_memory_cursor = ForwardInMemoryCursor::new(trie_updates);
-        Self {
-            cursor,
-            cursor_entry: None,
-            in_memory_cursor,
-            last_key: None,
-            #[cfg(debug_assertions)]
-            seeked: false,
-        }
+        Self { cursor, cursor_entry: None, in_memory_cursor, last_key: None, seeked: false }
     }
 
     /// Asserts that the next entry to be returned from the cursor is not previous to the last entry
@@ -117,13 +109,15 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
 
     /// Seeks the `cursor_entry` field of the struct using the cursor.
     fn cursor_seek(&mut self, key: Nibbles) -> Result<(), DatabaseError> {
-        if let Some(entry) = self.cursor_entry.as_ref() &&
-            entry.0 >= key
-        {
-            // If already seeked to the given key then don't do anything. Also if we're seeked past
-            // the given key then don't anything, because `TrieCursor` is specifically a
-            // forward-only cursor.
-        } else {
+        // Only seek if:
+        // 1. We have a cursor entry and need to seek forward (entry.0 < key), OR
+        // 2. We have no cursor entry and haven't seeked yet (!self.seeked)
+        let should_seek = match self.cursor_entry.as_ref() {
+            Some(entry) => entry.0 < key,
+            None => !self.seeked,
+        };
+
+        if should_seek {
             self.cursor_entry = self.cursor.as_mut().map(|c| c.seek(key)).transpose()?.flatten();
         }
 
@@ -132,10 +126,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
 
     /// Seeks the `cursor_entry` field of the struct to the subsequent entry using the cursor.
     fn cursor_next(&mut self) -> Result<(), DatabaseError> {
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(self.seeked);
-        }
+        debug_assert!(self.seeked);
 
         // If the previous entry is `None`, and we've done a seek previously, then the cursor is
         // exhausted and we shouldn't call `next` again.
@@ -193,10 +184,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         self.cursor_seek(key)?;
         let mem_entry = self.in_memory_cursor.seek(&key);
 
-        #[cfg(debug_assertions)]
-        {
-            self.seeked = true;
-        }
+        self.seeked = true;
 
         let entry = match (mem_entry, &self.cursor_entry) {
             (Some((mem_key, entry_inner)), _) if mem_key == key => {
@@ -217,10 +205,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         self.cursor_seek(key)?;
         self.in_memory_cursor.seek(&key);
 
-        #[cfg(debug_assertions)]
-        {
-            self.seeked = true;
-        }
+        self.seeked = true;
 
         let entry = self.choose_next_entry()?;
         self.set_last_key(&entry);
@@ -228,10 +213,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(self.seeked, "Cursor must be seek'd before next is called");
-        }
+        debug_assert!(self.seeked, "Cursor must be seek'd before next is called");
 
         // A `last_key` of `None` indicates that the cursor is exhausted.
         let Some(last_key) = self.last_key else {
@@ -582,6 +564,80 @@ mod tests {
         assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x3])));
     }
 
+    #[test]
+    fn test_all_storage_slots_deleted_not_wiped_exact_keys() {
+        use tracing::debug;
+        reth_tracing::init_test_tracing();
+
+        // This test reproduces an edge case where:
+        // - cursor is not None (not wiped)
+        // - All in-memory entries are deletions (None values)
+        // - Database has corresponding entries
+        // - Expected: NO leaves should be returned (all deleted)
+
+        // Generate 42 trie node entries with keys distributed across the keyspace
+        let mut db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (0..10)
+            .map(|i| {
+                let key_bytes = vec![(i * 6) as u8, i as u8]; // Spread keys across keyspace
+                let nibbles = Nibbles::unpack(key_bytes);
+                (nibbles, BranchNodeCompact::new(i as u16, i as u16, 0, vec![], None))
+            })
+            .collect();
+
+        db_nodes.sort_by_key(|(key, _)| *key);
+        db_nodes.dedup_by_key(|(key, _)| *key);
+
+        for (key, _) in &db_nodes {
+            debug!("node at {key:?}");
+        }
+
+        // Create in-memory entries with same keys but all None values (deletions)
+        let in_memory_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)> =
+            db_nodes.iter().map(|(key, _)| (*key, None)).collect();
+
+        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
+
+        let mut cursor = InMemoryTrieCursor::new(Some(mock_cursor), &in_memory_nodes);
+
+        // Seek to beginning should return None (all nodes are deleted)
+        tracing::debug!("seeking to 0x");
+        let result = cursor.seek(Nibbles::default()).unwrap();
+        assert_eq!(
+            result, None,
+            "Expected no entries when all nodes are deleted, but got {:?}",
+            result
+        );
+
+        // Test seek operations at various positions - all should return None
+        let seek_keys = vec![
+            Nibbles::unpack([0x00]),
+            Nibbles::unpack([0x5d]),
+            Nibbles::unpack([0x5e]),
+            Nibbles::unpack([0x5f]),
+            Nibbles::unpack([0xc2]),
+            Nibbles::unpack([0xc5]),
+            Nibbles::unpack([0xc9]),
+            Nibbles::unpack([0xf0]),
+        ];
+
+        for seek_key in seek_keys {
+            tracing::debug!("seeking to {seek_key:?}");
+            let result = cursor.seek(seek_key).unwrap();
+            assert_eq!(
+                result, None,
+                "Expected None when seeking to {:?} but got {:?}",
+                seek_key, result
+            );
+        }
+
+        // next() should also always return None
+        let result = cursor.next().unwrap();
+        assert_eq!(result, None, "Expected None from next() but got {:?}", result);
+    }
+
     mod proptest_tests {
         use super::*;
         use itertools::Itertools;
@@ -632,7 +688,7 @@ mod tests {
         /// Generate a sorted vector of (Nibbles, `BranchNodeCompact`) entries
         fn sorted_db_nodes_strategy() -> impl Strategy<Value = Vec<(Nibbles, BranchNodeCompact)>> {
             prop::collection::vec(
-                (prop::collection::vec(any::<u8>(), 0..3), branch_node_strategy()),
+                (prop::collection::vec(any::<u8>(), 0..2), branch_node_strategy()),
                 0..20,
             )
             .prop_map(|entries| {
@@ -652,7 +708,7 @@ mod tests {
         ) -> impl Strategy<Value = Vec<(Nibbles, Option<BranchNodeCompact>)>> {
             prop::collection::vec(
                 (
-                    prop::collection::vec(any::<u8>(), 0..3),
+                    prop::collection::vec(any::<u8>(), 0..2),
                     prop::option::of(branch_node_strategy()),
                 ),
                 0..20,
@@ -670,7 +726,7 @@ mod tests {
         }
 
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(1000))]
+            #![proptest_config(ProptestConfig::with_cases(10000))]
 
             #[test]
             fn proptest_in_memory_trie_cursor(
@@ -681,7 +737,12 @@ mod tests {
                 reth_tracing::init_test_tracing();
                 use tracing::debug;
 
-                debug!("Starting proptest!");
+                debug!(
+                    db_paths=?db_nodes.iter().map(|(k, _)| k).collect::<Vec<_>>(),
+                    in_mem_nodes=?in_memory_nodes.iter().map(|(k, v)| (k, v.is_some())).collect::<Vec<_>>(),
+                    num_op_choices=?op_choices.len(),
+                    "Starting proptest!",
+                );
 
                 // Create the expected results by merging the two sorted vectors,
                 // properly handling deletions (None values in in_memory_nodes)
@@ -761,7 +822,7 @@ mod tests {
                                 continue;
                             }
 
-                            let key = *valid_keys[(choice as usize / 3) % valid_keys.len()];
+                            let key = *valid_keys[choice as usize % valid_keys.len()];
 
                             let control_result = control_cursor.seek(key).unwrap();
                             let test_result = test_cursor.seek(key).unwrap();
@@ -795,7 +856,7 @@ mod tests {
                                 continue;
                             }
 
-                            let key = *valid_keys[(choice as usize / 3) % valid_keys.len()];
+                            let key = *valid_keys[choice as usize  % valid_keys.len()];
 
                             let control_result = control_cursor.seek_exact(key).unwrap();
                             let test_result = test_cursor.seek_exact(key).unwrap();
