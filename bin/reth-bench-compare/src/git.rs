@@ -181,10 +181,11 @@ impl GitManager {
     /// Validate that the specified git references exist (branches, tags, or commits)
     pub(crate) fn validate_refs(&self, refs: &[&str]) -> Result<()> {
         for &git_ref in refs {
-            // Use git's built-in reference resolution, which handles local branches,
-            // remote branches, tags, and commits automatically (same as git checkout)
+            // Try to resolve the ref similar to `git checkout` by peeling to a commit.
+            // First try the ref as-is with ^{commit}, then fall back to origin/{ref}^{commit}.
+            let as_is = format!("{git_ref}^{{commit}}");
             let ref_check = Command::new("git")
-                .args(["rev-parse", "--verify", git_ref])
+                .args(["rev-parse", "--verify", &as_is])
                 .current_dir(&self.repo_root)
                 .output();
 
@@ -194,13 +195,29 @@ impl GitManager {
                 info!("Validated reference exists: {}", git_ref);
                 true
             } else {
-                false
+                // Try remote-only branches via origin/{ref}
+                let origin_ref = format!("origin/{git_ref}^{{commit}}");
+                let origin_check = Command::new("git")
+                    .args(["rev-parse", "--verify", &origin_ref])
+                    .current_dir(&self.repo_root)
+                    .output();
+
+                if let Ok(output) = origin_check
+                    && output.status.success()
+                {
+                    info!("Validated remote reference exists: origin/{}", git_ref);
+                    true
+                } else {
+                    false
+                }
             };
 
             if !found {
                 return Err(eyre!(
-                    "Git reference '{}' does not exist as branch, tag, or commit",
-                    git_ref
+                    "Git reference '{}' does not exist as branch, tag, or commit (tried '{}' and 'origin/{}^{{commit}}')",
+                    git_ref,
+                    format!("{git_ref}^{{commit}}"),
+                    git_ref,
                 ));
             }
         }
