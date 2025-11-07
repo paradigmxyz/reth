@@ -101,6 +101,11 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         self
     }
 
+    pub fn with_genesis_block_number(mut self, genesis_block_number: u64) -> Self {
+        self.static_file_provider.set_genesis_block_number(genesis_block_number);
+        self
+    }
+
     /// Returns reference to the underlying database.
     pub const fn db_ref(&self) -> &N::DB {
         &self.db

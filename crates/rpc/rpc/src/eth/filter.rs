@@ -1,5 +1,7 @@
 //! `eth_` `Filter` RPC handler implementation
 
+mod filter_xlayer;
+
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Sealable, TxHash};
@@ -325,7 +327,7 @@ where
 #[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt + LoadReceipt + EthBlocks + 'static,
+    Eth: FullEthApiTypes + RpcNodeCoreExt + LoadReceipt + EthBlocks + reth_rpc_eth_api::helpers::LegacyRpc + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -392,6 +394,7 @@ where
     /// Handler for `eth_uninstallFilter`
     async fn uninstall_filter(&self, id: FilterId) -> RpcResult<bool> {
         trace!(target: "rpc::eth", "Serving eth_uninstallFilter");
+
         let mut filters = self.inner.active_filters.inner.lock().await;
         if filters.remove(&id).is_some() {
             trace!(target: "rpc::eth::filter", ?id, "uninstalled filter");
@@ -406,6 +409,12 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
+        // XLayer: Check if this query needs legacy RPC routing (based on block range)
+        // Returns Some(...) if legacy/hybrid routing is needed, None for pure local processing
+        if let Some(result) = self.route_logs_to_legacy(filter.clone()).await {
+            return result;
+        }
+
         Ok(self.logs_for_filter(filter, self.inner.query_limits).await?)
     }
 }

@@ -54,3 +54,10 @@ where
         )
     }
 }
+
+mod builder_xlayer;
+mod intercept_xlayer;
+
+pub use intercept_xlayer::{
+    intercept_bridge_transaction_if_need, BridgeInterceptConfig, BridgeInterceptError,
+};

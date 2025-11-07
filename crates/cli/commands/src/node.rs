@@ -167,6 +167,14 @@ where
             era,
         } = self;
 
+        // XLayer: Auto-derive legacy cutoff block from genesis if legacy RPC is configured
+        let mut rpc = rpc;
+        if rpc.legacy_rpc_url.is_some() {
+            let genesis_block_number = chain.as_ref().genesis().number.unwrap_or_default();
+            rpc.legacy_cutoff_block = Some(genesis_block_number);
+            tracing::info!(target: "reth::cli::xlayer", genesis_block = genesis_block_number, "Using genesis block as legacy cutoff");
+        }
+
         // set up node config
         let mut node_config = NodeConfig {
             datadir,

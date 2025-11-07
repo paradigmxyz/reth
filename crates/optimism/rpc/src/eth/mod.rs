@@ -35,8 +35,11 @@ use reth_rpc_eth_api::{
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
     RpcNodeCoreExt, RpcTypes,
 };
-use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock};
-use reth_storage_api::{BlockReaderIdExt, ProviderHeader};
+use reth_rpc_eth_types::{
+    EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock, PendingBlockEnvOrigin,
+    LegacyRpcClient,
+};
+use reth_storage_api::{BlockReaderIdExt, ProviderHeader, ProviderTx};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
@@ -526,5 +529,16 @@ where
             U256::from(min_suggested_priority_fee),
             flashblocks,
         ))
+    }
+}
+
+// XLayer: Implement LegacyRpc trait for OpEthApi to enable legacy RPC routing
+impl<N, Rpc> reth_rpc_eth_api::helpers::LegacyRpc for OpEthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    Rpc: RpcConvert,
+{
+    fn legacy_rpc_client(&self) -> Option<&Arc<LegacyRpcClient>> {
+        self.inner.eth_api.legacy_rpc_client()
     }
 }

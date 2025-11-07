@@ -3025,7 +3025,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_bootnode_not_in_update_stream() {
         reth_tracing::init_test_tracing();
         let (_, service_1) = create_discv4().await;
@@ -3042,7 +3042,7 @@ mod tests {
 
         // Poll for events for a reasonable time
         let mut bootnode_appeared = false;
-        let timeout = tokio::time::sleep(Duration::from_secs(1));
+        let timeout = tokio::time::sleep(Duration::from_secs(10));
         tokio::pin!(timeout);
 
         loop {

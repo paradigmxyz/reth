@@ -5,7 +5,7 @@ use super::{
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
     ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, get_genesis_block_number, set_genesis_block_number
+    TransactionsProviderExt
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -262,6 +262,8 @@ pub struct StaticFileProviderInner<N> {
     access: StaticFileAccess,
     /// Number of blocks per file.
     blocks_per_file: u64,
+    /// Genesis block number, default is 0;
+    genesis_block_number: u64,
     /// Write lock for when access is [`StaticFileAccess::RW`].
     _lock_file: Option<StorageLock>,
     /// Node primitives
@@ -288,6 +290,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             metrics: None,
             access,
             blocks_per_file: DEFAULT_BLOCKS_PER_STATIC_FILE,
+            genesis_block_number: 0,
             _lock_file,
             _pd: Default::default(),
         };
@@ -303,6 +306,11 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     /// block is positioned.
     pub const fn find_fixed_range(&self, block: BlockNumber) -> SegmentRangeInclusive {
         find_fixed_range(block, self.blocks_per_file)
+    }
+
+    /// Get genesis block number
+    pub fn get_genesis_block_number(&self) -> u64 {
+        self.genesis_block_number
     }
 }
 
@@ -322,6 +330,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             Arc::try_unwrap(self.0).expect("should be called when initializing only");
         provider.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
         Self(Arc::new(provider))
+    }
+
+    /// Set genesis block number.
+    pub fn set_genesis_block_number(&mut self, genesis_block_number: u64) {
+        if let Some(inner) = Arc::get_mut(&mut self.0) {
+            inner.genesis_block_number = genesis_block_number;
+        } else {
+            panic!("set_genesis_block_number must be called when there's only one reference to StaticFileProvider");
+        }
     }
 
     /// Reports metrics for the static files.
@@ -818,9 +835,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         }
 
         info!(target: "reth::cli", "Verifying storage consistency.");
-        set_genesis_block_number(provider.chain_spec().genesis().number.unwrap_or_default());
-
-
         let mut unwind_target: Option<BlockNumber> = None;
         let mut update_unwind_target = |new_target: BlockNumber| {
             if let Some(target) = unwind_target.as_mut() {
@@ -1422,7 +1436,8 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         &self,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
-        self.get_writer(self.get_highest_static_file_block(segment).unwrap_or(get_genesis_block_number()), segment)
+        let genesis_number = self.0.as_ref().get_genesis_block_number();
+        self.get_writer(self.get_highest_static_file_block(segment).unwrap_or(genesis_number), segment)
     }
 
     fn commit(&self) -> ProviderResult<()> {

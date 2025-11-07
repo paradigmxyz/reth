@@ -1,0 +1,255 @@
+---
+description: Database cursor rules for X Layer reth database-related code. These rules help maintain consistency and best practices across all database operations, interfaces, and implementations.
+
+globs:
+
+- "crates/storage/db-api/src/lib.rs"
+- "crates/storage/db-api/src/database.rs"
+- "crates/storage/db-api/src/transaction.rs"
+- "crates/storage/db-api/src/cursor.rs"
+- "crates/storage/db-api/src/table.rs"
+- "crates/storage/db-api/src/models/*.rs"
+- "crates/storage/db-api/src/models/mod.rs"
+- "crates/storage/db-api/src/models/accounts.rs"
+- "crates/storage/db-api/src/models/blocks.rs"
+- "crates/storage/db-api/src/models/storage.rs"
+- "crates/storage/db-api/src/models/client_version.rs"
+- "crates/storage/db-api/src/models/integer_list.rs"
+- "crates/storage/db-api/src/models/sharded_key.rs"
+- "crates/storage/db-api/src/tables.rs"
+- "crates/storage/db-api/src/common.rs"
+- "crates/storage/db-api/src/utils.rs"
+
+- "crates/storage/libmdbx-rs/src/lib.rs"
+- "crates/storage/libmdbx-rs/src/environment.rs"
+- "crates/storage/libmdbx-rs/src/database.rs"
+- "crates/storage/libmdbx-rs/src/transaction.rs"
+- "crates/storage/libmdbx-rs/src/cursor.rs"
+- "crates/storage/libmdbx-rs/src/error.rs"
+- "crates/storage/libmdbx-rs/src/flags.rs"
+- "crates/storage/libmdbx-rs/src/txn_manager.rs"
+- "crates/storage/libmdbx-rs/mdbx-sys/**/*.rs"
+- "crates/storage/libmdbx-rs/mdbx-sys/src/lib.rs"
+- "crates/storage/libmdbx-rs/mdbx-sys/build.rs"
+
+- "crates/storage/db/src/lib.rs"
+- "crates/storage/db/src/implementation/mdbx/*.rs"
+- "crates/storage/db/src/implementation/mdbx/mod.rs"
+- "crates/storage/db/src/implementation/mdbx/tx.rs"
+- "crates/storage/db/src/implementation/mdbx/cursor.rs"
+- "crates/storage/db/src/implementation/mdbx/database.rs"
+- "crates/storage/db/src/implementation/mdbx/environment.rs"
+- "crates/storage/db/src/tables.rs"
+- "crates/storage/db/src/static_file/*.rs"
+- "crates/storage/db/src/static_file/mod.rs"
+- "crates/storage/db/src/static_file/cursor.rs"
+- "crates/storage/db/src/static_file/mask.rs"
+- "crates/storage/db/src/metrics.rs"
+- "crates/storage/db/src/lockfile.rs"
+- "crates/storage/db/src/utils.rs"
+
+- "crates/storage/static-file/static-file/src/lib.rs"
+- "crates/storage/static-file/static-file/src/static_file_producer.rs"
+- "crates/storage/static-file/static-file/src/static_file_manager.rs"
+- "crates/storage/static-file/static-file/src/writer.rs"
+- "crates/storage/static-file/static-file/src/reader.rs"
+- "crates/storage/static-file/static-file/src/jar.rs"
+- "crates/storage/static-file/static-file/src/segments/*.rs"
+- "crates/storage/static-file/static-file/src/segments/mod.rs"
+- "crates/storage/static-file/static-file/src/segments/headers.rs"
+- "crates/storage/static-file/static-file/src/segments/transactions.rs"
+- "crates/storage/static-file/static-file/src/segments/receipts.rs"
+- "crates/storage/static-file/types/src/lib.rs"
+- "crates/storage/static-file/types/src/segment.rs"
+- "crates/storage/static-file/types/src/compression.rs"
+
+- "crates/storage/provider/src/lib.rs"
+- "crates/storage/provider/src/providers/*.rs"
+- "crates/storage/provider/src/providers/mod.rs"
+- "crates/storage/provider/src/providers/database/*.rs"
+- "crates/storage/provider/src/providers/database/mod.rs"
+- "crates/storage/provider/src/providers/database/provider.rs"
+- "crates/storage/provider/src/providers/state/*.rs"
+- "crates/storage/provider/src/providers/state/mod.rs"
+- "crates/storage/provider/src/providers/state/historical.rs"
+- "crates/storage/provider/src/providers/state/latest.rs"
+- "crates/storage/provider/src/providers/state/macros.rs"
+- "crates/storage/provider/src/providers/static_file/*.rs"
+- "crates/storage/provider/src/providers/static_file/mod.rs"
+- "crates/storage/provider/src/providers/static_file/manager.rs"
+- "crates/storage/provider/src/providers/static_file/writer.rs"
+- "crates/storage/provider/src/providers/static_file/jar.rs"
+- "crates/storage/provider/src/providers/blockchain_provider.rs"
+- "crates/storage/provider/src/bundle_state/*.rs"
+- "crates/storage/provider/src/bundle_state/mod.rs"
+- "crates/storage/provider/src/bundle_state/state_reverts.rs"
+- "crates/storage/provider/src/bundle_state/bundle_state_with_receipts.rs"
+- "crates/storage/provider/src/writer/*.rs"
+- "crates/storage/provider/src/writer/mod.rs"
+- "crates/storage/provider/src/writer/database_writer.rs"
+- "crates/storage/provider/src/writer/static_file_writer.rs"
+- "crates/storage/provider/src/writer/unified_storage_writer.rs"
+- "crates/storage/provider/src/test_utils/*.rs"
+- "crates/storage/provider/src/test_utils/mod.rs"
+- "crates/storage/provider/src/test_utils/mock.rs"
+
+- "crates/storage/storage-api/src/lib.rs"
+- "crates/storage/storage-api/src/block.rs"
+- "crates/storage/storage-api/src/block_hash.rs"
+- "crates/storage/storage-api/src/block_id.rs"
+- "crates/storage/storage-api/src/block_num.rs"
+- "crates/storage/storage-api/src/header.rs"
+- "crates/storage/storage-api/src/transactions.rs"
+- "crates/storage/storage-api/src/receipts.rs"
+- "crates/storage/storage-api/src/withdrawals.rs"
+- "crates/storage/storage-api/src/requests.rs"
+- "crates/storage/storage-api/src/state.rs"
+- "crates/storage/storage-api/src/state_provider.rs"
+- "crates/storage/storage-api/src/account.rs"
+- "crates/storage/storage-api/src/bytecode.rs"
+- "crates/storage/storage-api/src/trie.rs"
+- "crates/storage/storage-api/src/storage.rs"
+- "crates/storage/storage-api/src/storage_change_set.rs"
+- "crates/storage/storage-api/src/history.rs"
+- "crates/storage/storage-api/src/chain.rs"
+- "crates/storage/storage-api/src/database_provider.rs"
+- "crates/storage/storage-api/src/noop.rs"
+
+- "crates/trie/common/src/lib.rs"
+- "crates/trie/common/src/root.rs"
+- "crates/trie/common/src/prefix_set.rs"
+- "crates/trie/common/src/prefix_set/*.rs"
+- "crates/trie/common/src/prefix_set/mod.rs"
+- "crates/trie/common/src/prefix_set/loader.rs"
+- "crates/trie/common/src/account.rs"
+- "crates/trie/common/src/storage.rs"
+- "crates/trie/common/src/subnode.rs"
+- "crates/trie/common/src/hash_builder/*.rs"
+- "crates/trie/common/src/hash_builder/mod.rs"
+- "crates/trie/common/src/hash_builder/state.rs"
+- "crates/trie/common/src/hash_builder/value.rs"
+- "crates/trie/common/src/nibbles.rs"
+- "crates/trie/common/src/proofs.rs"
+- "crates/trie/trie/src/lib.rs"
+- "crates/trie/trie/src/trie.rs"
+- "crates/trie/trie/src/walker.rs"
+- "crates/trie/trie/src/node_iter.rs"
+- "crates/trie/trie/src/updates.rs"
+- "crates/trie/trie/src/forward_cursor.rs"
+- "crates/trie/trie/src/prefix_set.rs"
+- "crates/trie/parallel/src/lib.rs"
+- "crates/trie/parallel/src/async_root.rs"
+- "crates/trie/parallel/src/parallel.rs"
+- "crates/trie/parallel/src/storage_root_targets.rs"
+- "crates/trie/sparse/src/lib.rs"
+- "crates/trie/sparse/src/trie.rs"
+- "crates/trie/sparse/src/state.rs"
+- "crates/trie/sparse/src/revealed.rs"
+- "crates/trie/db/src/lib.rs"
+- "crates/trie/db/src/prefix_set.rs"
+- "crates/trie/db/src/state.rs"
+- "crates/trie/db/src/storage.rs"
+- "crates/trie/db/src/witness.rs"
+
+- "crates/storage/db-models/src/lib.rs"
+- "crates/storage/db-models/src/account_before_tx.rs"
+- "crates/storage/db-models/src/client_version.rs"
+- "crates/storage/db-models/src/integer_list.rs"
+- "crates/storage/db-models/src/sharded_key.rs"
+
+- "crates/storage/errors/src/lib.rs"
+- "crates/storage/errors/src/db.rs"
+- "crates/storage/errors/src/provider.rs"
+- "crates/storage/errors/src/writer.rs"
+- "crates/storage/errors/src/lockfile.rs"
+- "crates/storage/errors/src/static_file.rs"
+
+- "crates/storage/db-common/src/lib.rs"
+- "crates/storage/db-common/src/init.rs"
+- "crates/storage/db-common/src/utils.rs"
+
+- "crates/storage/db/src/**/*_test.rs"
+- "crates/storage/provider/src/test_utils/*.rs"
+- "crates/trie/trie/benches/*.rs"
+- "crates/storage/db/benches/*.rs"
+
+- "crates/node/builder/src/setup.rs"
+- "crates/node/core/src/dirs.rs"
+- "crates/cli/util/src/lib.rs"
+- "crates/stages/api/src/pipeline/*.rs"
+- "crates/stages/stages/src/stages/*.rs"
+- "crates/chainstate/src/lib.rs"
+- "crates/rpc/rpc-eth-api/src/helpers/state.rs"
+
+alwaysApply: false
+---
+
+# X Layer Database Rules
+
+When working with the underlying X Layer reth execution layer database, you are an expert in the underly database with full understanding of how the implementation of the database functions. This includes mdbx, rocksdb, triedb and leveldb. When interacting with the database, prioritize ensuring performance, scalability and stability. You are familiar with how all of the underlying databases are implemented, including Log-Structured Merge-tree (LSM-tree) databases and B-tree databases implementations.
+
+You are also an expert in both Merkle Patricia Tree (MPT) and Sparse Merkle Trees (SMT), with deep understanding of their implementation in blockchain state management and how they are updated with the underlying triedb implementation and stored in the underlying databases.
+
+When responding to queries:
+
+- Always analyze the query by considering the underlying database design tradeoffs.
+- Provide clear, concise explanations of the approaches while considering the inherent underlying database design.
+- Always consider the relationship between database operations and blockchain state management, ensuring optimal performance.
+- Added X Layer specific database extensions.
+
+Interface-Driven Development
+
+- Always use database interfaces (ethdb.Database, ethdb.Batch, etc.) rather than concrete implementations
+- Prefer composition over inheritance when extending database functionality
+- Use dependency injection for database dependencies
+
+Performance Considerations
+
+- Use batch operations for multiple database writes
+- Implement proper error handling for all database operations
+- Consider memory usage and I/O efficiency in database operations
+- Use appropriate database engines (LevelDB vs PebbleDB) based on use case
+
+Security and Data Integrity
+
+- Always validate data before database operations
+- Use proper transaction boundaries for atomic operations
+- Implement proper error handling and rollback mechanisms
+- Follow X Layer specific security requirements for blockchain data
+
+Testing and Validation
+
+- Use the database test suite for interface compliance
+- Implement comprehensive tests for custom database operations
+- Validate data integrity in database operations
+- Test performance characteristics of database operations
+
+## Database Architecture
+
+Key Components
+
+1. **db-api**: Abstract traits - Database, DbTx, DbCursor, Table definitions
+2. **libmdbx-rs**: Low-level MDBX bindings (FFI to C library)
+3. **db**: Concrete MDBX implementation of db-api traits
+4. **static-file**: Ancient/freezer data storage using NippyJar format
+5. **codecs**: Type-safe serialization for all blockchain types
+6. **provider**: High-level domain API (blocks, state, transactions)
+7. **storage-api**: Operation traits (StateProvider, BlockProvider, etc.)
+8. **trie**: Merkle Patricia Trie with multiple variants (parallel, sparse, db-backed)
+
+Table Schema
+
+- Canonical chain: CanonicalHeaders, HeaderNumbers, BlockBodyIndices
+- Block data: Headers, BlockBodies, BlockOmmers, BlockWithdrawals
+- Transaction data: Transactions, TransactionBlocks, TransactionHashNumbers
+- State: PlainAccountState, PlainStorageState, Bytecodes
+- Trie: AccountsTrie, StoragesTrie, TrieAccounts, TrieStorage
+- History indices: AccountsHistory, StoragesHistory
+- Receipts: Receipts
+- Stage checkpoints: StageCheckpoints, StageCheckpointProgresses
+
+Static File Segments
+
+- Headers segment: Block headers
+- Transactions segment: Transaction data
+- Receipts segment: Receipt data

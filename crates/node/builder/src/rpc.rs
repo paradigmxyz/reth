@@ -1157,6 +1157,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
             .pending_block_kind(self.config.pending_block_kind)
             .raw_tx_forwarder(self.config.raw_tx_forwarder)
             .evm_memory_limit(self.config.rpc_evm_memory_limit)
+            .with_legacy_rpc_config(self.config.legacy_rpc_config.clone())
     }
 }
 
@@ -1165,6 +1166,7 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
     /// The Ethapi implementation this builder will build.
     type EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool>
+        + reth_rpc_eth_api::helpers::LegacyRpc
         + Unpin
         + 'static;
 

@@ -4,7 +4,7 @@ use crate::{
     args::RollupArgs,
     engine::OpEngineValidator,
     txpool::{OpTransactionPool, OpTransactionValidator},
-    OpEngineApiBuilder, OpEngineTypes,
+    OpEngineApiBuilder, OpEngineTypes, XLayerArgs,
 };
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
 use op_alloy_rpc_types_engine::OpExecutionData;
@@ -122,6 +122,9 @@ pub struct OpNode {
     /// Used to control the gas limit of the blocks produced by the OP builder.(configured by the
     /// batcher via the `miner_` api)
     pub gas_limit_config: OpGasLimitConfig,
+
+    /// X Layer specific configuration
+    pub xlayer_args: XLayerArgs,
 }
 
 /// A [`ComponentsBuilder`] with its generic arguments set to a stack of Optimism specific builders.
@@ -137,10 +140,12 @@ pub type OpNodeComponentBuilder<Node, Payload = OpPayloadBuilder> = ComponentsBu
 impl OpNode {
     /// Creates a new instance of the Optimism node type.
     pub fn new(args: RollupArgs) -> Self {
+        let xlayer_args = args.xlayer_args.clone();
         Self {
             args,
             da_config: OpDAConfig::default(),
             gas_limit_config: OpGasLimitConfig::default(),
+            xlayer_args,
         }
     }
 
@@ -153,6 +158,11 @@ impl OpNode {
     /// Configure the gas limit configuration for the OP builder.
     pub fn with_gas_limit_config(mut self, gas_limit_config: OpGasLimitConfig) -> Self {
         self.gas_limit_config = gas_limit_config;
+    }
+
+    /// Configure X Layer specific settings
+    pub fn with_xlayer_args(mut self, xlayer_args: XLayerArgs) -> Self {
+        self.xlayer_args = xlayer_args;
         self
     }
 
@@ -178,6 +188,7 @@ impl OpNode {
                 OpPayloadBuilder::new(compute_pending_block)
                     .with_da_config(self.da_config.clone())
                     .with_gas_limit_config(self.gas_limit_config.clone()),
+                    .with_xlayer_args(self.xlayer_args.clone()),
             ))
             .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
             .consensus(OpConsensusBuilder::default())
@@ -1051,6 +1062,9 @@ pub struct OpPayloadBuilder<Txs = ()> {
     /// Gas limit configuration for the OP builder.
     /// This is used to configure gas limit related constraints for the payload builder.
     pub gas_limit_config: OpGasLimitConfig,
+
+    /// X Layer specific configuration
+    pub xlayer_args: XLayerArgs,
 }
 
 impl OpPayloadBuilder {
@@ -1062,6 +1076,7 @@ impl OpPayloadBuilder {
             best_transactions: (),
             da_config: OpDAConfig::default(),
             gas_limit_config: OpGasLimitConfig::default(),
+            xlayer_args: XLayerArgs::default(),
         }
     }
 
@@ -1074,6 +1089,11 @@ impl OpPayloadBuilder {
     /// Configure the gas limit configuration for the OP payload builder.
     pub fn with_gas_limit_config(mut self, gas_limit_config: OpGasLimitConfig) -> Self {
         self.gas_limit_config = gas_limit_config;
+    }
+
+    /// Configure X Layer specific settings
+    pub fn with_xlayer_args(mut self, xlayer_args: XLayerArgs) -> Self {
+        self.xlayer_args = xlayer_args;
         self
     }
 }
@@ -1082,8 +1102,8 @@ impl<Txs> OpPayloadBuilder<Txs> {
     /// Configures the type responsible for yielding the transactions that should be included in the
     /// payload.
     pub fn with_transactions<T>(self, best_transactions: T) -> OpPayloadBuilder<T> {
-        let Self { compute_pending_block, da_config, gas_limit_config, .. } = self;
-        OpPayloadBuilder { compute_pending_block, best_transactions, da_config, gas_limit_config }
+        let Self { compute_pending_block, da_config, gas_limit_config, xlayer_args, .. } = self;
+        OpPayloadBuilder { compute_pending_block, best_transactions, da_config, gas_limit_config, xlayer_args }
     }
 }
 
@@ -1120,10 +1140,21 @@ where
         pool: Pool,
         evm_config: Evm,
     ) -> eyre::Result<Self::PayloadBuilder> {
+        self.xlayer_args
+            .validate()
+            .map_err(|e| eyre::eyre!("X Layer configuration validation failed: {}", e))?;
+
+        let bridge_intercept = self
+            .xlayer_args
+            .intercept
+            .to_bridge_intercept_config()
+            .map_err(|e| eyre::eyre!("Failed to create bridge intercept config: {}", e))?;
+
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
             pool,
             ctx.provider().clone(),
             evm_config,
+            bridge_intercept,
             OpBuilderConfig {
                 da_config: self.da_config.clone(),
                 gas_limit_config: self.gas_limit_config.clone(),
