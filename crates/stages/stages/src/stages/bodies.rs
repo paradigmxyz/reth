@@ -471,6 +471,7 @@ mod tests {
     }
 
     mod test_utils {
+        use reth_provider::{BlockReader, EitherWriter};
         use crate::{
             stages::bodies::BodyStage,
             test_utils::{
@@ -584,7 +585,8 @@ mod tests {
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data
                     {
-                        let tx = self.db.factory.provider_rw()?.into_tx();
+                        let provider = self.db.factory.provider_rw()?;
+                        let tx = provider.tx_ref();
                         let mut static_file_producer = static_file_provider
                             .get_writer(start, StaticFileSegment::Transactions)?;
 
@@ -600,11 +602,16 @@ mod tests {
                             static_file_producer.append_transaction(tx_num, &transaction).map(drop)
                         })?;
 
+                        let mut tx_block_writer = EitherWriter::new_transaction_blocks(
+                            &*provider,
+                            &static_file_provider,
+                            start,
+                        )?;
+                        tx_block_writer.increment_block(progress.number)?;
+
                         if body.tx_count != 0 {
-                            tx.put::<tables::TransactionBlocks>(
-                                body.last_tx_num(),
-                                progress.number,
-                            )?;
+                            tx_block_writer
+                                .append_transaction_block(body.last_tx_num(), &progress.number)?;
                         }
 
                         tx.put::<tables::BlockBodyIndices>(progress.number, body)?;
@@ -616,8 +623,9 @@ mod tests {
                             )?;
                         }
 
+                        drop(tx_block_writer);
                         static_file_producer.commit()?;
-                        tx.commit()?;
+                        provider.commit()?;
                     }
                 }
                 self.set_responses(blocks.iter().map(body_by_hash).collect());
@@ -679,62 +687,62 @@ mod tests {
                 prev_progress: BlockNumber,
                 highest_block: BlockNumber,
             ) -> Result<(), TestRunnerError> {
-                let static_file_provider = self.db.factory.static_file_provider();
+                let provider = self.db.factory.provider()?;
+                let tx = provider.tx_ref();
 
-                self.db.query(|tx| {
-                    // Acquire cursors on body related tables
-                    let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-                    let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
-                    let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlocks>()?;
+                // Acquire cursors on body related tables
+                let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+                let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
 
-                    let first_body_key = match bodies_cursor.first()? {
-                        Some((key, _)) => key,
-                        None => return Ok(()),
-                    };
+                let first_body_key = match bodies_cursor.first()? {
+                    Some((key, _)) => key,
+                    None => return Ok(()),
+                };
 
-                    let mut prev_number: Option<BlockNumber> = None;
+                let mut prev_number: Option<BlockNumber> = None;
 
+                for entry in bodies_cursor.walk(Some(first_body_key))? {
+                    let (number, body) = entry?;
 
-                    for entry in bodies_cursor.walk(Some(first_body_key))? {
-                        let (number, body) = entry?;
-
-                        // Validate sequentiality only after prev progress,
-                        // since the data before is mocked and can contain gaps
-                        if number > prev_progress
-                            && let Some(prev_key) = prev_number {
-                                assert_eq!(prev_key + 1, number, "Body entries must be sequential");
-                            }
-
-                        // Validate that the current entry is below or equals to the highest allowed block
-                        assert!(
-                            number <= highest_block,
-                            "We wrote a block body outside of our synced range. Found block with number {number}, highest block according to stage is {highest_block}",
-                        );
-
-                        let header = static_file_provider.header_by_number(number)?.expect("to be present");
-                        // Validate that ommers exist if any
-                        let stored_ommers =  ommers_cursor.seek_exact(number)?;
-                        if header.ommers_hash_is_empty() {
-                            assert!(stored_ommers.is_none(), "Unexpected ommers entry");
-                        } else {
-                            assert!(stored_ommers.is_some(), "Missing ommers entry");
-                        }
-
-                        let tx_block_id = tx_block_cursor.seek_exact(body.last_tx_num())?.map(|(_,b)| b);
-                        if body.tx_count == 0 {
-                            assert_ne!(tx_block_id,Some(number));
-                        } else {
-                            assert_eq!(tx_block_id, Some(number));
-                        }
-
-                        for tx_id in body.tx_num_range() {
-                            assert!(static_file_provider.transaction_by_id(tx_id)?.is_some(), "Transaction is missing.");
-                        }
-
-                        prev_number = Some(number);
+                    // Validate sequentiality only after prev progress,
+                    // since the data before is mocked and can contain gaps
+                    if number > prev_progress
+                        && let Some(prev_key) = prev_number
+                    {
+                        assert_eq!(prev_key + 1, number, "Body entries must be sequential");
                     }
-                    Ok(())
-                })?;
+
+                    // Validate that the current entry is below or equals to the highest allowed block
+                    assert!(
+                        number <= highest_block,
+                        "We wrote a block body outside of our synced range. Found block with number {number}, highest block according to stage is {highest_block}",
+                    );
+
+                    let header = provider.header_by_number(number)?.expect("to be present");
+                    // Validate that ommers exist if any
+                    let stored_ommers = ommers_cursor.seek_exact(number)?;
+                    if header.ommers_hash_is_empty() {
+                        assert!(stored_ommers.is_none(), "Unexpected ommers entry");
+                    } else {
+                        assert!(stored_ommers.is_some(), "Missing ommers entry");
+                    }
+
+                    let tx_block_id = provider.block_by_transaction_id(body.last_tx_num())?;
+                    if body.tx_count == 0 {
+                        assert_ne!(tx_block_id, Some(number));
+                    } else {
+                        assert_eq!(tx_block_id, Some(number));
+                    }
+
+                    for tx_id in body.tx_num_range() {
+                        assert!(
+                            provider.transaction_by_id(tx_id)?.is_some(),
+                            "Transaction is missing."
+                        );
+                    }
+
+                    prev_number = Some(number);
+                }
                 Ok(())
             }
         }

@@ -35,6 +35,8 @@ pub enum StaticFileSegment {
     Transactions,
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
+    /// Static File segment responsible for the `TransactionBlocks` table.
+    TransactionBlocks,
 }
 
 impl StaticFileSegment {
@@ -46,13 +48,14 @@ impl StaticFileSegment {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
             Self::Receipts => "receipts",
+            Self::TransactionBlocks => "transaction-blocks",
         }
     }
 
     /// Returns an iterator over all segments.
     pub fn iter() -> impl Iterator<Item = Self> {
         // The order of segments is significant and must be maintained to ensure correctness.
-        [Self::Headers, Self::Transactions, Self::Receipts].into_iter()
+        [Self::Headers, Self::Transactions, Self::Receipts, Self::TransactionBlocks].into_iter()
     }
 
     /// Returns the default configuration of the segment.
@@ -64,7 +67,7 @@ impl StaticFileSegment {
     pub const fn columns(&self) -> usize {
         match self {
             Self::Headers => 3,
-            Self::Transactions | Self::Receipts => 1,
+            Self::Transactions | Self::Receipts | Self::TransactionBlocks => 1,
         }
     }
 
@@ -124,7 +127,7 @@ impl StaticFileSegment {
 
     /// Returns `true` if a segment row is linked to a transaction.
     pub const fn is_tx_based(&self) -> bool {
-        matches!(self, Self::Receipts | Self::Transactions)
+        matches!(self, Self::Receipts | Self::Transactions | Self::TransactionBlocks)
     }
 
     /// Returns `true` if a segment row is linked to a block.
@@ -484,6 +487,7 @@ mod tests {
                 StaticFileSegment::Headers => "headers",
                 StaticFileSegment::Transactions => "transactions",
                 StaticFileSegment::Receipts => "receipts",
+                StaticFileSegment::TransactionBlocks => "transaction-blocks",
             };
             assert_eq!(static_str, expected_str);
         }
@@ -500,6 +504,7 @@ mod tests {
                 StaticFileSegment::Headers => "Headers",
                 StaticFileSegment::Transactions => "Transactions",
                 StaticFileSegment::Receipts => "Receipts",
+                StaticFileSegment::TransactionBlocks => "TransactionBlocks",
             };
             assert_eq!(ser, format!("\"{expected_str}\""));
         }

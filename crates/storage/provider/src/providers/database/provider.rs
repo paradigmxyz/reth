@@ -1183,11 +1183,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     }
 
     fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        Ok(self
-            .tx
-            .cursor_read::<tables::TransactionBlocks>()?
-            .seek(id)
-            .map(|b| b.map(|(_, bn)| bn))?)
+        if self.storage_settings.read().transaction_blocks_in_static_files {
+            self.static_file_provider.block_by_transaction_id(id)
+        } else {
+            Ok(self
+                .tx
+                .cursor_read::<tables::TransactionBlocks>()?
+                .seek(id)
+                .map(|b| b.map(|(_, bn)| bn))?)
+        }
     }
 }
 
@@ -2943,7 +2947,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
         self.remove::<tables::BlockBodyIndices>(block + 1..)?;
-        self.remove::<tables::TransactionBlocks>(unwind_tx_from..)?;
+
+        // Handle TransactionBlocks pruning based on storage settings
+        EitherWriter::new_transaction_blocks(self, &self.static_file_provider, block)?
+            .prune_transaction_blocks(unwind_tx_from.., block)?;
 
         let static_file_tx_num =
             self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Transactions);

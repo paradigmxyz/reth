@@ -2,7 +2,8 @@ use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
     static_file::{
-        ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+        ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask,
+        TransactionBlocksMask, TransactionMask,
     },
     RawDupSort,
 };
@@ -75,6 +76,10 @@ impl Command {
                     StaticFileSegment::Receipts => {
                         (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
                     }
+                    StaticFileSegment::TransactionBlocks => (
+                        table_key::<tables::TransactionBlocks>(&key)?,
+                        <TransactionBlocksMask>::MASK,
+                    ),
                 };
 
                 let content = tool
@@ -113,6 +118,13 @@ impl Command {
                                         content[0].as_slice(),
                                     )?;
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
+                                }
+                                StaticFileSegment::TransactionBlocks => {
+                                    let block_number =
+                                        <<tables::TransactionBlocks as Table>::Value>::decompress(
+                                            content[0].as_slice(),
+                                        )?;
+                                    println!("{}", serde_json::to_string_pretty(&block_number)?);
                                 }
                             }
                         }

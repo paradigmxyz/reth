@@ -340,7 +340,7 @@ mod tests {
         };
         use reth_ethereum_primitives::TransactionSigned;
         use reth_primitives_traits::{SealedBlock, SealedHeader};
-        use reth_provider::{BlockNumReader, HeaderProvider, TransactionsProvider};
+        use reth_provider::{BlockNumReader, EitherWriter, HeaderProvider, TransactionsProvider};
         use reth_testing_utils::generators::{
             random_block_range, random_signed_tx, BlockRangeParams,
         };
@@ -399,7 +399,8 @@ mod tests {
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data
                     {
-                        let tx = self.db.factory.provider_rw()?.into_tx();
+                        let provider = self.db.factory.provider_rw()?;
+                        let tx = provider.tx_ref();
                         let mut static_file_producer = static_file_provider
                             .get_writer(start, StaticFileSegment::Transactions)?;
 
@@ -415,11 +416,16 @@ mod tests {
                             static_file_producer.append_transaction(tx_num, &transaction).map(drop)
                         })?;
 
+                        let mut tx_block_writer = EitherWriter::new_transaction_blocks(
+                            &*provider,
+                            &static_file_provider,
+                            start,
+                        )?;
+                        tx_block_writer.increment_block(progress.number)?;
+
                         if body.tx_count != 0 {
-                            tx.put::<tables::TransactionBlocks>(
-                                body.last_tx_num(),
-                                progress.number,
-                            )?;
+                            tx_block_writer
+                                .append_transaction_block(body.last_tx_num(), &progress.number)?;
                         }
 
                         tx.put::<tables::BlockBodyIndices>(progress.number, body)?;
@@ -431,8 +437,9 @@ mod tests {
                             )?;
                         }
 
+                        drop(tx_block_writer);
                         static_file_producer.commit()?;
-                        tx.commit()?;
+                        provider.commit()?;
                     }
                 }
                 self.responses.replace(
@@ -526,10 +533,11 @@ mod tests {
                 let static_file_provider = self.db.factory.static_file_provider();
 
                 self.db.query(|tx| {
+                    let provider = self.db.factory.provider()?;
+
                     // Acquire cursors on body related tables
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
-                    let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlocks>()?;
 
                     let first_body_key = match bodies_cursor.first()? {
                         Some((key, _)) => key,
@@ -564,9 +572,9 @@ mod tests {
                             assert!(stored_ommers.is_some(), "Missing ommers entry");
                         }
 
-                        let tx_block_id = tx_block_cursor.seek_exact(body.last_tx_num())?.map(|(_,b)| b);
+                        let tx_block_id = provider.block_by_transaction_id(body.last_tx_num())?;
                         if body.tx_count == 0 {
-                            assert_ne!(tx_block_id,Some(number));
+                            assert_ne!(tx_block_id, Some(number));
                         } else {
                             assert_eq!(tx_block_id, Some(number));
                         }

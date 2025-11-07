@@ -40,15 +40,17 @@ impl<C: ChainSpecParser> Command<C> {
 
         let tool = DbTool::new(provider_factory)?;
 
-        let static_file_segment = match self.stage {
-            StageEnum::Headers => Some(StaticFileSegment::Headers),
-            StageEnum::Bodies => Some(StaticFileSegment::Transactions),
-            StageEnum::Execution => Some(StaticFileSegment::Receipts),
-            _ => None,
+        let static_file_segments = match self.stage {
+            StageEnum::Headers => vec![StaticFileSegment::Headers],
+            StageEnum::Bodies => {
+                vec![StaticFileSegment::Transactions, StaticFileSegment::TransactionBlocks]
+            }
+            StageEnum::Execution => vec![StaticFileSegment::Receipts],
+            _ => vec![],
         };
 
         // Delete static file segment data before inserting the genesis header below
-        if let Some(static_file_segment) = static_file_segment {
+        for static_file_segment in static_file_segments {
             let static_file_provider = tool.provider_factory.static_file_provider();
             let static_files = iter_static_files(static_file_provider.directory())?;
             if let Some(segment_static_files) = static_files.get(&static_file_segment) {

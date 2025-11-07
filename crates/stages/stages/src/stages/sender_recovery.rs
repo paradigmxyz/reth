@@ -3,11 +3,7 @@ use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::static_file::TransactionMask;
 use reth_db_api::{
-    cursor::DbCursorRW,
-    table::Value,
-    tables,
-    transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt, RawValue,
+    cursor::DbCursorRW, table::Value, tables, transaction::DbTxMut, DbTxUnwindExt, RawValue,
 };
 use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
@@ -148,7 +144,7 @@ fn recover_range<Provider, CURSOR>(
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
-    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
+    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory + BlockReader,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
@@ -181,8 +177,7 @@ where
                         SenderRecoveryStageError::FailedRecovery(err) => {
                             // get the block number for the bad transaction
                             let block_number = provider
-                                .tx_ref()
-                                .get::<tables::TransactionBlocks>(err.tx)?
+                                .block_by_transaction_id(err.tx)?
                                 .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
 
                             // fetch the sealed header so we can use it in the sender recovery
@@ -374,7 +369,7 @@ mod tests {
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
-    use reth_db_api::cursor::DbCursorRO;
+    use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_ethereum_primitives::{Block, TransactionSigned};
     use reth_primitives_traits::{SealedBlock, SignerRecoverable};
     use reth_provider::{

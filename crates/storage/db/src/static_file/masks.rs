@@ -42,3 +42,9 @@ add_static_file_mask! {
     #[doc = "Mask for selecting a single transaction from Transactions static file segment"]
     TransactionMask<T>, T, 0b1
 }
+
+// TRANSACTION BLOCKS MASKS
+add_static_file_mask! {
+    #[doc = "Mask for selecting a single transaction block from `TransactionBlocks` static file segment"]
+    TransactionBlocksMask, alloy_primitives::BlockNumber, 0b1
+}

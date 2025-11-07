@@ -21,7 +21,7 @@ use reth_db::{
     lockfile::StorageLock,
     static_file::{
         iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
-        StaticFileCursor, TransactionMask,
+        StaticFileCursor, TransactionBlocksMask, TransactionMask,
     },
 };
 use reth_db_api::{
@@ -967,7 +967,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         for segment in StaticFileSegment::iter() {
             match segment {
-                StaticFileSegment::Headers | StaticFileSegment::Transactions => {}
+                StaticFileSegment::Headers |
+                StaticFileSegment::Transactions |
+                StaticFileSegment::TransactionBlocks => {}
                 StaticFileSegment::Receipts => {
                     if has_receipt_pruning {
                         // Pruned nodes (including full node) do not store receipts as static files.
@@ -1076,6 +1078,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         highest_tx,
                         highest_block,
                     )?,
+                StaticFileSegment::TransactionBlocks => self
+                    .ensure_invariants::<_, tables::TransactionBlocks>(
+                        provider,
+                        segment,
+                        highest_tx,
+                        highest_block,
+                    )?,
             } {
                 update_unwind_target(unwind);
             }
@@ -1163,6 +1172,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 StaticFileSegment::Headers => StageId::Headers,
                 StaticFileSegment::Transactions => StageId::Bodies,
                 StaticFileSegment::Receipts => StageId::Execution,
+                StaticFileSegment::TransactionBlocks => StageId::Bodies,
             })?
             .unwrap_or_default()
             .block_number;
@@ -1976,8 +1986,16 @@ impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> Blo
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        self.get_segment_provider_for_transaction(StaticFileSegment::TransactionBlocks, id, None)
+            .and_then(|provider| provider.cursor()?.get_one::<TransactionBlocksMask>(id.into()))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileTx(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 }
 
