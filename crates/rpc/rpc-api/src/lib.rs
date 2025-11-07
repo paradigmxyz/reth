@@ -52,7 +52,7 @@ pub mod servers {
     };
     pub use reth_rpc_eth_api::{
         self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthFilterApiServer,
-        EthPubSubApiServer, L2EthApiExtServer,
+        EthPubSubApiServer, L2EthApiExtServer, XLayerEthApiExtServer,
     };
 }
 

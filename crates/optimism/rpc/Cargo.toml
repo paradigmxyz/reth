@@ -29,6 +29,9 @@ reth-chainspec.workspace = true
 reth-chain-state.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-rpc-convert.workspace = true
+reth-revm.workspace = true
+reth-errors.workspace = true
+revm-inspectors.workspace = true
 
 # op-reth
 reth-optimism-evm.workspace = true
@@ -57,6 +60,8 @@ op-alloy-rpc-jsonrpsee.workspace = true
 op-alloy-consensus.workspace = true
 revm.workspace = true
 op-revm.workspace = true
+alloy-evm.workspace = true
+alloy-rpc-types-trace.workspace = true
 
 # async
 tokio.workspace = true

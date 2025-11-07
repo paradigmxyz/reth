@@ -20,6 +20,7 @@ pub mod helpers;
 pub mod node;
 pub mod pubsub;
 pub mod types;
+pub mod ext_xlayer;
 
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
@@ -27,6 +28,7 @@ pub use ext::L2EthApiExtServer;
 pub use filter::{EngineEthFilter, EthFilterApiServer, QueryLimits};
 pub use node::{RpcNodeCore, RpcNodeCoreExt};
 pub use pubsub::EthPubSubApiServer;
+pub use ext_xlayer::XLayerEthApiExtServer;
 pub use reth_rpc_convert::*;
 pub use reth_rpc_eth_types::error::{
     AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError,
@@ -41,5 +43,7 @@ pub use core::EthApiClient;
 pub use ext::L2EthApiExtClient;
 #[cfg(feature = "client")]
 pub use filter::EthFilterApiClient;
+#[cfg(feature = "client")]
+pub use ext_xlayer::XLayerEthApiExtClient;
 
 use reth_trie_common as _;
