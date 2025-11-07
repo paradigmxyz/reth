@@ -9,15 +9,25 @@ on:
         description: 'Release version to tag as latest (e.g., v1.8.4)'
         required: true
         type: string
+      tag_reth:
+        description: 'Tag reth image as latest'
+        required: false
+        type: boolean
+        default: true
+      tag_op_reth:
+        description: 'Tag op-reth image as latest'
+        required: false
+        type: boolean
+        default: false
 
 env:
-  DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth
   DOCKER_USERNAME: ${{ github.actor }}
 
 jobs:
-  tag-latest:
-    name: Tag release as latest
+  tag-reth-latest:
+    name: Tag reth as latest
     runs-on: ubuntu-24.04
+    if: ${{ inputs.tag_reth }}
     permissions:
       packages: write
       contents: read
@@ -26,14 +36,38 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username ${DOCKER_USERNAME} --password-stdin
 
-      - name: Pull release image
+      - name: Pull reth release image
         run: |
-          docker pull ${DOCKER_IMAGE_NAME}:${{ inputs.version }}
+          docker pull ghcr.io/${{ github.repository_owner }}/reth:${{ inputs.version }}
 
-      - name: Tag as latest
+      - name: Tag reth as latest
         run: |
-          docker tag ${DOCKER_IMAGE_NAME}:${{ inputs.version }} ${DOCKER_IMAGE_NAME}:latest
+          docker tag ghcr.io/${{ github.repository_owner }}/reth:${{ inputs.version }} ghcr.io/${{ github.repository_owner }}/reth:latest
 
-      - name: Push latest tag
+      - name: Push reth latest tag
         run: |
-          docker push ${DOCKER_IMAGE_NAME}:latest
+          docker push ghcr.io/${{ github.repository_owner }}/reth:latest
+
+  tag-op-reth-latest:
+    name: Tag op-reth as latest
+    runs-on: ubuntu-24.04
+    if: ${{ inputs.tag_op_reth }}
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Log in to Docker
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username ${DOCKER_USERNAME} --password-stdin
+
+      - name: Pull op-reth release image
+        run: |
+          docker pull ghcr.io/${{ github.repository_owner }}/op-reth:${{ inputs.version }}
+
+      - name: Tag op-reth as latest
+        run: |
+          docker tag ghcr.io/${{ github.repository_owner }}/op-reth:${{ inputs.version }} ghcr.io/${{ github.repository_owner }}/op-reth:latest
+
+      - name: Push op-reth latest tag
+        run: |
+          docker push ghcr.io/${{ github.repository_owner }}/op-reth:latest
