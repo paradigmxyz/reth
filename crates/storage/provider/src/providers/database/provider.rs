@@ -2958,7 +2958,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
                 .unwrap_or_default();
 
             self.static_file_provider
-                .latest_writer(StaticFileSegment::Receipts)?
+                .latest_writer(StaticFileSegment::TransactionSenders)?
                 .prune_transaction_senders(to_delete, unwind_tx_from)?;
         } else {
             self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
