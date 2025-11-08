@@ -16,6 +16,14 @@ pub(crate) struct ChainMetadata {
     pub optimism: Option<OptimismConfig>,
 }
 
+/// Optimism hardfork activation timestamps.
+///
+/// All timestamps are in seconds since Unix epoch. Fields are optional because not all chains
+/// have activated all hardforks. The hardforks are ordered chronologically:
+/// Canyon → Delta → Ecotone → Fjord → Granite → Holocene → Isthmus → Jovian.
+///
+/// See the [superchain registry](https://github.com/ethereum-optimism/superchain-registry)
+/// for the actual activation times for each chain.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct HardforkConfig {
@@ -29,6 +37,16 @@ pub(crate) struct HardforkConfig {
     pub jovian_time: Option<u64>,
 }
 
+/// EIP-1559 fee market parameters for Optimism chains.
+///
+/// These parameters adjust the EIP-1559 base fee calculation formula to account for Optimism's
+/// 2-second block time (compared to Ethereum's ~12 seconds). The denominator controls how quickly
+/// the base fee adjusts to network congestion.
+///
+/// - `eip1559_elasticity`: Multiplier for the elasticity parameter in the base fee calculation.
+/// - `eip1559_denominator`: Denominator used in base fee calculation before Canyon hardfork.
+/// - `eip1559_denominator_canyon`: Denominator used in base fee calculation after Canyon hardfork
+///   activation. If `None`, the pre-Canyon denominator is used.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct OptimismConfig {
