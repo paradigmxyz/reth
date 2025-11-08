@@ -103,11 +103,14 @@ where
             range = 0..=*input.next_block_range().end();
         }
 
+        let range_start = *range.start();
+        let range_end = *range.end();
+        
         info!(target: "sync::stages::index_storage_history::exec", ?first_sync, "Collecting indices");
         let collector =
             collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(
                 provider,
-                BlockNumberAddress::range(range.clone()),
+                BlockNumberAddress::range(range_start..=range_end),
                 |AddressStorageKey((address, storage_key)), highest_block_number| {
                     StorageShardedKey::new(address, storage_key, highest_block_number)
                 },
@@ -127,7 +130,7 @@ where
             |key| AddressStorageKey((key.address, key.sharded_key.key)),
         )?;
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(range_end), done: true })
     }
 
     /// Unwind the stage.
