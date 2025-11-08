@@ -1844,23 +1844,23 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
     fn remove_state_above(&self, block: BlockNumber) -> ProviderResult<()> {
-        let range = block + 1..=self.last_block_number()?;
+        let start = block + 1;
+        let end = self.last_block_number()?;
 
-        if range.is_empty() {
+        if start > end {
             return Ok(());
         }
 
         // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.block_body_indices_range(range.clone())?;
+        let block_bodies = self.block_body_indices_range(start..=end)?;
 
         // get transaction receipts
         let from_transaction_num =
             block_bodies.first().expect("already checked if there are blocks").first_tx_num();
 
-        let storage_range = BlockNumberAddress::range(range.clone());
-
+        let storage_range = BlockNumberAddress::range(start..=end);
         let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
-        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
+        let account_changeset = self.take::<tables::AccountChangeSets>(start..=end)?;
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
@@ -1937,15 +1937,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         &self,
         block: BlockNumber,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
-        let range = block + 1..=self.last_block_number()?;
+        let start = block + 1;
+        let end = self.last_block_number()?;
 
-        if range.is_empty() {
+        if start > end {
             return Ok(ExecutionOutcome::default())
         }
-        let start_block_number = *range.start();
+        let start_block_number = start;
 
         // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.block_body_indices_range(range.clone())?;
+        let block_bodies = self.block_body_indices_range(start..=end)?;
 
         // get transaction receipts
         let from_transaction_num =
@@ -1953,10 +1954,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let to_transaction_num =
             block_bodies.last().expect("already checked if there are blocks").last_tx_num();
 
-        let storage_range = BlockNumberAddress::range(range.clone());
-
+        let storage_range = BlockNumberAddress::range(start..=end);
         let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
-        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
+        let account_changeset = self.take::<tables::AccountChangeSets>(start..=end)?;
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
