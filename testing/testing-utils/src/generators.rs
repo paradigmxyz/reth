@@ -268,19 +268,22 @@ pub fn random_block_range<R: Rng>(
 ) -> Vec<SealedBlock<Block>> {
     let mut blocks =
         Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
+    let fallback_parent = block_range_params.parent.unwrap_or_default();
     for idx in block_numbers {
-        let tx_count = block_range_params.tx_count.clone().sample_single(rng).unwrap();
+        let tx_count = block_range_params.tx_count.sample_single(rng).unwrap();
         let requests_count =
-            block_range_params.requests_count.clone().map(|r| r.sample_single(rng).unwrap());
+            block_range_params.requests_count.map(|r| r.sample_single(rng).unwrap());
         let withdrawals_count =
-            block_range_params.withdrawals_count.clone().map(|r| r.sample_single(rng).unwrap());
-        let parent = block_range_params.parent.unwrap_or_default();
+            block_range_params.withdrawals_count.map(|r| r.sample_single(rng).unwrap());
         blocks.push(random_block(
             rng,
             idx,
             BlockParams {
                 parent: Some(
-                    blocks.last().map(|block: &SealedBlock<Block>| block.hash()).unwrap_or(parent),
+                    blocks
+                        .last()
+                        .map(|block: &SealedBlock<Block>| block.hash())
+                        .unwrap_or(fallback_parent),
                 ),
                 tx_count: Some(tx_count),
                 ommers_count: None,
@@ -322,12 +325,8 @@ where
 
     for _block in blocks {
         let mut changeset = Vec::new();
-        let (from, to, mut transfer, new_entries) = random_account_change(
-            rng,
-            &valid_addresses,
-            n_storage_changes.clone(),
-            key_range.clone(),
-        );
+        let (from, to, mut transfer, new_entries) =
+            random_account_change(rng, &valid_addresses, n_storage_changes, key_range);
 
         // extract from sending account
         let (prev_from, _) = state.get_mut(&from).unwrap();
@@ -395,7 +394,7 @@ pub fn random_account_change<R: Rng>(
         Vec::new()
     } else {
         (0..n_storage_changes.sample_single(rng).unwrap())
-            .map(|_| random_storage_entry(rng, key_range.clone()))
+            .map(|_| random_storage_entry(rng, key_range))
             .collect()
     };
 
