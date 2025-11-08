@@ -1687,4 +1687,126 @@ mod tests {
         // only slots in the state update can be included, so slot3 should not appear
         assert!(!targets.contains_key(&addr));
     }
+
+    #[test]
+    fn test_prefetch_proofs_batching() {
+        let test_provider_factory = create_test_provider_factory();
+        let mut task = create_test_state_root_task(test_provider_factory);
+
+        // send multiple messages
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        let addr3 = B256::random();
+
+        let mut targets1 = MultiProofTargets::default();
+        targets1.insert(addr1, HashSet::default());
+
+        let mut targets2 = MultiProofTargets::default();
+        targets2.insert(addr2, HashSet::default());
+
+        let mut targets3 = MultiProofTargets::default();
+        targets3.insert(addr3, HashSet::default());
+
+        let tx = task.state_root_message_sender();
+        tx.send(MultiProofMessage::PrefetchProofs(targets1)).unwrap();
+        tx.send(MultiProofMessage::PrefetchProofs(targets2)).unwrap();
+        tx.send(MultiProofMessage::PrefetchProofs(targets3)).unwrap();
+
+        let proofs_requested =
+            if let Ok(MultiProofMessage::PrefetchProofs(targets)) = task.rx.recv() {
+                // simulate the batching logic
+                let mut merged_targets = targets;
+                let mut num_batched = 1;
+                while let Ok(MultiProofMessage::PrefetchProofs(next_targets)) = task.rx.try_recv() {
+                    merged_targets.extend(next_targets);
+                    num_batched += 1;
+                }
+
+                assert_eq!(num_batched, 3);
+                assert_eq!(merged_targets.len(), 3);
+                assert!(merged_targets.contains_key(&addr1));
+                assert!(merged_targets.contains_key(&addr2));
+                assert!(merged_targets.contains_key(&addr3));
+
+                task.on_prefetch_proof(merged_targets)
+            } else {
+                panic!("Expected PrefetchProofs message");
+            };
+
+        assert_eq!(proofs_requested, 1);
+    }
+
+    #[test]
+    fn test_state_update_batching() {
+        use alloy_evm::block::StateChangeSource;
+        use revm_state::Account;
+
+        let test_provider_factory = create_test_provider_factory();
+        let mut task = create_test_state_root_task(test_provider_factory);
+
+        // create multiple state updates
+        let addr1 = alloy_primitives::Address::random();
+        let addr2 = alloy_primitives::Address::random();
+
+        let mut update1 = EvmState::default();
+        update1.insert(
+            addr1,
+            Account {
+                info: revm_state::AccountInfo {
+                    balance: U256::from(100),
+                    nonce: 1,
+                    code_hash: Default::default(),
+                    code: Default::default(),
+                },
+                transaction_id: Default::default(),
+                storage: Default::default(),
+                status: revm_state::AccountStatus::Touched,
+            },
+        );
+
+        let mut update2 = EvmState::default();
+        update2.insert(
+            addr2,
+            Account {
+                info: revm_state::AccountInfo {
+                    balance: U256::from(200),
+                    nonce: 2,
+                    code_hash: Default::default(),
+                    code: Default::default(),
+                },
+                transaction_id: Default::default(),
+                storage: Default::default(),
+                status: revm_state::AccountStatus::Touched,
+            },
+        );
+
+        let source = StateChangeSource::Transaction(0);
+
+        let tx = task.state_root_message_sender();
+        tx.send(MultiProofMessage::StateUpdate(source, update1.clone())).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source, update2.clone())).unwrap();
+
+        let proofs_requested =
+            if let Ok(MultiProofMessage::StateUpdate(_src, update)) = task.rx.recv() {
+                let mut merged_update = update;
+                let mut num_batched = 1;
+
+                while let Ok(MultiProofMessage::StateUpdate(_next_source, next_update)) =
+                    task.rx.try_recv()
+                {
+                    merged_update.extend(next_update);
+                    num_batched += 1;
+                }
+
+                assert_eq!(num_batched, 2);
+                assert_eq!(merged_update.len(), 2);
+                assert!(merged_update.contains_key(&addr1));
+                assert!(merged_update.contains_key(&addr2));
+
+                task.on_state_update(source, merged_update)
+            } else {
+                panic!("Expected StateUpdate message");
+            };
+        assert_eq!(proofs_requested, 1);
+    }
 }
