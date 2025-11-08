@@ -31,6 +31,9 @@ use reth_primitives_traits::{
 mod validation;
 pub use validation::validate_block_post_execution;
 
+/// Default maximum extra data size in bytes (32 bytes as per Ethereum spec).
+const DEFAULT_MAX_EXTRA_DATA_SIZE: usize = 32;
+
 /// Ethereum beacon consensus
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.
@@ -39,13 +42,24 @@ pub struct EthBeaconConsensus<ChainSpec> {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
     /// Maximum allowed extra data size in bytes
-    pub max_extra_data_size: usize,
+    max_extra_data_size: usize,
 }
 
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
     /// Create a new instance of [`EthBeaconConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, max_extra_data_size: 32 }
+        Self { chain_spec, max_extra_data_size: DEFAULT_MAX_EXTRA_DATA_SIZE }
+    }
+
+    /// Returns the maximum allowed extra data size.
+    pub const fn max_extra_data_size(&self) -> usize {
+        self.max_extra_data_size
+    }
+
+    /// Sets the maximum allowed extra data size and returns the updated instance.
+    pub const fn with_max_extra_data_size(mut self, size: usize) -> Self {
+        self.max_extra_data_size = size;
+        self
     }
 
     /// Returns the chain spec associated with this consensus engine.
