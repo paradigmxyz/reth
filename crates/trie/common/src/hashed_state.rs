@@ -544,8 +544,7 @@ impl HashedPostStateSorted {
 
     /// Clears all accounts and storage data.
     pub fn clear(&mut self) {
-        self.accounts.accounts.clear();
-        self.accounts.destroyed_accounts.clear();
+        self.accounts.clear();
         self.storages.clear();
     }
 }
@@ -1285,7 +1284,7 @@ mod tests {
         state.accounts.insert(addr1, Some(Default::default()));
 
         let mut sorted_state = HashedPostStateSorted::default();
-        sorted_state.accounts.accounts.push((addr2, Default::default()));
+        sorted_state.accounts.push((addr2, Some(Default::default())));
 
         state.extend_from_sorted(&sorted_state);
 
@@ -1302,7 +1301,7 @@ mod tests {
         let mut state = HashedPostState::default();
 
         let mut sorted_state = HashedPostStateSorted::default();
-        sorted_state.accounts.destroyed_accounts.insert(addr1);
+        sorted_state.accounts.push((addr1, None));
 
         state.extend_from_sorted(&sorted_state);
 
@@ -1319,12 +1318,8 @@ mod tests {
 
         let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
 
-        let mut zero_valued_slots = B256Set::default();
-        zero_valued_slots.insert(slot3);
-
         let sorted = HashedStorageSorted {
-            non_zero_valued_slots: vec![(slot2, U256::from(200))],
-            zero_valued_slots,
+            storage_slots: vec![(slot2, U256::from(200)), (slot3, U256::ZERO)],
             wiped: false,
         };
 
@@ -1345,11 +1340,8 @@ mod tests {
 
         let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
 
-        let sorted = HashedStorageSorted {
-            non_zero_valued_slots: vec![(slot2, U256::from(200))],
-            zero_valued_slots: Default::default(),
-            wiped: true,
-        };
+        let sorted =
+            HashedStorageSorted { storage_slots: vec![(slot2, U256::from(200))], wiped: true };
 
         storage.extend_from_sorted(&sorted);
 
