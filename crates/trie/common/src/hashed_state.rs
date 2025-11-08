@@ -336,17 +336,11 @@ impl HashedPostState {
     /// and then extending, as it avoids creating intermediate `HashMap` allocations.
     pub fn extend_from_sorted(&mut self, sorted: &HashedPostStateSorted) {
         // Reserve capacity for accounts
-        self.accounts
-            .reserve(sorted.accounts.accounts.len() + sorted.accounts.destroyed_accounts.len());
+        self.accounts.reserve(sorted.accounts.len());
 
-        // Insert updated accounts
-        for (address, account) in &sorted.accounts.accounts {
-            self.accounts.insert(*address, Some(*account));
-        }
-
-        // Insert destroyed accounts
-        for address in &sorted.accounts.destroyed_accounts {
-            self.accounts.insert(*address, None);
+        // Insert accounts (Some = updated, None = destroyed)
+        for (address, account) in &sorted.accounts {
+            self.accounts.insert(*address, *account);
         }
 
         // Reserve capacity for storages
@@ -369,17 +363,8 @@ impl HashedPostState {
 
     /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
-        let mut updated_accounts = Vec::new();
-        let mut destroyed_accounts = HashSet::default();
-        for (hashed_address, info) in self.accounts {
-            if let Some(info) = info {
-                updated_accounts.push((hashed_address, info));
-            } else {
-                destroyed_accounts.insert(hashed_address);
-            }
-        }
-        updated_accounts.sort_unstable_by_key(|(address, _)| *address);
-        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
+        let mut accounts: Vec<_> = self.accounts.into_iter().collect();
+        accounts.sort_unstable_by_key(|(address, _)| *address);
 
         let storages = self
             .storages
@@ -467,16 +452,11 @@ impl HashedStorage {
         }
 
         // Reserve capacity for all slots
-        self.storage.reserve(sorted.non_zero_valued_slots.len() + sorted.zero_valued_slots.len());
+        self.storage.reserve(sorted.storage_slots.len());
 
-        // Insert non-zero valued slots
-        for (slot, value) in &sorted.non_zero_valued_slots {
+        // Insert all storage slots
+        for (slot, value) in &sorted.storage_slots {
             self.storage.insert(*slot, *value);
-        }
-
-        // Insert zero-valued slots
-        for slot in &sorted.zero_valued_slots {
-            self.storage.insert(*slot, U256::ZERO);
         }
     }
 
