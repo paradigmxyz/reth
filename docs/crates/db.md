@@ -233,7 +233,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
 }
 ```
 
-Notice that the function uses a [turbofish](https://techblog.tonsser.com/posts/what-is-rusts-turbofish) to define which table to use when passing in the `key` to the `DbTx::get()` function. Taking a quick look at the function definition, a generic `T` is defined that implements the `Table` trait mentioned at the beginning of this chapter.
+Notice that the function uses a [turbofish](https://rust.code-maven.com/turbofish) to define which table to use when passing in the `key` to the `DbTx::get()` function. Taking a quick look at the function definition, a generic `T` is defined that implements the `Table` trait mentioned at the beginning of this chapter.
 
 [File: crates/storage/db-api/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/transaction.rs#L15)
 
