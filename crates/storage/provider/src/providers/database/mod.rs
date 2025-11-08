@@ -1,11 +1,14 @@
 use crate::{
-    providers::{state::latest::LatestStateProvider, NodeTypesForProvider, StaticFileProvider},
+    providers::{
+        state::latest::LatestStateProvider, NodeTypesForProvider, StaticFileProvider,
+        StaticFileProviderRWRefMut,
+    },
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, MetadataProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    StaticFileProviderFactory, StaticFileWriter, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
@@ -246,6 +249,14 @@ impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
     /// Returns static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
+    }
+
+    fn get_static_file_writer(
+        &self,
+        block: BlockNumber,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
+        self.static_file_provider.get_writer(block, segment)
     }
 }
 
