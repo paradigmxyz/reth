@@ -315,8 +315,15 @@ where
         let mut cumulative_gas = 0;
         let batch_start = Instant::now();
 
-        let mut blocks = Vec::new();
-        let mut results = Vec::new();
+        let expected_len = max_block.saturating_sub(start_block) + 1;
+        let prealloc_capacity = usize::try_from(expected_len).ok();
+
+        let mut blocks = if self.exex_manager_handle.has_exexs() {
+            prealloc_capacity.map_or_else(Vec::new, Vec::with_capacity)
+        } else {
+            Vec::new()
+        };
+        let mut results = prealloc_capacity.map_or_else(Vec::new, Vec::with_capacity);
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
