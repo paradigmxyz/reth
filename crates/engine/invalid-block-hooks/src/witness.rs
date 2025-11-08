@@ -21,7 +21,7 @@ use revm_database::{
     AccountStatus, RevertToSlot,
 };
 use serde::Serialize;
-use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
+use std::{collections::BTreeMap, fmt::Debug, io::Write, path::PathBuf};
 
 type CollectionResult =
     (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
@@ -400,7 +400,8 @@ where
         let path = self.output_directory.join(filename);
         let diff = Comparison::new(original, new);
         let mut file = reth_fs_util::create_file(&path)?;
-        file.write_all(diff.to_string().as_bytes()).map_err(|err| FsPathError::write(err, &path))?;
+        file.write_all(diff.to_string().as_bytes())
+            .map_err(|err| FsPathError::write(err, &path))?;
 
         Ok(path)
     }
@@ -750,8 +751,8 @@ mod tests {
 
         // Modify the state to create a mismatch
         let addr = Address::from([1u8; 20]);
-        if let Some(account) = modified_state.state.get_mut(&addr)
-            && let Some(ref mut info) = account.info
+        if let Some(account) = modified_state.state.get_mut(&addr) &&
+            let Some(ref mut info) = account.info
         {
             info.balance = U256::from(999);
         }
