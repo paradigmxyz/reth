@@ -390,7 +390,7 @@ where
         //
         // we should catch this earlier, so that such a transaction does not occupy memory.
         if tx.is_eip4844() {
-            metrics::record_inclusion_list_transaction_excluded("blob_transaction");
+            metrics::record_inclusion_list_transaction_excluded("blob_tx");
             il_bitfield[i] = false;
             i += 1;
             continue;
@@ -398,7 +398,7 @@ where
 
         // transaction gas limit too high
         if cumulative_gas_used + tx.gas_limit() > block_gas_limit {
-            metrics::record_inclusion_list_transaction_excluded("gas_limit");
+            metrics::record_inclusion_list_transaction_excluded("gas_limit_exceeded");
             il_bitfield[i] = false;
             i += 1;
             continue;
@@ -421,9 +421,9 @@ where
             })) => {
                 // Record the reason for exclusion
                 if error.is_nonce_too_high() {
-                    metrics::record_inclusion_list_transaction_excluded("nonce");
+                    metrics::record_inclusion_list_transaction_excluded("invalid_nonce");
                 } else if error.is_lack_of_funds_for_max_fee() {
-                    metrics::record_inclusion_list_transaction_excluded("balance");
+                    metrics::record_inclusion_list_transaction_excluded("insufficient_balance");
                 } else {
                     metrics::record_inclusion_list_transaction_excluded("unknown");
                 }

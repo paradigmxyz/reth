@@ -206,7 +206,7 @@ impl BlockValidationMetrics {
 #[metrics(scope = "ef_execution")]
 pub struct EfExecutionMetrics {
     /// Total number of inclusion list transactions included into block
-    pub(crate) inclusion_list_transactions_included_total: Counter,
+    pub(crate) inclusion_list_block_validation_transactions_included_total: Counter,
     /// Time taken to validate a block against its inclusion list (histogram, seconds)
     #[metrics(buckets = [0.05, 0.1, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0])]
     pub(crate) inclusion_list_block_validation_time_seconds: Histogram,
@@ -215,18 +215,19 @@ pub struct EfExecutionMetrics {
 impl EfExecutionMetrics {
     /// Record inclusion list transaction included into block
     pub(crate) fn record_inclusion_list_transaction_included(&self) {
-        self.inclusion_list_transactions_included_total.increment(1);
+        // TODO: Switch to macro!
+        self.inclusion_list_block_validation_transactions_included_total.increment(1);
     }
 
     /// Record inclusion list transaction excluded from block with reason
     pub(crate) fn record_inclusion_list_transaction_excluded(&self, reason: &'static str) {
-        metrics::counter!("ef_execution_inclusion_list_transactions_excluded_total", "reason" => reason).increment(1);
+        metrics::counter!("ef_execution_inclusion_list_block_validation_transactions_excluded_total", "reason" => reason).increment(1);
     }
 
     /// Record inclusion list transaction excluded that were not checked or should have been
     /// included (i.e. the tx is valid but not included)
     pub(crate) fn record_inclusion_list_transaction_excluded_unknown(&self, count: u64) {
-        metrics::counter!("ef_execution_inclusion_list_transactions_excluded_total", "reason" => "unknown").increment(count);
+        metrics::counter!("ef_execution_inclusion_list_block_validation_transactions_excluded_total", "reason" => "unknown").increment(count);
     }
 
     /// Record block validation time against inclusion list

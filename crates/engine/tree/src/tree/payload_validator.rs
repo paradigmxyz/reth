@@ -1230,13 +1230,13 @@ where
             if tx.is_eip4844() {
                 self.metrics
                     .ef_excution
-                    .record_inclusion_list_transaction_excluded("blob_transaction");
+                    .record_inclusion_list_transaction_excluded("blob_tx");
                 continue
             }
 
             // Skip if not enough gas (reason: gas_limit)
             if tx.gas_limit() > remaining {
-                self.metrics.ef_excution.record_inclusion_list_transaction_excluded("gas_limit");
+                self.metrics.ef_excution.record_inclusion_list_transaction_excluded("gas_limit_exceeded");
                 continue
             }
 
@@ -1255,7 +1255,7 @@ where
 
             // Check nonce matches - if not, it's excluded due to nonce mismatch
             if account_nonce != tx.nonce() {
-                self.metrics.ef_excution.record_inclusion_list_transaction_excluded("nonce");
+                self.metrics.ef_excution.record_inclusion_list_transaction_excluded("invalid_nonce");
                 continue
             }
 
@@ -1288,7 +1288,7 @@ where
                 ));
             }
             // Insufficient balance (reason: balance)
-            self.metrics.ef_excution.record_inclusion_list_transaction_excluded("balance");
+            self.metrics.ef_excution.record_inclusion_list_transaction_excluded("invalid_balance");
         }
 
         Ok(())
