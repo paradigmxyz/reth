@@ -13,7 +13,6 @@ use reth_revm::{
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
-use reth_fs_util::{self, FsPathError};
 use revm::state::AccountInfo;
 use revm_bytecode::Bytecode;
 use revm_database::{
