@@ -1,9 +1,7 @@
-//! Common receipts pruning logic shared between user and static file pruning segments.
+//! Common receipts pruning logic.
 //!
 //! - [`crate::segments::user::Receipts`] is responsible for pruning receipts according to the
 //!   user-configured settings (for example, on a full node or with a custom prune config)
-//! - [`crate::segments::static_file::Receipts`] is responsible for pruning receipts on an archive
-//!   node after static file producer has finished
 
 use crate::{db_ext::DbTxPruneExt, segments::PruneInput, PrunerError};
 use reth_db_api::{table::Value, tables, transaction::DbTxMut};
@@ -48,7 +46,7 @@ where
     trace!(target: "pruner", %pruned, %done, "Pruned receipts");
 
     let last_pruned_block = provider
-        .transaction_block(last_pruned_transaction)?
+        .block_by_transaction_id(last_pruned_transaction)?
         .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
         // If there's more receipts to prune, set the checkpoint block number to previous,
         // so we could finish pruning its receipts on the next run.

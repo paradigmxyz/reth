@@ -16,6 +16,7 @@ reth-codecs = { workspace = true, optional = true }
 
 alloy-primitives.workspace = true
 derive_more.workspace = true
+strum = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 
 modular-bitfield = { workspace = true, optional = true }
@@ -42,6 +43,7 @@ std = [
     "serde?/std",
     "serde_json/std",
     "thiserror/std",
+    "strum/std",
 ]
 test-utils = [
     "std",

@@ -5,7 +5,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use itertools::Itertools;
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_trie::{
-    hashed_cursor::{noop::NoopHashedStorageCursor, HashedPostStateStorageCursor},
+    hashed_cursor::{noop::NoopHashedCursor, HashedPostStateCursor},
     node_iter::{TrieElement, TrieNodeIter},
     trie_cursor::{noop::NoopStorageTrieCursor, InMemoryTrieCursor},
     updates::StorageTrieUpdates,
@@ -142,9 +142,9 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                 );
                                 let mut node_iter = TrieNodeIter::storage_trie(
                                     walker,
-                                    HashedPostStateStorageCursor::new(
-                                        NoopHashedStorageCursor::default(),
-                                        Some(&storage_sorted),
+                                    HashedPostStateCursor::new(
+                                        Option::<NoopHashedCursor<U256>>::None,
+                                        &storage_sorted.storage_slots,
                                     ),
                                 );
 

@@ -1,6 +1,7 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::B256;
+use alloy_rpc_types_engine::PayloadId;
 use core::mem;
 use eyre::{bail, OptionExt};
 use reth_primitives_traits::{Recovered, SignedTransaction};
@@ -35,6 +36,13 @@ where
         // messages. Order is preserved.
         let (tx, _) = broadcast::channel(FLASHBLOCK_SEQUENCE_CHANNEL_SIZE);
         Self { inner: BTreeMap::new(), block_broadcaster: tx, state_root: None }
+    }
+
+    /// Returns the sender half of the [`FlashBlockCompleteSequence`] channel.
+    pub const fn block_sequence_broadcaster(
+        &self,
+    ) -> &broadcast::Sender<FlashBlockCompleteSequence> {
+        &self.block_broadcaster
     }
 
     /// Gets a subscriber to the flashblock sequences produced.
@@ -82,8 +90,12 @@ where
             return Ok(())
         }
 
-        // only insert if we previously received the same block, assume we received index 0
-        if self.block_number() == Some(flashblock.metadata.block_number) {
+        // only insert if we previously received the same block and payload, assume we received
+        // index 0
+        let same_block = self.block_number() == Some(flashblock.metadata.block_number);
+        let same_payload = self.payload_id() == Some(flashblock.payload_id);
+
+        if same_block && same_payload {
             trace!(number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len()  ,"Received followup flashblock");
             self.inner.insert(flashblock.index, PreparedFlashBlock::new(flashblock)?);
         } else {
@@ -139,6 +151,10 @@ where
     pub fn index(&self) -> Option<u64> {
         Some(self.inner.values().last()?.block().index)
     }
+    /// Returns the payload id of the first tracked flashblock in the current sequence.
+    pub fn payload_id(&self) -> Option<PayloadId> {
+        Some(self.inner.values().next()?.block().payload_id)
+    }
 }
 
 impl<T> Default for FlashBlockPendingSequence<T>
@@ -151,7 +167,10 @@ where
 }
 
 /// A complete sequence of flashblocks, often corresponding to a full block.
-/// Ensure invariants of a complete flashblocks sequence.
+///
+/// Ensures invariants of a complete flashblocks sequence.
+/// If this entire sequence of flashblocks was executed on top of latest block, this also includes
+/// the computed state root.
 #[derive(Debug, Clone)]
 pub struct FlashBlockCompleteSequence {
     inner: Vec<FlashBlock>,

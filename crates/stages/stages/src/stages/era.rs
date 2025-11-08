@@ -4,7 +4,7 @@ use futures_util::{Stream, StreamExt};
 use reqwest::{Client, Url};
 use reth_config::config::EtlConfig;
 use reth_db_api::{table::Value, transaction::DbTxMut};
-use reth_era::{era1_file::Era1Reader, era_file_ops::StreamReader};
+use reth_era::{common::file_ops::StreamReader, era1::file::Era1Reader};
 use reth_era_downloader::{read_dir, EraClient, EraMeta, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
@@ -204,13 +204,24 @@ where
 
             height
         } else {
-            // It's possible for a pipeline sync to be executed with a None target, e.g. after a
-            // stage was manually dropped, and `reth node` is then called without a `--debug.tip`.
+            // No era files to process. Return the highest block we're aware of to avoid
+            // limiting subsequent stages with an outdated checkpoint.
             //
-            // In this case we don't want to simply default to zero, as that would overwrite the
-            // previously stored checkpoint block number. Instead we default to that previous
-            // checkpoint.
-            input.target.unwrap_or_else(|| input.checkpoint().block_number)
+            // This can happen when:
+            // 1. Era import is complete (all pre-merge blocks imported)
+            // 2. No era import source was configured
+            //
+            // We return max(checkpoint, highest_header, target) to ensure we don't return
+            // a stale checkpoint that could limit subsequent stages like Headers.
+            let highest_header = provider
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Headers)
+                .unwrap_or_default();
+
+            let checkpoint = input.checkpoint().block_number;
+            let from_target = input.target.unwrap_or(checkpoint);
+
+            checkpoint.max(highest_header).max(from_target)
         };
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(height), done: height >= input.target() })

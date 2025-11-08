@@ -7,7 +7,7 @@ use crate::{
         TreeConfig,
     },
 };
-use alloy_consensus::Header;
+
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -336,15 +336,12 @@ impl TestHarness {
 
     fn persist_blocks(&self, blocks: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>) {
         let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
-        let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
 
         for block in &blocks {
             block_data.push((block.hash(), block.clone_block()));
-            headers_data.push((block.hash(), block.header().clone()));
         }
 
         self.provider.extend_blocks(block_data);
-        self.provider.extend_headers(headers_data);
     }
 }
 
@@ -403,7 +400,7 @@ impl ValidatorTestHarness {
         Self { harness, validator, metrics: TestMetrics::default() }
     }
 
-    /// Configure `PersistenceState` for specific `PersistingKind` scenarios
+    /// Configure `PersistenceState` for specific persistence scenarios
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
         use tokio::sync::oneshot;
 
@@ -432,7 +429,6 @@ impl ValidatorTestHarness {
     ) -> ValidationOutcome<EthPrimitives> {
         let ctx = TreeCtx::new(
             &mut self.harness.tree.state,
-            &self.harness.tree.persistence_state,
             &self.harness.tree.canonical_in_memory_state,
         );
         let result = self.validator.validate_block(block, ctx);
@@ -1695,7 +1691,6 @@ mod payload_execution_tests {
 #[cfg(test)]
 mod forkchoice_updated_tests {
     use super::*;
-    use alloy_primitives::Address;
 
     /// Test that validates the forkchoice state pre-validation logic
     #[tokio::test]
@@ -1913,33 +1908,6 @@ mod forkchoice_updated_tests {
             .unwrap();
         let fcu_result = result.outcome.await.unwrap();
         assert!(fcu_result.payload_status.is_syncing(), "Should return syncing during backfill");
-    }
-
-    /// Test metrics recording in forkchoice updated
-    #[tokio::test]
-    async fn test_record_forkchoice_metrics() {
-        let chain_spec = MAINNET.clone();
-        let test_harness = TestHarness::new(chain_spec);
-
-        // Get initial metrics state by checking if metrics are recorded
-        // We can't directly get counter values, but we can verify the methods are called
-
-        // Test without attributes
-        let attrs_none = None;
-        test_harness.tree.record_forkchoice_metrics(&attrs_none);
-
-        // Test with attributes
-        let attrs_some = Some(alloy_rpc_types_engine::PayloadAttributes {
-            timestamp: 1000,
-            prev_randao: B256::random(),
-            suggested_fee_recipient: Address::random(),
-            withdrawals: None,
-            parent_beacon_block_root: None,
-        });
-        test_harness.tree.record_forkchoice_metrics(&attrs_some);
-
-        // We can't directly verify counter values since they're private metrics
-        // But we can verify the methods don't panic and execute successfully
     }
 
     /// Test edge case: FCU with invalid ancestor
