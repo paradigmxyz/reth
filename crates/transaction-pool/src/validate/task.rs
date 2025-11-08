@@ -9,6 +9,7 @@ use crate::{
 };
 use futures_util::{lock::Mutex, StreamExt};
 use reth_primitives_traits::{Block, SealedBlock};
+use reth_storage_api::StateProvider;
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
@@ -186,11 +187,42 @@ impl<V> TransactionValidationTaskExecutor<V> {
     }
 }
 
+impl<V> TransactionValidationTaskExecutor<V>
+where
+    V: TransactionValidator + 'static,
+{
+    /// Runs validation for a single transaction.
+    async fn validate_transaction_internal(
+        validator: Arc<V>,
+        origin: TransactionOrigin,
+        transaction: V::Transaction,
+    ) -> TransactionValidationOutcome<V::Transaction> {
+        validator.validate_transaction(origin, transaction).await
+    }
+}
+
 impl<V> TransactionValidator for TransactionValidationTaskExecutor<V>
 where
     V: TransactionValidator + 'static,
 {
     type Transaction = <V as TransactionValidator>::Transaction;
+
+    async fn validate_transaction_stateless(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> Result<Self::Transaction, TransactionValidationOutcome<Self::Transaction>> {
+        self.validator.validate_transaction_stateless(origin, transaction).await
+    }
+
+    async fn validate_transaction_stateful(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+        state: &dyn StateProvider,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        self.validator.validate_transaction_stateful(origin, transaction, state).await
+    }
 
     async fn validate_transaction(
         &self,
@@ -204,7 +236,8 @@ where
                 let to_validation_task = self.to_validation_task.clone();
                 let validator = self.validator.clone();
                 let fut = Box::pin(async move {
-                    let res = validator.validate_transaction(origin, transaction).await;
+                    let res =
+                        Self::validate_transaction_internal(validator, origin, transaction).await;
                     let _ = tx.send(res);
                 });
                 let to_validation_task = to_validation_task.lock().await;
@@ -230,52 +263,43 @@ where
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        provider: &dyn StateProvider,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        let hashes: Vec<_> = transactions.iter().map(|(_, tx)| *tx.hash()).collect();
-        let (tx, rx) = oneshot::channel();
-        {
-            let res = {
-                let to_validation_task = self.to_validation_task.clone();
-                let validator = self.validator.clone();
-                let fut = Box::pin(async move {
-                    let res = validator.validate_transactions(transactions).await;
-                    let _ = tx.send(res);
-                });
-                let to_validation_task = to_validation_task.lock().await;
-                to_validation_task.send(fut).await
-            };
-            if res.is_err() {
-                return hashes
-                    .into_iter()
-                    .map(|hash| {
-                        TransactionValidationOutcome::Error(
-                            hash,
-                            Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-                        )
-                    })
-                    .collect();
-            }
-        }
-        match rx.await {
-            Ok(res) => res,
-            Err(_) => hashes
-                .into_iter()
-                .map(|hash| {
-                    TransactionValidationOutcome::Error(
-                        hash,
-                        Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-                    )
-                })
-                .collect(),
-        }
+        // Since we can't send &dyn StateProvider across tasks, we need to validate synchronously
+        // This is acceptable as @klkvr mentioned we can leave TaskExecutor without many changes
+        self.validator.validate_transactions(transactions, provider).await
     }
 
-    async fn validate_transactions_with_origin(
+    async fn validate_transactions_with_origin<I>(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_transactions(transactions.into_iter().map(|tx| (origin, tx)).collect()).await
+        transactions: I,
+        provider: &dyn StateProvider,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>>
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
+        self.validator.validate_transactions_with_origin(origin, transactions, provider).await
+    }
+
+    async fn validate_transactions_internal(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Option<Vec<TransactionValidationOutcome<Self::Transaction>>> {
+        self.validator.validate_transactions_internal(transactions).await
+    }
+
+    async fn validate_transactions_with_origin_internal<I>(
+        &self,
+        origin: TransactionOrigin,
+        transactions: I,
+    ) -> Option<Vec<TransactionValidationOutcome<Self::Transaction>>>
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
+        self.validator.validate_transactions_with_origin_internal(origin, transactions).await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
