@@ -13,6 +13,7 @@ use reth_revm::{
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
+use reth_fs_util::{self, FsPathError};
 use revm::state::AccountInfo;
 use revm_bytecode::Bytecode;
 use revm_database::{
@@ -20,7 +21,7 @@ use revm_database::{
     AccountStatus, RevertToSlot,
 };
 use serde::Serialize;
-use std::{collections::BTreeMap, fmt::Debug, io::Write, path::PathBuf};
+use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 type CollectionResult =
     (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
@@ -364,17 +365,14 @@ where
         Ok(())
     }
 
-    fn write_file(&self, filename: String, contents: &[u8]) -> eyre::Result<PathBuf> {
-        let path = self.output_directory.join(filename);
-        create_file(&path)?
-            .write_all(contents)
-            .map_err(|err| FsPathError::write(err, &path))?;
-        Ok(path)
-    }
-
     /// Serializes and saves a value to a JSON file in the output directory
     fn save_file<T: Serialize>(&self, filename: String, value: &T) -> eyre::Result<PathBuf> {
-        self.write_file(filename, serde_json::to_string(value)?.as_bytes())
+        let path = self.output_directory.join(filename);
+        let mut file = reth_fs_util::create_file(&path)?;
+        let contents = serde_json::to_string(value)?;
+        file.write_all(contents.as_bytes()).map_err(|err| FsPathError::write(err, &path))?;
+
+        Ok(path)
     }
 
     /// Saves both original and re-executed comparison files with the given file type prefix
@@ -399,8 +397,12 @@ where
         original: &T,
         new: &T,
     ) -> eyre::Result<PathBuf> {
+        let path = self.output_directory.join(filename);
         let diff = Comparison::new(original, new);
-        self.write_file(filename, diff.to_string().as_bytes())
+        let mut file = reth_fs_util::create_file(&path)?;
+        file.write_all(diff.to_string().as_bytes()).map_err(|err| FsPathError::write(err, &path))?;
+
+        Ok(path)
     }
 }
 
@@ -1072,3 +1074,4 @@ mod tests {
             hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_component_test");
         assert!(validation_result.is_ok(), "Component validation should succeed");
     }
+}
