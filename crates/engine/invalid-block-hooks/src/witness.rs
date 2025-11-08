@@ -20,7 +20,7 @@ use revm_database::{
     AccountStatus, RevertToSlot,
 };
 use serde::Serialize;
-use std::{collections::BTreeMap, fmt::Debug, io::Write, path::PathBuf};
+use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 type CollectionResult =
     (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
@@ -367,9 +367,11 @@ where
     /// Serializes and saves a value to a JSON file in the output directory
     fn save_file<T: Serialize>(&self, filename: String, value: &T) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
-        let mut file = reth_fs_util::create_file(&path)?;
+        let mut file = File::create(&path)
+            .map_err(|err| eyre::eyre!("failed to create file {:?}: {}", path, err))?;
         let contents = serde_json::to_string(value)?;
-        file.write_all(contents.as_bytes()).map_err(|err| FsPathError::write(err, &path))?;
+        file.write_all(contents.as_bytes())
+            .map_err(|err| eyre::eyre!("failed to write to {:?}: {}", path, err))?;
 
         Ok(path)
     }
@@ -398,9 +400,10 @@ where
     ) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
         let diff = Comparison::new(original, new);
-        let mut file = reth_fs_util::create_file(&path)?;
+        let mut file = File::create(&path)
+            .map_err(|err| eyre::eyre!("failed to create file {:?}: {}", path, err))?;
         file.write_all(diff.to_string().as_bytes())
-            .map_err(|err| FsPathError::write(err, &path))?;
+            .map_err(|err| eyre::eyre!("failed to write to {:?}: {}", path, err))?;
 
         Ok(path)
     }
@@ -750,8 +753,8 @@ mod tests {
 
         // Modify the state to create a mismatch
         let addr = Address::from([1u8; 20]);
-        if let Some(account) = modified_state.state.get_mut(&addr) &&
-            let Some(ref mut info) = account.info
+        if let Some(account) = modified_state.state.get_mut(&addr)
+            && let Some(ref mut info) = account.info
         {
             info.balance = U256::from(999);
         }
