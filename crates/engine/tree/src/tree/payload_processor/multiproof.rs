@@ -1109,15 +1109,26 @@ impl MultiProofTask {
                                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                                 }
 
-                                let account_targets = targets.len();
+                                // Batch consecutive PrefetchProofs messages into one
+                                let mut merged_targets = targets;
+                                let mut num_batched = 1;
+                                while let Ok(MultiProofMessage::PrefetchProofs(next_targets)) =
+                                    self.rx.try_recv()
+                                {
+                                    merged_targets.extend(next_targets);
+                                    num_batched += 1;
+                                }
+
+                                let account_targets = merged_targets.len();
                                 let storage_targets =
-                                    targets.values().map(|slots| slots.len()).sum::<usize>();
-                                prefetch_proofs_requested += self.on_prefetch_proof(targets);
+                                    merged_targets.values().map(|slots| slots.len()).sum::<usize>();
+                                prefetch_proofs_requested += self.on_prefetch_proof(merged_targets);
                                 debug!(
                                     target: "engine::tree::payload_processor::multiproof",
                                     account_targets,
                                     storage_targets,
                                     prefetch_proofs_requested,
+                                    num_batched,
                                     "Prefetching proofs"
                                 );
                             }
@@ -1133,13 +1144,26 @@ impl MultiProofTask {
                                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                                 }
 
-                                let len = update.len();
-                                state_update_proofs_requested += self.on_state_update(source, update);
+                                // Batch consecutive StateUpdate messages into one.
+                                // When batching, we use the first message's source for logging
+                                // (observability only).
+                                let mut merged_update = update;
+                                let mut num_batched = 1;
+                                while let Ok(MultiProofMessage::StateUpdate(_new_source, next_update)) =
+                                    self.rx.try_recv()
+                                {
+                                    merged_update.extend(next_update);
+                                    num_batched += 1;
+                                }
+
+                                let len = merged_update.len();
+                                state_update_proofs_requested += self.on_state_update(source, merged_update);
                                 debug!(
                                     target: "engine::tree::payload_processor::multiproof",
                                     ?source,
                                     len,
                                     ?state_update_proofs_requested,
+                                    num_batched,
                                     "Received new state update"
                                 );
                             }
