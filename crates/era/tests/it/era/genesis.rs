@@ -3,9 +3,7 @@
 //! These tests verify proper decompression and decoding of genesis blocks
 //! from different networks.
 
-use crate::{
-    EraTestDownloader, ERA_HOODI_FILES_NAMES, HOODI,
-};
+use crate::{EraTestDownloader, ERA_HOODI_FILES_NAMES, HOODI};
 
 #[tokio::test(flavor = "multi_thread")]
 //#[ignore = "download intensive"]
