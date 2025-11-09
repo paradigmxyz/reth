@@ -138,6 +138,7 @@ impl EraTestDownloader {
             .download_to_file(file_url)
             .await
             .map_err(|e| eyre!("Failed to download file: {}", e))?;
+
         // update the cache
         {
             let mut cache = self.file_cache.lock().unwrap();
