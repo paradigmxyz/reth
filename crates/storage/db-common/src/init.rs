@@ -489,7 +489,8 @@ fn parse_accounts(
     let mut line = String::new();
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir);
 
-    while let Ok(n) = reader.read_line(&mut line) {
+    loop {
+        let n = reader.read_line(&mut line)?;
         if n == 0 {
             break
         }
