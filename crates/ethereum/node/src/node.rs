@@ -15,7 +15,6 @@ use reth_ethereum_engine_primitives::{
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
-    SpecFor, TxEnvFor,
 };
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
@@ -58,7 +57,7 @@ use reth_transaction_pool::{
     TransactionPool, TransactionValidationTaskExecutor,
 };
 use revm::context::TxEnv;
-use std::{default::Default, marker::PhantomData, sync::Arc, time::SystemTime};
+use std::{marker::PhantomData, sync::Arc, time::SystemTime};
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -159,10 +158,9 @@ where
     NetworkT: RpcTypes<TransactionRequest: SignableTxRequest<TxTy<N::Types>>>,
     EthRpcConverterFor<N, NetworkT>: RpcConvert<
         Primitives = PrimitivesTy<N::Types>,
-        TxEnv = TxEnvFor<N::Evm>,
         Error = EthApiError,
         Network = NetworkT,
-        Spec = SpecFor<N::Evm>,
+        Evm = N::Evm,
     >,
     EthApiError: FromEvmError<N::Evm>,
 {

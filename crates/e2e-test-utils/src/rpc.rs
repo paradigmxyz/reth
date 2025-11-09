@@ -1,4 +1,5 @@
-use alloy_consensus::TxEnvelope;
+use alloy_consensus::{EthereumTxEnvelope, TxEip4844Variant};
+use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
 use reth_chainspec::EthereumHardforks;
@@ -31,9 +32,12 @@ where
     }
 
     /// Retrieves a transaction envelope by its hash
-    pub async fn envelope_by_hash(&self, hash: B256) -> eyre::Result<TxEnvelope> {
+    pub async fn envelope_by_hash(
+        &self,
+        hash: B256,
+    ) -> eyre::Result<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>> {
         let tx = self.inner.debug_api().raw_transaction(hash).await?.unwrap();
         let tx = tx.to_vec();
-        Ok(TxEnvelope::decode_2718(&mut tx.as_ref()).unwrap())
+        Ok(EthereumTxEnvelope::decode_2718(&mut tx.as_ref()).unwrap())
     }
 }

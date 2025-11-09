@@ -21,6 +21,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::pre_exec_xlayer::{PreExecError, PreExecInnerTx, PreExecResult};
 use revm::context_interface::result::ExecutionResult;
+use revm::context_interface::block::Block; // for block_env.number()
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::MuxInspector;
 use serde_json::{Map as JsonMap, Value as JsonValue};
@@ -245,7 +246,7 @@ pub trait PreExec: EthCall {
                     tx_req.as_mut().gas = Some(corrected_gas);
                 }
                 Err(err) => {
-                    results.push(err.into_result(0, evm_env.block_env.number));
+                    results.push(err.into_result(0, evm_env.block_env.number()));
                     prev = Some(tx_req);
                     continue;
                 }
@@ -262,7 +263,7 @@ pub trait PreExec: EthCall {
                 Err(e) => {
                     results.push(
                         PreExecError::unknown(e.to_string())
-                            .into_result(0, evm_env.block_env.number),
+                            .into_result(0, evm_env.block_env.number()),
                     );
                     prev = Some(current_req_for_next);
                     continue;
@@ -289,7 +290,7 @@ pub trait PreExec: EthCall {
                 Err(e) => {
                     results.push(
                         PreExecError::unknown(e.to_string())
-                            .into_result(0, evm_env.block_env.number),
+                            .into_result(0, evm_env.block_env.number()),
                     );
                     prev = Some(current_req_for_next);
                     continue;
@@ -302,7 +303,7 @@ pub trait PreExec: EthCall {
                 Err(e) => {
                     results.push(
                         Self::classify_error(e.to_string())
-                            .into_result(0, evm_env.block_env.number),
+                            .into_result(0, evm_env.block_env.number()),
                     );
                     prev = Some(current_req_for_next);
                     continue;
@@ -319,13 +320,13 @@ pub trait PreExec: EthCall {
                 exec.clone(),
                 inspector,
                 &*db,
-                current_evm_env.block_env.number,
+                current_evm_env.block_env.number(),
                 block_hash_opt,
                 tx_idx,
             ) {
                 Ok(r) => r,
                 Err(e) => {
-                    results.push(e.into_result(gas_used, current_evm_env.block_env.number));
+                    results.push(e.into_result(gas_used, current_evm_env.block_env.number()));
                     prev = Some(current_req_for_next);
                     continue;
                 }
@@ -532,7 +533,7 @@ where
                 if let Some(overrides) = state_overrides {
                     if let Err(e) = apply_state_overrides(overrides, &mut db) {
                         let res = PreExecError::unknown(format!("state override error: {:?}", e))
-                            .into_result(0, evm_env.block_env.number);
+                            .into_result(0, evm_env.block_env.number());
                         return Ok(vec![res]);
                     }
                 }

@@ -1,3 +1,4 @@
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, U256};
 use futures_util::{Stream, StreamExt};
 use reth_db_api::{
@@ -19,15 +20,15 @@ use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    providers::StaticFileProviderRWRefMut, writer::UnifiedStorageWriter, BlockWriter,
-    ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    providers::StaticFileProviderRWRefMut, BlockReader, BlockWriter, StaticFileProviderFactory,
+    StaticFileSegment, StaticFileWriter,
 };
 use reth_stages_types::{
     CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
 };
 use reth_storage_api::{
-    errors::ProviderResult, DBProvider, DatabaseProviderFactory, HeaderProvider,
-    NodePrimitivesProvider, StageCheckpointWriter, StorageLocation,
+    errors::ProviderResult, DBProvider, DatabaseProviderFactory, NodePrimitivesProvider,
+    StageCheckpointWriter,
 };
 use std::{
     collections::Bound,
@@ -82,11 +83,6 @@ where
         .get_highest_static_file_block(StaticFileSegment::Headers)
         .unwrap_or_default();
 
-    // Find the latest total difficulty
-    let mut td = static_file_provider
-        .header_td_by_number(height)?
-        .ok_or(ProviderError::TotalDifficultyNotFound(height))?;
-
     while let Some(meta) = rx.recv()? {
         let from = height;
         let provider = provider_factory.database_provider_rw()?;
@@ -96,20 +92,19 @@ where
             &mut static_file_provider.latest_writer(StaticFileSegment::Headers)?,
             &provider,
             hash_collector,
-            &mut td,
             height..,
         )?;
 
         save_stage_checkpoints(&provider, from, height, height, height)?;
 
-        UnifiedStorageWriter::commit(provider)?;
+        provider.commit()?;
     }
 
     let provider = provider_factory.database_provider_rw()?;
 
     build_index(&provider, hash_collector)?;
 
-    UnifiedStorageWriter::commit(provider)?;
+    provider.commit()?;
 
     Ok(height)
 }
@@ -146,7 +141,7 @@ where
 
 /// Extracts block headers and bodies from `meta` and appends them using `writer` and `provider`.
 ///
-/// Adds on to `total_difficulty` and collects hash to height using `hash_collector`.
+/// Collects hash to height using `hash_collector`.
 ///
 /// Skips all blocks below the [`start_bound`] of `block_numbers` and stops when reaching past the
 /// [`end_bound`] or the end of the file.
@@ -160,7 +155,6 @@ pub fn process<Era, P, B, BB, BH>(
     writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
-    total_difficulty: &mut U256,
     block_numbers: impl RangeBounds<BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
@@ -182,7 +176,7 @@ where
                 as Box<dyn Fn(Result<BlockTuple, E2sError>) -> eyre::Result<(BH, BB)>>);
     let iter = ProcessIter { iter, era: meta };
 
-    process_iter(iter, writer, provider, hash_collector, total_difficulty, block_numbers)
+    process_iter(iter, writer, provider, hash_collector, block_numbers)
 }
 
 type ProcessInnerIter<R, BH, BB> =
@@ -271,7 +265,6 @@ pub fn process_iter<P, B, BB, BH>(
     writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
-    total_difficulty: &mut U256,
     block_numbers: impl RangeBounds<BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
@@ -286,12 +279,12 @@ where
 {
     let mut last_header_number = match block_numbers.start_bound() {
         Bound::Included(&number) => number,
-        Bound::Excluded(&number) => number.saturating_sub(1),
+        Bound::Excluded(&number) => number.saturating_add(1),
         Bound::Unbounded => 0,
     };
     let target = match block_numbers.end_bound() {
         Bound::Included(&number) => Some(number),
-        Bound::Excluded(&number) => Some(number.saturating_add(1)),
+        Bound::Excluded(&number) => Some(number.saturating_sub(1)),
         Bound::Unbounded => None,
     };
 
@@ -311,18 +304,11 @@ where
         let hash = header.hash_slow();
         last_header_number = number;
 
-        // Increase total difficulty
-        *total_difficulty += header.difficulty();
-
         // Append to Headers segment
-        writer.append_header(&header, *total_difficulty, &hash)?;
+        writer.append_header(&header, &hash)?;
 
         // Write bodies to database.
-        provider.append_block_bodies(
-            vec![(header.number(), Some(body))],
-            // We are writing transactions directly to static files.
-            StorageLocation::StaticFiles,
-        )?;
+        provider.append_block_bodies(vec![(header.number(), Some(body))])?;
 
         hash_collector.insert(hash, number)?;
     }
@@ -385,4 +371,29 @@ where
     }
 
     Ok(())
+}
+
+/// Calculates the total difficulty for a given block number by summing the difficulty
+/// of all blocks from genesis to the given block.
+///
+/// Very expensive - iterates through all blocks in batches of 1000.
+///
+/// Returns an error if any block is missing.
+pub fn calculate_td_by_number<P>(provider: &P, num: BlockNumber) -> eyre::Result<U256>
+where
+    P: BlockReader,
+{
+    let mut total_difficulty = U256::ZERO;
+    let mut start = 0;
+
+    while start <= num {
+        let end = (start + 1000 - 1).min(num);
+
+        total_difficulty +=
+            provider.headers_range(start..=end)?.iter().map(|h| h.difficulty()).sum::<U256>();
+
+        start = end + 1;
+    }
+
+    Ok(total_difficulty)
 }

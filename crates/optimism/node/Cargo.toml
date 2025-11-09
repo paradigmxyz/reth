@@ -45,7 +45,7 @@ reth-optimism-primitives = { workspace = true, features = ["serde", "serde-binco
 
 # revm with required optimism features
 # Note: this must be kept to ensure all features are properly enabled/forwarded
-revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit"] }
 op-revm.workspace = true
 
 # ethereum
@@ -94,7 +94,12 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "revm/asm-keccak",
 ]
-js-tracer = ["reth-node-builder/js-tracer"]
+js-tracer = [
+    "reth-node-builder/js-tracer",
+    "reth-optimism-node/js-tracer",
+    "reth-rpc/js-tracer",
+    "reth-rpc-eth-types/js-tracer",
+]
 test-utils = [
     "reth-tasks",
     "reth-e2e-test-utils",

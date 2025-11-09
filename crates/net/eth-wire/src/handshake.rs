@@ -1,6 +1,6 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
-    ethstream::MAX_STATUS_SIZE,
+    ethstream::MAX_MESSAGE_SIZE,
     CanDisconnect,
 };
 use bytes::{Bytes, BytesMut};
@@ -110,7 +110,7 @@ where
             }
         };
 
-        if their_msg.len() > MAX_STATUS_SIZE {
+        if their_msg.len() > MAX_MESSAGE_SIZE {
             unauth
                 .disconnect(DisconnectReason::ProtocolBreach)
                 .await
@@ -203,6 +203,20 @@ where
                         .await
                         .map_err(EthStreamError::from)?;
                     return Err(err.into());
+                }
+
+                if let StatusMessage::Eth69(s) = their_status_message {
+                    if s.earliest > s.latest {
+                        return Err(EthHandshakeError::EarliestBlockGreaterThanLatestBlock {
+                            got: s.earliest,
+                            latest: s.latest,
+                        }
+                        .into());
+                    }
+
+                    if s.blockhash.is_zero() {
+                        return Err(EthHandshakeError::BlockhashZero.into());
+                    }
                 }
 
                 Ok(UnifiedStatus::from_message(their_status_message))

@@ -1,9 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, StateProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
-    TransactionsProvider,
+    ChainSpecProvider, ChangeSetReader, HeaderProvider, PruneCheckpointReader,
+    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{
     constants::EMPTY_ROOT_HASH,
@@ -18,6 +18,7 @@ use alloy_primitives::{
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, EthChainSpec};
+use reth_db::transaction::DbTx;
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
@@ -28,17 +29,18 @@ use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
     SignerRecoverable,
 };
-use reth_prune_types::PruneModes;
+use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageRootProvider,
+    StorageRootProvider, TrieReader,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput,
 };
 use std::{
     collections::BTreeMap,
@@ -266,6 +268,10 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
         self.tx
     }
 
+    fn commit(self) -> ProviderResult<bool> {
+        Ok(self.tx.commit()?)
+    }
+
     fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
@@ -276,32 +282,14 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderP
 {
     type Header = <T::Block as Block>::Header;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         let lock = self.headers.lock();
-        Ok(lock.get(block_hash).cloned())
+        Ok(lock.get(&block_hash).cloned())
     }
 
     fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
         let lock = self.headers.lock();
         Ok(lock.values().find(|h| h.number() == num).cloned())
-    }
-
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        let lock = self.headers.lock();
-        Ok(lock.get(hash).map(|target| {
-            lock.values()
-                .filter(|h| h.number() < target.number())
-                .fold(target.difficulty(), |td, h| td + h.difficulty())
-        }))
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        let lock = self.headers.lock();
-        let sum = lock
-            .values()
-            .filter(|h| h.number() <= number)
-            .fold(U256::ZERO, |td, h| td + h.difficulty());
-        Ok(Some(sum))
     }
 
     fn headers_range(
@@ -713,6 +701,10 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         Ok(vec![])
     }
+
+    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
 }
 
 impl<T, ChainSpec> BlockReaderIdExt for MockEthProvider<T, ChainSpec>
@@ -760,6 +752,21 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader
     }
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+        Ok(vec![])
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync> PruneCheckpointReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn get_prune_checkpoint(
+        &self,
+        _segment: PruneSegment,
+    ) -> ProviderResult<Option<PruneCheckpoint>> {
+        Ok(None)
+    }
+
+    fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         Ok(vec![])
     }
 }
@@ -975,6 +982,14 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
     }
+
+    fn get_account_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
+        Ok(None)
+    }
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<T, ChainSpec> {
@@ -985,6 +1000,19 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<
         _block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
         Ok(None)
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync> TrieReader for MockEthProvider<T, ChainSpec> {
+    fn trie_reverts(&self, _from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
+        Ok(TrieUpdatesSorted::default())
+    }
+
+    fn get_block_trie_updates(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<TrieUpdatesSorted> {
+        Ok(TrieUpdatesSorted::default())
     }
 }
 

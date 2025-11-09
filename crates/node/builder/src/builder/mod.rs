@@ -21,8 +21,7 @@ use reth_network::{
     NetworkPrimitives,
 };
 use reth_node_api::{
-    FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
-    NodeTypesWithDBAdapter,
+    FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
@@ -332,6 +331,11 @@ impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>> {
     pub const fn config(&self) -> &NodeConfig<ChainSpec> {
         self.builder.config()
     }
+
+    /// Returns a mutable reference to the node builder's config.
+    pub const fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+        self.builder.config_mut()
+    }
 }
 
 impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>>
@@ -397,7 +401,6 @@ where
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
         >,
-        N::Primitives: FullNodePrimitives,
         EngineNodeLauncher: LaunchNode<
             NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
         >,
@@ -452,6 +455,11 @@ where
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
         &self.builder.config
+    }
+
+    /// Returns a mutable reference to the node builder's config.
+    pub const fn config_mut(&mut self) -> &mut NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
+        &mut self.builder.config
     }
 
     /// Returns a reference to node's database.
@@ -729,6 +737,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the config of the node.
     pub const fn config(&self) -> &NodeConfig<<Node::Types as NodeTypes>::ChainSpec> {
         &self.config_container.config
+    }
+
+    /// Returns a mutable reference to the config of the node.
+    pub const fn config_mut(&mut self) -> &mut NodeConfig<<Node::Types as NodeTypes>::ChainSpec> {
+        &mut self.config_container.config
     }
 
     /// Returns the loaded reh.toml config.

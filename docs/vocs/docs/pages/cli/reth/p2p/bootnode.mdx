@@ -14,15 +14,10 @@ Options:
 
           [default: 0.0.0.0:30301]
 
-      --gen-key <GEN_KEY>
-          Generate a new node key and save it to the specified file
+      --p2p-secret-key <PATH>
+          Secret key to use for the bootnode.
 
-          [default: ]
-
-      --node-key <NODE_KEY>
-          Private key filename for the node
-
-          [default: ]
+          This will also deterministically set the peer ID. If a path is provided but no key exists at that path, a new random secret will be generated and stored there. If no path is specified, a new ephemeral random secret will be used.
 
       --nat <NAT>
           NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
@@ -99,7 +94,7 @@ Logging:
 
           Possible values:
           - always: Colors on
-          - auto:   Colors on
+          - auto:   Auto-detect
           - never:  Colors off
 
           [default: always]
@@ -116,4 +111,37 @@ Display:
 
   -q, --quiet
           Silence all log output
+
+Tracing:
+      --tracing-otlp[=<URL>]
+          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+
+          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
+
+          Example: --tracing-otlp=http://collector:4318/v1/traces
+
+          [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
+
+      --tracing-otlp-protocol <PROTOCOL>
+          OTLP transport protocol to use for exporting traces.
+
+          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
+
+          Defaults to HTTP if not specified.
+
+          Possible values:
+          - http: HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
+          - grpc: gRPC transport, port 4317
+
+          [env: OTEL_EXPORTER_OTLP_PROTOCOL=]
+          [default: http]
+
+      --tracing-otlp.filter <FILTER>
+          Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
+
+          Example: --tracing-otlp.filter=info,reth=debug,hyper_util=off
+
+          Defaults to TRACE if not specified.
+
+          [default: debug]
 ```

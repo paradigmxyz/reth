@@ -10,7 +10,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
@@ -200,6 +200,9 @@ impl<H: NippyJarHeader> NippyJar<H> {
         // Read [`Self`] located at the data file.
         let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
         let config_file = File::open(&config_path)
+            .inspect_err(|e| {
+                warn!( ?path, %e, "Failed to load static file jar");
+            })
             .map_err(|err| reth_fs_util::FsPathError::open(err, config_path))?;
 
         let mut obj = Self::load_from_reader(config_file)?;

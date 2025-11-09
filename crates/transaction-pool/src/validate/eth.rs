@@ -32,13 +32,14 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{AccountInfoReader, BytecodeReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
+use revm_primitives::U256;
 use std::{
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, AtomicU64},
         Arc,
     },
-    time::Instant,
+    time::{Instant, SystemTime},
 };
 use tokio::sync::Mutex;
 
@@ -92,6 +93,8 @@ pub struct EthTransactionValidator<Client, T> {
     _marker: PhantomData<T>,
     /// Metrics for tsx pool validation
     validation_metrics: TxPoolValidationMetrics,
+    /// Bitmap of custom transaction types that are allowed.
+    other_tx_types: U256,
 }
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx> {
@@ -294,12 +297,14 @@ where
                 }
             }
 
-            _ => {
+            ty if !self.other_tx_types.bit(ty as usize) => {
                 return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
                 ))
             }
+
+            _ => {}
         };
 
         // Reject transactions with a nonce equal to U64::max according to EIP-2681
@@ -321,10 +326,10 @@ where
             if tx_input_len > self.max_tx_input_bytes {
                 return Err(TransactionValidationOutcome::Invalid(
                     transaction,
-                    InvalidPoolTransactionError::OversizedData(
-                        tx_input_len,
-                        self.max_tx_input_bytes,
-                    ),
+                    InvalidPoolTransactionError::OversizedData {
+                        size: tx_input_len,
+                        limit: self.max_tx_input_bytes,
+                    },
                 ))
             }
         } else {
@@ -333,7 +338,10 @@ where
             if tx_size > self.max_tx_input_bytes {
                 return Err(TransactionValidationOutcome::Invalid(
                     transaction,
-                    InvalidPoolTransactionError::OversizedData(tx_size, self.max_tx_input_bytes),
+                    InvalidPoolTransactionError::OversizedData {
+                        size: tx_size,
+                        limit: self.max_tx_input_bytes,
+                    },
                 ))
             }
         }
@@ -388,15 +396,12 @@ where
             match self.tx_fee_cap {
                 Some(0) | None => {} // Skip if cap is 0 or None
                 Some(tx_fee_cap_wei) => {
-                    // max possible tx fee is (gas_price * gas_limit)
-                    // (if EIP1559) max possible tx fee is (max_fee_per_gas * gas_limit)
-                    let gas_price = transaction.max_fee_per_gas();
-                    let max_tx_fee_wei = gas_price.saturating_mul(transaction.gas_limit() as u128);
+                    let max_tx_fee_wei = transaction.cost().saturating_sub(transaction.value());
                     if max_tx_fee_wei > tx_fee_cap_wei {
                         return Err(TransactionValidationOutcome::Invalid(
                             transaction,
                             InvalidPoolTransactionError::ExceedsFeeCap {
-                                max_tx_fee_wei,
+                                max_tx_fee_wei: max_tx_fee_wei.saturating_to(),
                                 tx_fee_cap_wei,
                             },
                         ))
@@ -668,7 +673,7 @@ where
                                 Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
                             ))
                         }
-                    } else if sidecar.is_eip7594() {
+                    } else if sidecar.is_eip7594() && !self.allow_7594_sidecars() {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
                         ))
@@ -740,6 +745,10 @@ where
             self.fork_tracker.osaka.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
+        self.fork_tracker
+            .tip_timestamp
+            .store(new_tip_block.timestamp(), std::sync::atomic::Ordering::Relaxed);
+
         if let Some(blob_params) =
             self.chain_spec().blob_params_at_timestamp(new_tip_block.timestamp())
         {
@@ -753,6 +762,24 @@ where
 
     fn max_gas_limit(&self) -> u64 {
         self.block_gas_limit.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns whether EIP-7594 sidecars are allowed
+    fn allow_7594_sidecars(&self) -> bool {
+        let tip_timestamp = self.fork_tracker.tip_timestamp();
+
+        // If next block is Osaka, allow 7594 sidecars
+        if self.chain_spec().is_osaka_active_at_timestamp(tip_timestamp.saturating_add(12)) {
+            true
+        } else if self.chain_spec().is_osaka_active_at_timestamp(tip_timestamp.saturating_add(24)) {
+            let current_timestamp =
+                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+
+            // Allow after 4 seconds into last non-Osaka slot
+            current_timestamp >= tip_timestamp.saturating_add(4)
+        } else {
+            false
+        }
     }
 }
 
@@ -806,6 +833,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     prague: bool,
     /// Fork indicator whether we are in the Osaka hardfork.
     osaka: bool,
+    /// Timestamp of the tip block.
+    tip_timestamp: u64,
     /// Max blob count at the block's timestamp.
     max_blob_count: u64,
     /// Whether using EIP-2718 type transactions is allowed
@@ -837,6 +866,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     max_tx_gas_limit: Option<u64>,
     /// Disable balance checks during transaction validation
     disable_balance_check: bool,
+    /// Bitmap of custom transaction types that are allowed.
+    other_tx_types: U256,
 }
 
 impl<Client> EthTransactionValidatorBuilder<Client> {
@@ -878,11 +909,16 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             // osaka not yet activated
             osaka: false,
 
+            tip_timestamp: 0,
+
             // max blob count is prague by default
             max_blob_count: BlobParams::prague().max_blobs_per_tx,
 
             // balance checks are enabled by default
             disable_balance_check: false,
+
+            // no custom transaction types by default
+            other_tx_types: U256::ZERO,
         }
     }
 
@@ -1002,6 +1038,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self.cancun = self.client.chain_spec().is_cancun_active_at_timestamp(timestamp);
         self.prague = self.client.chain_spec().is_prague_active_at_timestamp(timestamp);
         self.osaka = self.client.chain_spec().is_osaka_active_at_timestamp(timestamp);
+        self.tip_timestamp = timestamp;
         self.max_blob_count = self
             .client
             .chain_spec()
@@ -1045,6 +1082,12 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self
     }
 
+    /// Adds a custom transaction type to the validator.
+    pub const fn with_custom_tx_type(mut self, tx_type: u8) -> Self {
+        self.other_tx_types.set_bit(tx_type as usize, true);
+        self
+    }
+
     /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
     pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
     where
@@ -1056,6 +1099,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             cancun,
             prague,
             osaka,
+            tip_timestamp,
             eip2718,
             eip1559,
             eip4844,
@@ -1070,6 +1114,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             disable_balance_check,
             max_blob_count,
             additional_tasks: _,
+            other_tx_types,
         } = self;
 
         let fork_tracker = ForkTracker {
@@ -1077,6 +1122,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             cancun: AtomicBool::new(cancun),
             prague: AtomicBool::new(prague),
             osaka: AtomicBool::new(osaka),
+            tip_timestamp: AtomicU64::new(tip_timestamp),
             max_blob_count: AtomicU64::new(max_blob_count),
         };
 
@@ -1098,6 +1144,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             disable_balance_check,
             _marker: Default::default(),
             validation_metrics: TxPoolValidationMetrics::default(),
+            other_tx_types,
         }
     }
 
@@ -1157,6 +1204,8 @@ pub struct ForkTracker {
     pub osaka: AtomicBool,
     /// Tracks max blob count per transaction at the block's timestamp.
     pub max_blob_count: AtomicU64,
+    /// Tracks the timestamp of the tip block.
+    pub tip_timestamp: AtomicU64,
 }
 
 impl ForkTracker {
@@ -1178,6 +1227,11 @@ impl ForkTracker {
     /// Returns `true` if Osaka fork is activated.
     pub fn is_osaka_activated(&self) -> bool {
         self.osaka.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns the timestamp of the tip block.
+    pub fn tip_timestamp(&self) -> u64 {
+        self.tip_timestamp.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Returns the max allowed blob count per transaction.
@@ -1254,6 +1308,7 @@ mod tests {
             cancun: false.into(),
             prague: false.into(),
             osaka: false.into(),
+            tip_timestamp: 0.into(),
             max_blob_count: 0.into(),
         };
 

@@ -45,6 +45,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     raw_tx_forwarder: ForwardConfig,
     legacy_rpc_config: Option<reth_rpc_eth_types::LegacyRpcConfig>,
     send_raw_transaction_sync_timeout: Duration,
+    evm_memory_limit: u64,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -96,6 +97,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             raw_tx_forwarder,
             legacy_rpc_config,
             send_raw_transaction_sync_timeout,
+            evm_memory_limit,
         } = self;
         EthApiBuilder {
             components,
@@ -117,6 +119,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             raw_tx_forwarder,
             legacy_rpc_config,
             send_raw_transaction_sync_timeout,
+            evm_memory_limit,
         }
     }
 }
@@ -149,6 +152,7 @@ where
             raw_tx_forwarder: ForwardConfig::default(),
             legacy_rpc_config: None,
             send_raw_transaction_sync_timeout: Duration::from_secs(30),
+            evm_memory_limit: (1 << 32) - 1,
         }
     }
 }
@@ -197,6 +201,7 @@ where
             raw_tx_forwarder,
             legacy_rpc_config,
             send_raw_transaction_sync_timeout,
+            evm_memory_limit,
         } = self;
         EthApiBuilder {
             components,
@@ -218,6 +223,7 @@ where
             raw_tx_forwarder,
             legacy_rpc_config,
             send_raw_transaction_sync_timeout,
+            evm_memory_limit,
         }
     }
 
@@ -246,6 +252,7 @@ where
             raw_tx_forwarder,
             legacy_rpc_config,
             send_raw_transaction_sync_timeout,
+            evm_memory_limit,
         } = self;
         EthApiBuilder {
             components,
@@ -267,6 +274,7 @@ where
             raw_tx_forwarder,
             legacy_rpc_config,
             send_raw_transaction_sync_timeout,
+            evm_memory_limit,
         }
     }
 
@@ -495,6 +503,7 @@ where
             raw_tx_forwarder,
             legacy_rpc_config,
             send_raw_transaction_sync_timeout,
+            evm_memory_limit,
         } = self;
 
         let provider = components.provider().clone();
@@ -536,6 +545,7 @@ where
             raw_tx_forwarder.forwarder_client(),
             legacy_rpc_config,
             send_raw_transaction_sync_timeout,
+            evm_memory_limit,
         )
     }
 
@@ -558,6 +568,12 @@ where
     /// Sets the timeout for `send_raw_transaction_sync` RPC method.
     pub const fn send_raw_transaction_sync_timeout(mut self, timeout: Duration) -> Self {
         self.send_raw_transaction_sync_timeout = timeout;
+        self
+    }
+
+    /// Sets the maximum memory the EVM can allocate per RPC request.
+    pub const fn evm_memory_limit(mut self, memory_limit: u64) -> Self {
+        self.evm_memory_limit = memory_limit;
         self
     }
 }

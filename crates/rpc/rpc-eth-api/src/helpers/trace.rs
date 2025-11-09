@@ -13,20 +13,20 @@ use reth_evm::{
     Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
-use reth_revm::{database::StateProviderDatabase, db::CacheDB};
+use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     EthApiError,
 };
 use reth_storage_api::{ProviderBlock, ProviderTx};
-use revm::{context_interface::result::ResultAndState, DatabaseCommit};
+use revm::{context::Block, context_interface::result::ResultAndState, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
 pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
-    /// Executes the [`TxEnvFor`] with [`EvmEnvFor`] against the given [Database] without committing
-    /// state changes.
+    /// Executes the [`TxEnvFor`] with [`reth_evm::EvmEnv`] against the given [Database] without
+    /// committing state changes.
     fn inspect<DB, I>(
         &self,
         db: DB,
@@ -68,7 +68,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
             + 'static,
     {
         self.with_state_at_block(at, move |this, state| {
-            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+            let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
             let mut inspector = TracingInspector::new(config);
             let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
             f(inspector, res)
@@ -103,7 +103,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
     {
         let this = self.clone();
         self.spawn_with_state_at_block(at, move |state| {
-            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+            let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
             let mut inspector = TracingInspector::new(config);
             let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
             f(inspector, res, db)
@@ -184,7 +184,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
 
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
                 let block_txs = block.transactions_recovered();
 
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
@@ -301,13 +302,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
                 let state_at = block.parent_hash();
                 let block_hash = block.hash();
 
-                let block_number = evm_env.block_env.number.saturating_to();
-                let base_fee = evm_env.block_env.basefee;
+                let block_number = evm_env.block_env.number().saturating_to();
+                let base_fee = evm_env.block_env.basefee();
 
                 // now get the state
                 let state = this.state_at_block_id(state_at.into()).await?;
-                let mut db =
-                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)))
+                    .build();
 
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 

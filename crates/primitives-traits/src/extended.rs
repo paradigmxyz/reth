@@ -95,7 +95,7 @@ where
     fn is_create(&self) -> bool {
         match self {
             Self::BuiltIn(tx) => tx.is_create(),
-            Self::Other(_tx) => false,
+            Self::Other(tx) => tx.is_create(),
         }
     }
 
@@ -142,8 +142,8 @@ where
 
 impl<B, T> SignerRecoverable for Extended<B, T>
 where
-    B: SignedTransaction + IsTyped2718,
-    T: SignedTransaction,
+    B: SignerRecoverable,
+    T: SignerRecoverable,
 {
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         delegate!(self => tx.recover_signer())

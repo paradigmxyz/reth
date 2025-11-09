@@ -69,6 +69,18 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
         }
         Ok(())
     }
+
+    pub(crate) fn has_unwind_queued(&self) -> bool {
+        for writer_lock in [&self.headers, &self.transactions, &self.receipts] {
+            let writer = writer_lock.read();
+            if let Some(writer) = writer.as_ref() &&
+                writer.will_prune_on_commit()
+            {
+                return true
+            }
+        }
+        false
+    }
 }
 
 /// Mutable reference to a [`StaticFileProviderRW`] behind a [`RwLockWriteGuard`].
@@ -201,7 +213,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         } else {
             self.user_header().tx_len().unwrap_or_default()
         };
-        let pruned_rows = expected_rows - self.writer.rows() as u64;
+        let actual_rows = self.writer.rows() as u64;
+        let pruned_rows = expected_rows.saturating_sub(actual_rows);
         if pruned_rows > 0 {
             self.user_header_mut().prune(pruned_rows);
         }
@@ -211,6 +224,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         // Updates the [SnapshotProvider] manager
         self.update_index()?;
         Ok(())
+    }
+
+    /// Returns `true` if the writer will prune on commit.
+    pub const fn will_prune_on_commit(&self) -> bool {
+        self.prune_on_commit.is_some()
     }
 
     /// Commits configuration changes to disk and updates the reader index with the new changes.
@@ -513,7 +531,20 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// blocks.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
-    pub fn append_header(
+    pub fn append_header(&mut self, header: &N::BlockHeader, hash: &BlockHash) -> ProviderResult<()>
+    where
+        N::BlockHeader: Compact,
+    {
+        self.append_header_with_td(header, U256::ZERO, hash)
+    }
+
+    /// Appends header to static file with a specified total difficulty.
+    ///
+    /// It **CALLS** `increment_block()` since the number of headers is equal to the number of
+    /// blocks.
+    ///
+    /// Returns the current [`BlockNumber`] as seen in the static file.
+    pub fn append_header_with_td(
         &mut self,
         header: &N::BlockHeader,
         total_difficulty: U256,

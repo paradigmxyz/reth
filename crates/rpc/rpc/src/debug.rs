@@ -3,8 +3,9 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
+use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{uint, Address, Bytes, B256};
+use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
@@ -21,11 +22,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock};
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{CacheDB, State},
-    witness::ExecutionWitnessRecord,
-};
+use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
@@ -40,7 +37,7 @@ use reth_storage_api::{
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{context_interface::Transaction, state::EvmState, DatabaseCommit};
+use revm::{context::Block, context_interface::Transaction, state::EvmState, DatabaseCommit};
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
@@ -99,7 +96,8 @@ where
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
@@ -168,8 +166,6 @@ where
                     .iter()
                     .map(|tx| tx.recover_signer().map_err(Eth::Error::from_eth_err))
                     .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .collect()
             } else {
                 block
                     .body()
@@ -177,8 +173,6 @@ where
                     .iter()
                     .map(|tx| tx.recover_signer_unchecked().map_err(Eth::Error::from_eth_err))
                     .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .collect()
             };
 
         self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
@@ -233,7 +227,8 @@ where
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
@@ -372,8 +367,8 @@ where
                                 let db = db.0;
 
                                 let tx_info = TransactionInfo {
-                                    block_number: Some(evm_env.block_env.number.saturating_to()),
-                                    base_fee: Some(evm_env.block_env.basefee),
+                                    block_number: Some(evm_env.block_env.number().saturating_to()),
+                                    base_fee: Some(evm_env.block_env.basefee()),
                                     hash: None,
                                     block_hash: None,
                                     index: None,
@@ -418,6 +413,11 @@ where
                             .await?;
 
                         Ok(frame.into())
+                    }
+                    _ => {
+                        // Note: this match is non-exhaustive in case we need to add support for
+                        // additional tracers
+                        Err(EthApiError::Unsupported("unsupported tracer").into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -533,7 +533,8 @@ where
             .spawn_with_state_at_block(at.into(), move |state| {
                 // the outer vec for the bundles
                 let mut all_bundles = Vec::with_capacity(bundles.len());
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -589,8 +590,8 @@ where
                         results.push(trace);
                     }
                     // Increment block_env number and timestamp for the next bundle
-                    evm_env.block_env.number += uint!(1_U256);
-                    evm_env.block_env.timestamp += uint!(12_U256);
+                    evm_env.block_env.inner_mut().number += uint!(1_U256);
+                    evm_env.block_env.inner_mut().timestamp += uint!(12_U256);
 
                     all_bundles.push(results);
                 }
@@ -741,8 +742,8 @@ where
                 .map(|c| c.tx_index.map(|i| i as u64))
                 .unwrap_or_default(),
             block_hash: transaction_context.as_ref().map(|c| c.block_hash).unwrap_or_default(),
-            block_number: Some(evm_env.block_env.number.saturating_to()),
-            base_fee: Some(evm_env.block_env.basefee),
+            block_number: Some(evm_env.block_env.number().saturating_to()),
+            base_fee: Some(evm_env.block_env.basefee()),
         };
 
         if let Some(tracer) = tracer {
@@ -838,6 +839,11 @@ where
 
                         return Ok((frame.into(), res.state));
                     }
+                    _ => {
+                        // Note: this match is non-exhaustive in case we need to add support for
+                        // additional tracers
+                        Err(EthApiError::Unsupported("unsupported tracer").into())
+                    }
                 },
                 #[cfg(not(feature = "js-tracer"))]
                 GethDebugTracerType::JsTracer(_) => {
@@ -917,7 +923,7 @@ where
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
         let header = match block_id {
-            BlockId::Hash(hash) => self.provider().header(&hash.into()).to_rpc_result()?,
+            BlockId::Hash(hash) => self.provider().header(hash.into()).to_rpc_result()?,
             BlockId::Number(number_or_tag) => {
                 let number = self
                     .provider()
@@ -1137,8 +1143,38 @@ where
         Ok(())
     }
 
-    async fn debug_db_get(&self, _key: String) -> RpcResult<()> {
-        Ok(())
+    /// `debug_db_get` - database key lookup
+    ///
+    /// Currently supported:
+    /// * Contract bytecode associated with a code hash. The key format is: `<0x63><code_hash>`
+    ///     * Prefix byte: 0x63 (required)
+    ///     * Code hash: 32 bytes
+    ///   Must be provided as either:
+    ///     * Hex string: "0x63..." (66 hex characters after 0x)
+    ///     * Raw byte string: raw byte string (33 bytes)
+    ///   See Geth impl: <https://github.com/ethereum/go-ethereum/blob/737ffd1bf0cbee378d0111a5b17ae4724fb2216c/core/rawdb/schema.go#L120>
+    async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>> {
+        let key_bytes = if key.starts_with("0x") {
+            decode(&key).map_err(|_| EthApiError::InvalidParams("Invalid hex key".to_string()))?
+        } else {
+            key.into_bytes()
+        };
+
+        if key_bytes.len() != 33 {
+            return Err(EthApiError::InvalidParams(format!(
+                "Key must be 33 bytes, got {}",
+                key_bytes.len()
+            ))
+            .into());
+        }
+        if key_bytes[0] != 0x63 {
+            return Err(EthApiError::InvalidParams("Key prefix must be 0x63".to_string()).into());
+        }
+
+        let code_hash = B256::from_slice(&key_bytes[1..33]);
+
+        // No block ID is provided, so it defaults to the latest block
+        self.debug_code_by_hash(code_hash, None).await.map_err(Into::into)
     }
 
     async fn debug_dump_block(&self, _number: BlockId) -> RpcResult<()> {

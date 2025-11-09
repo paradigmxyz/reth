@@ -22,7 +22,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use crate::{
     error::{DecodePacketError, Discv4Error},
@@ -213,12 +213,12 @@ impl Discv4 {
     /// Binds a new `UdpSocket` and creates the service
     ///
     /// ```
-    /// # use std::io;
     /// use reth_discv4::{Discv4, Discv4Config};
     /// use reth_network_peers::{pk2id, NodeRecord, PeerId};
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
-    /// # async fn t() -> io::Result<()> {
+    /// # async fn t() -> std:: io::Result<()> {
+    ///
     /// // generate a (random) keypair
     /// let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
     /// let id = pk2id(&pk);
@@ -2109,7 +2109,7 @@ impl Default for LookupTargetRotator {
 }
 
 impl LookupTargetRotator {
-    /// this will return the next node id to lookup
+    /// This will return the next node id to lookup
     fn next(&mut self, local: &PeerId) -> PeerId {
         self.counter += 1;
         self.counter %= self.interval;
@@ -2402,7 +2402,7 @@ pub enum DiscoveryUpdate {
     /// Node that was removed from the table
     Removed(PeerId),
     /// A series of updates
-    Batch(Vec<DiscoveryUpdate>),
+    Batch(Vec<Self>),
 }
 
 #[cfg(test)]

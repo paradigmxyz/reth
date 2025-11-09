@@ -4,13 +4,14 @@ use super::super::EthFilter;
 use alloy_rpc_types_eth::{Filter, Log};
 use jsonrpsee::core::RpcResult;
 use reth_rpc_eth_api::{
-    helpers::{internal_rpc_err, LegacyRpc},
+    helpers::{internal_rpc_err, EthBlocks, LegacyRpc, LoadReceipt},
     EthApiTypes, FullEthApiTypes, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::LegacyRpcClient;
 use reth_storage_api::{BlockIdReader, BlockReader};
 use std::sync::Arc;
 use tracing::info;
+use tracing::log::log;
 
 /// XLayer: Implement LegacyRpc trait for EthFilter to enable legacy RPC routing
 impl<Eth> LegacyRpc for EthFilter<Eth>
@@ -28,6 +29,8 @@ where
     Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader>
         + RpcNodeCoreExt
         + LegacyRpc
+        + LoadReceipt
+        + EthBlocks
         + 'static,
 {
     /// Parse block range from filter for legacy routing logic
@@ -98,10 +101,11 @@ where
                 .from_block(alloy_rpc_types_eth::BlockNumberOrTag::Number(cutoff_block));
 
             // Query both in parallel
-            let (legacy_result, local_result) =
-                tokio::join!(async { legacy_client.get_logs(legacy_filter).await }, async {
-                    self.logs_for_filter(local_filter, self.inner.query_limits).await
-                });
+            let (legacy_result, local_result): (Result<Vec<Log>, _>, Result<Vec<Log>, _>) =
+                tokio::join!(
+                    async { legacy_client.get_logs(legacy_filter).await },
+                    async { self.logs_for_filter(local_filter, self.inner.query_limits).await }
+                );
 
             let mut legacy_logs = match legacy_result.map_err(|e| internal_rpc_err(e)) {
                 Ok(logs) => logs,
@@ -109,7 +113,7 @@ where
             };
 
             let legacy_count = legacy_logs.len();
-            let mut local_logs = match local_result {
+            let mut local_logs: Vec<Log> = match local_result {
                 Ok(logs) => logs,
                 Err(e) => return Some(Err(e.into())),
             };

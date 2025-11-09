@@ -41,14 +41,10 @@ pub(crate) enum Action {
     InsertHashes,
     InsertHistoryIndices,
     UpdatePipelineStages,
-    InsertCanonicalHeaders,
-    InsertHeaders,
     InsertHeaderNumbers,
-    InsertHeaderTerminalDifficulties,
     InsertBlockBodyIndices,
     InsertTransactionBlocks,
     GetNextTxNum,
-    GetParentTD,
 }
 
 /// Database provider metrics
@@ -66,21 +62,14 @@ struct DatabaseProviderMetrics {
     /// Duration of update pipeline stages
     update_pipeline_stages: Histogram,
     /// Duration of insert canonical headers
-    insert_canonical_headers: Histogram,
-    /// Duration of insert headers
-    insert_headers: Histogram,
     /// Duration of insert header numbers
     insert_header_numbers: Histogram,
-    /// Duration of insert header TD
-    insert_header_td: Histogram,
     /// Duration of insert block body indices
     insert_block_body_indices: Histogram,
     /// Duration of insert transaction blocks
     insert_tx_blocks: Histogram,
     /// Duration of get next tx num
     get_next_tx_num: Histogram,
-    /// Duration of get parent TD
-    get_parent_td: Histogram,
 }
 
 impl DatabaseProviderMetrics {
@@ -92,14 +81,10 @@ impl DatabaseProviderMetrics {
             Action::InsertHashes => self.insert_hashes.record(duration),
             Action::InsertHistoryIndices => self.insert_history_indices.record(duration),
             Action::UpdatePipelineStages => self.update_pipeline_stages.record(duration),
-            Action::InsertCanonicalHeaders => self.insert_canonical_headers.record(duration),
-            Action::InsertHeaders => self.insert_headers.record(duration),
             Action::InsertHeaderNumbers => self.insert_header_numbers.record(duration),
-            Action::InsertHeaderTerminalDifficulties => self.insert_header_td.record(duration),
             Action::InsertBlockBodyIndices => self.insert_block_body_indices.record(duration),
             Action::InsertTransactionBlocks => self.insert_tx_blocks.record(duration),
             Action::GetNextTxNum => self.get_next_tx_num.record(duration),
-            Action::GetParentTD => self.get_parent_td.record(duration),
         }
     }
 }

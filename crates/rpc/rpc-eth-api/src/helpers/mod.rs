@@ -39,7 +39,7 @@ pub use legacy_xlayer::{
 };
 pub use pending_block::LoadPendingBlock;
 pub use receipt::LoadReceipt;
-pub use signer::{AddDevSigners, EthSigner};
+pub use signer::EthSigner;
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
 pub use trace::Trace;
