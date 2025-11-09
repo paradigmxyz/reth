@@ -272,14 +272,14 @@ pub struct TransactionConversionError(String);
 ///
 /// An [`RpcConvert`] implementation is generated if the following traits are implemented for the
 /// network and EVM associated primitives:
-/// * [`FromConsensusTx`]: from signed transaction into RPC response object.
-/// * [`TryIntoSimTx`]: from RPC transaction request into a simulated transaction.
+/// * [`alloy_evm::rpc::FromConsensusTx`]: from signed transaction into RPC response object.
+/// * [`alloy_evm::rpc::TryIntoSimTx`]: from RPC transaction request into a simulated transaction.
 /// * [`TryIntoTxEnv`] or [`TxEnvConverter`]: from RPC transaction request into an executable
 ///   transaction.
-/// * [`TxInfoMapper`]: from [`TransactionInfo`] into [`FromConsensusTx::TxInfo`]. Should be
-///   implemented for a dedicated struct that is assigned to `Map`. If [`FromConsensusTx::TxInfo`]
-///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input
-///   object.
+/// * [`TxInfoMapper`]: from [`TransactionInfo`] into [`alloy_evm::rpc::FromConsensusTx::TxInfo`].
+///   Should be implemented for a dedicated struct that is assigned to `Map`. If
+///   [`alloy_evm::rpc::FromConsensusTx::TxInfo`] is [`TransactionInfo`] then `()` can be used as
+///   `Map` which trivially passes over the input object.
 #[derive(Debug)]
 pub struct RpcConverter<
     Network,
