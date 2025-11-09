@@ -55,5 +55,5 @@ op = [
 	"dep:reth-storage-api",
 	"reth-evm/op",
 	"reth-primitives-traits/op",
-	"alloy-evm/op"
+	"alloy-evm/op",
 ]
