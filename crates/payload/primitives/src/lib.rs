@@ -13,7 +13,7 @@
 
 extern crate alloc;
 
-use crate::alloc::string::ToString;
+use alloc::string::ToString;
 use alloy_primitives::Bytes;
 use reth_chainspec::EthereumHardforks;
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
