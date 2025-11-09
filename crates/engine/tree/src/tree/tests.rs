@@ -1439,8 +1439,7 @@ fn test_validate_block_multiple_scenarios() {
     let total_calls = test_harness.validation_call_count();
     assert!(
         total_calls >= 2,
-        "At least invalid block validations should have executed (got {})",
-        total_calls
+        "At least invalid block validations should have executed (got {total_calls})"
     );
 }
 

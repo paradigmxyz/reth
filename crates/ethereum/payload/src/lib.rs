@@ -209,6 +209,10 @@ where
 
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
 
+    // Track transaction hashes that have been successfully executed from the pool
+    // to avoid re-executing them from the inclusion list
+    let mut executed_tx_hashes = std::collections::HashSet::new();
+
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
@@ -300,7 +304,10 @@ where
         }
 
         let gas_used = match builder.execute_transaction(tx.clone()) {
-            Ok(gas_used) => gas_used,
+            Ok(gas_used) => {
+                executed_tx_hashes.insert(*tx.hash());
+                gas_used
+            }
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
             })) => {
@@ -373,6 +380,9 @@ where
 
     let mut i = 0;
     let n = il.len();
+    let mut pass_flag = false;
+    // Track exclusion reasons for retryable transactions to avoid double-counting
+    let mut il_exclusion_reasons: Vec<Option<&str>> = vec![None; n];
 
     while i < n {
         if !il_bitfield[i] {
@@ -383,6 +393,14 @@ where
         // if the IL tx were not able to be decoded, then the corresponding index in the bitfield
         // should be `false` in the check above.
         let tx = il[i].as_ref().expect("IL tx exists b/c it was decoded");
+
+        // check if a transaction already exist in the block
+        if executed_tx_hashes.contains(tx.hash()) {
+            il_bitfield[i] = false;
+            i += 1;
+            metrics::record_inclusion_list_transaction_included();
+            continue
+        }
 
         // transaction is a blob transaction which is not supported
         //
@@ -413,25 +431,40 @@ where
                 total_fees += U256::from(miner_fee) * U256::from(gas_used);
                 cumulative_gas_used += gas_used;
 
-                // Record successful inclusion
                 metrics::record_inclusion_list_transaction_included();
+                // Clear any stored exclusion reason since the transaction succeeded
+                il_exclusion_reasons[i] = None;
             }
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
             })) => {
-                // Record the reason for exclusion
-                if error.is_nonce_too_high() {
-                    metrics::record_inclusion_list_transaction_excluded("invalid_nonce");
+                let reason = if error.is_nonce_too_low() {
+                    "nonce_too_low"
+                } else if error.is_nonce_too_high() {
+                    "nonce_too_high"
                 } else if error.is_lack_of_funds_for_max_fee() {
-                    metrics::record_inclusion_list_transaction_excluded("insufficient_balance");
+                    "insufficient_balance"
                 } else {
-                    metrics::record_inclusion_list_transaction_excluded("unknown");
-                }
+                    "unknown"
+                };
 
                 // a transaction whose nonce is too high may become valid.
                 // a transaction whose sender lacks funds may become valid.
-                if !error.is_nonce_too_high() && !error.is_lack_of_funds_for_max_fee() {
+                let is_retryable =
+                    error.is_nonce_too_high() || error.is_lack_of_funds_for_max_fee();
+
+                if is_retryable {
+                    // Store reason for later, don't record metric yet to avoid double-counting
+                    il_exclusion_reasons[i] = Some(reason);
+                    pass_flag = true;
+                } else {
+                    // Non-retryable error - record exclusion metric immediately
                     il_bitfield[i] = false;
+                    if error.is_nonce_too_low() {
+                        metrics::record_inclusion_list_transaction_excluded("invalid_nonce");
+                    } else {
+                        metrics::record_inclusion_list_transaction_excluded("unknown");
+                    }
                 }
 
                 i += 1;
@@ -440,16 +473,27 @@ where
             Err(err) => return Err(PayloadBuilderError::evm(err)),
         }
 
-        // executed_txs.push(tx.clone().into_tx());
-
-        // NOTE
-        //
-        // if we are here, then the transaction executed successfully.
-        //
-        // instead of setting the index to zero, we could keep track of a flag that indicates
-        // whether or not we should perform another pass of the IL.
         il_bitfield[i] = false;
-        i = 0;
+        if pass_flag {
+            i = 0;
+            pass_flag = false;
+        } else {
+            i += 1;
+        }
+    }
+
+    // Record exclusion metrics for retryable transactions that never became valid
+    for i in 0..n {
+        if il_bitfield[i] {
+            // Transaction was never included - record its final exclusion reason
+            if let Some(reason) = il_exclusion_reasons[i] {
+                if reason == "nonce_too_high" {
+                    metrics::record_inclusion_list_transaction_excluded("invalid_nonce");
+                } else if reason == "insufficient_balance" {
+                    metrics::record_inclusion_list_transaction_excluded("insufficient_balance");
+                }
+            }
+        }
     }
 
     // check if we have a better block
