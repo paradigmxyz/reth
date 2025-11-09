@@ -17,7 +17,7 @@ use reth_metrics::{
 use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tracing::{debug_span, trace};
 
 /// Metrics for the `EngineApi`.
@@ -186,16 +186,20 @@ pub(crate) struct ForkchoiceUpdatedMetrics {
     pub(crate) forkchoice_updated_latency: Histogram,
     /// Latency for the last forkchoice updated call.
     pub(crate) forkchoice_updated_last: Gauge,
+    /// Time diff between new payload call response and the next forkchoice updated call request.
+    pub(crate) new_payload_forkchoice_updated_time_diff: Histogram,
 }
 
 impl ForkchoiceUpdatedMetrics {
     /// Increment the forkchoiceUpdated counter based on the given result
     pub(crate) fn update_response_metrics(
         &self,
+        start: Instant,
+        latest_new_payload_at: &mut Option<Instant>,
         has_attrs: bool,
         result: &Result<TreeOutcome<OnForkChoiceUpdated>, ProviderError>,
-        elapsed: Duration,
     ) {
+        let elapsed = start.elapsed();
         match result {
             Ok(outcome) => match outcome.outcome.forkchoice_status() {
                 ForkchoiceStatus::Valid => self.forkchoice_updated_valid.increment(1),
@@ -210,6 +214,9 @@ impl ForkchoiceUpdatedMetrics {
         }
         self.forkchoice_updated_latency.record(elapsed);
         self.forkchoice_updated_last.set(elapsed);
+        if let Some(latest_new_payload_at) = latest_new_payload_at.take() {
+            self.new_payload_forkchoice_updated_time_diff.record(start - latest_new_payload_at);
+        }
     }
 }
 
@@ -217,6 +224,9 @@ impl ForkchoiceUpdatedMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "consensus.engine.beacon")]
 pub(crate) struct NewPayloadStatusMetrics {
+    /// Finish time of the latest new payload call.
+    #[metric(skip)]
+    pub(crate) latest_at: Option<Instant>,
     /// The total count of new payload messages received.
     pub(crate) new_payload_messages: Counter,
     /// The total count of new payload messages that we responded to with
@@ -247,11 +257,15 @@ pub(crate) struct NewPayloadStatusMetrics {
 impl NewPayloadStatusMetrics {
     /// Increment the newPayload counter based on the given result
     pub(crate) fn update_response_metrics(
-        &self,
+        &mut self,
+        start: Instant,
         result: &Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError>,
         gas_used: u64,
-        elapsed: Duration,
     ) {
+        let finish = Instant::now();
+        let elapsed = finish - start;
+
+        self.latest_at = Some(finish);
         match result {
             Ok(outcome) => match outcome.outcome.status {
                 PayloadStatusEnum::Valid => {
