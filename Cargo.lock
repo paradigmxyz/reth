@@ -265,8 +265,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6223235f0b785a83dd10dc1599b7f3763c65e4f98b4e9e4e10e576bbbdf7dfa2"
+source = "git+https://github.com/alloy-rs/evm?rev=5d8bba2db050aaf33efe243b13d242de058ac1db#5d8bba2db050aaf33efe243b13d242de058ac1db"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -279,6 +278,7 @@ dependencies = [
  "auto_impl",
  "derive_more",
  "op-alloy-consensus",
+ "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
  "op-revm",
  "revm",
@@ -382,8 +382,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ad8f3a679eb44ee21481edabd628d191c9a42d182ed29923b4d43a27a0f2cc8"
+source = "git+https://github.com/alloy-rs/evm?rev=5d8bba2db050aaf33efe243b13d242de058ac1db#5d8bba2db050aaf33efe243b13d242de058ac1db"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9616,6 +9615,7 @@ version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-json-rpc",
  "alloy-op-hardforks",
  "alloy-primitives",
@@ -10208,6 +10208,7 @@ name = "reth-rpc-convert"
 version = "1.9.1"
 dependencies = [
  "alloy-consensus",
+ "alloy-evm",
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
@@ -10219,13 +10220,11 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types",
- "op-revm",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-storage-api",
- "revm-context",
  "serde_json",
  "thiserror 2.0.17",
 ]

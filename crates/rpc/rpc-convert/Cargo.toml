@@ -25,16 +25,13 @@ alloy-signer.workspace = true
 alloy-consensus.workspace = true
 alloy-network.workspace = true
 alloy-json-rpc.workspace = true
+alloy-evm = { workspace = true, features = ["rpc"] }
 
 # optimism
 op-alloy-consensus = { workspace = true, optional = true }
 op-alloy-rpc-types = { workspace = true, optional = true }
 op-alloy-network = { workspace = true, optional = true }
 reth-optimism-primitives = { workspace = true, optional = true }
-op-revm = { workspace = true, optional = true }
-
-# revm
-revm-context.workspace = true
 
 # io
 jsonrpsee-types.workspace = true
@@ -56,7 +53,6 @@ op = [
     "dep:op-alloy-network",
     "dep:reth-optimism-primitives",
     "dep:reth-storage-api",
-    "dep:op-revm",
     "reth-evm/op",
     "reth-primitives-traits/op",
 ]

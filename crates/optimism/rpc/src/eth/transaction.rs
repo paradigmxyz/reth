@@ -1,6 +1,7 @@
 //! Loads and formats OP transaction RPC response.
 
 use crate::{OpEthApi, OpEthApiError, SequencerClient};
+use alloy_evm::rpc::TxInfoMapper;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use futures::StreamExt;
@@ -11,7 +12,7 @@ use reth_primitives_traits::{BlockBody, Recovered, SignedTransaction, WithEncode
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadReceipt, LoadTransaction},
     try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
-    RpcReceipt, TxInfoMapper,
+    RpcReceipt,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{errors::ProviderError, ReceiptProvider};

@@ -3,13 +3,12 @@ use crate::{
     primitives::{CustomHeader, CustomTransaction},
 };
 use alloy_consensus::error::ValueError;
+use alloy_evm::rpc::{EthTxEnvError, TryIntoSimTx, TryIntoTxEnv};
 use alloy_network::TxSigner;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::{OpTransactionReceipt, OpTransactionRequest};
 use reth_op::rpc::RpcTypes;
-use reth_rpc_api::eth::{
-    transaction::TryIntoTxEnv, EthTxEnvError, SignTxRequestError, SignableTxRequest, TryIntoSimTx,
-};
+use reth_rpc_api::eth::{SignTxRequestError, SignableTxRequest};
 use revm::context::{BlockEnv, CfgEnv};
 
 #[derive(Debug, Clone, Copy, Default)]
