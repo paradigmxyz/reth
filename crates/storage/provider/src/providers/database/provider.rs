@@ -264,7 +264,7 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx + DbTxMut + 'static, N: NodeTypes + NodeTypesForProvider> DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Writes executed blocks and state to storage.
     pub fn save_blocks(&self, blocks: Vec<ExecutedBlock<N::Primitives>>) -> ProviderResult<()> {
         if blocks.is_empty() {
