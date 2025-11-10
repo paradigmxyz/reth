@@ -10,7 +10,9 @@ pub trait StaticFileProviderFactory: NodePrimitivesProvider {
     /// Create new instance of static file provider.
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives>;
 
-    /// Returns a mutable reference to a [`StaticFileProviderRW`] of a [`StaticFileSegment`].
+    /// Returns a mutable reference to a
+    /// [`StaticFileProviderRW`](`crate::providers::StaticFileProviderRW`) of a
+    /// [`StaticFileSegment`].
     fn get_static_file_writer(
         &self,
         block: BlockNumber,
