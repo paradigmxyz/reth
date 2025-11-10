@@ -49,7 +49,6 @@ async fn test_getting_file_after_fetching_file_list(url: &str) {
     assert_eq!(actual_count, expected_count);
 }
 
-
 #[test_case("https://mainnet.era.nimbus.team/"; "nimbus")]
 #[tokio::test]
 async fn test_getting_era_file_url_after_fetching_file_list(url: &str) {

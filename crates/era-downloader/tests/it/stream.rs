@@ -50,7 +50,6 @@ async fn test_streaming_era1_files_after_fetching_file_list_into_missing_folder_
     assert_eq!(actual_error, expected_error);
 }
 
-
 #[tokio::test]
 async fn test_streaming_era_files_after_fetching_file_list_into_missing_folder_fails() {
     let base_url = Url::from_str("https://mainnet.era.nimbus.team").unwrap(); //TODO: change once ithaca host era files
