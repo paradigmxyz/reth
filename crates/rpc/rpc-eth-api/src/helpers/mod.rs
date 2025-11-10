@@ -38,7 +38,7 @@ pub use receipt::LoadReceipt;
 pub use signer::EthSigner;
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
-pub use storage_diff_inspector::StorageDiffInspector;
+pub use storage_diff_inspector::{StorageDiffInspector, StorageDiffs};
 pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction};
 

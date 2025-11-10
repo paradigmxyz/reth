@@ -21,8 +21,8 @@ pub struct StorageDiffInspector {
 
 impl StorageDiffInspector {
     /// Creates a new inspector instance.
-    pub const fn new() -> Self {
-        Self { current_tx: BTreeMap::new(), tx_diffs: Vec::new() }
+    pub fn new() -> Self {
+        Self { current_tx: HashMap::new(), tx_diffs: Vec::new() }
     }
 
     /// Marks the end of the current transaction and stores the accumulated diff.
