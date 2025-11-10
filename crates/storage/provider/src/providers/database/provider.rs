@@ -264,7 +264,7 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut + 'static, N: NodeTypes + NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Writes executed blocks and state to storage.
     pub fn save_blocks(&self, blocks: Vec<ExecutedBlock<N::Primitives>>) -> ProviderResult<()> {
         if blocks.is_empty() {
@@ -369,7 +369,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // iterate over block body and remove receipts
         self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
 
-        if !self.prune_modes.has_receipts_pruning() {
+        if EitherWriter::receipts_destination(self).is_static_file() {
             let static_file_receipt_num =
                 self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
 
@@ -1608,11 +1608,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
         // Write receipts to static files only if they're explicitly enabled or we don't have
         // receipts pruning
-        //
-        // TODO: support writing receipts to static files with log filter pruning enabled
-        let mut receipts_writer = if self.storage_settings.read().receipts_in_static_files ||
-            !self.prune_modes.has_receipts_pruning()
-        {
+        let mut receipts_writer = if EitherWriter::receipts_destination(self).is_static_file() {
             EitherWriter::StaticFile(
                 self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?,
             )

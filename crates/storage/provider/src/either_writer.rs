@@ -5,7 +5,9 @@ use alloy_primitives::{BlockNumber, TxNumber};
 use reth_db::table::Value;
 use reth_db_api::{cursor::DbCursorRW, tables};
 use reth_node_types::NodePrimitives;
+use reth_storage_api::{DBProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
+use strum::EnumIs;
 
 /// Represents a destination for writing data, either to database or static files.
 #[derive(Debug)]
@@ -14,6 +16,32 @@ pub enum EitherWriter<'a, CURSOR, N> {
     Database(CURSOR),
     /// Write to static file
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
+}
+
+#[derive(Debug, EnumIs)]
+#[allow(missing_docs)]
+pub enum EitherWriterDestination {
+    Database,
+    StaticFile,
+}
+
+impl EitherWriter<'_, (), ()> {
+    /// Returns the destination for writing receipts.
+    pub fn receipts_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        let receipts_in_static_files = provider.cached_storage_settings().receipts_in_static_files;
+        let prune_modes = provider.prune_modes_ref();
+
+        if !receipts_in_static_files && prune_modes.has_receipts_pruning() ||
+            // TODO: support writing receipts to static files with log filter pruning enabled
+            receipts_in_static_files && !prune_modes.receipts_log_filter.is_empty()
+        {
+            EitherWriterDestination::Database
+        } else {
+            EitherWriterDestination::StaticFile
+        }
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
