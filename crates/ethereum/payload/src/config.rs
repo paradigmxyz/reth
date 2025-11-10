@@ -12,7 +12,7 @@ pub struct EthereumBuilderConfig {
     /// Maximum number of blobs to include per block (EIP-7872).
     ///
     /// If `None`, defaults to the protocol maximum.
-    pub max_blobs_per_block: Option<u8>,
+    pub max_blobs_per_block: Option<u64>,
 }
 
 impl Default for EthereumBuilderConfig {
@@ -45,7 +45,7 @@ impl EthereumBuilderConfig {
     }
 
     /// Set the maximum number of blobs per block (EIP-7872).
-    pub const fn with_max_blobs_per_block(mut self, max_blobs_per_block: Option<u8>) -> Self {
+    pub const fn with_max_blobs_per_block(mut self, max_blobs_per_block: Option<u64>) -> Self {
         self.max_blobs_per_block = max_blobs_per_block;
         self
     }

@@ -38,7 +38,7 @@ pub struct PayloadBuilderArgs {
 
     /// Maximum number of blobs to include per block.
     #[arg(long = "builder.max-blobs", value_name = "COUNT")]
-    pub max_blobs_per_block: Option<u8>,
+    pub max_blobs_per_block: Option<u64>,
 }
 
 impl Default for PayloadBuilderArgs {
@@ -75,7 +75,7 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
         self.max_payload_tasks
     }
 
-    fn max_blobs_per_block(&self) -> Option<u8> {
+    fn max_blobs_per_block(&self) -> Option<u64> {
         self.max_blobs_per_block
     }
 }
