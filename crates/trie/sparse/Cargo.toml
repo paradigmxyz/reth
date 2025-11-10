@@ -84,7 +84,7 @@ arbitrary = [
 ]
 
 [[bench]]
-name = "update"
+name = "root"
 harness = false
 
 [[bench]]
