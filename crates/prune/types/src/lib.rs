@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 use alloy_primitives::{Address, BlockNumber};
 pub use checkpoint::PruneCheckpoint;
-use derive_more::{Deref, From};
+use derive_more::{Deref, DerefMut, From};
 pub use event::PrunerEvent;
 pub use mode::PruneMode;
 pub use pruner::{
@@ -30,17 +30,17 @@ pub use pruner::{
     SegmentOutputCheckpoint,
 };
 pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
-use serde::Deserialize;
+use serde::{de::Error, Deserialize, Deserializer};
 pub use target::{PruneModes, UnwindTargetPrunedError, MINIMUM_PRUNING_DISTANCE};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deref, From)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut, From)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct ReceiptsLogPruneConfig(pub BTreeMap<Address, PruneMode>);
 
 impl ReceiptsLogPruneConfig {
     /// Creates an empty config.
-    pub const fn empty() -> Self {
+    pub const fn new() -> Self {
         Self(BTreeMap::new())
     }
 
@@ -51,18 +51,23 @@ impl ReceiptsLogPruneConfig {
 
     pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
-        let map = BTreeMap::<Address, PruneMode>::deserialize(deserializer)?;
-        if let Some(address) =
-            map.iter().find_map(|(address, mode)| mode.is_distance().then_some(address))
-        {
-            return Err(serde::de::Error::custom(format!(
-                "address {} has a distance-based pruning mode which is no longer supported. Please either use `full` or `before`.",
-                address
-            )));
+        let config = Self(BTreeMap::deserialize(deserializer)?);
+        config.validate().map_err(D::Error::custom)?;
+        Ok(config)
+    }
+
+    /// Validates the configuration.
+    pub fn validate(&self) -> Result<(), PruneSegmentError> {
+        for (address, mode) in &self.0 {
+            if mode.is_distance() {
+                return Err(PruneSegmentError::UnsupportedReceiptsLogFilterPruneMode(
+                    *address, *mode,
+                ));
+            }
         }
-        Ok(Self(map))
+        Ok(())
     }
 
     /// Given the `tip` block number, consolidates the structure so it can easily be queried for

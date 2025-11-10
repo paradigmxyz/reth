@@ -1172,7 +1172,6 @@ mod tests {
                     storage_history_before: None,
                     bodies_pre_merge: false,
                     bodies_distance: None,
-                    #[expect(deprecated)]
                     receipts_log_filter: None,
                     bodies_before: None,
                 },

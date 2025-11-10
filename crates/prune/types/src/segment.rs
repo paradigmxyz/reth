@@ -1,6 +1,7 @@
 #![allow(deprecated)] // necessary to all defining deprecated `PruneSegment` variants
 
-use crate::MINIMUM_PRUNING_DISTANCE;
+use crate::{PruneMode, MINIMUM_PRUNING_DISTANCE};
+use alloy_primitives::Address;
 use derive_more::Display;
 use strum::{EnumIter, IntoEnumIterator};
 use thiserror::Error;
@@ -115,6 +116,9 @@ pub enum PruneSegmentError {
     /// Invalid configuration of a prune segment.
     #[error("the configuration provided for {0} is invalid")]
     Configuration(PruneSegment),
+    /// Unsupported receipts log filter prune mode for address.
+    #[error("unsupported receipts log filter prune mode for address {0}: {1:?}")]
+    UnsupportedReceiptsLogFilterPruneMode(Address, PruneMode),
 }
 
 #[cfg(test)]

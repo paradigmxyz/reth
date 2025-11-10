@@ -120,7 +120,7 @@ impl Default for PruneModes {
             storage_history: None,
             bodies_history: None,
             merkle_changesets: default_merkle_changesets_mode(),
-            receipts_log_filter: ReceiptsLogPruneConfig::empty(),
+            receipts_log_filter: ReceiptsLogPruneConfig::new(),
         }
     }
 }
@@ -136,7 +136,7 @@ impl PruneModes {
             storage_history: Some(PruneMode::Full),
             bodies_history: Some(PruneMode::Full),
             merkle_changesets: PruneMode::Full,
-            receipts_log_filter: ReceiptsLogPruneConfig::empty(),
+            receipts_log_filter: ReceiptsLogPruneConfig::new(),
         }
     }
 

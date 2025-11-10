@@ -1,6 +1,6 @@
 //! Configuration files.
 use reth_network_types::{PeersConfig, SessionsConfig};
-use reth_prune_types::PruneModes;
+use reth_prune_types::{PruneModes, PruneSegmentError};
 use reth_stages_types::ExecutionStageThresholds;
 use std::{
     path::{Path, PathBuf},
@@ -453,6 +453,11 @@ impl PruneConfig {
     /// Returns whether there is any kind of receipt pruning configuration.
     pub const fn has_receipts_pruning(&self) -> bool {
         self.segments.receipts.is_some()
+    }
+
+    /// Validates the configuration.
+    pub fn validate(&self) -> Result<(), PruneSegmentError> {
+        self.segments.receipts_log_filter.validate()
     }
 
     /// Merges another `PruneConfig` into this one, taking values from the other config if and only
