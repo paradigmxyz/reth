@@ -31,7 +31,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use alloy_primitives::{Address, BlockNumber};
 use derive_more::{Deref, DerefMut, From};
 #[cfg(feature = "serde")]
-use serde::{de::Error, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut, From)]
@@ -49,26 +49,33 @@ impl ReceiptsLogPruneConfig {
         self.0.is_empty()
     }
 
-    #[cfg(feature = "serde")]
+    #[cfg(all(feature = "serde", feature = "std"))]
     pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let config = Self(BTreeMap::deserialize(deserializer)?);
-        config.validate().map_err(D::Error::custom)?;
+        let mut config = Self(BTreeMap::deserialize(deserializer)?);
+        let errors = config.validate_and_fix();
+        for error in errors {
+            reth_tracing::tracing::warn!("Receipt log pruning config error: {}", error);
+        }
         Ok(config)
     }
 
-    /// Validates the configuration.
-    pub fn validate(&self) -> Result<(), PruneSegmentError> {
-        for (address, mode) in &self.0 {
+    /// Validates the configuration and fixes any issues if possible.
+    pub fn validate_and_fix(&mut self) -> Vec<PruneSegmentError> {
+        let mut errors = Vec::new();
+        self.retain(|address, mode| {
             if mode.is_distance() {
-                return Err(PruneSegmentError::UnsupportedReceiptsLogFilterPruneMode(
+                errors.push(PruneSegmentError::UnsupportedReceiptsLogFilterPruneMode(
                     *address, *mode,
                 ));
+                return false;
             }
-        }
-        Ok(())
+
+            true
+        });
+        errors
     }
 
     /// Given the `tip` block number, consolidates the structure so it can easily be queried for

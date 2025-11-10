@@ -9947,6 +9947,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "reth-codecs",
+ "reth-tracing",
  "serde",
  "serde_json",
  "strum 0.27.2",

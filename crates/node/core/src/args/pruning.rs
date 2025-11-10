@@ -309,7 +309,11 @@ pub(crate) fn parse_receipts_log_filter(
         config.insert(address, prune_mode);
     }
 
-    config.validate()?;
+    let errors = config.validate_and_fix();
+    for error in errors {
+        reth_tracing::tracing::warn!("Receipt log pruning CLI arguments error: {}", error);
+    }
+
     Ok(config)
 }
 

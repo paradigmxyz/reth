@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 reth-codecs = { workspace = true, optional = true }
+reth-tracing = { workspace = true, optional = true }
 
 alloy-primitives.workspace = true
 derive_more.workspace = true
@@ -44,6 +45,7 @@ std = [
     "serde_json/std",
     "thiserror/std",
     "strum/std",
+    "dep:reth-tracing"
 ]
 test-utils = [
     "std",
