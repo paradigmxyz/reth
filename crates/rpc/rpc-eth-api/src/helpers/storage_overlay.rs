@@ -115,7 +115,7 @@ fn collect_account_slots(
     loop {
         let StorageRangeResult { slots: chunk_slots, next_key } =
             provider.storage_range(account, start, STORAGE_PAGE)?;
-        for entry in chunk_slots.iter() {
+        for entry in &chunk_slots {
             slots.insert(entry.key, entry.value);
         }
 
@@ -200,7 +200,7 @@ mod tests {
         assert_eq!(merged.len(), 2);
         assert_eq!(merged.get(&StorageKey::with_last_byte(0x01)), Some(&StorageValue::from(30)));
         assert_eq!(merged.get(&StorageKey::with_last_byte(0x03)), Some(&StorageValue::from(40)));
-        assert!(merged.get(&StorageKey::with_last_byte(0x02)).is_none());
+        assert!(!merged.contains_key(&StorageKey::with_last_byte(0x02)));
     }
 
     #[test]

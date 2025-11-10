@@ -30,7 +30,7 @@ impl StorageDiffInspector {
 
     /// Marks the end of the current transaction and stores the accumulated diff.
     pub fn finish_transaction(&mut self) {
-        self.tx_diffs.push(self.current_tx.drain().map(|(addr, slots)| (addr, slots)).collect());
+        self.tx_diffs.push(self.current_tx.drain().collect());
     }
 
     /// Returns collected diffs, consuming the inspector.
@@ -54,6 +54,20 @@ impl StorageDiffInspector {
         let slot: StorageKey = B256::from(slot);
         let value: StorageValue = value;
         self.current_tx.entry(contract).or_default().insert(slot, value);
+    }
+}
+
+impl<CTX, INTR> Inspector<CTX, INTR> for StorageDiffInspector
+where
+    CTX: ContextTr,
+    INTR: InterpreterTypes,
+{
+    fn step(&mut self, interp: &mut Interpreter<INTR>, _context: &mut CTX) {
+        if let Some(opcode) = OpCode::new(interp.bytecode.opcode()) &&
+            opcode == OpCode::SSTORE
+        {
+            self.record_sstore(interp);
+        }
     }
 }
 
@@ -89,19 +103,5 @@ mod tests {
         assert!(diffs.len() == 1);
         let slots = diffs[0].get(&addr).unwrap();
         assert_eq!(slots.get(&key), Some(&value));
-    }
-}
-
-impl<CTX, INTR> Inspector<CTX, INTR> for StorageDiffInspector
-where
-    CTX: ContextTr,
-    INTR: InterpreterTypes,
-{
-    fn step(&mut self, interp: &mut Interpreter<INTR>, _context: &mut CTX) {
-        if let Some(opcode) = OpCode::new(interp.bytecode.opcode()) {
-            if opcode == OpCode::SSTORE {
-                self.record_sstore(interp);
-            }
-        }
     }
 }

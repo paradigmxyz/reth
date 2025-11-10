@@ -25,6 +25,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use secp256k1 as _;
+
 use http as _;
 use http_body as _;
 use hyper as _;

@@ -166,8 +166,8 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
         let mut slots = BTreeMap::new();
 
         let mut plain_cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
-        let mut walker = plain_cursor.walk_dup(Some(account), None)?;
-        while let Some(entry) = walker.next() {
+        let walker = plain_cursor.walk_dup(Some(account), None)?;
+        for entry in walker {
             let (_, storage) = entry?;
             slots.insert(storage.key, storage.value);
         }
@@ -502,17 +502,16 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> 
 
         let entries: Vec<_> = slots_map.into_iter().collect();
         let start_index = entries.partition_point(|(key, _)| *key < start_key);
-        let mut iter = entries.into_iter().skip(start_index);
+        let iter = entries.into_iter().skip(start_index);
 
         let mut slots = Vec::new();
         let mut next_key = None;
-        while let Some((key, value)) = iter.next() {
-            if slots.len() < max_slots {
-                slots.push(StorageEntry { key, value });
-            } else {
+        for (key, value) in iter {
+            if slots.len() >= max_slots {
                 next_key = Some(key);
                 break;
             }
+            slots.push(StorageEntry { key, value });
         }
 
         Ok(StorageRangeResult { slots, next_key })

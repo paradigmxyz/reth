@@ -16,10 +16,10 @@ use crate::{
     DBProvider, EitherWriter, HashingWriter, HeaderProvider, HeaderSyncGapProvider,
     HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter, LatestStateProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, RevertsInit, StageCheckpointReader, StateProviderBox,
-    StateWriter, StaticFileProviderFactory, StatsReader, StorageRangeProviderBox,
-    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieReader, TrieWriter,
+    PruneCheckpointWriter, RevertsInit, StageCheckpointReader, StateProviderBox, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageRangeProviderBox, StorageReader,
+    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    TrieReader, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},

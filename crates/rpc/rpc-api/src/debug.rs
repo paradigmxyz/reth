@@ -2,9 +2,7 @@ use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256};
-use alloy_rpc_types_debug::{
-    storage_range::StorageRangeResult as RpcStorageRangeResult, ExecutionWitness,
-};
+use alloy_rpc_types_debug::{ExecutionWitness, StorageRangeResult as RpcStorageRangeResult};
 use alloy_rpc_types_eth::{Block, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,

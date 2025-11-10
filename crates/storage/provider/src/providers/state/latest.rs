@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
-use reth_primitives_traits::{Account, Bytecode, StorageEntry};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     BytecodeReader, DBProvider, StateProofProvider, StorageRangeProvider, StorageRangeResult,
     StorageRootProvider,
@@ -183,17 +183,17 @@ fn plain_storage_range<T: DbTx>(
     }
 
     let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-    let mut walker = cursor.walk_dup(Some(account), Some(start_key))?;
+    let walker = cursor.walk_dup(Some(account), Some(start_key))?;
     let mut slots = Vec::new();
     let mut next_key = None;
 
-    while let Some(entry) = walker.next() {
+    for entry in walker {
         let (_, slot) = entry?;
         if slots.len() >= max_slots {
             next_key = Some(slot.key);
             break;
         }
-        slots.push(StorageEntry { key: slot.key, value: slot.value });
+        slots.push(slot);
     }
 
     Ok(StorageRangeResult { slots, next_key })

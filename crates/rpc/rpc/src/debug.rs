@@ -3,13 +3,12 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
-use alloy_evm::env::BlockEnvironment;
+use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, StorageKey, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::{
-    storage_range::{StorageMap, StorageRangeResult as RpcStorageRangeResult, StorageResult},
-    ExecutionWitness,
+    ExecutionWitness, StorageMap, StorageRangeResult as RpcStorageRangeResult, StorageResult,
 };
 use alloy_rpc_types_eth::{
     state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo,
@@ -30,13 +29,13 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, StorageDiffInspector, StorageDiffs, StorageRangeOverlay, TraceExt},
-    EthApiTypes, FromEthApiError, RpcNodeCore,
+    EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProviderFactory, StateRootProvider,
+    StateProofProvider, StateProviderFactory, StateRootProvider, StorageRangeProvider,
     StorageRangeResult as ProviderStorageRangeResult, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
@@ -45,7 +44,7 @@ use revm::{context::Block, context_interface::Transaction, state::EvmState, Data
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
@@ -249,24 +248,23 @@ where
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 let mut inspector = StorageDiffInspector::default();
-                {
-                    let mut evm = this.eth_api().evm_config().evm_with_env_and_inspector(
-                        &mut db,
-                        evm_env.clone(),
-                        &mut inspector,
-                    );
-
-                    for (idx, tx) in block.transactions_recovered().into_iter().enumerate() {
-                        if let Some(limit) = max_index {
-                            if idx > limit {
-                                break
-                            }
-                        }
-
-                        let tx_env = this.eth_api().evm_config().tx_env(tx);
-                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
-                        inspector.finish_transaction();
+                for (idx, tx) in block.transactions_recovered().enumerate() {
+                    if let Some(limit) = max_index &&
+                        idx > limit
+                    {
+                        break
                     }
+
+                    let tx_env = this.eth_api().evm_config().tx_env(tx);
+                    {
+                        let mut evm = this.eth_api().evm_config().evm_with_env_and_inspector(
+                            &mut db,
+                            evm_env.clone(),
+                            &mut inspector,
+                        );
+                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+                    }
+                    inspector.finish_transaction();
                 }
 
                 Ok::<_, Eth::Error>(inspector.into_diffs())
@@ -1529,7 +1527,7 @@ fn convert_storage_range(range: ProviderStorageRangeResult) -> RpcStorageRangeRe
         storage.insert(entry.key, StorageResult { key: entry.key, value });
     }
 
-    RpcStorageRangeResult { storage: StorageMap(storage), next_key: range.next_key.map(Into::into) }
+    RpcStorageRangeResult { storage: StorageMap(storage), next_key: range.next_key }
 }
 
 #[cfg(test)]
@@ -1543,15 +1541,12 @@ mod tests {
     use reth_db_api::models::StoredBlockBodyIndices;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::{
-        crypto::secp256k1::{public_key_to_address, Keypair, Secp256k1, SecretKey},
-        StorageEntry,
-    };
+    use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, StorageEntry};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_testing_utils::generators::sign_tx_with_key_pair;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-    use std::collections::BTreeMap;
+    use secp256k1::{Keypair, Secp256k1, SecretKey};
 
     type TestRpcNode = RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>;
     type TestEthApi = EthApi<TestRpcNode, EthRpcConverter<ChainSpec>>;
@@ -1581,7 +1576,7 @@ mod tests {
             value: U256::ZERO,
             input: Bytes::new(),
         });
-        sign_tx_with_key_pair(keypair.clone(), tx)
+        sign_tx_with_key_pair(*keypair, tx)
     }
 
     fn build_debug_api_with_contract_writes(
@@ -1591,7 +1586,7 @@ mod tests {
         let secp = Secp256k1::new();
         let secret_key = SecretKey::from_slice(&[0x11; 32]).expect("valid secret key");
         let keypair = Keypair::from_secret_key(&secp, &secret_key);
-        let sender = public_key_to_address(&keypair.public_key());
+        let sender = public_key_to_address(keypair.public_key());
         let mut accounts = Vec::new();
         accounts.push((sender, ExtendedAccount::new(0, U256::from(1_000_000_000_000_000_000u128))));
 
@@ -1661,7 +1656,7 @@ mod tests {
         let slot = StorageKey::from(U256::from(specs[0].slot));
         let value = StorageValue::from(U256::from(specs[0].value));
         assert_eq!(first_contract_diff.get(&slot), Some(&value));
-        assert!(capped[0].get(&specs[1].address).is_none());
+        assert!(!capped[0].contains_key(&specs[1].address));
 
         let full = api.run_with_storage_diff_inspector_for_tests(block_id, None).await;
         assert_eq!(full.len(), specs.len());
@@ -1678,12 +1673,12 @@ mod tests {
     fn converts_storage_range_result() {
         let entry = StorageEntry::new(B256::from(U256::from(1)), U256::from(2));
         let range = ProviderStorageRangeResult {
-            slots: vec![entry.clone()],
-            next_key: Some(StorageKey::from(B256::from(3))),
+            slots: vec![entry],
+            next_key: Some(StorageKey::from(B256::from(U256::from(3)))),
         };
 
         let rpc = convert_storage_range(range);
-        assert_eq!(rpc.next_key, Some(B256::from(3)));
+        assert_eq!(rpc.next_key, Some(B256::from(U256::from(3))));
         assert_eq!(rpc.storage.len(), 1);
         let (key, slot) = rpc.storage.0.iter().next().unwrap();
         assert_eq!(key, &entry.key);
