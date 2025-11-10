@@ -16,16 +16,17 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use async_trait::async_trait;
+use futures::{stream::FuturesOrdered, Future, StreamExt};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
 use reth_evm::ConfigureEvm;
-use reth_primitives_traits::{BlockBody, BlockHeader};
+use reth_primitives_traits::{BlockBody, BlockHeader, NodePrimitives, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
-    FromEthApiError, RpcNodeCore,
+    EthApiTypes, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
@@ -37,8 +38,9 @@ use revm_inspectors::{
     storage::StorageInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
+use revm_primitives::FixedBytes;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{collections::VecDeque, iter::Peekable, ops::RangeInclusive, pin::Pin, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `trace` API implementation.
@@ -389,88 +391,102 @@ where
             .into())
         }
 
+        // Create block stream that can fetch blocks concurrently
+        let mut block_stream = BlockStreamKind::new(
+            start,
+            end,
+            latest_block,
+            self.inner.clone(),
+            self.inner.eth_config.max_tracing_requests,
+        );
+
+        // Stream for tracing futures that process blocks as they arrive
+        let mut tracing_futures = FuturesOrdered::new();
         let mut all_traces = Vec::new();
-        let mut block_traces = Vec::with_capacity(self.inner.eth_config.max_tracing_requests);
-        for chunk_start in (start..end).step_by(self.inner.eth_config.max_tracing_requests) {
-            let chunk_end =
-                std::cmp::min(chunk_start + self.inner.eth_config.max_tracing_requests as u64, end);
+        let mut blocks_for_rewards = Vec::new();
 
-            // fetch all blocks in that chunk
-            let blocks = self
-                .eth_api()
-                .spawn_blocking_io(move |this| {
-                    Ok(this
-                        .provider()
-                        .recovered_block_range(chunk_start..=chunk_end)
-                        .map_err(Eth::Error::from_eth_err)?
-                        .into_iter()
-                        .map(Arc::new)
-                        .collect::<Vec<_>>())
-                })
-                .await?;
+        // Process blocks and traces concurrently
+        loop {
+            tokio::select! {
+                // Get next block from stream
+                block_result = block_stream.next() => {
+                    match block_result? {
+                        Some(block) => {
+                            // Store block for reward processing later
+                            blocks_for_rewards.push(block.clone());
 
-            // trace all blocks
-            for block in &blocks {
-                let matcher = matcher.clone();
-                let traces = self.eth_api().trace_block_until(
-                    block.hash().into(),
-                    Some(block.clone()),
-                    None,
-                    TracingInspectorConfig::default_parity(),
-                    move |tx_info, mut ctx| {
-                        let mut traces = ctx
-                            .take_inspector()
-                            .into_parity_builder()
-                            .into_localized_transaction_traces(tx_info);
-                        traces.retain(|trace| matcher.matches(&trace.trace));
-                        Ok(Some(traces))
-                    },
+                            // Spawn trace task for this block
+                            let matcher = matcher.clone();
+                            let trace_future = self.eth_api().trace_block_until(
+                                block.hash().into(),
+                                Some(block),
+                                None,
+                                TracingInspectorConfig::default_parity(),
+                                move |tx_info, mut ctx| {
+                                    let mut traces = ctx
+                                        .take_inspector()
+                                        .into_parity_builder()
+                                        .into_localized_transaction_traces(tx_info);
+                                    traces.retain(|trace| matcher.matches(&trace.trace));
+                                    Ok(Some(traces))
+                                },
+                            );
+                            tracing_futures.push_back(trace_future);
+                        }
+                        None => {
+                            // No more blocks to fetch, but continue processing pending traces
+                            if tracing_futures.is_empty() {
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Process completed trace
+                Some(trace_result) = tracing_futures.next() => {
+                    let block_traces = trace_result?;
+                    if let Some(block_traces) = block_traces {
+                        all_traces.extend(block_traces.into_iter().flatten().flat_map(|traces| traces.into_iter()));
+                    }
+                }
+
+                else => break, // Both streams exhausted
+            }
+        }
+
+        // Add reward traces for all blocks
+        for block in &blocks_for_rewards {
+            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
+                all_traces.extend(
+                    self.extract_reward_traces(
+                        block.header(),
+                        block.body().ommers(),
+                        base_block_reward,
+                    )
+                    .into_iter()
+                    .filter(|trace| matcher.matches(&trace.trace)),
                 );
-                block_traces.push(traces);
+            } else {
+                // no block reward, means we're past the Paris hardfork and don't expect any
+                // rewards because the blocks in ascending order
+                break;
             }
+        }
 
-            #[allow(clippy::iter_with_drain)]
-            let block_traces = futures::future::try_join_all(block_traces.drain(..)).await?;
-            all_traces.extend(block_traces.into_iter().flatten().flat_map(|traces| {
-                traces.into_iter().flatten().flat_map(|traces| traces.into_iter())
-            }));
+        // Skips the first `after` number of matching traces.
+        if let Some(cutoff) = after.map(|a| a as usize) &&
+            cutoff < all_traces.len()
+        {
+            all_traces.drain(..cutoff);
+            after = None;
+        }
 
-            // add reward traces for all blocks
-            for block in &blocks {
-                if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                    all_traces.extend(
-                        self.extract_reward_traces(
-                            block.header(),
-                            block.body().ommers(),
-                            base_block_reward,
-                        )
-                        .into_iter()
-                        .filter(|trace| matcher.matches(&trace.trace)),
-                    );
-                } else {
-                    // no block reward, means we're past the Paris hardfork and don't expect any
-                    // rewards because the blocks in ascending order
-                    break
-                }
+        // Return at most `count` of traces
+        if let Some(count) = count {
+            let count = count as usize;
+            if count < all_traces.len() {
+                all_traces.truncate(count);
             }
-
-            // Skips the first `after` number of matching traces.
-            if let Some(cutoff) = after.map(|a| a as usize) &&
-                cutoff < all_traces.len()
-            {
-                all_traces.drain(..cutoff);
-                // we removed the first `after` traces
-                after = None;
-            }
-
-            // Return at most `count` of traces
-            if let Some(count) = count {
-                let count = count as usize;
-                if count < all_traces.len() {
-                    all_traces.truncate(count);
-                    return Ok(all_traces)
-                }
-            };
         }
 
         // If `after` is greater than or equal to the number of matched traces, it returns an
@@ -813,5 +829,225 @@ fn reward_trace<H: BlockHeader>(header: &H, reward: RewardAction) -> LocalizedTr
             error: None,
             result: None,
         },
+    }
+}
+
+/// Type alias for accessing the block type from TraceExt implementations
+type TraceBlock<Eth> = <<Eth as RpcNodeCore>::Primitives as NodePrimitives>::Block;
+
+/// Future for fetching blocks in parallel
+type BlockFetchFuture<Eth> = Pin<
+    Box<
+        dyn Future<
+            Output = Result<
+                Vec<
+                    Arc<
+                        RecoveredBlock<<<Eth as RpcNodeCore>::Primitives as NodePrimitives>::Block>,
+                    >,
+                >,
+                <Eth as EthApiTypes>::Error,
+            >,
+        >,
+    >,
+>;
+
+/// Cache threshold: use cache if within 1000 blocks of tip
+const CACHE_THRESHOLD_BLOCKS: u64 = 1000;
+
+/// Helper enum for determining how to stream blocks for trace_filter based on proximity to chain
+/// tip
+enum BlockStreamKind<Eth>
+where
+    Eth: TraceExt + 'static,
+{
+    /// Blocks are close to tip (~1000 blocks), use cache
+    CloseToTip(CachedBlockStream<Eth>),
+    /// Blocks are far behind, use provider range queries
+    FarBehind(RangeBlockStream<Eth>),
+}
+
+impl<Eth> BlockStreamKind<Eth>
+where
+    Eth: TraceExt + 'static,
+{
+    /// Creates appropriate stream type based on distance from tip
+    fn new(
+        start: u64,
+        end: u64,
+        latest_block: u64,
+        trace_api: Arc<TraceApiInner<Eth>>,
+        max_range: usize,
+    ) -> Self {
+        let distance_from_tip = latest_block.saturating_sub(end);
+
+        if distance_from_tip <= CACHE_THRESHOLD_BLOCKS {
+            Self::CloseToTip(CachedBlockStream {
+                trace_api,
+                block_numbers: (start..=end).peekable(),
+            })
+        } else {
+            Self::FarBehind(RangeBlockStream {
+                trace_api,
+                iter: (start..=end).peekable(),
+                next: VecDeque::new(),
+                max_range,
+                pending_tasks: FuturesOrdered::new(),
+            })
+        }
+    }
+
+    /// Get next block from the stream
+    async fn next(&mut self) -> Result<Option<Arc<RecoveredBlock<TraceBlock<Eth>>>>, Eth::Error> {
+        match self {
+            Self::CloseToTip(stream) => stream.next().await,
+            Self::FarBehind(stream) => stream.next().await,
+        }
+    }
+}
+
+/// Streams blocks using cache for recent blocks
+struct CachedBlockStream<Eth>
+where
+    Eth: TraceExt + 'static,
+{
+    /// Reference to trace API for accessing cache and provider
+    trace_api: Arc<TraceApiInner<Eth>>,
+    /// Iterator over block numbers to fetch
+    block_numbers: Peekable<RangeInclusive<u64>>,
+}
+
+impl<Eth> CachedBlockStream<Eth>
+where
+    Eth: TraceExt + 'static,
+{
+    /// Get next block from cache or provider
+    async fn next(&mut self) -> Result<Option<Arc<RecoveredBlock<TraceBlock<Eth>>>>, Eth::Error> {
+        let block_num = match self.block_numbers.next() {
+            Some(num) => num,
+            None => return Ok(None), // Stream finished
+        };
+
+        // TODO: fix this, find a way to get block hash in fixed bytes, right now I only have
+        // block_num as a u64
+        let block_hash = FixedBytes::random();
+
+        // Try cache first using maybe_cached_block_and_receipts
+        let (maybe_block, _receipts) = self
+            .trace_api
+            .eth_api
+            .cache()
+            .maybe_cached_block_and_receipts(block_hash)
+            .await
+            .map_err(Eth::Error::from_eth_err)?;
+
+        if let Some(block) = maybe_block {
+            return Ok(Some(block));
+        }
+
+        // Cache miss - fetch from provider using spawn_blocking_io
+        let block = self
+            .trace_api
+            .eth_api
+            .spawn_blocking_io(move |this| {
+                this.provider()
+                    .recovered_block_range(block_num..=block_num)
+                    .map_err(Eth::Error::from_eth_err)?
+                    .into_iter()
+                    .next()
+                    .map(Arc::new)
+                    .ok_or_else(|| EthApiError::HeaderNotFound(block_num.into()).into())
+            })
+            .await?;
+
+        Ok(Some(block))
+    }
+}
+
+/// Streams blocks using range queries with parallel fetching
+struct RangeBlockStream<Eth>
+where
+    Eth: TraceExt + 'static,
+{
+    /// Reference to trace API for accessing provider
+    trace_api: Arc<TraceApiInner<Eth>>,
+    /// Iterator over block numbers to fetch
+    iter: Peekable<RangeInclusive<u64>>,
+    /// Buffer of already-fetched blocks
+    next: VecDeque<Arc<RecoveredBlock<TraceBlock<Eth>>>>,
+    /// Maximum number of blocks to fetch in one range query
+    max_range: usize,
+    /// Futures for concurrent block fetching tasks
+    pending_tasks: FuturesOrdered<BlockFetchFuture<Eth>>,
+}
+
+impl<Eth> RangeBlockStream<Eth>
+where
+    Eth: TraceExt + 'static,
+{
+    /// Get next block from buffer or spawn new fetch tasks
+    async fn next(&mut self) -> Result<Option<Arc<RecoveredBlock<TraceBlock<Eth>>>>, Eth::Error> {
+        loop {
+            // Step 1: Check if we have blocks in buffer
+            if let Some(block) = self.next.pop_front() {
+                return Ok(Some(block));
+            }
+
+            // Step 2: Check if any pending tasks completed
+            if let Some(task_result) = self.pending_tasks.next().await {
+                let blocks = task_result?;
+                self.next.extend(blocks);
+                continue; // Go back to step 1
+            }
+
+            // Step 3: Try to spawn new task if we have more block numbers
+            if self.iter.peek().is_some() {
+                self.spawn_fetch_task();
+                continue; // Go back to step 2
+            }
+
+            // Step 4: Nothing left to process
+            return Ok(None);
+        }
+    }
+
+    /// Spawns a task to fetch a chunk of blocks from provider
+    fn spawn_fetch_task(&mut self) {
+        // Collect range of block numbers (up to max_range)
+        let start = match self.iter.next() {
+            Some(n) => n,
+            None => return, // No more blocks
+        };
+
+        let mut end = start;
+        for _ in 0..self.max_range - 1 {
+            if self.iter.peek().is_some() {
+                if let Some(next) = self.iter.next() {
+                    end = next;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Clone for move into async block
+        let trace_api = self.trace_api.clone();
+
+        // Spawn blocking task to fetch block range
+        let task = Box::pin(async move {
+            trace_api
+                .eth_api
+                .spawn_blocking_io(move |this| {
+                    Ok(this
+                        .provider()
+                        .recovered_block_range(start..=end)
+                        .map_err(Eth::Error::from_eth_err)?
+                        .into_iter()
+                        .map(Arc::new)
+                        .collect::<Vec<_>>())
+                })
+                .await
+        });
+
+        self.pending_tasks.push_back(task);
     }
 }
