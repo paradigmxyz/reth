@@ -156,7 +156,6 @@ docker run --rm --name jaeger \
   cr.jaegertracing.io/jaegertracing/jaeger:2.11.0
 ```
 
-
 Now we can provide the `--tracing-otlp` argument with reth:
 
 ```bash
@@ -164,6 +163,8 @@ reth node --tracing-otlp=http://localhost:4317 --tracing-otlp-protocol grpc
 ```
 
 The traces reth exported should now be searchable and viewable on http://localhost:16686.
+
+For environments where reth is processing a high number of transactions or blocks, it may be a good idea to bump `OTEL_BLRP_MAX_QUEUE_SIZE`, which has a default of `2048`. This controls how many log records can be recorded before batching and exporting. If this is set to too low of a value, spans and events may be dropped by the exporter.
 
 ## Conclusion
 
