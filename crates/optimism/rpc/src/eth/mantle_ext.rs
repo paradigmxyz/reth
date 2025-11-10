@@ -9,7 +9,7 @@ use reth_rpc_server_types::result::invalid_params_rpc_err;
 use reth_storage_api::{BlockNumReader, BlockReaderIdExt, StateProviderFactory};
 use std::sync::Arc;
 
-use crate::SequencerClient;
+use crate::{error::SequencerClientError, SequencerClient};
 
 /// Mantle-specific `Eth` API extensions implementation.
 ///
@@ -146,9 +146,19 @@ where
                 .forward_raw_transaction_with_preconf(bytes.as_ref())
                 .await
                 .map_err(|err| {
+                    // Extract the original error message from the sequencer response
+                    let error_msg = match &err {
+                        SequencerClientError::HttpError(rpc_err) => {
+                            rpc_err.as_error_resp()
+                                .map(|payload| payload.message.to_string())
+                                .unwrap_or_else(|| err.to_string())
+                        }
+                        _ => err.to_string(),
+                    };
+                    
                     ErrorObject::owned(
                         -32000,
-                        format!("failed to forward tx to sequencer, please try again. Error message: '{err}'"),
+                        format!("failed to forward tx to sequencer, please try again. Error message: '{error_msg}'"),
                         None::<()>,
                     )
                 })
