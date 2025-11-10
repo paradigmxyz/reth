@@ -151,7 +151,7 @@ impl NodeManager {
         // Add tracing arguments if OTLP endpoint is configured
         if let Some(ref endpoint) = self.tracing_endpoint {
             info!("Enabling OTLP tracing export to: {}", endpoint);
-            reth_args.extend_from_slice(&["--tracing-otlp".to_string(), endpoint.clone()]);
+            reth_args.push(format!("--tracing-otlp={}", endpoint));
         }
 
         // Add any additional arguments passed via command line (common to both baseline and
