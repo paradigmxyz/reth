@@ -67,9 +67,7 @@ impl ReceiptsLogPruneConfig {
         let mut errors = Vec::new();
         self.retain(|address, mode| {
             if mode.is_distance() {
-                errors.push(PruneSegmentError::UnsupportedReceiptsLogFilterPruneMode(
-                    *address, *mode,
-                ));
+                errors.push(PruneSegmentError::UnsupportedReceiptsLogFilterDistance(*address));
                 return false;
             }
 
