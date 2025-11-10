@@ -43,19 +43,28 @@ where
     ///
     /// Returns the hash of the transaction.
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
+        use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
+
         let recovered = recover_raw_transaction(&tx)?;
 
         // broadcast raw transaction to subscribers if there is any.
         self.eth_api().broadcast_raw_transaction(tx.clone());
 
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+        let tx_hash = *pool_transaction.hash();
 
         // On optimism, transactions are forwarded directly to the sequencer to be included in
-        // blocks that it builds.
+        // blocks that it builds (RPC node forwarding to sequencer).
         if let Some(client) = self.raw_tx_forwarder().as_ref() {
-            tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to sequencer");
+            tracing::debug!(target: "rpc::eth", hash = %tx_hash, "forwarding raw transaction to sequencer");
+            
+            // X Layer: Log RPC receive end
+            if let Some(tracer) = get_global_tracer() {
+                tracer.log_transaction(tx_hash, TransactionProcessId::RpcReceiveTxEnd, None);
+            }
+            
             let hash = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
-                    tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
+                    tracing::debug!(target: "rpc::eth", %err, hash=%tx_hash, "failed to forward raw transaction");
                 })?;
 
             // Retain tx in local tx pool after forwarding, for local RPC usage.
@@ -66,12 +75,18 @@ where
             return Ok(hash)
         }
 
+        // Sequencer node receiving transaction (no forwarder configured).
         // submit the transaction to the pool with a `Local` origin
         let AddedTransactionOutcome { hash, .. } = self
             .pool()
             .add_transaction(TransactionOrigin::Local, pool_transaction)
             .await
             .map_err(Self::Error::from_eth_err)?;
+
+        // X Layer: Log sequencer receive end
+        if let Some(tracer) = get_global_tracer() {
+            tracer.log_transaction(tx_hash, TransactionProcessId::SeqReceiveTxEnd, None);
+        }
 
         Ok(hash)
     }

@@ -56,6 +56,7 @@ smallvec.workspace = true
 # metrics
 metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
+reth-node-metrics.workspace = true
 
 # misc
 dashmap.workspace = true

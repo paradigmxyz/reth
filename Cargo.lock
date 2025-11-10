@@ -7892,6 +7892,7 @@ dependencies = [
 name = "reth-cli-runner"
 version = "1.9.1"
 dependencies = [
+ "reth-node-metrics",
  "reth-tasks",
  "tokio",
  "tracing",
@@ -8452,6 +8453,7 @@ dependencies = [
  "reth-metrics",
  "reth-network-p2p",
  "reth-node-ethereum",
+ "reth-node-metrics",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives-traits",
@@ -8772,6 +8774,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-node-metrics",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
@@ -8862,6 +8865,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-execution-types",
+ "reth-node-metrics",
  "reth-primitives-traits",
  "reth-storage-errors",
  "reth-testing-utils",
@@ -9520,6 +9524,7 @@ dependencies = [
 name = "reth-node-metrics"
 version = "1.9.1"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "http 1.3.1",
  "jsonrpsee-server",
@@ -9532,6 +9537,7 @@ dependencies = [
  "reth-metrics",
  "reth-tasks",
  "socket2 0.5.10",
+ "tempfile",
  "tikv-jemalloc-ctl",
  "tokio",
  "tower",
@@ -9855,6 +9861,7 @@ dependencies = [
  "reth-chainspec",
  "reth-evm",
  "reth-execution-types",
+ "reth-node-metrics",
  "reth-optimism-evm",
  "reth-optimism-forks",
  "reth-optimism-primitives",
@@ -9941,6 +9948,7 @@ dependencies = [
  "reth-metrics",
  "reth-node-api",
  "reth-node-builder",
+ "reth-node-metrics",
  "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-flashblocks",
@@ -10369,6 +10377,7 @@ dependencies = [
  "reth-network-peers",
  "reth-network-types",
  "reth-node-api",
+ "reth-node-metrics",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
@@ -10566,6 +10575,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-metrics",
  "reth-node-ethereum",
+ "reth-node-metrics",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
@@ -11041,6 +11051,7 @@ dependencies = [
  "reth-execution-types",
  "reth-fs-util",
  "reth-metrics",
+ "reth-node-metrics",
  "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
@@ -11603,7 +11614,7 @@ dependencies = [
  "regex",
  "relative-path",
  "rustc_version 0.4.1",
- "syn 2.0.108",
+ "syn 2.0.110",
  "unicode-ident",
 ]
 
@@ -14597,14 +14608,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "xsum"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0637d3a5566a82fa5214bae89087bc8c9fb94cd8e8a3c07feb691bb8d9c632db"
-
-[[package]]
 name = "xlayer-e2e-test"
-version = "1.8.3"
+version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -14630,6 +14635,12 @@ dependencies = [
  "tracing",
  "url",
 ]
+
+[[package]]
+name = "xsum"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0637d3a5566a82fa5214bae89087bc8c9fb94cd8e8a3c07feb691bb8d9c632db"
 
 [[package]]
 name = "yansi"
