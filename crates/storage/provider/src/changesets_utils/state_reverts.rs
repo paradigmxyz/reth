@@ -56,10 +56,11 @@ where
                 match revert.0.cmp(&wiped.0) {
                     Ordering::Less => self.next_revert(),
                     Ordering::Greater => {
-                        // For wiped entries, we need to convert them to RevertToSlot::Destroyed
-                        let (key, _value) = *wiped;
+                        // For wiped entries that don't have explicit reverts,
+                        // we should preserve the original value from storage
+                        let (key, value) = *wiped;
                         self.next_wiped();
-                        Some((key, RevertToSlot::Destroyed))
+                        Some((key, RevertToSlot::Some(value)))
                     }
                     Ordering::Equal => {
                         // Keys are the same, prefer the revert value
@@ -75,8 +76,8 @@ where
             }
             (Some(_revert), None) => self.next_revert(),
             (None, Some(_wiped)) => {
-                // For wiped entries, convert to RevertToSlot::Destroyed
-                self.next_wiped().map(|(key, _)| (key, RevertToSlot::Destroyed))
+                // For wiped entries without reverts, preserve the original value
+                self.next_wiped().map(|(key, value)| (key, RevertToSlot::Some(value)))
             }
             (None, None) => None,
         }
@@ -207,12 +208,12 @@ mod tests {
         // Iterate and collect results into a vector for verification.
         let results: Vec<_> = iter.collect();
 
-        // Verify the output order and values.
+        // Verify the output order and values - should preserve original values
         assert_eq!(
             results,
             vec![
-                (B256::from_slice(&[6; 32]), RevertToSlot::Destroyed),
-                (B256::from_slice(&[7; 32]), RevertToSlot::Destroyed),
+                (B256::from_slice(&[6; 32]), RevertToSlot::Some(U256::from(50))),
+                (B256::from_slice(&[7; 32]), RevertToSlot::Some(U256::from(60))),
             ]
         );
     }
@@ -245,8 +246,7 @@ mod tests {
                 (B256::from_slice(&[8; 32]), RevertToSlot::Some(U256::from(70))), /* Revert takes priority. */
                 (B256::from_slice(&[9; 32]), RevertToSlot::Some(U256::from(80))), /* Only revert
                                                                                    * present. */
-                (B256::from_slice(&[10; 32]), RevertToSlot::Destroyed), /* Wiped entry converted
-                                                                         * to Destroyed. */
+                (B256::from_slice(&[10; 32]), RevertToSlot::Some(U256::from(85))), /* Wiped entry preserves value */
                 (B256::from_slice(&[15; 32]), RevertToSlot::Some(U256::from(90))), /* Greater revert entry */
             ]
         );
