@@ -7,7 +7,7 @@ use alloy_primitives::TxNumber;
 use core::{ops::RangeInclusive, str::FromStr};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use strum::{AsRefStr, EnumString};
+use strum::{EnumIs, EnumString};
 
 #[derive(
     Debug,
@@ -21,20 +21,18 @@ use strum::{AsRefStr, EnumString};
     Deserialize,
     Serialize,
     EnumString,
-    AsRefStr,
     Display,
+    EnumIs,
 )]
+#[strum(serialize_all = "kebab-case")]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Segment of the data that can be moved to static files.
 pub enum StaticFileSegment {
-    #[strum(serialize = "headers")]
     /// Static File segment responsible for the `CanonicalHeaders`, `Headers`,
     /// `HeaderTerminalDifficulties` tables.
     Headers,
-    #[strum(serialize = "transactions")]
     /// Static File segment responsible for the `Transactions` table.
     Transactions,
-    #[strum(serialize = "receipts")]
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
 }
@@ -42,6 +40,8 @@ pub enum StaticFileSegment {
 impl StaticFileSegment {
     /// Returns the segment as a string.
     pub const fn as_str(&self) -> &'static str {
+        // `strum` doesn't generate a doc comment for `into_str` when using `IntoStaticStr` derive
+        // macro, so we need to manually implement it.
         match self {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
@@ -72,7 +72,7 @@ impl StaticFileSegment {
     pub fn filename(&self, block_range: &SegmentRangeInclusive) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`].
-        format!("static_file_{}_{}_{}", self.as_ref(), block_range.start(), block_range.end())
+        format!("static_file_{}_{}_{}", self.as_str(), block_range.start(), block_range.end())
     }
 
     /// Returns file name for the provided segment and range, alongside filters, compression.
@@ -122,16 +122,6 @@ impl StaticFileSegment {
         Some((segment, SegmentRangeInclusive::new(block_start, block_end)))
     }
 
-    /// Returns `true` if the segment is `StaticFileSegment::Headers`.
-    pub const fn is_headers(&self) -> bool {
-        matches!(self, Self::Headers)
-    }
-
-    /// Returns `true` if the segment is `StaticFileSegment::Receipts`.
-    pub const fn is_receipts(&self) -> bool {
-        matches!(self, Self::Receipts)
-    }
-
     /// Returns `true` if a segment row is linked to a transaction.
     pub const fn is_tx_based(&self) -> bool {
         matches!(self, Self::Receipts | Self::Transactions)
@@ -144,7 +134,7 @@ impl StaticFileSegment {
 }
 
 /// A segment header that contains information common to all segments. Used for storage.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Copy)]
 pub struct SegmentHeader {
     /// Defines the expected block range for a static file segment. This attribute is crucial for
     /// scenarios where the file contains no data, allowing for a representation beyond a
@@ -175,14 +165,19 @@ impl SegmentHeader {
         self.segment
     }
 
+    /// Returns the expected block range.
+    pub const fn expected_block_range(&self) -> SegmentRangeInclusive {
+        self.expected_block_range
+    }
+
     /// Returns the block range.
-    pub const fn block_range(&self) -> Option<&SegmentRangeInclusive> {
-        self.block_range.as_ref()
+    pub const fn block_range(&self) -> Option<SegmentRangeInclusive> {
+        self.block_range
     }
 
     /// Returns the transaction range.
-    pub const fn tx_range(&self) -> Option<&SegmentRangeInclusive> {
-        self.tx_range.as_ref()
+    pub const fn tx_range(&self) -> Option<SegmentRangeInclusive> {
+        self.tx_range
     }
 
     /// The expected block start of the segment.
@@ -217,12 +212,12 @@ impl SegmentHeader {
 
     /// Number of transactions.
     pub fn tx_len(&self) -> Option<u64> {
-        self.tx_range.as_ref().map(|r| (r.end() + 1) - r.start())
+        self.tx_range.as_ref().map(|r| r.len())
     }
 
     /// Number of blocks.
     pub fn block_len(&self) -> Option<u64> {
-        self.block_range.as_ref().map(|r| (r.end() + 1) - r.start())
+        self.block_range.as_ref().map(|r| r.len())
     }
 
     /// Increments block end range depending on segment
@@ -328,6 +323,16 @@ impl SegmentRangeInclusive {
     /// End of the inclusive range
     pub const fn end(&self) -> u64 {
         self.end
+    }
+
+    /// Returns the length of the inclusive range.
+    pub const fn len(&self) -> u64 {
+        self.end.saturating_sub(self.start).saturating_add(1)
+    }
+
+    /// Returns true if the range is empty.
+    pub const fn is_empty(&self) -> bool {
+        self.start > self.end
     }
 }
 
@@ -465,6 +470,38 @@ mod tests {
                 },
                 receipts.user_header()
             );
+        }
+    }
+
+    /// Used in filename writing/parsing
+    #[test]
+    fn test_static_file_segment_str_roundtrip() {
+        for segment in StaticFileSegment::iter() {
+            let static_str = segment.as_str();
+            assert_eq!(StaticFileSegment::from_str(static_str).unwrap(), segment);
+
+            let expected_str = match segment {
+                StaticFileSegment::Headers => "headers",
+                StaticFileSegment::Transactions => "transactions",
+                StaticFileSegment::Receipts => "receipts",
+            };
+            assert_eq!(static_str, expected_str);
+        }
+    }
+
+    /// Used in segment headers serialize/deserialize
+    #[test]
+    fn test_static_file_segment_serde_roundtrip() {
+        for segment in StaticFileSegment::iter() {
+            let ser = serde_json::to_string(&segment).unwrap();
+            assert_eq!(serde_json::from_str::<StaticFileSegment>(&ser).unwrap(), segment);
+
+            let expected_str = match segment {
+                StaticFileSegment::Headers => "Headers",
+                StaticFileSegment::Transactions => "Transactions",
+                StaticFileSegment::Receipts => "Receipts",
+            };
+            assert_eq!(ser, format!("\"{expected_str}\""));
         }
     }
 }

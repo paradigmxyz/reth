@@ -55,17 +55,23 @@ impl MockHashedCursorFactory {
 }
 
 impl HashedCursorFactory for MockHashedCursorFactory {
-    type AccountCursor = MockHashedCursor<Account>;
-    type StorageCursor = MockHashedCursor<U256>;
+    type AccountCursor<'a>
+        = MockHashedCursor<Account>
+    where
+        Self: 'a;
+    type StorageCursor<'a>
+        = MockHashedCursor<U256>
+    where
+        Self: 'a;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         Ok(MockHashedCursor::new(self.hashed_accounts.clone(), self.visited_account_keys.clone()))
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor, DatabaseError> {
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         Ok(MockHashedCursor::new(
             self.hashed_storage_tries
                 .get(&hashed_address)
@@ -93,7 +99,11 @@ pub struct MockHashedCursor<T> {
 }
 
 impl<T> MockHashedCursor<T> {
-    fn new(values: Arc<BTreeMap<B256, T>>, visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>) -> Self {
+    /// Creates a new mock hashed cursor with the given values and key tracking.
+    pub fn new(
+        values: Arc<BTreeMap<B256, T>>,
+        visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>,
+    ) -> Self {
         Self { current_key: None, values, visited_keys }
     }
 }
@@ -101,7 +111,7 @@ impl<T> MockHashedCursor<T> {
 impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
     type Value = T;
 
-    #[instrument(level = "trace", skip(self), ret)]
+    #[instrument(skip(self), ret(level = "trace"))]
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         // Find the first key that is greater than or equal to the given key.
         let entry = self.values.iter().find_map(|(k, v)| (k >= &key).then(|| (*k, v.clone())));
@@ -115,7 +125,7 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
         Ok(entry)
     }
 
-    #[instrument(level = "trace", skip(self), ret)]
+    #[instrument(skip(self), ret(level = "trace"))]
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         let mut iter = self.values.iter();
         // Jump to the first key that has a prefix of the current key if it's set, or to the first

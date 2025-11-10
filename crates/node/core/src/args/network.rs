@@ -100,11 +100,11 @@ pub struct NetworkArgs {
     #[arg(long = "port", value_name = "PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
 
-    /// Maximum number of outbound requests. default: 100
+    /// Maximum number of outbound peers. default: 100
     #[arg(long)]
     pub max_outbound_peers: Option<usize>,
 
-    /// Maximum number of inbound requests. default: 30
+    /// Maximum number of inbound peers. default: 30
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
 
@@ -184,6 +184,10 @@ pub struct NetworkArgs {
     /// Peers that don't have these blocks will be filtered out.
     #[arg(long = "required-block-hashes", value_delimiter = ',')]
     pub required_block_hashes: Vec<B256>,
+
+    /// Optional network ID to override the chain specification's network ID for P2P connections
+    #[arg(long)]
+    pub network_id: Option<u64>,
 }
 
 impl NetworkArgs {
@@ -297,6 +301,7 @@ impl NetworkArgs {
             ))
             .disable_tx_gossip(self.disable_tx_gossip)
             .required_block_hashes(self.required_block_hashes.clone())
+            .network_id(self.network_id)
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -371,6 +376,7 @@ impl Default for NetworkArgs {
             disable_tx_gossip: false,
             propagation_mode: TransactionPropagationMode::Sqrt,
             required_block_hashes: vec![],
+            network_id: None,
         }
     }
 }

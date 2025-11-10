@@ -4,18 +4,17 @@ use futures_util::{Stream, StreamExt};
 use reqwest::{Client, Url};
 use reth_config::config::EtlConfig;
 use reth_db_api::{table::Value, transaction::DbTxMut};
-use reth_era::{era1_file::Era1Reader, era_file_ops::StreamReader};
+use reth_era::{common::file_ops::StreamReader, era1::file::Era1Reader};
 use reth_era_downloader::{read_dir, EraClient, EraMeta, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_primitives_traits::{FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    BlockReader, BlockWriter, DBProvider, HeaderProvider, StageCheckpointWriter,
-    StaticFileProviderFactory, StaticFileWriter,
+    BlockReader, BlockWriter, DBProvider, StageCheckpointWriter, StaticFileProviderFactory,
+    StaticFileWriter,
 };
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_errors::ProviderError;
 use std::{
     fmt::{Debug, Formatter},
     iter,
@@ -176,11 +175,6 @@ where
                 .get_highest_static_file_block(StaticFileSegment::Headers)
                 .unwrap_or_default();
 
-            // Find the latest total difficulty
-            let mut td = static_file_provider
-                .header_td_by_number(last_header_number)?
-                .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
-
             // Although headers were downloaded in reverse order, the collector iterates it in
             // ascending order
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
@@ -190,7 +184,6 @@ where
                 &mut writer,
                 provider,
                 &mut self.hash_collector,
-                &mut td,
                 last_header_number..=input.target(),
             )
             .map_err(|e| StageError::Fatal(e.into()))?;
@@ -211,10 +204,27 @@ where
 
             height
         } else {
-            input.target()
+            // No era files to process. Return the highest block we're aware of to avoid
+            // limiting subsequent stages with an outdated checkpoint.
+            //
+            // This can happen when:
+            // 1. Era import is complete (all pre-merge blocks imported)
+            // 2. No era import source was configured
+            //
+            // We return max(checkpoint, highest_header, target) to ensure we don't return
+            // a stale checkpoint that could limit subsequent stages like Headers.
+            let highest_header = provider
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Headers)
+                .unwrap_or_default();
+
+            let checkpoint = input.checkpoint().block_number;
+            let from_target = input.target.unwrap_or(checkpoint);
+
+            checkpoint.max(highest_header).max(from_target)
         };
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(height), done: height == input.target() })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(height), done: height >= input.target() })
     }
 
     fn unwind(
@@ -330,7 +340,7 @@ mod tests {
         };
         use reth_ethereum_primitives::TransactionSigned;
         use reth_primitives_traits::{SealedBlock, SealedHeader};
-        use reth_provider::{BlockNumReader, TransactionsProvider};
+        use reth_provider::{BlockNumReader, HeaderProvider, TransactionsProvider};
         use reth_testing_utils::generators::{
             random_block_range, random_signed_tx, BlockRangeParams,
         };
@@ -385,7 +395,7 @@ mod tests {
                         ..Default::default()
                     },
                 );
-                self.db.insert_headers_with_td(blocks.iter().map(|block| block.sealed_header()))?;
+                self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data
                     {
@@ -441,9 +451,6 @@ mod tests {
                 match output {
                     Some(output) if output.checkpoint.block_number > initial_checkpoint => {
                         let provider = self.db.factory.provider()?;
-                        let mut td = provider
-                            .header_td_by_number(initial_checkpoint.saturating_sub(1))?
-                            .unwrap_or_default();
 
                         for block_num in initial_checkpoint..
                             output
@@ -463,10 +470,6 @@ mod tests {
                             assert!(header.is_some());
                             let header = SealedHeader::seal_slow(header.unwrap());
                             assert_eq!(header.hash(), hash);
-
-                            // validate the header total difficulty
-                            td += header.difficulty;
-                            assert_eq!(provider.header_td_by_number(block_num)?, Some(td));
                         }
 
                         self.validate_db_blocks(
@@ -507,10 +510,6 @@ mod tests {
                     .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
                 self.db.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
                 self.db.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
-                self.db.ensure_no_entry_above::<tables::HeaderTerminalDifficulties, _>(
-                    block,
-                    |num| num,
-                )?;
                 Ok(())
             }
 

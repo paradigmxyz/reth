@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 # reth
-reth-chain-state.workspace = true
 reth-codecs.workspace = true
 reth-network-peers.workspace = true
 reth-node-builder.workspace = true
@@ -50,9 +49,6 @@ jsonrpsee.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 modular-bitfield.workspace = true
-
-[dev-dependencies]
-test-fuzz.workspace = true
 
 [features]
 arbitrary = [

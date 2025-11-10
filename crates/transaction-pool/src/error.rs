@@ -157,7 +157,7 @@ pub enum Eip4844PoolTransactionError {
     /// Thrown if an EIP-4844 transaction without any blobs arrives
     #[error("blobless blob transaction")]
     NoEip4844Blobs,
-    /// Thrown if an EIP-4844 transaction without any blobs arrives
+    /// Thrown if an EIP-4844 transaction arrives with too many blobs
     #[error("too many blobs in transaction: have {have}, permitted {permitted}")]
     TooManyEip4844Blobs {
         /// Number of blobs the transaction has
@@ -225,7 +225,7 @@ pub enum InvalidPoolTransactionError {
     /// respect the tx fee exceeds the configured cap
     #[error("tx fee ({max_tx_fee_wei} wei) exceeds the configured cap ({tx_fee_cap_wei} wei)")]
     ExceedsFeeCap {
-        /// max fee in wei of new tx submitted to the pull (e.g. 0.11534 ETH)
+        /// max fee in wei of new tx submitted to the pool (e.g. 0.11534 ETH)
         max_tx_fee_wei: u128,
         /// configured tx fee cap in wei (e.g. 1.0 ETH)
         tx_fee_cap_wei: u128,
@@ -237,8 +237,13 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if the input data of a transaction is greater
     /// than some meaningful limit a user might use. This is not a consensus error
     /// making the transaction invalid, rather a DOS protection.
-    #[error("input data too large")]
-    OversizedData(usize, usize),
+    #[error("oversized data: transaction size {size}, limit {limit}")]
+    OversizedData {
+        /// Size of the transaction/input data that exceeded the limit.
+        size: usize,
+        /// Configured limit that was exceeded.
+        limit: usize,
+    },
     /// Thrown if the transaction's fee is below the minimum fee
     #[error("transaction underpriced")]
     Underpriced,
@@ -335,7 +340,7 @@ impl InvalidPoolTransactionError {
             }
             Self::ExceedsFeeCap { max_tx_fee_wei: _, tx_fee_cap_wei: _ } => true,
             Self::ExceedsMaxInitCodeSize(_, _) => true,
-            Self::OversizedData(_, _) => true,
+            Self::OversizedData { .. } => true,
             Self::Underpriced => {
                 // local setting
                 false
@@ -393,7 +398,7 @@ impl InvalidPoolTransactionError {
 
     /// Returns `true` if an import failed due to an oversized transaction
     pub const fn is_oversized(&self) -> bool {
-        matches!(self, Self::OversizedData(_, _))
+        matches!(self, Self::OversizedData { .. })
     }
 
     /// Returns `true` if an import failed due to nonce gap.

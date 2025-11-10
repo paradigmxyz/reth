@@ -125,10 +125,10 @@ Networking:
           [default: 30303]
 
       --max-outbound-peers <MAX_OUTBOUND_PEERS>
-          Maximum number of outbound requests. default: 100
+          Maximum number of outbound peers. default: 100
 
       --max-inbound-peers <MAX_INBOUND_PEERS>
-          Maximum number of inbound requests. default: 30
+          Maximum number of inbound peers. default: 30
 
       --max-tx-reqs <COUNT>
           Max concurrent `GetPooledTransactions` requests.
@@ -205,6 +205,9 @@ Networking:
 
       --required-block-hashes <REQUIRED_BLOCK_HASHES>
           Comma separated list of required block hashes. Peers that don't have these blocks will be filtered out
+
+      --network-id <NETWORK_ID>
+          Optional network ID to override the chain specification's network ID for P2P connections
 
 Datadir:
       --datadir <DATA_DIR>
@@ -300,7 +303,7 @@ Logging:
 
           Possible values:
           - always: Colors on
-          - auto:   Colors on
+          - auto:   Auto-detect
           - never:  Colors off
 
           [default: always]
@@ -317,4 +320,37 @@ Display:
 
   -q, --quiet
           Silence all log output
+
+Tracing:
+      --tracing-otlp[=<URL>]
+          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+
+          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
+
+          Example: --tracing-otlp=http://collector:4318/v1/traces
+
+          [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
+
+      --tracing-otlp-protocol <PROTOCOL>
+          OTLP transport protocol to use for exporting traces.
+
+          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
+
+          Defaults to HTTP if not specified.
+
+          Possible values:
+          - http: HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
+          - grpc: gRPC transport, port 4317
+
+          [env: OTEL_EXPORTER_OTLP_PROTOCOL=]
+          [default: http]
+
+      --tracing-otlp.filter <FILTER>
+          Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
+
+          Example: --tracing-otlp.filter=info,reth=debug,hyper_util=off
+
+          Defaults to TRACE if not specified.
+
+          [default: debug]
 ```

@@ -38,9 +38,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                 let header = (move || get_single_header(fetch_client.clone(), id))
                     .retry(backoff)
-                    .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
+                    .notify(|err, _| tracing::warn!(target: "reth::cli", error = %err, "Error requesting header. Retrying..."))
                     .await?;
-                println!("Successfully downloaded header: {header:?}");
+                tracing::info!(target: "reth::cli", ?header, "Successfully downloaded header");
             }
 
             Subcommands::Body { args, id } => {
@@ -51,13 +51,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let hash = match id {
                     BlockHashOrNumber::Hash(hash) => hash,
                     BlockHashOrNumber::Number(number) => {
-                        println!("Block number provided. Downloading header first...");
+                        tracing::info!(target: "reth::cli", "Block number provided. Downloading header first...");
                         let client = fetch_client.clone();
                         let header = (move || {
                             get_single_header(client.clone(), BlockHashOrNumber::Number(number))
                         })
                         .retry(backoff)
-                        .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
+                        .notify(|err, _| tracing::warn!(target: "reth::cli", error = %err, "Error requesting header. Retrying..."))
                         .await?;
                         header.hash()
                     }
@@ -67,7 +67,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     client.get_block_bodies(vec![hash])
                 })
                 .retry(backoff)
-                .notify(|err, _| println!("Error requesting block: {err}. Retrying..."))
+                .notify(|err, _| tracing::warn!(target: "reth::cli", error = %err, "Error requesting block. Retrying..."))
                 .await?
                 .split();
                 if result.len() != 1 {
@@ -77,7 +77,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     )
                 }
                 let body = result.into_iter().next().unwrap();
-                println!("Successfully downloaded body: {body:?}")
+                tracing::info!(target: "reth::cli", ?body, "Successfully downloaded body")
             }
             Subcommands::Rlpx(command) => {
                 command.execute().await?;
@@ -192,6 +192,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
         let net = NetworkConfigBuilder::<N::NetworkPrimitives>::new(p2p_secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(None))
             .external_ip_resolver(self.network.nat)
+            .network_id(self.network.network_id)
             .boot_nodes(boot_nodes.clone())
             .apply(|builder| {
                 self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes)

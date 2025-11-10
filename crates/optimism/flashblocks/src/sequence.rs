@@ -1,5 +1,7 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx};
 use alloy_eips::eip2718::WithEncoded;
+use alloy_primitives::B256;
+use alloy_rpc_types_engine::PayloadId;
 use core::mem;
 use eyre::{bail, OptionExt};
 use reth_primitives_traits::{Recovered, SignedTransaction};
@@ -12,7 +14,7 @@ const FLASHBLOCK_SEQUENCE_CHANNEL_SIZE: usize = 128;
 
 /// An ordered B-tree keeping the track of a sequence of [`FlashBlock`]s by their indices.
 #[derive(Debug)]
-pub(crate) struct FlashBlockPendingSequence<T> {
+pub struct FlashBlockPendingSequence<T> {
     /// tracks the individual flashblocks in order
     ///
     /// With a blocktime of 2s and flashblock tick-rate of 200ms plus one extra flashblock per new
@@ -20,21 +22,31 @@ pub(crate) struct FlashBlockPendingSequence<T> {
     inner: BTreeMap<u64, PreparedFlashBlock<T>>,
     /// Broadcasts flashblocks to subscribers.
     block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence>,
+    /// Optional properly computed state root for the current sequence.
+    state_root: Option<B256>,
 }
 
 impl<T> FlashBlockPendingSequence<T>
 where
     T: SignedTransaction,
 {
-    pub(crate) fn new() -> Self {
+    /// Create a new pending sequence.
+    pub fn new() -> Self {
         // Note: if the channel is full, send will not block but rather overwrite the oldest
         // messages. Order is preserved.
         let (tx, _) = broadcast::channel(FLASHBLOCK_SEQUENCE_CHANNEL_SIZE);
-        Self { inner: BTreeMap::new(), block_broadcaster: tx }
+        Self { inner: BTreeMap::new(), block_broadcaster: tx, state_root: None }
+    }
+
+    /// Returns the sender half of the [`FlashBlockCompleteSequence`] channel.
+    pub const fn block_sequence_broadcaster(
+        &self,
+    ) -> &broadcast::Sender<FlashBlockCompleteSequence> {
+        &self.block_broadcaster
     }
 
     /// Gets a subscriber to the flashblock sequences produced.
-    pub(crate) fn subscribe_block_sequence(&self) -> FlashBlockCompleteSequenceRx {
+    pub fn subscribe_block_sequence(&self) -> FlashBlockCompleteSequenceRx {
         self.block_broadcaster.subscribe()
     }
 
@@ -46,6 +58,7 @@ where
         if self.block_broadcaster.receiver_count() > 0 {
             let flashblocks = match FlashBlockCompleteSequence::new(
                 flashblocks.into_iter().map(|block| block.1.into()).collect(),
+                self.state_root,
             ) {
                 Ok(flashblocks) => flashblocks,
                 Err(err) => {
@@ -66,7 +79,7 @@ where
     /// Inserts a new block into the sequence.
     ///
     /// A [`FlashBlock`] with index 0 resets the set.
-    pub(crate) fn insert(&mut self, flashblock: FlashBlock) -> eyre::Result<()> {
+    pub fn insert(&mut self, flashblock: FlashBlock) -> eyre::Result<()> {
         if flashblock.index == 0 {
             trace!(number=%flashblock.block_number(), "Tracking new flashblock sequence");
 
@@ -77,8 +90,12 @@ where
             return Ok(())
         }
 
-        // only insert if we previously received the same block, assume we received index 0
-        if self.block_number() == Some(flashblock.metadata.block_number) {
+        // only insert if we previously received the same block and payload, assume we received
+        // index 0
+        let same_block = self.block_number() == Some(flashblock.metadata.block_number);
+        let same_payload = self.payload_id() == Some(flashblock.payload_id);
+
+        if same_block && same_payload {
             trace!(number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len()  ,"Received followup flashblock");
             self.inner.insert(flashblock.index, PreparedFlashBlock::new(flashblock)?);
         } else {
@@ -88,15 +105,18 @@ where
         Ok(())
     }
 
+    /// Set state root
+    pub const fn set_state_root(&mut self, state_root: Option<B256>) {
+        self.state_root = state_root;
+    }
+
     /// Iterator over sequence of executable transactions.
     ///
     /// A flashblocks is not ready if there's missing previous flashblocks, i.e. there's a gap in
     /// the sequence
     ///
     /// Note: flashblocks start at `index 0`.
-    pub(crate) fn ready_transactions(
-        &self,
-    ) -> impl Iterator<Item = WithEncoded<Recovered<T>>> + '_ {
+    pub fn ready_transactions(&self) -> impl Iterator<Item = WithEncoded<Recovered<T>>> + '_ {
         self.inner
             .values()
             .enumerate()
@@ -108,25 +128,55 @@ where
     }
 
     /// Returns the first block number
-    pub(crate) fn block_number(&self) -> Option<u64> {
+    pub fn block_number(&self) -> Option<u64> {
         Some(self.inner.values().next()?.block().metadata.block_number)
     }
 
     /// Returns the payload base of the first tracked flashblock.
-    pub(crate) fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
+    pub fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
         self.inner.values().next()?.block().base.clone()
     }
 
     /// Returns the number of tracked flashblocks.
-    pub(crate) fn count(&self) -> usize {
+    pub fn count(&self) -> usize {
         self.inner.len()
+    }
+
+    /// Returns the reference to the last flashblock.
+    pub fn last_flashblock(&self) -> Option<&FlashBlock> {
+        self.inner.last_key_value().map(|(_, b)| &b.block)
+    }
+
+    /// Returns the current/latest flashblock index in the sequence
+    pub fn index(&self) -> Option<u64> {
+        Some(self.inner.values().last()?.block().index)
+    }
+    /// Returns the payload id of the first tracked flashblock in the current sequence.
+    pub fn payload_id(&self) -> Option<PayloadId> {
+        Some(self.inner.values().next()?.block().payload_id)
+    }
+}
+
+impl<T> Default for FlashBlockPendingSequence<T>
+where
+    T: SignedTransaction,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 /// A complete sequence of flashblocks, often corresponding to a full block.
-/// Ensure invariants of a complete flashblocks sequence.
+///
+/// Ensures invariants of a complete flashblocks sequence.
+/// If this entire sequence of flashblocks was executed on top of latest block, this also includes
+/// the computed state root.
 #[derive(Debug, Clone)]
-pub struct FlashBlockCompleteSequence(Vec<FlashBlock>);
+pub struct FlashBlockCompleteSequence {
+    inner: Vec<FlashBlock>,
+    /// Optional state root for the current sequence
+    state_root: Option<B256>,
+}
 
 impl FlashBlockCompleteSequence {
     /// Create a complete sequence from a vector of flashblocks.
@@ -134,7 +184,7 @@ impl FlashBlockCompleteSequence {
     /// * vector is not empty
     /// * first flashblock have the base payload
     /// * sequence of flashblocks is sound (successive index from 0, same payload id, ...)
-    pub fn new(blocks: Vec<FlashBlock>) -> eyre::Result<Self> {
+    pub fn new(blocks: Vec<FlashBlock>, state_root: Option<B256>) -> eyre::Result<Self> {
         let first_block = blocks.first().ok_or_eyre("No flashblocks in sequence")?;
 
         // Ensure that first flashblock have base
@@ -149,27 +199,32 @@ impl FlashBlockCompleteSequence {
             bail!("Flashblock inconsistencies detected in sequence");
         }
 
-        Ok(Self(blocks))
+        Ok(Self { inner: blocks, state_root })
     }
 
     /// Returns the block number
     pub fn block_number(&self) -> u64 {
-        self.0.first().unwrap().metadata.block_number
+        self.inner.first().unwrap().metadata.block_number
     }
 
     /// Returns the payload base of the first flashblock.
     pub fn payload_base(&self) -> &ExecutionPayloadBaseV1 {
-        self.0.first().unwrap().base.as_ref().unwrap()
+        self.inner.first().unwrap().base.as_ref().unwrap()
     }
 
     /// Returns the number of flashblocks in the sequence.
     pub const fn count(&self) -> usize {
-        self.0.len()
+        self.inner.len()
     }
 
     /// Returns the last flashblock in the sequence.
     pub fn last(&self) -> &FlashBlock {
-        self.0.last().unwrap()
+        self.inner.last().unwrap()
+    }
+
+    /// Returns the state root for the current sequence
+    pub const fn state_root(&self) -> Option<B256> {
+        self.state_root
     }
 }
 
@@ -177,7 +232,7 @@ impl Deref for FlashBlockCompleteSequence {
     type Target = Vec<FlashBlock>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.inner
     }
 }
 
@@ -186,6 +241,7 @@ impl<T> TryFrom<FlashBlockPendingSequence<T>> for FlashBlockCompleteSequence {
     fn try_from(sequence: FlashBlockPendingSequence<T>) -> Result<Self, Self::Error> {
         Self::new(
             sequence.inner.into_values().map(|block| block.block().clone()).collect::<Vec<_>>(),
+            sequence.state_root,
         )
     }
 }
@@ -227,6 +283,14 @@ where
         }
 
         Ok(Self { txs, block })
+    }
+}
+
+impl<T> Deref for PreparedFlashBlock<T> {
+    type Target = FlashBlock;
+
+    fn deref(&self) -> &Self::Target {
+        &self.block
     }
 }
 
@@ -333,7 +397,7 @@ mod tests {
         let flashblocks = subscriber.try_recv().unwrap();
         assert_eq!(flashblocks.count(), 10);
 
-        for (idx, block) in flashblocks.0.iter().enumerate() {
+        for (idx, block) in flashblocks.iter().enumerate() {
             assert_eq!(block.index, idx as u64);
         }
     }

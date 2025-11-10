@@ -1,7 +1,7 @@
 # libmdbx-rs
 
 
-Rust bindings for [libmdbx](https://libmdbx.dqdkfa.ru).
+Rust bindings for [libmdbx](https://github.com/erthink/libmdbx).
 
 Forked from an earlier Apache licenced version of the `libmdbx-rs` crate, before it changed licence to GPL.
 NOTE: Most of the repo came from [lmdb-rs bindings](https://github.com/mozilla/lmdb-rs).
@@ -9,7 +9,7 @@ NOTE: Most of the repo came from [lmdb-rs bindings](https://github.com/mozilla/l
 ## Updating the libmdbx Version
 
 To update the libmdbx version you must clone it and copy the `dist/` folder in `mdbx-sys/`.
-Make sure to follow the [building steps](https://libmdbx.dqdkfa.ru/usage.html#getting).
+Make sure to follow the [building steps](https://github.com/erthink/libmdbx#building).
 
 ```bash
 # clone libmdbx to a repository outside at specific tag

@@ -1,9 +1,9 @@
-use crate::{DBProvider, StorageLocation};
+use crate::DBProvider;
 use alloc::vec::Vec;
 use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::StoredBlockOmmers,
@@ -14,7 +14,7 @@ use reth_db_api::{
 use reth_db_models::StoredBlockWithdrawals;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{
-    Block, BlockBody, FullBlockHeader, FullNodePrimitives, SignedTransaction,
+    Block, BlockBody, FullBlockHeader, NodePrimitives, SignedTransaction,
 };
 use reth_storage_errors::provider::ProviderResult;
 
@@ -29,7 +29,6 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
         &self,
         provider: &Provider,
         bodies: Vec<(BlockNumber, Option<Body>)>,
-        write_to: StorageLocation,
     ) -> ProviderResult<()>;
 
     /// Removes all block bodies above the given block number from the database.
@@ -37,16 +36,15 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
         &self,
         provider: &Provider,
         block: BlockNumber,
-        remove_from: StorageLocation,
     ) -> ProviderResult<()>;
 }
 
 /// Trait that implements how chain-specific types are written to the storage.
-pub trait ChainStorageWriter<Provider, Primitives: FullNodePrimitives>:
+pub trait ChainStorageWriter<Provider, Primitives: NodePrimitives>:
     BlockBodyWriter<Provider, <Primitives::Block as Block>::Body>
 {
 }
-impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageWriter<Provider, Primitives> for T where
+impl<T, Provider, Primitives: NodePrimitives> ChainStorageWriter<Provider, Primitives> for T where
     T: BlockBodyWriter<Provider, <Primitives::Block as Block>::Body>
 {
 }
@@ -75,11 +73,11 @@ pub trait BlockBodyReader<Provider> {
 }
 
 /// Trait that implements how chain-specific types are read from storage.
-pub trait ChainStorageReader<Provider, Primitives: FullNodePrimitives>:
+pub trait ChainStorageReader<Provider, Primitives: NodePrimitives>:
     BlockBodyReader<Provider, Block = Primitives::Block>
 {
 }
-impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageReader<Provider, Primitives> for T where
+impl<T, Provider, Primitives: NodePrimitives> ChainStorageReader<Provider, Primitives> for T where
     T: BlockBodyReader<Provider, Block = Primitives::Block>
 {
 }
@@ -105,7 +103,6 @@ where
         &self,
         provider: &Provider,
         bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
-        _write_to: StorageLocation,
     ) -> ProviderResult<()> {
         let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers<H>>()?;
         let mut withdrawals_cursor =
@@ -134,7 +131,6 @@ where
         &self,
         provider: &Provider,
         block: BlockNumber,
-        _remove_from: StorageLocation,
     ) -> ProviderResult<()> {
         provider.tx_ref().unwind_table_by_num::<tables::BlockWithdrawals>(block)?;
         provider.tx_ref().unwind_table_by_num::<tables::BlockOmmers<H>>(block)?;
@@ -210,7 +206,6 @@ impl<T, H> Default for EmptyBodyStorage<T, H> {
 impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>>
     for EmptyBodyStorage<T, H>
 where
-    Provider: DBProvider<Tx: DbTxMut>,
     T: SignedTransaction,
     H: FullBlockHeader,
 {
@@ -218,7 +213,6 @@ where
         &self,
         _provider: &Provider,
         _bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
-        _write_to: StorageLocation,
     ) -> ProviderResult<()> {
         // noop
         Ok(())
@@ -228,7 +222,6 @@ where
         &self,
         _provider: &Provider,
         _block: BlockNumber,
-        _remove_from: StorageLocation,
     ) -> ProviderResult<()> {
         // noop
         Ok(())
@@ -237,7 +230,7 @@ where
 
 impl<Provider, T, H> BlockBodyReader<Provider> for EmptyBodyStorage<T, H>
 where
-    Provider: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks> + DBProvider,
+    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     T: SignedTransaction,
     H: FullBlockHeader,
 {

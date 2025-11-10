@@ -7,41 +7,43 @@ use reth_db_api::{
 };
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory},
-    updates::StorageTrieUpdates,
+    updates::StorageTrieUpdatesSorted,
     BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
-#[derive(Debug)]
-pub struct DatabaseTrieCursorFactory<'a, TX>(&'a TX);
+#[derive(Debug, Clone)]
+pub struct DatabaseTrieCursorFactory<T>(T);
 
-impl<TX> Clone for DatabaseTrieCursorFactory<'_, TX> {
-    fn clone(&self) -> Self {
-        Self(self.0)
-    }
-}
-
-impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
+impl<T> DatabaseTrieCursorFactory<T> {
     /// Create new [`DatabaseTrieCursorFactory`].
-    pub const fn new(tx: &'a TX) -> Self {
+    pub const fn new(tx: T) -> Self {
         Self(tx)
     }
 }
 
-/// Implementation of the trie cursor factory for a database transaction.
-impl<TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'_, TX> {
-    type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
-    type StorageTrieCursor =
-        DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
+impl<TX> TrieCursorFactory for DatabaseTrieCursorFactory<&TX>
+where
+    TX: DbTx,
+{
+    type AccountTrieCursor<'a>
+        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>
+    where
+        Self: 'a;
 
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+    type StorageTrieCursor<'a>
+        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>
+    where
+        Self: 'a;
+
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         Ok(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         Ok(DatabaseStorageTrieCursor::new(
             self.0.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
@@ -114,31 +116,19 @@ where
         + DbDupCursorRO<tables::StoragesTrie>
         + DbDupCursorRW<tables::StoragesTrie>,
 {
-    /// Writes storage updates
-    pub fn write_storage_trie_updates(
+    /// Writes storage updates that are already sorted
+    pub fn write_storage_trie_updates_sorted(
         &mut self,
-        updates: &StorageTrieUpdates,
+        updates: &StorageTrieUpdatesSorted,
     ) -> Result<usize, DatabaseError> {
         // The storage trie for this account has to be deleted.
         if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
             self.cursor.delete_current_duplicates()?;
         }
 
-        // Merge updated and removed nodes. Updated nodes must take precedence.
-        let mut storage_updates = updates
-            .removed_nodes_ref()
-            .iter()
-            .filter_map(|n| (!updates.storage_nodes_ref().contains_key(n)).then_some((n, None)))
-            .collect::<Vec<_>>();
-        storage_updates.extend(
-            updates.storage_nodes_ref().iter().map(|(nibbles, node)| (nibbles, Some(node))),
-        );
-
-        // Sort trie node updates.
-        storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
-
         let mut num_entries = 0;
-        for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
+        for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
+        {
             num_entries += 1;
             let nibbles = StoredNibblesSubKey(*nibbles);
             // Delete the old entry if it exists.
