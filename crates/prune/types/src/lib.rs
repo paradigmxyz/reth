@@ -115,6 +115,7 @@ impl<'de> Deserialize<'de> for ReceiptsLogPruneConfig {
     {
         let mut config = Self(BTreeMap::deserialize(deserializer)?);
         let errors = config.validate_and_fix();
+        #[cfg(feature = "std")]
         for error in errors {
             reth_tracing::tracing::warn!("Receipt log pruning config error: {}", error);
         }
