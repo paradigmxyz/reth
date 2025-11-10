@@ -120,11 +120,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     if let Some(block_overrides) = block_overrides {
                         // ensure we don't allow uncapped gas limit per block
-                        if let Some(gas_limit_override) = block_overrides.gas_limit &&
-                            gas_limit_override > evm_env.block_env.gas_limit() &&
-                            gas_limit_override > this.call_gas_limit()
-                        {
-                            return Err(EthApiError::other(EthSimulateError::GasLimitReached).into())
+                        if let Some(gas_limit_override) = block_overrides.gas_limit {
+                            if gas_limit_override > evm_env.block_env.gas_limit() &&
+                                gas_limit_override > this.call_gas_limit()
+                            {
+                                return Err(
+                                    EthApiError::other(EthSimulateError::GasLimitReached).into()
+                                )
+                            }
                         }
                         apply_block_overrides(
                             block_overrides,
@@ -707,18 +710,20 @@ pub trait Call:
     ///
     /// Note: This assumes the target transaction is in the given iterator.
     /// Returns the index of the target transaction in the given iterator.
-    fn replay_transactions_until<'a, DB, I>(
+    fn replay_transactions_until<'a, DB, I, Insp>(
         &self,
         db: &mut DB,
         evm_env: EvmEnvFor<Self::Evm>,
         transactions: I,
         target_tx_hash: B256,
+        inspector: &mut Insp,
     ) -> Result<usize, Self::Error>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit + core::fmt::Debug,
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
+        Insp: InspectorFor<Self::Evm, DB>,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
         let mut index = 0;
         for tx in transactions {
             if *tx.tx_hash() == target_tx_hash {
@@ -728,6 +733,7 @@ pub trait Call:
 
             let tx_env = self.evm_config().tx_env(tx);
             evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
+            inspector.finish_transaction();
             index += 1;
         }
         Ok(index)

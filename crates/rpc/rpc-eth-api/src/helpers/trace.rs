@@ -191,7 +191,13 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 // replay all transactions prior to the targeted transaction
-                this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
+                this.replay_transactions_until(
+                    &mut db,
+                    evm_env.clone(),
+                    block_txs,
+                    *tx.tx_hash(),
+                    &mut inspector,
+                )?;
 
                 let tx_env = this.evm_config().tx_env(tx);
                 let res = this.inspect(

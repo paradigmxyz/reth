@@ -238,6 +238,7 @@ where
                     evm_env.clone(),
                     block_txs,
                     *tx.tx_hash(),
+                    &mut inspector,
                 )?;
 
                 let tx_env = this.eth_api().evm_config().tx_env(&tx);
