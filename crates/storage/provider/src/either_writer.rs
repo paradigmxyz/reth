@@ -13,6 +13,13 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 
+/// Type alias for [`EitherWriter`] constructors.
+type EitherWriterTy<'a, P, T> = EitherWriter<
+    'a,
+    CursorMutTy<<P as DBProvider>::Tx, T>,
+    <P as NodePrimitivesProvider>::Primitives,
+>;
+
 /// Represents a destination for writing data, either to database or static files.
 #[derive(Debug)]
 pub enum EitherWriter<'a, CURSOR, N> {
@@ -27,13 +34,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     pub fn new_receipts<P>(
         provider: &'a P,
         block_number: BlockNumber,
-    ) -> ProviderResult<
-        EitherWriter<
-            'a,
-            CursorMutTy<P::Tx, tables::Receipts<ReceiptTy<P::Primitives>>>,
-            P::Primitives,
-        >,
-    >
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::Receipts<ReceiptTy<P::Primitives>>>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
