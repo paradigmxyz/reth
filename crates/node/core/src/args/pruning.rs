@@ -159,6 +159,14 @@ impl PruningArgs {
         if let Some(mode) = self.storage_history_prune_mode() {
             config.segments.storage_history = Some(mode);
         }
+        if let Some(receipt_logs) =
+            self.receipts_log_filter.as_ref().filter(|c| !c.is_empty()).cloned()
+        {
+            config.segments.receipts_log_filter = receipt_logs;
+            // need to remove the receipts segment filter entirely because that takes precedence
+            // over the logs filter
+            config.segments.receipts.take();
+        }
 
         config.is_default().not().then_some(config)
     }
