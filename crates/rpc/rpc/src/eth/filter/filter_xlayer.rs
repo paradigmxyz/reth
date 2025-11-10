@@ -11,7 +11,6 @@ use reth_rpc_eth_types::LegacyRpcClient;
 use reth_storage_api::{BlockIdReader, BlockReader};
 use std::sync::Arc;
 use tracing::info;
-use tracing::log::log;
 
 /// XLayer: Implement LegacyRpc trait for EthFilter to enable legacy RPC routing
 impl<Eth> LegacyRpc for EthFilter<Eth>

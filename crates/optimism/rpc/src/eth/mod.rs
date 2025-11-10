@@ -37,10 +37,10 @@ use reth_rpc_eth_api::{
     RpcNodeCoreExt, RpcTypes,
 };
 use reth_rpc_eth_types::{
-    EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock, PendingBlockEnvOrigin,
+    EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock,
     LegacyRpcClient,
 };
-use reth_storage_api::{BlockReaderIdExt, ProviderHeader, ProviderTx};
+use reth_storage_api::{BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
