@@ -839,15 +839,17 @@ type TraceBlock<Eth> = <<Eth as RpcNodeCore>::Primitives as NodePrimitives>::Blo
 type BlockFetchFuture<Eth> = Pin<
     Box<
         dyn Future<
-            Output = Result<
-                Vec<
-                    Arc<
-                        RecoveredBlock<<<Eth as RpcNodeCore>::Primitives as NodePrimitives>::Block>,
+                Output = Result<
+                    Vec<
+                        Arc<
+                            RecoveredBlock<
+                                <<Eth as RpcNodeCore>::Primitives as NodePrimitives>::Block,
+                            >,
+                        >,
                     >,
+                    <Eth as EthApiTypes>::Error,
                 >,
-                <Eth as EthApiTypes>::Error,
-            >,
-        >,
+            > + Send,
     >,
 >;
 
