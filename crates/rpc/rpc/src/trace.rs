@@ -933,12 +933,12 @@ where
         // block_num as a u64
         let block_hash = FixedBytes::random();
 
-        // Try cache first using maybe_cached_block_and_receipts
-        let (maybe_block, _receipts) = self
+        // Try cache first using get_recovered_block
+        let maybe_block = self
             .trace_api
             .eth_api
             .cache()
-            .maybe_cached_block_and_receipts(block_hash)
+            .get_recovered_block(block_hash)
             .await
             .map_err(Eth::Error::from_eth_err)?;
 
