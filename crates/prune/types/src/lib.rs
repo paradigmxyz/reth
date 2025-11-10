@@ -12,26 +12,26 @@
 extern crate alloc;
 
 mod checkpoint;
-mod event;
-mod mode;
-mod pruner;
-mod segment;
-mod target;
-
-use std::collections::BTreeMap;
-
-use alloy_primitives::{Address, BlockNumber};
 pub use checkpoint::PruneCheckpoint;
-use derive_more::{Deref, DerefMut, From};
+mod event;
 pub use event::PrunerEvent;
+mod mode;
 pub use mode::PruneMode;
+mod pruner;
 pub use pruner::{
     PruneInterruptReason, PruneProgress, PrunedSegmentInfo, PrunerOutput, SegmentOutput,
     SegmentOutputCheckpoint,
 };
+mod segment;
 pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
-use serde::{de::Error, Deserialize, Deserializer};
+mod target;
 pub use target::{PruneModes, UnwindTargetPrunedError, MINIMUM_PRUNING_DISTANCE};
+
+use alloc::{collections::BTreeMap, vec::Vec};
+use alloy_primitives::{Address, BlockNumber};
+use derive_more::{Deref, DerefMut, From};
+#[cfg(feature = "serde")]
+use serde::{de::Error, Deserialize, Deserializer};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut, From)]
@@ -49,6 +49,7 @@ impl ReceiptsLogPruneConfig {
         self.0.is_empty()
     }
 
+    #[cfg(feature = "serde")]
     pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
