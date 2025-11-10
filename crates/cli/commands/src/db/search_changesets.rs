@@ -28,16 +28,16 @@ struct StorageMatch {
     pre_block_value: U256,
 }
 
-/// The arguments for the `reth db find-unhashed` command
+/// The arguments for the `reth db search-changesets` command
 #[derive(Parser, Debug)]
 pub struct Command {
     /// The hashed account address to search for (as hex string, will match as prefix)
     #[arg(long, value_name = "HEX")]
-    pub account: Option<Nibbles>,
+    pub hashed_account: Option<Nibbles>,
 
     /// The hashed storage slot key to search for (as hex string, will match as prefix)
     #[arg(long, value_name = "HEX")]
-    pub slot: Option<Nibbles>,
+    pub hashed_slot: Option<Nibbles>,
 
     /// Minimum block number to search (stop searching below this block)
     #[arg(long, value_name = "BLOCK_NUMBER")]
@@ -314,7 +314,7 @@ impl Command {
         Ok(())
     }
 
-    /// Execute `db find-unhashed` command
+    /// Execute `db search-changesets` command
     pub fn execute<N: NodeTypesWithDB>(
         self,
         provider_factory: ProviderFactory<N>,
@@ -331,19 +331,19 @@ impl Command {
             .block_number;
         info!("DB tip block: {}", db_tip);
 
-        // Validate: if slot is given, account must be a full B256 (64 nibbles)
-        if self.slot.is_some() &&
-            let Some(ref account_prefix) = self.account &&
+        // Validate: if hashed-slot is given, hashed-account must be a full B256 (64 nibbles)
+        if self.hashed_slot.is_some() &&
+            let Some(ref account_prefix) = self.hashed_account &&
             account_prefix.len() != 64
         {
             panic!(
-                "When --slot is provided, --account must be a full B256 hash (64 nibbles), got {} nibbles",
+                "When --hashed-slot is provided, --hashed-account must be a full B256 hash (64 nibbles), got {} nibbles",
                 account_prefix.len()
             );
         }
 
         // Call the appropriate search function based on which arguments are provided
-        match (self.account, self.slot) {
+        match (self.hashed_account, self.hashed_slot) {
             (account_prefix, Some(slot_prefix)) => {
                 // If slot is given, always search storage (with optional account filter)
                 Self::search_storage_by_nibbles(
@@ -369,7 +369,7 @@ impl Command {
             }
             (None, None) => {
                 // If neither is given then error.
-                panic!("At least one of --account or --slot must be provided")
+                panic!("At least one of --hashed-account or --hashed-slot must be provided")
             }
         }
     }
