@@ -651,7 +651,9 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        let Some(block) = self.block(_id)? else { return Ok(None) };
+        let senders = block.body().try_recover_signers()?;
+        Ok(Some(RecoveredBlock::new_unhashed(block, senders)))
     }
 
     fn sealed_block_with_senders(
@@ -659,7 +661,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        self.recovered_block(_id, _transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
