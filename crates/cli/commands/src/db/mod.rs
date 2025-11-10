@@ -14,6 +14,7 @@ mod diff;
 mod get;
 mod list;
 mod repair_trie;
+mod search_changesets;
 mod stats;
 /// DB List TUI
 mod tui;
@@ -51,6 +52,8 @@ pub enum Subcommands {
     Clear(clear::Command),
     /// Verifies trie consistency and outputs any inconsistencies
     RepairTrie(repair_trie::Command),
+    /// Searches account and storage changesets for hashed addresses and slots
+    SearchChangesets(search_changesets::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -142,6 +145,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 let access_rights =
                     if command.dry_run { AccessRights::RO } else { AccessRights::RW };
                 let Environment { provider_factory, .. } = self.env.init::<N>(access_rights)?;
+                command.execute(provider_factory)?;
+            }
+            Subcommands::SearchChangesets(command) => {
+                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
                 command.execute(provider_factory)?;
             }
             Subcommands::Version => {
