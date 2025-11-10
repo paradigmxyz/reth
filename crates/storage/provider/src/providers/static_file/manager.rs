@@ -69,11 +69,9 @@ impl fmt::Display for InvalidBlocksPerFile {
                 "blocks_per_file must be greater than zero for segment {segment:?} (received {})",
                 self.value
             ),
-            None => write!(
-                f,
-                "blocks_per_file must be greater than zero (received {})",
-                self.value
-            ),
+            None => {
+                write!(f, "blocks_per_file must be greater than zero (received {})", self.value)
+            }
         }
     }
 }
