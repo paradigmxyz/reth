@@ -8,7 +8,10 @@ use crate::{
     intercept_bridge_transaction_if_need, OpAttributes, OpPayloadPrimitives,
 };
 use alloy_consensus::{Transaction, Typed2718};
-use alloy_evm::Evm as AlloyEvm;
+use alloy_evm::{
+    block::CommitChanges,
+    Evm as AlloyEvm,
+};
 use alloy_primitives::{U256};
 use reth_chainspec::{EthChainSpec};
 use reth_evm::{
@@ -32,8 +35,7 @@ use reth_primitives_traits::{
     HeaderTy, TxTy,
 };
 use reth_transaction_pool::PoolTransaction;
-use revm::context::Block;
-use revm::context::result::ExecutionResult;
+use revm::context::{Block, result::ExecutionResult};
 use tracing::trace;
 
 impl<Evm, ChainSpec, Attrs> OpPayloadBuilderCtx<Evm, ChainSpec, Attrs>
@@ -133,8 +135,10 @@ where
                 return Ok(Some(()))
             }
 
-            let mut should_skip = false;
-            let gas_used = match builder.executor_mut().execute_transaction_with_result_closure(
+            // Execute transaction with conditional commit based on bridge interception check.
+            // This ensures that intercepted transactions are not committed to the block state,
+            // preventing tx number inconsistencies in static files.
+            let gas_used = match builder.execute_transaction_with_commit_condition(
                 tx.clone(),
                 |result| {
                     if let ExecutionResult::Success { logs, .. } = result {
@@ -145,12 +149,21 @@ where
                         )
                             .is_err()
                         {
-                            should_skip = true;
+                            // Bridge transaction intercepted, do not commit
+                            return CommitChanges::No
                         }
                     }
+                    // Normal transaction or non-success result, commit changes
+                    CommitChanges::Yes
                 },
             ) {
-                Ok(gas_used) => gas_used,
+                Ok(Some(gas_used)) => gas_used,
+                Ok(None) => {
+                    // Transaction was not committed (intercepted by bridge check)
+                    trace!(target: "payload_builder", ?tx, "bridge transaction intercepted, marking invalid");
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    continue
+                }
                 Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                                                         error,
                                                         ..
@@ -171,11 +184,6 @@ where
                     return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
                 }
             };
-
-            if should_skip {
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue;
-            }
 
             // add gas used by the transaction to cumulative gas used, before creating the
             // receipt
