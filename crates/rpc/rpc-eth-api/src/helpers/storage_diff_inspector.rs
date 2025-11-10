@@ -4,15 +4,19 @@ use revm::{
     interpreter::{bytecode::opcode::OpCode, Interpreter, InterpreterTypes},
 };
 use revm_inspectors::inspector::Inspector;
-use std::collections::BTreeMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
+
+/// Storage diff per transaction. Outer `Vec` is ordered by transaction index.
+pub type StorageDiffs = Vec<HashMap<Address, BTreeMap<StorageKey, StorageValue>>>;
 
 /// Captures per-transaction storage diffs by watching `SSTORE` instructions during replay.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct StorageDiffInspector {
     /// Diff recorded while the current transaction executes.
-    current_tx: BTreeMap<Address, BTreeMap<StorageKey, StorageValue>>,
+    current_tx: HashMap<Address, BTreeMap<StorageKey, StorageValue>>,
     /// Diffs for each transaction in order of execution.
-    tx_diffs: Vec<BTreeMap<Address, BTreeMap<StorageKey, StorageValue>>>,
+    tx_diffs: StorageDiffs,
 }
 
 impl StorageDiffInspector {
@@ -23,12 +27,15 @@ impl StorageDiffInspector {
 
     /// Marks the end of the current transaction and stores the accumulated diff.
     pub fn finish_transaction(&mut self) {
-        self.tx_diffs.push(core::mem::take(&mut self.current_tx));
+        self.tx_diffs.push(self.current_tx.drain().map(|(addr, slots)| (addr, slots)).collect());
     }
 
     /// Returns collected diffs, consuming the inspector.
-    pub fn into_diffs(self) -> Vec<BTreeMap<Address, BTreeMap<StorageKey, StorageValue>>> {
-        self.tx_diffs
+    pub fn into_diffs(mut self) -> StorageDiffs {
+        if !self.current_tx.is_empty() {
+            self.finish_transaction();
+        }
+        core::mem::take(&mut self.tx_diffs)
     }
 
     fn record_sstore<INTR: InterpreterTypes>(&mut self, interp: &Interpreter<INTR>) {
@@ -42,6 +49,41 @@ impl StorageDiffInspector {
         let slot: StorageKey = B256::from(slot);
         let value: StorageValue = value;
         self.current_tx.entry(contract).or_default().insert(slot, value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, U256};
+
+    #[test]
+    fn finish_transaction_moves_current_diff() {
+        let mut inspector = StorageDiffInspector::new();
+        let addr = Address::repeat_byte(0x11);
+        let key = StorageKey::from(B256::from(U256::from(1)));
+        let value: StorageValue = U256::from(2);
+        inspector.current_tx.entry(addr).or_default().insert(key, value);
+
+        inspector.finish_transaction();
+        assert!(inspector.current_tx.is_empty());
+        assert_eq!(inspector.tx_diffs.len(), 1);
+        let slots = inspector.tx_diffs[0].get(&addr).unwrap();
+        assert_eq!(slots.get(&key), Some(&value));
+    }
+
+    #[test]
+    fn into_diffs_flushes_pending_tx() {
+        let mut inspector = StorageDiffInspector::new();
+        let addr = Address::repeat_byte(0x22);
+        let key = StorageKey::from(B256::from(U256::from(3)));
+        let value: StorageValue = U256::from(4);
+        inspector.current_tx.entry(addr).or_default().insert(key, value);
+
+        let diffs = inspector.into_diffs();
+        assert!(diffs.len() == 1);
+        let slots = diffs[0].get(&addr).unwrap();
+        assert_eq!(slots.get(&key), Some(&value));
     }
 }
 
