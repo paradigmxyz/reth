@@ -72,7 +72,7 @@ use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, trace};
 
 #[cfg(feature = "metrics")]
-use crate::proof_task_metrics::ProofTaskTrieMetrics;
+use crate::proof_task_metrics::{ProofTaskCursorMetrics, ProofTaskTrieMetrics};
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
@@ -151,6 +151,8 @@ impl ProofWorkerHandle {
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
+                #[cfg(feature = "metrics")]
+                let cursor_metrics = ProofTaskCursorMetrics::new();
 
                 let _guard = span.enter();
                 let worker = StorageProofWorker::new(
@@ -160,6 +162,8 @@ impl ProofWorkerHandle {
                     storage_available_workers_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
+                    #[cfg(feature = "metrics")]
+                    cursor_metrics,
                 );
                 if let Err(error) = worker.run() {
                     error!(
@@ -187,6 +191,8 @@ impl ProofWorkerHandle {
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
+                #[cfg(feature = "metrics")]
+                let cursor_metrics = ProofTaskCursorMetrics::new();
 
                 let _guard = span.enter();
                 let worker = AccountProofWorker::new(
@@ -197,6 +203,8 @@ impl ProofWorkerHandle {
                     account_available_workers_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
+                    #[cfg(feature = "metrics")]
+                    cursor_metrics,
                 );
                 if let Err(error) = worker.run() {
                     error!(
@@ -658,6 +666,9 @@ struct StorageProofWorker<Factory> {
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
+    /// Cursor metrics collector for this worker
+    #[cfg(feature = "metrics")]
+    cursor_metrics: ProofTaskCursorMetrics,
 }
 
 impl<Factory> StorageProofWorker<Factory>
@@ -671,6 +682,7 @@ where
         worker_id: usize,
         available_workers: Arc<AtomicUsize>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
+        #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
         Self {
             task_ctx,
@@ -679,6 +691,8 @@ where
             available_workers,
             #[cfg(feature = "metrics")]
             metrics,
+            #[cfg(feature = "metrics")]
+            cursor_metrics,
         }
     }
 
@@ -699,7 +713,7 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
-    fn run(self) -> ProviderResult<()> {
+    fn run(mut self) -> ProviderResult<()> {
         let Self {
             task_ctx,
             work_rx,
@@ -707,6 +721,8 @@ where
             available_workers,
             #[cfg(feature = "metrics")]
             metrics,
+            #[cfg(feature = "metrics")]
+            ref mut cursor_metrics,
         } = self;
 
         // Create provider from factory
@@ -737,6 +753,8 @@ where
                         input,
                         proof_result_sender,
                         &mut storage_proofs_processed,
+                        #[cfg(feature = "metrics")]
+                        cursor_metrics,
                     );
                 }
 
@@ -777,6 +795,7 @@ where
         input: StorageProofInput,
         proof_result_sender: ProofResultContext,
         storage_proofs_processed: &mut u64,
+        #[cfg(feature = "metrics")] cursor_metrics: &mut ProofTaskCursorMetrics,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
@@ -839,6 +858,12 @@ where
             ?hashed_cursor_metrics,
             "Storage proof completed"
         );
+
+        #[cfg(feature = "metrics")]
+        {
+            trie_cursor_metrics.record(&mut cursor_metrics.storage_trie_cursor);
+            hashed_cursor_metrics.record(&mut cursor_metrics.storage_hashed_cursor);
+        }
     }
 
     /// Processes a blinded storage node lookup request.
@@ -907,6 +932,9 @@ struct AccountProofWorker<Factory> {
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
+    /// Cursor metrics collector for this worker
+    #[cfg(feature = "metrics")]
+    cursor_metrics: ProofTaskCursorMetrics,
 }
 
 impl<Factory> AccountProofWorker<Factory>
@@ -921,6 +949,7 @@ where
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         available_workers: Arc<AtomicUsize>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
+        #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
         Self {
             task_ctx,
@@ -930,6 +959,8 @@ where
             available_workers,
             #[cfg(feature = "metrics")]
             metrics,
+            #[cfg(feature = "metrics")]
+            cursor_metrics,
         }
     }
 
@@ -950,7 +981,7 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
-    fn run(self) -> ProviderResult<()> {
+    fn run(mut self) -> ProviderResult<()> {
         let Self {
             task_ctx,
             work_rx,
@@ -959,6 +990,8 @@ where
             available_workers,
             #[cfg(feature = "metrics")]
             metrics,
+            #[cfg(feature = "metrics")]
+            ref mut cursor_metrics,
         } = self;
 
         // Create provider from factory
@@ -989,6 +1022,8 @@ where
                         storage_work_tx.clone(),
                         *input,
                         &mut account_proofs_processed,
+                        #[cfg(feature = "metrics")]
+                        cursor_metrics,
                     );
                 }
 
@@ -1028,6 +1063,7 @@ where
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
+        #[cfg(feature = "metrics")] cursor_metrics: &mut ProofTaskCursorMetrics,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
@@ -1104,10 +1140,10 @@ where
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
 
-        let account_trie_cursor_metrics = tracker.account_trie_cursor_metrics;
-        let account_hashed_cursor_metrics = tracker.account_hashed_cursor_metrics;
-        let storage_trie_cursor_metrics = tracker.storage_trie_cursor_metrics;
-        let storage_hashed_cursor_metrics = tracker.storage_hashed_cursor_metrics;
+        let mut account_trie_cursor_metrics = tracker.account_trie_cursor_metrics;
+        let mut account_hashed_cursor_metrics = tracker.account_hashed_cursor_metrics;
+        let mut storage_trie_cursor_metrics = tracker.storage_trie_cursor_metrics;
+        let mut storage_hashed_cursor_metrics = tracker.storage_hashed_cursor_metrics;
 
         let stats = tracker.finish();
         let result = result.map(|proof| ProofResult::AccountMultiproof { proof, stats });
@@ -1142,6 +1178,14 @@ where
             ?storage_hashed_cursor_metrics,
             "Account multiproof completed"
         );
+
+        #[cfg(feature = "metrics")]
+        {
+            account_trie_cursor_metrics.record(&mut cursor_metrics.account_trie_cursor);
+            account_hashed_cursor_metrics.record(&mut cursor_metrics.account_hashed_cursor);
+            storage_trie_cursor_metrics.record(&mut cursor_metrics.storage_trie_cursor);
+            storage_hashed_cursor_metrics.record(&mut cursor_metrics.storage_hashed_cursor);
+        }
     }
 
     /// Processes a blinded account node lookup request.
