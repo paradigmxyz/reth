@@ -258,6 +258,8 @@ impl NodeManager {
         // Set OpenTelemetry service name to differentiate baseline vs feature runs in Jaeger
         if self.tracing_endpoint.is_some() {
             cmd.env("OTEL_SERVICE_NAME", format!("reth-{}", ref_type));
+            // Set high queue size to prevent trace dropping during intensive benchmarks
+            cmd.env("OTEL_BLRP_MAX_QUEUE_SIZE", "10000");
             info!("OTLP tracing configured with service name: reth-{}", ref_type);
         }
 
