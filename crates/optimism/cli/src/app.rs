@@ -92,6 +92,9 @@ where
             Commands::InitState(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
+            Commands::Import(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode, _>(components))
+            }
             Commands::ImportOp(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }

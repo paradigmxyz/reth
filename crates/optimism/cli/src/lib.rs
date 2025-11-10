@@ -33,7 +33,9 @@ pub mod receipt_file_codec;
 pub mod ovm_file_codec;
 
 pub use app::CliApp;
-pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
+pub use commands::{
+    import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand, import_simple::ImportCommand,
+};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 

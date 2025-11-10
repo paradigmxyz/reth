@@ -261,6 +261,12 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
                 // Validate standalone header
                 self.consensus.validate_header(block.sealed_header())?;
                 if let Some(parent) = &parent_header {
+                    // For X Layer
+                    // When we start from a custom genesis block, the parent number is the same as
+                    // the block number and we skip validation
+                    if parent.number() == block.number() {
+                        continue;
+                    }
                     self.consensus.validate_header_against_parent(block.sealed_header(), parent)?;
                     parent_header = Some(block.sealed_header().clone());
                 }
