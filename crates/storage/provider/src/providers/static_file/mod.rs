@@ -163,6 +163,7 @@ mod tests {
             let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)
                 .expect("Failed to create static file provider builder")
                 .with_blocks_per_file(blocks_per_file)
+                .expect("blocks_per_file must be greater than zero")
                 .build()
                 .expect("Failed to build static file provider");
 
@@ -259,6 +260,7 @@ mod tests {
             let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
                 .expect("Failed to create static file provider builder")
                 .with_blocks_per_file(blocks_per_file)
+                .expect("blocks_per_file must be greater than zero")
                 .build()
                 .expect("Failed to build static file provider");
 
@@ -476,6 +478,7 @@ mod tests {
             let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
                 .expect("Failed to create static file provider builder")
                 .with_blocks_per_file(blocks_per_file)
+                .expect("blocks_per_file must be greater than zero")
                 .build()
                 .expect("Failed to build static file provider");
 
@@ -484,6 +487,7 @@ mod tests {
             let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
                 .expect("Failed to create static file provider builder")
                 .with_blocks_per_file(blocks_per_file)
+                .expect("blocks_per_file must be greater than zero")
                 .build()
                 .expect("Failed to build static file provider");
             let highest_tx = sf_rw.get_highest_static_file_tx(segment).unwrap();
@@ -565,7 +569,7 @@ mod tests {
 
         {
             let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
-                .with_blocks_per_file(10)
+                .with_blocks_per_file(10)?
                 .build()?;
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
 
@@ -591,7 +595,7 @@ mod tests {
 
         {
             let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
-                .with_blocks_per_file(5)
+                .with_blocks_per_file(5)?
                 .build()?;
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
 
@@ -618,7 +622,7 @@ mod tests {
 
         {
             let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
-                .with_blocks_per_file(15)
+                .with_blocks_per_file(15)?
                 .build()?;
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
 
