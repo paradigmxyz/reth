@@ -1,0 +1,51 @@
+[package]
+name = "xlayer-e2e-test"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+revm.workspace = true
+tempfile.workspace = true
+
+# rpc
+jsonrpsee = { workspace = true, features = ["http-client", "client-core"] }
+url.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+alloy-rlp.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local = { workspace = true, features = ["mnemonic"] }
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-network.workspace = true
+alloy-consensus = { workspace = true, features = ["kzg"] }
+alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-sol-types.workspace = true
+
+futures-util.workspace = true
+eyre.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+derive_more.workspace = true
+
+[dev-dependencies]
+rstest = "0.23"
+
+[lib]
+name = "xlayer_e2e_test"
+path = "lib.rs"
+
+[[test]]
+name = "e2e_tests"
+path = "e2e-tests/main.rs"
