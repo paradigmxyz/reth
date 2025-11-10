@@ -160,10 +160,10 @@ docker run --rm --name jaeger \
 Now we can provide the `--tracing-otlp` argument with reth:
 
 ```bash
-reth node --tracing-otlp=http://localhost:4318/v1/traces
+reth node --tracing-otlp=http://localhost:4317 --tracing-otlp-protocol grpc
 ```
 
-The traces reth exported should now be searchable and viewable on `localhost:16686`.
+The traces reth exported should now be searchable and viewable on http://localhost:16686.
 
 ## Conclusion
 
