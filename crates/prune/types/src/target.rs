@@ -99,7 +99,11 @@ pub struct PruneModes {
         )
     )]
     pub merkle_changesets: PruneMode,
-    /// Receipts log filtering has been deprecated and will be removed in a future release.
+    /// Receipts pruning configuration by retaining only those receipts that contain logs emitted
+    /// by the specified addresses, discarding others. This setting is overridden by `receipts`.
+    ///
+    /// The [`BlockNumber`](`crate::BlockNumber`) represents the starting block from which point
+    /// onwards the receipts are preserved.
     #[cfg_attr(
         any(test, feature = "serde"),
         serde(skip_serializing_if = "ReceiptsLogPruneConfig::is_empty",)
