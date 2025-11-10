@@ -45,7 +45,7 @@ std = [
     "serde_json/std",
     "thiserror/std",
     "strum/std",
-    "dep:reth-tracing"
+    "dep:reth-tracing",
 ]
 test-utils = [
     "std",

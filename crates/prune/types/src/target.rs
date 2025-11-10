@@ -268,7 +268,10 @@ fn serde_deserialize_validate<'a, 'de, const MIN_BLOCKS: u64, D: serde::Deserial
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
+    use alloy_primitives::address;
     use assert_matches::assert_matches;
     use serde::Deserialize;
 
@@ -289,6 +292,30 @@ mod tests {
         assert_matches!(
             serde_json::from_str::<V>(r#""full""#),
             Err(err) if err.to_string() == "invalid value: string \"full\", expected prune mode that leaves at least 10 blocks in the database"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_receipts_log_filter() {
+        let addr1 = address!("0x0000000000000000000000000000000000000001");
+        let addr2 = address!("0x0000000000000000000000000000000000000002");
+        let addr3 = address!("0x0000000000000000000000000000000000000003");
+
+        let prune_modes: PruneModes = serde_json::from_str(&format!(
+            r#"
+                {{
+                    "receipts_log_filter": {{
+                        "{addr1}": "full",
+                        "{addr2}": {{ "distance": 1000 }},
+                        "{addr3}": {{ "before": 5000000 }}
+                    }}
+                }}"#
+        ))
+        .unwrap();
+
+        assert_eq!(
+            prune_modes.receipts_log_filter,
+            BTreeMap::from([(addr1, PruneMode::Full), (addr3, PruneMode::Before(5000000))]).into()
         );
     }
 

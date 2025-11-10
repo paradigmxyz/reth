@@ -319,6 +319,8 @@ pub(crate) fn parse_receipts_log_filter(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use alloy_primitives::address;
     use clap::Parser;
@@ -355,25 +357,27 @@ mod tests {
 
     #[test]
     fn test_parse_receipts_log_filter() {
-        let filter1 = "0x0000000000000000000000000000000000000001:full";
-        let filter2 = "0x0000000000000000000000000000000000000002:distance:1000";
-        let filter3 = "0x0000000000000000000000000000000000000003:before:5000000";
-        let filters = [filter1, filter2, filter3].join(",");
+        let addr1 = address!("0x0000000000000000000000000000000000000001");
+        let addr2 = address!("0x0000000000000000000000000000000000000002");
+        let addr3 = address!("0x0000000000000000000000000000000000000003");
+
+        let filters = [
+            format!("{addr1}:full"),
+            format!("{addr2}:distance:1000"),
+            format!("{addr3}:before:5000000"),
+        ]
+        .join(",");
 
         // Args can be parsed.
         let result = parse_receipts_log_filter(&filters);
         assert!(result.is_ok());
         let config = result.unwrap();
-        assert_eq!(config.len(), 3);
 
         // Check that the args were parsed correctly.
-        let addr1: Address = "0x0000000000000000000000000000000000000001".parse().unwrap();
-        let addr2: Address = "0x0000000000000000000000000000000000000002".parse().unwrap();
-        let addr3: Address = "0x0000000000000000000000000000000000000003".parse().unwrap();
-
-        assert_eq!(config.get(&addr1), Some(&PruneMode::Full));
-        assert_eq!(config.get(&addr2), Some(&PruneMode::Distance(1000)));
-        assert_eq!(config.get(&addr3), Some(&PruneMode::Before(5000000)));
+        assert_eq!(
+            config,
+            BTreeMap::from([(addr1, PruneMode::Full), (addr3, PruneMode::Before(5000000))]).into()
+        );
     }
 
     #[test]
