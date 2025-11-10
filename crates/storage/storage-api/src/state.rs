@@ -2,13 +2,13 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::Bytecode;
+use reth_primitives_traits::{Bytecode, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
@@ -28,6 +28,21 @@ pub trait StateReader: Send + Sync {
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;
+/// Result of a storage range query matching the semantics of `debug_storageRangeAt`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StorageRangeResult {
+    /// Collected storage entries.
+    pub slots: Vec<StorageEntry>,
+    /// Hash of the next key to resume iteration from, if more slots remain.
+    pub next_key: Option<StorageKey>,
+}
+
+impl StorageRangeResult {
+    /// Creates an empty range result.
+    pub const fn empty() -> Self {
+        Self { slots: Vec::new(), next_key: None }
+    }
+}
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
@@ -90,6 +105,20 @@ pub trait StateProvider:
         // Returns None if acc doesn't exist
         self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.nonce)))
     }
+}
+
+/// Optional trait for providers that can iterate storage slots in key order.
+#[auto_impl(&, Arc, Box)]
+pub trait StorageRangeProvider: Send + Sync {
+    /// Returns storage slots for `account` starting at `start_key` (inclusive) and capped by
+    /// `max_slots`. When additional slots are available beyond `max_slots`, `next_key` in the
+    /// result indicates where the caller should resume.
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: StorageKey,
+        max_slots: usize,
+    ) -> ProviderResult<StorageRangeResult>;
 }
 
 /// Minimal requirements to read a full account, for example, to validate its new transactions

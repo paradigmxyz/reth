@@ -25,6 +25,7 @@ pub mod receipt;
 pub mod signer;
 pub mod spec;
 pub mod state;
+pub mod storage_diff_inspector;
 pub mod trace;
 pub mod transaction;
 
@@ -37,6 +38,7 @@ pub use receipt::LoadReceipt;
 pub use signer::EthSigner;
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
+pub use storage_diff_inspector::StorageDiffInspector;
 pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction};
 
