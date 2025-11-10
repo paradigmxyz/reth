@@ -7445,7 +7445,6 @@ dependencies = [
  "reth-cli-util",
  "reth-node-core",
  "reth-tracing",
- "reth-tracing-otlp",
  "serde",
  "serde_json",
  "shellexpand",
