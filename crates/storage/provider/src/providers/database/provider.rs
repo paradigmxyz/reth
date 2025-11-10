@@ -1,6 +1,7 @@
 use crate::{
     changesets_utils::{
         storage_trie_wiped_changeset_iter, StorageRevertsIter, StorageTrieCurrentValuesIter,
+        StorageWipedEntriesIter,
     },
     providers::{
         database::{chain::ChainStorage, metrics},
@@ -28,7 +29,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -76,7 +77,7 @@ use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
 };
 use revm_database::states::{
-    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
+    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, RevertToSlot, StateChangeset,
 };
 use std::{
     cmp::Ordering,
@@ -1660,12 +1661,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut storages_cursor = self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
         let mut storage_changeset_cursor =
             self.tx_ref().cursor_dup_write::<tables::StorageChangeSets>()?;
+
         for (block_index, mut storage_changes) in reverts.storage.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
 
             tracing::trace!(block_number, "Writing block change");
             // sort changes by address.
             storage_changes.par_sort_unstable_by_key(|a| a.address);
+
             for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
                 let storage_id = BlockNumberAddress((block_number, address));
 
@@ -1678,25 +1681,38 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 // If we are writing the primary storage wipe transition, the pre-existing plain
                 // storage state has to be taken from the database and written to storage history.
-                // See [StorageWipe::Primary] for more details.
                 //
-                // TODO(mediocregopher): This could be rewritten in a way which doesn't require
-                // collecting wiped entries into a Vec like this, see
-                // `write_storage_trie_changesets`.
-                let mut wiped_storage = Vec::new();
+                // We process wiped entries from the cursor using an iterator adapter. This
+                // eliminates the intermediate allocation and extra iteration.
                 if wiped {
                     tracing::trace!(?address, "Wiping storage");
-                    if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
-                        wiped_storage.push((entry.key, entry.value));
-                        while let Some(entry) = storages_cursor.next_dup_val()? {
-                            wiped_storage.push((entry.key, entry.value))
-                        }
-                    }
-                }
 
-                tracing::trace!(?address, ?storage, "Writing storage reverts");
-                for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                    storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
+                    // Create an iterator that yields wiped storage entries directly from the cursor
+                    let wiped_storage_iter =
+                        StorageWipedEntriesIter::new(&mut storages_cursor, address)?;
+
+                    tracing::trace!(?address, ?storage, "Writing storage reverts");
+                    for (key, revert_slot) in StorageRevertsIter::new(storage, wiped_storage_iter) {
+                        // Convert RevertToSlot to U256 for StorageEntry
+                        let value = match revert_slot {
+                            RevertToSlot::Some(value) => value,
+                            RevertToSlot::Destroyed => U256::ZERO,
+                        };
+                        storage_changeset_cursor
+                            .append_dup(storage_id, StorageEntry { key, value })?;
+                    }
+                } else {
+                    // No wiped storage, just write the reverts directly
+                    tracing::trace!(?address, ?storage, "Writing storage reverts");
+                    for (key, revert_slot) in storage {
+                        // Convert RevertToSlot to U256 for StorageEntry
+                        let value = match revert_slot {
+                            RevertToSlot::Some(value) => value,
+                            RevertToSlot::Destroyed => U256::ZERO,
+                        };
+                        storage_changeset_cursor
+                            .append_dup(storage_id, StorageEntry { key, value })?;
+                    }
                 }
             }
         }

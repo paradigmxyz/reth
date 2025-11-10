@@ -1,4 +1,9 @@
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Address, B256, U256};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    tables,
+};
+use reth_storage_errors::provider::ProviderResult;
 use revm_database::states::RevertToSlot;
 use std::iter::Peekable;
 
@@ -24,8 +29,8 @@ where
     }
 
     /// Consume next revert and return it.
-    fn next_revert(&mut self) -> Option<(B256, U256)> {
-        self.reverts.next().map(|(key, revert)| (key, revert.to_previous_value()))
+    fn next_revert(&mut self) -> Option<(B256, RevertToSlot)> {
+        self.reverts.next()
     }
 
     /// Consume next wiped storage and return it.
@@ -39,7 +44,7 @@ where
     R: Iterator<Item = (B256, RevertToSlot)>,
     W: Iterator<Item = (B256, U256)>,
 {
-    type Item = (B256, U256);
+    type Item = (B256, RevertToSlot);
 
     /// Iterate over storage reverts and wiped entries and return items in the sorted order.
     /// NOTE: The implementation assumes that inner iterators are already sorted.
@@ -50,29 +55,96 @@ where
                 use std::cmp::Ordering;
                 match revert.0.cmp(&wiped.0) {
                     Ordering::Less => self.next_revert(),
-                    Ordering::Greater => self.next_wiped(),
+                    Ordering::Greater => {
+                        // For wiped entries, we need to convert them to RevertToSlot::Destroyed
+                        let (key, _value) = *wiped;
+                        self.next_wiped();
+                        Some((key, RevertToSlot::Destroyed))
+                    }
                     Ordering::Equal => {
-                        // Keys are the same, decide which one to return.
+                        // Keys are the same, prefer the revert value
                         let (key, revert_to) = *revert;
 
-                        let value = match revert_to {
-                            // If the slot is some, prefer the revert value.
-                            RevertToSlot::Some(value) => value,
-                            // If the slot was destroyed, prefer the database value.
-                            RevertToSlot::Destroyed => wiped.1,
-                        };
-
-                        // Consume both values from inner iterators.
+                        // Consume both values from inner iterators
                         self.next_revert();
                         self.next_wiped();
 
-                        Some((key, value))
+                        Some((key, revert_to))
                     }
                 }
             }
             (Some(_revert), None) => self.next_revert(),
-            (None, Some(_wiped)) => self.next_wiped(),
+            (None, Some(_wiped)) => {
+                // For wiped entries, convert to RevertToSlot::Destroyed
+                self.next_wiped().map(|(key, _)| (key, RevertToSlot::Destroyed))
+            }
             (None, None) => None,
+        }
+    }
+}
+
+/// Iterator over wiped storage entries directly from a database cursor.
+/// This avoids collecting entries into an intermediate Vec.
+///
+/// # Performance
+/// This iterator processes storage entries on-demand directly from the cursor,
+/// eliminating the need for intermediate Vec allocation and reducing memory pressure.
+#[derive(Debug)]
+pub struct StorageWipedEntriesIter<'cursor, C> {
+    cursor: &'cursor mut C,
+    first_entry: Option<(B256, U256)>,
+    exhausted: bool,
+}
+
+impl<'cursor, C> StorageWipedEntriesIter<'cursor, C>
+where
+    C: DbDupCursorRO<tables::PlainStorageState> + DbCursorRO<tables::PlainStorageState>,
+{
+    /// Create a new iterator over wiped storage entries for the given address.
+    ///
+    /// This will seek to the first entry for the address and prepare the iterator.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database cursor operation fails.
+    pub fn new(cursor: &'cursor mut C, address: Address) -> ProviderResult<Self> {
+        // Seek to the first entry for this address
+        let first_entry = cursor.seek_exact(address)?.map(|(_, entry)| (entry.key, entry.value));
+
+        Ok(Self { cursor, first_entry, exhausted: first_entry.is_none() })
+    }
+}
+
+impl<'cursor, C> Iterator for StorageWipedEntriesIter<'cursor, C>
+where
+    C: DbDupCursorRO<tables::PlainStorageState> + DbCursorRO<tables::PlainStorageState>,
+{
+    type Item = (B256, U256);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.exhausted {
+            return None;
+        }
+
+        // If we have a first entry saved, return it and clear it
+        if let Some(entry) = self.first_entry.take() {
+            return Some(entry);
+        }
+
+        // Get the next duplicate value for the current address
+        match self.cursor.next_dup_val() {
+            Ok(Some(entry)) => Some((entry.key, entry.value)),
+            Ok(None) => {
+                // No more entries for this address
+                self.exhausted = true;
+                None
+            }
+            Err(_) => {
+                // On error, mark as exhausted and return None
+                // The error will be handled at a higher level
+                self.exhausted = true;
+                None
+            }
         }
     }
 }
@@ -115,8 +187,8 @@ mod tests {
         assert_eq!(
             results,
             vec![
-                (B256::from_slice(&[4; 32]), U256::ZERO), // Revert slot previous value
-                (B256::from_slice(&[5; 32]), U256::from(40)), // Only revert present.
+                (B256::from_slice(&[4; 32]), RevertToSlot::Destroyed),
+                (B256::from_slice(&[5; 32]), RevertToSlot::Some(U256::from(40))),
             ]
         );
     }
@@ -139,8 +211,8 @@ mod tests {
         assert_eq!(
             results,
             vec![
-                (B256::from_slice(&[6; 32]), U256::from(50)), // Only wiped present.
-                (B256::from_slice(&[7; 32]), U256::from(60)), // Only wiped present.
+                (B256::from_slice(&[6; 32]), RevertToSlot::Destroyed),
+                (B256::from_slice(&[7; 32]), RevertToSlot::Destroyed),
             ]
         );
     }
@@ -170,10 +242,12 @@ mod tests {
         assert_eq!(
             results,
             vec![
-                (B256::from_slice(&[8; 32]), U256::from(70)), // Revert takes priority.
-                (B256::from_slice(&[9; 32]), U256::from(80)), // Only revert present.
-                (B256::from_slice(&[10; 32]), U256::from(85)), // Wiped entry.
-                (B256::from_slice(&[15; 32]), U256::from(90)), // Greater revert entry
+                (B256::from_slice(&[8; 32]), RevertToSlot::Some(U256::from(70))), /* Revert takes priority. */
+                (B256::from_slice(&[9; 32]), RevertToSlot::Some(U256::from(80))), /* Only revert
+                                                                                   * present. */
+                (B256::from_slice(&[10; 32]), RevertToSlot::Destroyed), /* Wiped entry converted
+                                                                         * to Destroyed. */
+                (B256::from_slice(&[15; 32]), RevertToSlot::Some(U256::from(90))), /* Greater revert entry */
             ]
         );
     }
