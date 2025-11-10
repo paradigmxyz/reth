@@ -43,6 +43,15 @@ impl TrieCursorMetricsCache {
         self.seek_exact_count = 0;
     }
 
+    /// Extend this cache by adding the counts from another cache.
+    ///
+    /// This accumulates the counter values from `other` into this cache.
+    pub const fn extend(&mut self, other: &Self) {
+        self.next_count += other.next_count;
+        self.seek_count += other.seek_count;
+        self.seek_exact_count += other.seek_exact_count;
+    }
+
     /// Record the cached metrics to the provided Prometheus metrics and reset counters.
     ///
     /// This method adds the current counter values to the Prometheus metrics
@@ -61,24 +70,22 @@ impl TrieCursorMetricsCache {
 /// - `next()` - Move to the next entry
 /// - `seek()` - Seek to a key or the next greater key
 /// - `seek_exact()` - Seek to an exact key match
-///
-/// The counters can be reset using the [`reset`](TrieCursorMetricsCache::reset) method.
 #[derive(Debug)]
-pub struct InstrumentedTrieCursor<C> {
+pub struct InstrumentedTrieCursor<'metrics, C> {
     /// The underlying cursor being wrapped
     cursor: C,
     /// Cached metrics counters
-    pub metrics: TrieCursorMetricsCache,
+    metrics: &'metrics mut TrieCursorMetricsCache,
 }
 
-impl<C> InstrumentedTrieCursor<C> {
+impl<'metrics, C> InstrumentedTrieCursor<'metrics, C> {
     /// Create a new metrics cursor wrapping the given cursor.
-    pub const fn new(cursor: C) -> Self {
-        Self { cursor, metrics: Default::default() }
+    pub const fn new(cursor: C, metrics: &'metrics mut TrieCursorMetricsCache) -> Self {
+        Self { cursor, metrics }
     }
 }
 
-impl<C: TrieCursor> TrieCursor for InstrumentedTrieCursor<C> {
+impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C> {
     fn seek_exact(
         &mut self,
         key: Nibbles,

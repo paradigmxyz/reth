@@ -44,6 +44,15 @@ impl HashedCursorMetricsCache {
         self.is_storage_empty_count = 0;
     }
 
+    /// Extend this cache by adding the counts from another cache.
+    ///
+    /// This accumulates the counter values from `other` into this cache.
+    pub const fn extend(&mut self, other: &Self) {
+        self.next_count += other.next_count;
+        self.seek_count += other.seek_count;
+        self.is_storage_empty_count += other.is_storage_empty_count;
+    }
+
     /// Record the cached metrics to the provided Prometheus metrics and reset counters.
     ///
     /// This method adds the current counter values to the Prometheus metrics
@@ -61,24 +70,22 @@ impl HashedCursorMetricsCache {
 /// This implementation counts the number of times each cursor operation is called:
 /// - `next()` - Move to the next entry
 /// - `seek()` - Seek to a key or the next greater key
-///
-/// The counters can be reset using the [`reset`](HashedCursorMetricsCache::reset) method.
 #[derive(Debug)]
-pub struct InstrumentedHashedCursor<C> {
+pub struct InstrumentedHashedCursor<'metrics, C> {
     /// The underlying cursor being wrapped
     cursor: C,
     /// Cached metrics counters
-    pub metrics: HashedCursorMetricsCache,
+    metrics: &'metrics mut HashedCursorMetricsCache,
 }
 
-impl<C> InstrumentedHashedCursor<C> {
+impl<'metrics, C> InstrumentedHashedCursor<'metrics, C> {
     /// Create a new metrics cursor wrapping the given cursor.
-    pub const fn new(cursor: C) -> Self {
-        Self { cursor, metrics: Default::default() }
+    pub const fn new(cursor: C, metrics: &'metrics mut HashedCursorMetricsCache) -> Self {
+        Self { cursor, metrics }
     }
 }
 
-impl<C> HashedCursor for InstrumentedHashedCursor<C>
+impl<'metrics, C> HashedCursor for InstrumentedHashedCursor<'metrics, C>
 where
     C: HashedCursor,
 {
@@ -95,7 +102,7 @@ where
     }
 }
 
-impl<C> HashedStorageCursor for InstrumentedHashedCursor<C>
+impl<'metrics, C> HashedStorageCursor for InstrumentedHashedCursor<'metrics, C>
 where
     C: HashedStorageCursor,
 {
