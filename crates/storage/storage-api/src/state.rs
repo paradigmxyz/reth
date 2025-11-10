@@ -9,7 +9,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{Bytecode, StorageEntry};
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
 
@@ -28,6 +28,8 @@ pub trait StateReader: Send + Sync {
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;
+/// Type alias of boxed [`StorageRangeProvider`].
+pub type StorageRangeProviderBox = Box<dyn StorageRangeProvider>;
 /// Result of a storage range query matching the semantics of `debug_storageRangeAt`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StorageRangeResult {
@@ -146,6 +148,12 @@ pub trait TryIntoHistoricalStateProvider {
         self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox>;
+
+    /// Returns a historical [`StorageRangeProvider`] indexed by the given historic block number.
+    fn try_into_storage_range_history_at_block(
+        self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<StorageRangeProviderBox>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
@@ -205,6 +213,16 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     ///
     /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
+
+    /// Returns a [`StorageRangeProvider`] indexed by the given block hash.
+    ///
+    /// Default implementation returns [`ProviderError::UnsupportedProvider`].
+    fn storage_range_by_block_hash(
+        &self,
+        _block_hash: BlockHash,
+    ) -> ProviderResult<StorageRangeProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 
     /// Returns _any_ [StateProvider] with matching block hash.
     ///

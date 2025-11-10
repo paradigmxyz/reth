@@ -59,7 +59,7 @@ macro_rules! delegate_provider_impls {
                 fn multiproof(&self, input: reth_trie::TrieInput, targets: reth_trie::MultiProofTargets) -> reth_storage_errors::provider::ProviderResult<reth_trie::MultiProof>;
                 fn witness(&self, input: reth_trie::TrieInput, target: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<Vec<alloy_primitives::Bytes>>;
             }
-            $crate::StorageRangeProvider $(where [$($generics)*])? {
+            StorageRangeProvider $(where [$($generics)*])? {
                 fn storage_range(&self, account: alloy_primitives::Address, start_key: alloy_primitives::StorageKey, max_slots: usize) -> reth_storage_errors::provider::ProviderResult<$crate::StorageRangeResult>;
             }
             HashedPostStateProvider $(where [$($generics)*])? {

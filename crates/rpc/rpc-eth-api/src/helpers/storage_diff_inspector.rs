@@ -1,17 +1,20 @@
-use alloy_primitives::{Address, StorageKey, StorageValue, B256, U256};
+use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use revm::{
+    bytecode::OpCode,
     context::ContextTr,
-    interpreter::{bytecode::opcode::OpCode, Interpreter, InterpreterTypes},
+    inspector::Inspector,
+    interpreter::{
+        interpreter_types::{InputsTr, Jumps, StackTr},
+        Interpreter, InterpreterTypes,
+    },
 };
-use revm_inspectors::inspector::Inspector;
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 /// Storage diff per transaction. Outer `Vec` is ordered by transaction index.
 pub type StorageDiffs = Vec<HashMap<Address, BTreeMap<StorageKey, StorageValue>>>;
 
 /// Captures per-transaction storage diffs by watching `SSTORE` instructions during replay.
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone)]
 pub struct StorageDiffInspector {
     /// Diff recorded while the current transaction executes.
     current_tx: HashMap<Address, BTreeMap<StorageKey, StorageValue>>,
@@ -39,13 +42,15 @@ impl StorageDiffInspector {
     }
 
     fn record_sstore<INTR: InterpreterTypes>(&mut self, interp: &Interpreter<INTR>) {
-        let contract = interp.contract.address;
+        let contract = interp.input.target_address();
         let stack = &interp.stack;
-        if stack.len() < 2 {
+        let len = stack.len();
+        if len < 2 {
             return;
         }
-        let slot = stack.peek(0).copied().unwrap_or(U256::ZERO);
-        let value = stack.peek(1).copied().unwrap_or(U256::ZERO);
+        let data = stack.data();
+        let slot = data[len - 1];
+        let value = data[len - 2];
         let slot: StorageKey = B256::from(slot);
         let value: StorageValue = value;
         self.current_tx.entry(contract).or_default().insert(slot, value);

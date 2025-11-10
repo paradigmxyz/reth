@@ -25,7 +25,7 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
-    StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    StorageChangeSetReader, StorageRangeProviderBox, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::updates::TrieUpdatesSorted;
@@ -611,6 +611,22 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             return Ok(Box::new(block_state.state_provider(latest_historical)));
         }
         into_history_at_block_hash(block_hash)
+    }
+
+    /// Consumes the provider and returns a storage range provider for the specific block hash.
+    pub(crate) fn into_storage_range_provider_at_block_hash(
+        self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<StorageRangeProviderBox> {
+        let Self { storage_provider, head_block, .. } = self;
+        if let Some(Some(_)) = head_block.as_ref().map(|b| b.block_on_chain(block_hash.into())) {
+            return Err(ProviderError::UnsupportedProvider)
+        }
+
+        let block_number = storage_provider
+            .block_number(block_hash)?
+            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        storage_provider.try_into_storage_range_history_at_block(block_number)
     }
 }
 

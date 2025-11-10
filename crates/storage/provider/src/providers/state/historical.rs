@@ -500,7 +500,7 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> 
             return Ok(StorageRangeResult::empty())
         }
 
-        let mut entries: Vec<_> = slots_map.into_iter().collect();
+        let entries: Vec<_> = slots_map.into_iter().collect();
         let start_index = entries.partition_point(|(key, _)| *key < start_key);
         let mut iter = entries.into_iter().skip(start_index);
 

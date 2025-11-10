@@ -25,7 +25,10 @@ pub mod receipt;
 pub mod signer;
 pub mod spec;
 pub mod state;
+/// Utilities for capturing per-transaction storage diffs via inspectors.
 pub mod storage_diff_inspector;
+/// Helpers for overlaying historical storage with pending diffs.
+pub mod storage_overlay;
 pub mod trace;
 pub mod transaction;
 
@@ -39,6 +42,7 @@ pub use signer::EthSigner;
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
 pub use storage_diff_inspector::{StorageDiffInspector, StorageDiffs};
+pub use storage_overlay::StorageRangeOverlay;
 pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction};
 

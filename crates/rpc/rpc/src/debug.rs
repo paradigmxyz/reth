@@ -5,9 +5,12 @@ use alloy_consensus::{
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
+use alloy_primitives::{hex::decode, uint, Address, Bytes, StorageKey, B256};
 use alloy_rlp::{Decodable, Encodable};
-use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_rpc_types_debug::{
+    storage_range::{StorageMap, StorageRangeResult as RpcStorageRangeResult, StorageResult},
+    ExecutionWitness,
+};
 use alloy_rpc_types_eth::{
     state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo,
 };
@@ -26,14 +29,15 @@ use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWi
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{EthTransactions, StorageDiffInspector, StorageDiffs, TraceExt},
+    helpers::{EthTransactions, StorageDiffInspector, StorageDiffs, StorageRangeOverlay, TraceExt},
     EthApiTypes, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
+    StateProofProvider, StateProviderFactory, StateRootProvider,
+    StorageRangeResult as ProviderStorageRangeResult, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
@@ -270,6 +274,67 @@ where
             .await
     }
 
+    /// Computes the storage range for the given block, transaction index and account, taking into
+    /// account the writes performed up to the specified transaction.
+    pub async fn storage_range_at(
+        &self,
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> Result<RpcStorageRangeResult, Eth::Error> {
+        if max_result == 0 {
+            return Err(
+                EthApiError::InvalidParams("maxResult must be greater than zero".into()).into()
+            )
+        }
+
+        let block_id: BlockId = block_hash.into();
+        let block = self
+            .eth_api()
+            .recovered_block(block_id)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let tx_count = block.body().transactions().len();
+        if tx_idx >= tx_count {
+            return Err(EthApiError::InvalidParams(format!(
+                "transaction index {tx_idx} out of bounds for block with {tx_count} transactions"
+            ))
+            .into())
+        }
+
+        let storage_provider = self
+            .provider()
+            .storage_range_by_block_hash(block_hash)
+            .map_err(Eth::Error::from_eth_err)?;
+        let base = storage_provider.as_ref();
+
+        let diffs = self.run_with_storage_diff_inspector(block_id, Some(tx_idx as u64)).await?;
+
+        let max_slots = usize::try_from(max_result).map_err(|_| {
+            Eth::Error::from_eth_err(EthApiError::InvalidParams(
+                "maxResult exceeds supported limits".to_string(),
+            ))
+        })?;
+        let start_key = StorageKey::from(key_start);
+
+        let overlay_slots =
+            StorageRangeOverlay::merged_slots_for_account(base, contract_address, &diffs, tx_idx)
+                .map_err(Eth::Error::from_eth_err)?;
+
+        let range = if let Some(slots) = overlay_slots {
+            let mut overlay = StorageRangeOverlay::new(base);
+            overlay.add_account_overlay(contract_address, slots);
+            overlay.storage_range(contract_address, start_key, max_slots)
+        } else {
+            base.storage_range(contract_address, start_key, max_slots)
+        }
+        .map_err(Eth::Error::from_eth_err)?;
+
+        Ok(convert_storage_range(range))
+    }
+
     /// Trace the transaction according to the provided options.
     ///
     /// Ref: <https://geth.ethereum.org/docs/developers/evm-tracing/built-in-tracers>
@@ -308,7 +373,6 @@ where
                     evm_env.clone(),
                     block_txs,
                     *tx.tx_hash(),
-                    &mut inspector,
                 )?;
 
                 let tx_env = this.eth_api().evm_config().tx_env(&tx);
@@ -1399,13 +1463,15 @@ where
 
     async fn debug_storage_range_at(
         &self,
-        _block_hash: B256,
-        _tx_idx: usize,
-        _contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> RpcResult<RpcStorageRangeResult> {
+        self.storage_range_at(block_hash, tx_idx, contract_address, key_start, max_result)
+            .await
+            .map_err(Into::into)
     }
 
     async fn debug_trace_bad_block(
@@ -1456,6 +1522,16 @@ struct DebugApiInner<Eth> {
     blocking_task_guard: BlockingTaskGuard,
 }
 
+fn convert_storage_range(range: ProviderStorageRangeResult) -> RpcStorageRangeResult {
+    let mut storage = BTreeMap::new();
+    for entry in range.slots {
+        let value = B256::from(entry.value.to_be_bytes());
+        storage.insert(entry.key, StorageResult { key: entry.key, value });
+    }
+
+    RpcStorageRangeResult { storage: StorageMap(storage), next_key: range.next_key.map(Into::into) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1467,13 +1543,15 @@ mod tests {
     use reth_db_api::models::StoredBlockBodyIndices;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::crypto::secp256k1::{
-        public_key_to_address, Keypair, Secp256k1, SecretKey,
+    use reth_primitives_traits::{
+        crypto::secp256k1::{public_key_to_address, Keypair, Secp256k1, SecretKey},
+        StorageEntry,
     };
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_testing_utils::generators::sign_tx_with_key_pair;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use std::collections::BTreeMap;
 
     type TestRpcNode = RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>;
     type TestEthApi = EthApi<TestRpcNode, EthRpcConverter<ChainSpec>>;
@@ -1594,5 +1672,22 @@ mod tests {
             let value = StorageValue::from(U256::from(spec.value));
             assert_eq!(entry.get(&slot), Some(&value));
         }
+    }
+
+    #[test]
+    fn converts_storage_range_result() {
+        let entry = StorageEntry::new(B256::from(U256::from(1)), U256::from(2));
+        let range = ProviderStorageRangeResult {
+            slots: vec![entry.clone()],
+            next_key: Some(StorageKey::from(B256::from(3))),
+        };
+
+        let rpc = convert_storage_range(range);
+        assert_eq!(rpc.next_key, Some(B256::from(3)));
+        assert_eq!(rpc.storage.len(), 1);
+        let (key, slot) = rpc.storage.0.iter().next().unwrap();
+        assert_eq!(key, &entry.key);
+        assert_eq!(slot.key, entry.key);
+        assert_eq!(slot.value, B256::from(entry.value.to_be_bytes()));
     }
 }
