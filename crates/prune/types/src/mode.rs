@@ -80,6 +80,38 @@ impl PruneMode {
     pub const fn is_distance(&self) -> bool {
         matches!(self, Self::Distance(_))
     }
+
+    /// Returns the next block number that will EVENTUALLY be pruned after the given checkpoint. It
+    /// should not be used to find if there are blocks to be pruned right now. For that, use
+    /// [`Self::prune_target_block`].
+    ///
+    /// This is independent of the current tip and indicates what block is next in the pruning
+    /// sequence according to this mode's configuration. Returns `None` if no more blocks will
+    /// be pruned (i.e., the mode has reached its target).
+    ///
+    /// # Examples
+    ///
+    /// - `Before(10)` with checkpoint at block 5 returns `Some(6)`
+    /// - `Before(10)` with checkpoint at block 9 returns `None` (done)
+    /// - `Distance(100)` with checkpoint at block 1000 returns `Some(1001)` (always has more)
+    /// - `Full` always returns the next block after checkpoint
+    pub const fn next_pruned_block(&self, checkpoint: Option<BlockNumber>) -> Option<BlockNumber> {
+        let next = match checkpoint {
+            Some(c) => c + 1,
+            None => 0,
+        };
+
+        match self {
+            Self::Before(n) => {
+                if next < *n {
+                    Some(next)
+                } else {
+                    None
+                }
+            }
+            Self::Distance(_) | Self::Full => Some(next),
+        }
+    }
 }
 
 #[cfg(test)]
