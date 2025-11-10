@@ -59,7 +59,6 @@ where
         _static_file_provider: StaticFileProvider<Provider::Primitives>,
         prune_modes: PruneModes,
     ) -> Self {
-        #[expect(deprecated)]
         let PruneModes {
             sender_recovery,
             transaction_lookup,
@@ -68,7 +67,7 @@ where
             storage_history,
             bodies_history,
             merkle_changesets,
-            receipts_log_filter: (),
+            receipts_log_filter: _,
         } = prune_modes;
 
         Self::default()

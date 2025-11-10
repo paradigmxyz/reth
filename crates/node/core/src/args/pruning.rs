@@ -7,7 +7,7 @@ use alloy_primitives::BlockNumber;
 use clap::{builder::RangedU64ValueParser, Args};
 use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
-use reth_prune_types::{PruneMode, PruneModes, MINIMUM_PRUNING_DISTANCE};
+use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 
 /// Parameters for pruning and full node
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
@@ -136,8 +136,7 @@ impl PruningArgs {
                         .block_number()
                         .map(PruneMode::Before),
                     merkle_changesets: PruneMode::Distance(MINIMUM_PRUNING_DISTANCE),
-                    #[expect(deprecated)]
-                    receipts_log_filter: (),
+                    receipts_log_filter: ReceiptsLogPruneConfig::empty(),
                 },
             }
         }
