@@ -121,6 +121,7 @@ impl NodeManager {
         &self,
         binary_path_str: &str,
         additional_args: &[String],
+        ref_type: &str,
     ) -> (Vec<String>, String) {
         let mut reth_args = vec![binary_path_str.to_string(), "node".to_string()];
 
@@ -150,8 +151,12 @@ impl NodeManager {
 
         // Add tracing arguments if OTLP endpoint is configured
         if let Some(ref endpoint) = self.tracing_endpoint {
-            info!("Enabling OTLP tracing export to: {}", endpoint);
+            info!("Enabling OTLP tracing export to: {} (service: reth-{})", endpoint, ref_type);
+            // Endpoint requires equals per clap settings in reth
             reth_args.push(format!("--tracing-otlp={}", endpoint));
+
+            // Set service name to differentiate baseline vs feature runs in Jaeger
+            reth_args.push(format!("--tracing-otlp.service-name=reth-{}", ref_type));
         }
 
         // Add any additional arguments passed via command line (common to both baseline and
@@ -233,7 +238,7 @@ impl NodeManager {
         self.binary_path = Some(binary_path.to_path_buf());
 
         let binary_path_str = binary_path.to_string_lossy();
-        let (reth_args, _) = self.build_reth_args(&binary_path_str, additional_args);
+        let (reth_args, _) = self.build_reth_args(&binary_path_str, additional_args, ref_type);
 
         // Log additional arguments if any
         if !self.additional_reth_args.is_empty() {
@@ -255,13 +260,9 @@ impl NodeManager {
             cmd.process_group(0);
         }
 
-        // Set OpenTelemetry service name to differentiate baseline vs feature runs in Jaeger
+        // Set high queue size to prevent trace dropping during benchmarks
         if self.tracing_endpoint.is_some() {
-            cmd.env("OTEL_SERVICE_NAME", format!("reth-{}", ref_type));
-            // Set high queue size to prevent trace dropping during benchmarks for higher block
-            // ranges
             cmd.env("OTEL_BLRP_MAX_QUEUE_SIZE", "10000");
-            info!("OTLP tracing configured with service name: reth-{}", ref_type);
         }
 
         debug!("Executing reth command: {cmd:?}");
@@ -335,7 +336,8 @@ impl NodeManager {
     pub(crate) async fn wait_for_node_ready_and_get_tip(&self) -> Result<u64> {
         info!("Waiting for node to be ready and synced...");
 
-        let max_wait = Duration::from_secs(120); // 2 minutes to allow for sync
+        // Allow more time in CI and when tracing/profiling is enabled
+        let max_wait = Duration::from_secs(300);
         let check_interval = Duration::from_secs(2);
         let rpc_url = "http://localhost:8545";
 
@@ -345,29 +347,25 @@ impl NodeManager {
 
         timeout(max_wait, async {
             loop {
-                // First check if RPC is up and node is not syncing
-                match provider.syncing().await {
-                    Ok(sync_result) => {
-                        match sync_result {
-                            SyncStatus::Info(sync_info) => {
-                                debug!("Node is still syncing {sync_info:?}, waiting...");
-                            }
-                            _ => {
-                                // Node is not syncing, now get the tip
-                                match provider.get_block_number().await {
-                                    Ok(tip) => {
-                                        info!("Node is ready and not syncing at block: {}", tip);
-                                        return Ok(tip);
-                                    }
-                                    Err(e) => {
-                                        debug!("Failed to get block number: {}", e);
-                                    }
-                                }
-                            }
-                        }
+                // Treat successful block number as readiness, regardless of syncing status
+                match provider.get_block_number().await {
+                    Ok(tip) => {
+                        info!("Node RPC is responsive at block: {}", tip);
+                        return Ok(tip);
                     }
                     Err(e) => {
-                        debug!("Node RPC not ready yet or failed to check sync status: {}", e);
+                        debug!("RPC not ready yet (block_number): {}", e);
+                    }
+                }
+
+                // Log syncing state for visibility but don't gate readiness on it
+                match provider.syncing().await {
+                    Ok(SyncStatus::Info(sync_info)) => {
+                        debug!("Sync status: {sync_info:?}");
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        debug!("Failed to fetch sync status: {}", e);
                     }
                 }
 

@@ -61,6 +61,24 @@ pub struct TraceArgs {
         help_heading = "Tracing"
     )]
     pub otlp_filter: EnvFilter,
+
+    /// Service name to use for OTLP tracing export.
+    ///
+    /// This name will be used to identify the service in distributed tracing systems
+    /// like Jaeger or Zipkin. Useful for differentiating between multiple reth instances.
+    ///
+    /// Example: --tracing-otlp.service-name=reth-baseline
+    ///
+    /// Defaults to "reth" if not specified.
+    #[arg(
+        long = "tracing-otlp.service-name",
+        env = "OTEL_SERVICE_NAME",
+        global = true,
+        value_name = "NAME",
+        default_value = "reth",
+        help_heading = "Tracing"
+    )]
+    pub service_name: String,
 }
 
 impl Default for TraceArgs {
@@ -69,6 +87,7 @@ impl Default for TraceArgs {
             otlp: None,
             protocol: OtlpProtocol::Http,
             otlp_filter: EnvFilter::from_default_env(),
+            service_name: "reth".to_string(),
         }
     }
 }
