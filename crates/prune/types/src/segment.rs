@@ -1,6 +1,6 @@
 #![allow(deprecated)] // necessary to all defining deprecated `PruneSegment` variants
 
-use crate::{PruneMode, MINIMUM_PRUNING_DISTANCE};
+use crate::MINIMUM_PRUNING_DISTANCE;
 use alloy_primitives::Address;
 use derive_more::Display;
 use strum::{EnumIter, IntoEnumIterator};

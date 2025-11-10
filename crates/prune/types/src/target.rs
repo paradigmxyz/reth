@@ -102,10 +102,7 @@ pub struct PruneModes {
     /// Receipts log filtering has been deprecated and will be removed in a future release.
     #[cfg_attr(
         any(test, feature = "serde"),
-        serde(
-            skip_serializing_if = "ReceiptsLogPruneConfig::is_empty",
-            deserialize_with = "ReceiptsLogPruneConfig::deserialize"
-        )
+        serde(skip_serializing_if = "ReceiptsLogPruneConfig::is_empty",)
     )]
     pub receipts_log_filter: ReceiptsLogPruneConfig,
 }

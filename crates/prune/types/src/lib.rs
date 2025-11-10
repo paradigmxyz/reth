@@ -35,7 +35,7 @@ use serde::{Deserialize, Deserializer};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut, From)]
-#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub struct ReceiptsLogPruneConfig(pub BTreeMap<Address, PruneMode>);
 
 impl ReceiptsLogPruneConfig {
@@ -47,19 +47,6 @@ impl ReceiptsLogPruneConfig {
     /// Returns `true` if the config is empty.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
-    }
-
-    #[cfg(all(feature = "serde", feature = "std"))]
-    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let mut config = Self(BTreeMap::deserialize(deserializer)?);
-        let errors = config.validate_and_fix();
-        for error in errors {
-            reth_tracing::tracing::warn!("Receipt log pruning config error: {}", error);
-        }
-        Ok(config)
     }
 
     /// Validates the configuration and fixes any issues if possible.
@@ -117,5 +104,20 @@ impl ReceiptsLogPruneConfig {
             map.entry(block).or_insert_with(Vec::new).push(*address)
         }
         Ok(map)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for ReceiptsLogPruneConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let mut config = Self(BTreeMap::deserialize(deserializer)?);
+        let errors = config.validate_and_fix();
+        for error in errors {
+            reth_tracing::tracing::warn!("Receipt log pruning config error: {}", error);
+        }
+        Ok(config)
     }
 }
