@@ -3,6 +3,7 @@ use bytes::Bytes;
 use eyre::{eyre, OptionExt};
 use futures_util::{stream::StreamExt, Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl, Url};
+use reth_era::common::file_ops::EraFileType;
 use sha2::{Digest, Sha256};
 use std::{future::Future, path::Path, str::FromStr};
 use tokio::{
@@ -41,6 +42,7 @@ pub struct EraClient<Http> {
     client: Http,
     url: Url,
     folder: Box<Path>,
+    era_type: EraFileType,
 }
 
 impl<Http: HttpClient + Clone> EraClient<Http> {
@@ -48,7 +50,8 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
     pub fn new(client: Http, url: Url, folder: impl Into<Box<Path>>) -> Self {
-        Self { client, url, folder: folder.into() }
+        let era_type = EraFileType::from_url(url.as_str());
+        Self { client, url, folder: folder.into(), era_type }
     }
 
     /// Performs a GET request on `url` and stores the response body into a file located within
@@ -92,9 +95,11 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 }
             }
 
-            self.assert_checksum(number, actual_checksum?)
-                .await
-                .map_err(|e| eyre!("{e} for {file_name} at {}", path.display()))?;
+            if self.era_type == EraFileType::Era1 {
+                self.assert_checksum(number, actual_checksum?)
+                    .await
+                    .map_err(|e| eyre!("{e} for {file_name} at {}", path.display()))?;
+            }
         }
 
         Ok(path.into_boxed_path())
@@ -145,9 +150,11 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     pub async fn files_count(&self) -> usize {
         let mut count = 0usize;
 
+        let file_extension = self.era_type.extension().trim_start_matches('.');
+
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
-                if entry.path().extension() == Some("era1".as_ref()) {
+                if entry.path().extension() == Some(file_extension.as_ref()) {
                     count += 1;
                 }
             }
@@ -203,11 +210,14 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let file = File::create(&path).await?;
         let mut writer = io::BufWriter::new(file);
 
+        let ext = self.era_type.extension();
+        let ext_len = ext.len();
+
         while let Some(line) = lines.next_line().await? {
-            if let Some(j) = line.find(".era1") &&
+            if let Some(j) = line.find(ext) &&
                 let Some(i) = line[..j].rfind(|c: char| !c.is_alphanumeric() && c != '-')
             {
-                let era = &line[i + 1..j + 5];
+                let era = &line[i + 1..j + ext_len];
                 writer.write_all(era.as_bytes()).await?;
                 writer.write_all(b"\n").await?;
             }
