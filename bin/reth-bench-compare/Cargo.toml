@@ -21,7 +21,6 @@ reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
 reth-node-core.workspace = true
 reth-tracing.workspace = true
-reth-tracing-otlp.workspace = true
 reth-chainspec.workspace = true
 
 # alloy
