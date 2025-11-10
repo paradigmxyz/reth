@@ -22,7 +22,6 @@ pub(crate) const ERA1_MAINNET_0: &[u8] =
 pub(crate) const ERA1_MAINNET_1: &[u8] =
     include_bytes!("../res/era1-files/mainnet-00001-a5364e9a.era1");
 
-#[allow(dead_code)]
 pub(crate) const ERA_NIMBUS: &[u8] = include_bytes!("../res/era-nimbus.html");
 pub(crate) const ERA_MAINNET_0: &[u8] =
     include_bytes!("../res/era-files/mainnet-00000-4b363db9.era");

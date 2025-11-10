@@ -9,7 +9,6 @@ use std::{future::Future, path::Path, str::FromStr};
 use tokio::{
     fs::{self, File},
     io::{self, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt},
-    join, try_join,
 };
 
 /// Accesses the network over HTTP.
@@ -163,43 +162,30 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         count
     }
 
-    /// Fetches the list of ERA1 files from `url` and stores it in a file located within `folder`.
+    /// Fetches the list of ERA1/ERA files from `url` and stores it in a file located within
+    /// `folder`.
+    /// For era files, checksum.txt file does not exist, so the checksum verification is
+    /// skipped.
     pub async fn fetch_file_list(&self) -> eyre::Result<()> {
-        let (mut index, mut checksums) = try_join!(
-            self.client.get(self.url.clone()),
-            self.client.get(self.url.clone().join(Self::CHECKSUMS)?),
-        )?;
-
         let index_path = self.folder.to_path_buf().join("index.html");
         let checksums_path = self.folder.to_path_buf().join(Self::CHECKSUMS);
 
-        let (mut index_file, mut checksums_file) =
-            try_join!(File::create(&index_path), File::create(&checksums_path))?;
+        let mut index_stream = self.client.get(self.url.clone()).await?;
+        let mut index_file = File::create(&index_path).await?;
 
-        loop {
-            let (index, checksums) = join!(index.next(), checksums.next());
-            let (index, checksums) = (index.transpose()?, checksums.transpose()?);
+        while let Some(item) = index_stream.next().await.transpose()? {
+            io::copy(&mut item.as_ref(), &mut index_file).await?;
+        }
 
-            if index.is_none() && checksums.is_none() {
-                break;
+        // only do checksum operations for era1 files
+        if self.era_type == EraFileType::Era1 {
+            let mut checksums_stream =
+                self.client.get(self.url.clone().join(Self::CHECKSUMS)?).await?;
+            let mut checksums_file = File::create(&checksums_path).await?;
+
+            while let Some(item) = checksums_stream.next().await.transpose()? {
+                io::copy(&mut item.as_ref(), &mut checksums_file).await?;
             }
-            let index_file = &mut index_file;
-            let checksums_file = &mut checksums_file;
-
-            try_join!(
-                async move {
-                    if let Some(index) = index {
-                        io::copy(&mut index.as_ref(), index_file).await?;
-                    }
-                    Ok::<(), eyre::Error>(())
-                },
-                async move {
-                    if let Some(checksums) = checksums {
-                        io::copy(&mut checksums.as_ref(), checksums_file).await?;
-                    }
-                    Ok::<(), eyre::Error>(())
-                },
-            )?;
         }
 
         let file = File::open(&index_path).await?;
@@ -227,7 +213,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         Ok(())
     }
 
-    /// Returns ERA1 file name that is ordered at `number`.
+    /// Returns ERA1/ERA file name that is ordered at `number`.
     pub async fn number_to_file_name(&self, number: usize) -> eyre::Result<Option<String>> {
         let path = self.folder.to_path_buf().join("index");
         let file = File::open(&path).await?;
@@ -245,18 +231,23 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
         match File::open(path).await {
             Ok(file) => {
-                let number = self
-                    .file_name_to_number(name)
-                    .ok_or_else(|| eyre!("Cannot parse ERA number from {name}"))?;
+                if self.era_type == EraFileType::Era1 {
+                    let number = self
+                        .file_name_to_number(name)
+                        .ok_or_else(|| eyre!("Cannot parse ERA number from {name}"))?;
 
-                let actual_checksum = checksum(file).await?;
-                let is_verified = self.verify_checksum(number, actual_checksum).await?;
+                    let actual_checksum = checksum(file).await?;
+                    let is_verified = self.verify_checksum(number, actual_checksum).await?;
 
-                if !is_verified {
-                    fs::remove_file(path).await?;
+                    if !is_verified {
+                        fs::remove_file(path).await?;
+                    }
+
+                    Ok(is_verified)
+                } else {
+                    // For era files, we skip checksum verification, as checksum.txt does not exist
+                    Ok(true)
                 }
-
-                Ok(is_verified)
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(e)?,
