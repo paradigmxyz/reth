@@ -117,7 +117,7 @@ pub enum PruneSegmentError {
     #[error("the configuration provided for {0} is invalid")]
     Configuration(PruneSegment),
     /// Unsupported receipts log filter prune mode for address.
-    #[error("distance prune mode is not supported for receipts log filter, check address {0}")]
+    #[error("receipts log filter for address {0} does not support distance prune mode")]
     UnsupportedReceiptsLogFilterDistance(Address),
 }
 

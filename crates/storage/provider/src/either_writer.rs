@@ -18,15 +18,15 @@ pub enum EitherWriter<'a, CURSOR, N> {
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
 }
 
-#[derive(Debug, EnumIs)]
-#[allow(missing_docs)]
-pub enum EitherWriterDestination {
-    Database,
-    StaticFile,
-}
-
 impl EitherWriter<'_, (), ()> {
     /// Returns the destination for writing receipts.
+    ///
+    /// The rules are as follows:
+    /// - If the node should not always write receipts to static files, and any receipt pruning is
+    ///   enabled, write to the database.
+    /// - If the node should always write receipts to static files, but receipt log filter pruning
+    ///   is enabled, write to the database.
+    /// - Otherwise, write to static files.
     pub fn receipts_destination<P: DBProvider + StorageSettingsCache>(
         provider: &P,
     ) -> EitherWriterDestination {
@@ -42,6 +42,13 @@ impl EitherWriter<'_, (), ()> {
             EitherWriterDestination::StaticFile
         }
     }
+}
+
+#[derive(Debug, EnumIs)]
+#[allow(missing_docs)]
+pub enum EitherWriterDestination {
+    Database,
+    StaticFile,
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
