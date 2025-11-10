@@ -25,7 +25,7 @@ impl TrieCursorMetrics {
 }
 
 /// Cached metrics counters for trie cursor operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct TrieCursorMetricsCache {
     /// Counter for `next()` calls
     pub next_count: usize,

@@ -26,7 +26,7 @@ impl HashedCursorMetrics {
 }
 
 /// Cached metrics counters for hashed cursor operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct HashedCursorMetricsCache {
     /// Counter for `next()` calls
     pub next_count: usize,

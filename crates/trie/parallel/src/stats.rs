@@ -1,5 +1,9 @@
 use derive_more::Deref;
-use reth_trie::stats::{TrieStats, TrieTracker};
+use reth_trie::{
+    hashed_cursor::metrics::HashedCursorMetricsCache,
+    stats::{TrieStats, TrieTracker},
+    trie_cursor::metrics::TrieCursorMetricsCache,
+};
 
 /// Trie stats.
 #[derive(Deref, Clone, Copy, Debug)]
@@ -34,6 +38,14 @@ pub struct ParallelTrieTracker {
     trie: TrieTracker,
     precomputed_storage_roots: u64,
     missed_leaves: u64,
+    /// Metrics for account trie cursor operations.
+    pub account_trie_cursor_metrics: TrieCursorMetricsCache,
+    /// Metrics for account hashed cursor operations.
+    pub account_hashed_cursor_metrics: HashedCursorMetricsCache,
+    /// Metrics for storage trie cursor operations.
+    pub storage_trie_cursor_metrics: TrieCursorMetricsCache,
+    /// Metrics for storage hashed cursor operations.
+    pub storage_hashed_cursor_metrics: HashedCursorMetricsCache,
 }
 
 impl ParallelTrieTracker {
