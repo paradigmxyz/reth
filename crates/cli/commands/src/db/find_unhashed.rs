@@ -1,12 +1,26 @@
-use alloy_primitives::{keccak256, Address, BlockNumber, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber};
 use clap::Parser;
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, models::BlockNumberAddress, tables, transaction::DbTx,
 };
 use reth_node_builder::NodeTypesWithDB;
+use reth_primitives_traits::Account;
 use reth_provider::ProviderFactory;
+use reth_stages::StageId;
 use reth_trie_common::Nibbles;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use tracing::info;
+
+/// A match result from searching account change sets
+#[derive(Debug, Clone)]
+struct AccountMatch {
+    block_number: BlockNumber,
+    address: Address,
+    pre_block_state: Option<Account>,
+}
 
 /// The arguments for the `reth db find-unhashed` command
 #[derive(Parser, Debug)]
@@ -26,56 +40,139 @@ pub struct Command {
     /// Maximum block number to search (start searching from this block)
     #[arg(long, value_name = "BLOCK_NUMBER")]
     pub max_block: Option<BlockNumber>,
+
+    /// Number of concurrent threads to use for searching
+    #[arg(long, value_name = "COUNT", default_value_t = default_concurrency())]
+    pub concurrency: usize,
+}
+
+fn default_concurrency() -> usize {
+    std::thread::available_parallelism().map_or(2, |n| n.get() * 2)
 }
 
 impl Command {
     /// Search for an account by its hash nibbles (prefix match) and output results
-    fn search_account_by_nibbles<TX: DbTx>(
-        tx: &TX,
+    fn search_account_by_nibbles<DB: Database>(
+        db: &DB,
         account_prefix: Nibbles,
         min_block: Option<BlockNumber>,
         max_block: Option<BlockNumber>,
+        db_tip: BlockNumber,
+        concurrency: usize,
     ) -> eyre::Result<()> {
-        // Create a cursor over the AccountChangeSets table
-        let mut cursor = tx.cursor_dup_read::<tables::AccountChangeSets>()?;
+        // Determine actual min and max blocks for the range
+        let actual_max = max_block.unwrap_or(db_tip);
+        let actual_min = min_block.unwrap_or(0);
 
-        // Position the cursor at the starting point. We start just after the configured max block
-        // so that iteration starts at the end of our target range.
-        let max_key_excl = max_block.map(|max| max + 1);
-        let mut walker = cursor.walk_back(max_key_excl)?;
-
-        info!("Searching for account with nibbles prefix: {:?}", account_prefix);
-        let mut matches_found = 0;
-
-        // Iterate through entries backwards
-        while let Some((block_number, account_before_tx)) = walker.next().transpose()? {
-            // Check if we're above the max block, or if we've gone below the minimum block
-            if let Some(max_block) = max_block &&
-                block_number > max_block
-            {
-                continue
-            } else if let Some(min_block) = min_block &&
-                block_number < min_block
-            {
-                info!("Reached minimum block {}, stopping search", min_block);
-                break;
-            }
-
-            let address = account_before_tx.address;
-            let hashed_address = keccak256(address);
-            let hashed_address_nibbles = Nibbles::unpack(hashed_address);
-
-            // Check if this is the account we're looking for (prefix match)
-            if hashed_address_nibbles.starts_with(&account_prefix) {
-                matches_found += 1;
-                info!(?address, ?block_number, pre_block_state=?account_before_tx.info, "Found matching account!");
-            }
+        if actual_min > actual_max {
+            info!(
+                "Min block {} is greater than max block {}, nothing to search",
+                actual_min, actual_max
+            );
+            return Ok(());
         }
 
-        if matches_found == 0 {
+        info!(
+            "Searching for account with nibbles prefix: {:?} from block {} to {} using {} threads",
+            account_prefix, actual_min, actual_max, concurrency
+        );
+
+        // Calculate the block range size and split it among threads
+        let total_blocks = actual_max - actual_min + 1;
+        let blocks_per_thread = total_blocks.div_ceil(concurrency as u64);
+
+        // Shared counter for total matches across all threads
+        let total_matches = Arc::new(AtomicUsize::new(0));
+
+        // Spawn threads to search in parallel
+        let mut all_matches = std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+
+            for thread_id in 0..concurrency {
+                let thread_min = actual_min + (thread_id as u64 * blocks_per_thread);
+                let thread_max = (thread_min + blocks_per_thread - 1).min(actual_max);
+
+                // Skip if this thread's range is beyond the actual range
+                if thread_min > actual_max {
+                    break;
+                }
+
+                let total_matches = Arc::clone(&total_matches);
+
+                let handle = scope.spawn(move || -> eyre::Result<Vec<AccountMatch>> {
+                    // Each thread creates its own database transaction
+                    let mut tx = db.tx()?;
+                    tx.disable_long_read_transaction_safety();
+
+                    // Create a cursor over the AccountChangeSets table
+                    let mut cursor = tx.cursor_dup_read::<tables::AccountChangeSets>()?;
+
+                    // Position the cursor at the starting point for this thread's range
+                    let max_key_excl = Some(thread_max + 1);
+                    let mut walker = cursor.walk_back(max_key_excl)?;
+
+                    let mut matches = Vec::new();
+
+                    // Iterate through entries backwards within this thread's range
+                    while let Some((block_number, account_before_tx)) = walker.next().transpose()? {
+                        // Check if we're above our thread's max block
+                        if block_number > thread_max {
+                            continue;
+                        }
+
+                        // Check if we've gone below our thread's minimum block
+                        if block_number < thread_min {
+                            break;
+                        }
+
+                        let address = account_before_tx.address;
+                        let hashed_address = keccak256(address);
+                        let hashed_address_nibbles = Nibbles::unpack(hashed_address);
+
+                        // Check if this is the account we're looking for (prefix match)
+                        if hashed_address_nibbles.starts_with(&account_prefix) {
+                            matches.push(AccountMatch {
+                                block_number,
+                                address,
+                                pre_block_state: account_before_tx.info,
+                            });
+                        }
+                    }
+
+                    // Update the total matches counter
+                    total_matches.fetch_add(matches.len(), Ordering::Relaxed);
+                    Ok(matches)
+                });
+
+                handles.push(handle);
+            }
+
+            // Wait for all threads to complete and collect results
+            let mut all_matches = Vec::new();
+            for handle in handles {
+                let thread_matches = handle.join().unwrap()?;
+                all_matches.extend(thread_matches);
+            }
+
+            Ok::<Vec<AccountMatch>, eyre::Error>(all_matches)
+        })?;
+
+        // Sort results by block number in reverse order (highest first)
+        all_matches.sort_by(|a, b| b.block_number.cmp(&a.block_number));
+
+        // Log all sorted results
+        if all_matches.is_empty() {
             info!("No account found with the given hash");
         } else {
-            info!("Total matches found: {}", matches_found);
+            info!("Total matches found: {}", all_matches.len());
+            for match_result in all_matches {
+                info!(
+                    ?match_result.address,
+                    ?match_result.block_number,
+                    pre_block_state=?match_result.pre_block_state,
+                    "Found matching account!"
+                );
+            }
         }
         Ok(())
     }
@@ -127,7 +224,7 @@ impl Command {
 
             // Check if the slot nibbles match as a prefix
             let slot_matches = hashed_slot.starts_with(&slot_prefix);
-            let addr_matches = account_prefix.as_ref().map_or(true, |prefix| {
+            let addr_matches = account_prefix.as_ref().is_none_or(|prefix| {
                 let hashed_address = Nibbles::unpack(keccak256(address));
                 hashed_address.starts_with(prefix)
             });
@@ -156,16 +253,22 @@ impl Command {
         let mut tx = db.tx()?;
         tx.disable_long_read_transaction_safety();
 
+        // Get the db tip block from the Finish checkpoint
+        let db_tip = tx
+            .get::<tables::StageCheckpoints>(StageId::Finish.to_string())?
+            .unwrap_or_default()
+            .block_number;
+        info!("DB tip block: {}", db_tip);
+
         // Validate: if slot is given, account must be a full B256 (64 nibbles)
-        if let Some(ref slot_prefix) = self.slot {
-            if let Some(ref account_prefix) = self.account {
-                if account_prefix.len() != 64 {
-                    panic!(
-                        "When --slot is provided, --account must be a full B256 hash (64 nibbles), got {} nibbles",
-                        account_prefix.len()
-                    );
-                }
-            }
+        if self.slot.is_some() &&
+            let Some(ref account_prefix) = self.account &&
+            account_prefix.len() != 64
+        {
+            panic!(
+                "When --slot is provided, --account must be a full B256 hash (64 nibbles), got {} nibbles",
+                account_prefix.len()
+            );
         }
 
         // Call the appropriate search function based on which arguments are provided
@@ -182,7 +285,14 @@ impl Command {
             }
             (Some(account_prefix), None) => {
                 // If only account is given, search accounts with prefix matching
-                Self::search_account_by_nibbles(&tx, account_prefix, self.min_block, self.max_block)
+                Self::search_account_by_nibbles(
+                    db,
+                    account_prefix,
+                    self.min_block,
+                    self.max_block,
+                    db_tip,
+                    self.concurrency,
+                )
             }
             (None, None) => {
                 // If neither is given then error.
