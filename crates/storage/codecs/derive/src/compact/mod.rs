@@ -206,6 +206,11 @@ pub fn get_bit_size(ftype: &str) -> u8 {
         "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "NumTransactions" => 4,
         "u128" => 5,
         "U256" => 6,
+
+        // IRYS MODIFICATIONS
+        "u32" | "i32" => 3,
+        "u8" => 1,
+
         _ => 0,
     }
 }

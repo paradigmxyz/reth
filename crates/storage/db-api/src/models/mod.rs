@@ -56,6 +56,8 @@ macro_rules! impl_uints {
 }
 
 impl_uints!(u64, u32, u16, u8);
+// IRYS
+impl_uints!(u128);
 
 impl Encode for Vec<u8> {
     type Encoded = Self;

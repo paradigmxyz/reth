@@ -176,6 +176,10 @@ macro_rules! impl_uint_compact {
 }
 
 impl_uint_compact!(u8, u64, u128);
+// IRYS
+// NOTE: this does work (less effectively) for signed numbers
+// but does require you to add the type to `get_bit_size`
+impl_uint_compact!(u32, i32);
 
 impl<T> Compact for Vec<T>
 where
