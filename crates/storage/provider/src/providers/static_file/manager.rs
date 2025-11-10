@@ -44,7 +44,7 @@ use reth_storage_api::{BlockBodyIndicesProvider, DBProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{BTreeMap, HashMap},
-    fmt::Debug,
+    fmt::{self, Debug},
     ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::{atomic::AtomicU64, mpsc, Arc},
@@ -54,6 +54,31 @@ use tracing::{debug, info, trace, warn};
 /// Alias type for a map that can be queried for block or transaction ranges. It uses `u64` to
 /// represent either a block or a transaction number end of a static file range.
 type SegmentRanges = HashMap<StaticFileSegment, BTreeMap<u64, SegmentRangeInclusive>>;
+
+#[derive(Debug)]
+struct InvalidBlocksPerFile {
+    value: u64,
+    segment: Option<StaticFileSegment>,
+}
+
+impl fmt::Display for InvalidBlocksPerFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.segment {
+            Some(segment) => write!(
+                f,
+                "blocks_per_file must be greater than zero for segment {segment:?} (received {})",
+                self.value
+            ),
+            None => write!(
+                f,
+                "blocks_per_file must be greater than zero (received {})",
+                self.value
+            ),
+        }
+    }
+}
+
+impl std::error::Error for InvalidBlocksPerFile {}
 
 /// Access mode on a static file provider. RO/RW.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -112,11 +137,17 @@ impl<N: NodePrimitives> StaticFileProviderBuilder<N> {
     }
 
     /// Set a custom number of blocks per file for all segments.
-    pub fn with_blocks_per_file(mut self, blocks_per_file: u64) -> Self {
+    pub fn with_blocks_per_file(mut self, blocks_per_file: u64) -> ProviderResult<Self> {
+        if blocks_per_file == 0 {
+            return Err(ProviderError::other(InvalidBlocksPerFile {
+                value: blocks_per_file,
+                segment: None,
+            }))
+        }
         for segment in StaticFileSegment::iter() {
             self.inner.blocks_per_file.insert(segment, blocks_per_file);
         }
-        self
+        Ok(self)
     }
 
     /// Set a custom number of blocks per file for a specific segment.
@@ -124,9 +155,15 @@ impl<N: NodePrimitives> StaticFileProviderBuilder<N> {
         mut self,
         segment: StaticFileSegment,
         blocks_per_file: u64,
-    ) -> Self {
+    ) -> ProviderResult<Self> {
+        if blocks_per_file == 0 {
+            return Err(ProviderError::other(InvalidBlocksPerFile {
+                value: blocks_per_file,
+                segment: Some(segment),
+            }))
+        }
         self.inner.blocks_per_file.insert(segment, blocks_per_file);
-        self
+        Ok(self)
     }
 
     /// Enables metrics on the [`StaticFileProvider`].
@@ -2046,7 +2083,7 @@ mod tests {
     fn test_find_fixed_range_with_block_index() -> eyre::Result<()> {
         let (static_dir, _) = create_test_static_files_dir();
         let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
-            .with_blocks_per_file(100)
+            .with_blocks_per_file(100)?
             .build()?;
 
         let segment = StaticFileSegment::Headers;
