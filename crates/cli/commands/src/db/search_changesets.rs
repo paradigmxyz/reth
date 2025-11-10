@@ -31,12 +31,20 @@ struct StorageMatch {
 /// The arguments for the `reth db search-changesets` command
 #[derive(Parser, Debug)]
 pub struct Command {
+    /// The unhashed account address to search for (will be hashed automatically)
+    #[arg(long, value_name = "ADDRESS", conflicts_with = "hashed_account")]
+    pub account: Option<Address>,
+
     /// The hashed account address to search for (as hex string, will match as prefix)
-    #[arg(long, value_name = "HEX")]
+    #[arg(long, value_name = "HEX", conflicts_with = "account")]
     pub hashed_account: Option<Nibbles>,
 
+    /// The unhashed storage slot key to search for (will be hashed automatically)
+    #[arg(long, value_name = "SLOT", conflicts_with = "hashed_slot")]
+    pub slot: Option<B256>,
+
     /// The hashed storage slot key to search for (as hex string, will match as prefix)
-    #[arg(long, value_name = "HEX")]
+    #[arg(long, value_name = "HEX", conflicts_with = "slot")]
     pub hashed_slot: Option<Nibbles>,
 
     /// Minimum block number to search (stop searching below this block)
@@ -331,19 +339,33 @@ impl Command {
             .block_number;
         info!("DB tip block: {}", db_tip);
 
-        // Validate: if hashed-slot is given, hashed-account must be a full B256 (64 nibbles)
+        // Hash unhashed parameters if provided
+        let account_prefix = if let Some(account) = self.account {
+            Some(Nibbles::unpack(keccak256(account)))
+        } else {
+            self.hashed_account
+        };
+
+        let slot_prefix = if let Some(slot) = self.slot {
+            Some(Nibbles::unpack(keccak256(slot)))
+        } else {
+            self.hashed_slot
+        };
+
+        // Validate: if slot is given, account must be a full B256 (64 nibbles)
+        // This only applies when using --hashed-account, not --account (which is always full hash)
         if self.hashed_slot.is_some() &&
-            let Some(ref account_prefix) = self.hashed_account &&
-            account_prefix.len() != 64
+            let Some(ref hashed_account) = self.hashed_account &&
+            hashed_account.len() != 64
         {
             panic!(
                 "When --hashed-slot is provided, --hashed-account must be a full B256 hash (64 nibbles), got {} nibbles",
-                account_prefix.len()
+                hashed_account.len()
             );
         }
 
         // Call the appropriate search function based on which arguments are provided
-        match (self.hashed_account, self.hashed_slot) {
+        match (account_prefix, slot_prefix) {
             (account_prefix, Some(slot_prefix)) => {
                 // If slot is given, always search storage (with optional account filter)
                 Self::search_storage_by_nibbles(
@@ -369,7 +391,7 @@ impl Command {
             }
             (None, None) => {
                 // If neither is given then error.
-                panic!("At least one of --hashed-account or --hashed-slot must be provided")
+                panic!("At least one of --account, --hashed-account, --slot, or --hashed-slot must be provided")
             }
         }
     }
