@@ -832,7 +832,7 @@ fn reward_trace<H: BlockHeader>(header: &H, reward: RewardAction) -> LocalizedTr
     }
 }
 
-/// Type alias for accessing the block type from TraceExt implementations
+/// Type alias for accessing the block type from `TraceExt implementations
 type TraceBlock<Eth> = <<Eth as RpcNodeCore>::Primitives as NodePrimitives>::Block;
 
 /// Future for fetching blocks in parallel
@@ -856,7 +856,7 @@ type BlockFetchFuture<Eth> = Pin<
 /// Cache threshold: use cache if within 1000 blocks of tip
 const CACHE_THRESHOLD_BLOCKS: u64 = 1000;
 
-/// Helper enum for determining how to stream blocks for trace_filter based on proximity to chain
+/// Helper enum for determining how to stream blocks for `trace_filter based on proximity to chain
 /// tip
 enum BlockStreamKind<Eth>
 where
