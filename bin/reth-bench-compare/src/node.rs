@@ -154,9 +154,6 @@ impl NodeManager {
             info!("Enabling OTLP tracing export to: {} (service: reth-{})", endpoint, ref_type);
             // Endpoint requires equals per clap settings in reth
             reth_args.push(format!("--tracing-otlp={}", endpoint));
-
-            // Set service name to differentiate baseline vs feature runs in Jaeger
-            reth_args.push(format!("--tracing-otlp.service-name=reth-{}", ref_type));
         }
 
         // Add any additional arguments passed via command line (common to both baseline and
@@ -263,6 +260,8 @@ impl NodeManager {
         // Set high queue size to prevent trace dropping during benchmarks
         if self.tracing_endpoint.is_some() {
             cmd.env("OTEL_BLRP_MAX_QUEUE_SIZE", "10000");
+            // Set service name to differentiate baseline vs feature runs in Jaeger
+            cmd.env("OTEL_SERVICE_NAME", format!("reth-{}", ref_type));
         }
 
         debug!("Executing reth command: {cmd:?}");
