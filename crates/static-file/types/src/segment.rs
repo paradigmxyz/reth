@@ -366,8 +366,9 @@ impl From<SegmentRangeInclusive> for RangeInclusive<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::hex;
+    use alloy_primitives::Bytes;
     use reth_nippy_jar::NippyJar;
+    use std::env::temp_dir;
 
     #[test]
     fn test_filename() {
@@ -426,53 +427,43 @@ mod tests {
     }
 
     #[test]
-    fn test_segment_config_backwards() {
-        let headers = hex!(
-            "010000000000000000000000000000001fa10700000000000100000000000000001fa10700000000000000000000030000000000000020a107000000000001010000004a02000000000000"
-        );
-        let transactions = hex!(
-            "010000000000000000000000000000001fa10700000000000100000000000000001fa107000000000001000000000000000034a107000000000001000000010000000000000035a1070000000000004010000000000000"
-        );
-        let receipts = hex!(
-            "010000000000000000000000000000001fa10700000000000100000000000000000000000000000000000200000001000000000000000000000000000000000000000000000000"
+    fn test_segment_config_serialization() {
+        let segments = vec![
+            SegmentHeader {
+                expected_block_range: SegmentRangeInclusive::new(0, 200),
+                block_range: Some(SegmentRangeInclusive::new(0, 100)),
+                tx_range: None,
+                segment: StaticFileSegment::Headers,
+            },
+            SegmentHeader {
+                expected_block_range: SegmentRangeInclusive::new(0, 200),
+                block_range: None,
+                tx_range: Some(SegmentRangeInclusive::new(0, 300)),
+                segment: StaticFileSegment::Transactions,
+            },
+            SegmentHeader {
+                expected_block_range: SegmentRangeInclusive::new(0, 200),
+                block_range: Some(SegmentRangeInclusive::new(0, 100)),
+                tx_range: Some(SegmentRangeInclusive::new(0, 300)),
+                segment: StaticFileSegment::Receipts,
+            },
+        ];
+        // Check that we test all segments
+        assert_eq!(
+            segments.iter().map(|segment| segment.segment()).collect::<Vec<_>>(),
+            StaticFileSegment::iter().collect::<Vec<_>>()
         );
 
-        {
-            let headers = NippyJar::<SegmentHeader>::load_from_reader(&headers[..]).unwrap();
-            assert_eq!(
-                &SegmentHeader {
-                    expected_block_range: SegmentRangeInclusive::new(0, 499999),
-                    block_range: Some(SegmentRangeInclusive::new(0, 499999)),
-                    tx_range: None,
-                    segment: StaticFileSegment::Headers,
-                },
-                headers.user_header()
-            );
-        }
-        {
-            let transactions =
-                NippyJar::<SegmentHeader>::load_from_reader(&transactions[..]).unwrap();
-            assert_eq!(
-                &SegmentHeader {
-                    expected_block_range: SegmentRangeInclusive::new(0, 499999),
-                    block_range: Some(SegmentRangeInclusive::new(0, 499999)),
-                    tx_range: Some(SegmentRangeInclusive::new(0, 500020)),
-                    segment: StaticFileSegment::Transactions,
-                },
-                transactions.user_header()
-            );
-        }
-        {
-            let receipts = NippyJar::<SegmentHeader>::load_from_reader(&receipts[..]).unwrap();
-            assert_eq!(
-                &SegmentHeader {
-                    expected_block_range: SegmentRangeInclusive::new(0, 499999),
-                    block_range: Some(SegmentRangeInclusive::new(0, 0)),
-                    tx_range: None,
-                    segment: StaticFileSegment::Receipts,
-                },
-                receipts.user_header()
-            );
+        for header in segments {
+            let segment_jar = NippyJar::new(1, &temp_dir(), header);
+            let mut serialized = Vec::new();
+            segment_jar.save_to_writer(&mut serialized).unwrap();
+
+            let deserialized =
+                NippyJar::<SegmentHeader>::load_from_reader(&serialized[..]).unwrap();
+            assert_eq!(deserialized.user_header(), segment_jar.user_header());
+
+            insta::assert_snapshot!(header.segment().to_string(), Bytes::from(serialized));
         }
     }
 
