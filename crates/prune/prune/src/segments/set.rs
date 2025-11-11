@@ -1,6 +1,6 @@
 use crate::segments::{
-    AccountHistory, Bodies, MerkleChangeSets, Segment, SenderRecovery, StorageHistory,
-    TransactionLookup, UserReceipts,
+    user::ReceiptsByLogs, AccountHistory, Bodies, MerkleChangeSets, Segment, SenderRecovery,
+    StorageHistory, TransactionLookup, UserReceipts,
 };
 use alloy_eips::eip2718::Encodable2718;
 use reth_db_api::{table::Value, transaction::DbTxMut};
@@ -59,7 +59,6 @@ where
         _static_file_provider: StaticFileProvider<Provider::Primitives>,
         prune_modes: PruneModes,
     ) -> Self {
-        #[expect(deprecated)]
         let PruneModes {
             sender_recovery,
             transaction_lookup,
@@ -68,7 +67,7 @@ where
             storage_history,
             bodies_history,
             merkle_changesets,
-            receipts_log_filter: (),
+            receipts_log_filter,
         } = prune_modes;
 
         Self::default()
@@ -82,6 +81,11 @@ where
             .segment_opt(storage_history.map(StorageHistory::new))
             // User receipts
             .segment_opt(receipts.map(UserReceipts::new))
+            // Receipts by logs
+            .segment_opt(
+                (!receipts_log_filter.is_empty())
+                    .then(|| ReceiptsByLogs::new(receipts_log_filter.clone())),
+            )
             // Transaction lookup
             .segment_opt(transaction_lookup.map(TransactionLookup::new))
             // Sender recovery

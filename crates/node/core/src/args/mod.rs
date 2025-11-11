@@ -76,4 +76,5 @@ pub use ress_args::RessArgs;
 mod era;
 pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 
+mod error;
 pub mod types;
