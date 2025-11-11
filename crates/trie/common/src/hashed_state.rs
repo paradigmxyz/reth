@@ -331,25 +331,44 @@ impl HashedPostState {
         }
     }
 
-    /// Converts hashed post state into [`HashedPostStateSorted`].
-    pub fn into_sorted(mut self) -> HashedPostStateSorted {
-        self.drain_into_sorted()
+    /// Extend this hashed post state with sorted data, converting directly into the unsorted
+    /// `HashMap` representation. This is more efficient than first converting to `HashedPostState`
+    /// and then extending, as it avoids creating intermediate `HashMap` allocations.
+    pub fn extend_from_sorted(&mut self, sorted: &HashedPostStateSorted) {
+        // Reserve capacity for accounts
+        self.accounts.reserve(sorted.accounts.len());
+
+        // Insert accounts (Some = updated, None = destroyed)
+        for (address, account) in &sorted.accounts {
+            self.accounts.insert(*address, *account);
+        }
+
+        // Reserve capacity for storages
+        self.storages.reserve(sorted.storages.len());
+
+        // Extend storages
+        for (hashed_address, sorted_storage) in &sorted.storages {
+            match self.storages.entry(*hashed_address) {
+                hash_map::Entry::Vacant(entry) => {
+                    let mut new_storage = HashedStorage::new(false);
+                    new_storage.extend_from_sorted(sorted_storage);
+                    entry.insert(new_storage);
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend_from_sorted(sorted_storage);
+                }
+            }
+        }
     }
 
-    /// Converts hashed post state into [`HashedPostStateSorted`], but keeping the maps allocated by
-    /// draining.
-    ///
-    /// This effectively clears all the fields in the [`HashedPostStateSorted`].
-    ///
-    /// This allows us to reuse the allocated space. This allocates new space for the sorted hashed
-    /// post state, like `into_sorted`.
-    pub fn drain_into_sorted(&mut self) -> HashedPostStateSorted {
-        let mut accounts: Vec<_> = self.accounts.drain().collect();
+    /// Converts hashed post state into [`HashedPostStateSorted`].
+    pub fn into_sorted(self) -> HashedPostStateSorted {
+        let mut accounts: Vec<_> = self.accounts.into_iter().collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
         let storages = self
             .storages
-            .drain()
+            .into_iter()
             .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
             .collect();
 
@@ -423,6 +442,24 @@ impl HashedStorage {
         self.storage.extend(other.storage.iter().map(|(&k, &v)| (k, v)));
     }
 
+    /// Extend hashed storage with sorted data, converting directly into the unsorted `HashMap`
+    /// representation. This is more efficient than first converting to `HashedStorage` and
+    /// then extending, as it avoids creating intermediate `HashMap` allocations.
+    pub fn extend_from_sorted(&mut self, sorted: &HashedStorageSorted) {
+        if sorted.wiped {
+            self.wiped = true;
+            self.storage.clear();
+        }
+
+        // Reserve capacity for all slots
+        self.storage.reserve(sorted.storage_slots.len());
+
+        // Insert all storage slots
+        for (slot, value) in &sorted.storage_slots {
+            self.storage.insert(*slot, *value);
+        }
+    }
+
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.into_iter().collect();
@@ -483,6 +520,12 @@ impl HashedPostStateSorted {
                 .and_modify(|existing| existing.extend_ref(other_storage))
                 .or_insert_with(|| other_storage.clone());
         }
+    }
+
+    /// Clears all accounts and storage data.
+    pub fn clear(&mut self) {
+        self.accounts.clear();
+        self.storages.clear();
     }
 }
 
@@ -1209,6 +1252,83 @@ mod tests {
         assert_eq!(storage3.storage_slots[0].1, U256::from(30));
         assert_eq!(storage3.storage_slots[1].0, B256::from([4; 32]));
         assert_eq!(storage3.storage_slots[1].1, U256::ZERO);
+    }
+
+    /// Test extending with sorted accounts merges correctly into `HashMap`
+    #[test]
+    fn test_hashed_post_state_extend_from_sorted_with_accounts() {
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+
+        let mut state = HashedPostState::default();
+        state.accounts.insert(addr1, Some(Default::default()));
+
+        let mut sorted_state = HashedPostStateSorted::default();
+        sorted_state.accounts.push((addr2, Some(Default::default())));
+
+        state.extend_from_sorted(&sorted_state);
+
+        assert_eq!(state.accounts.len(), 2);
+        assert!(state.accounts.contains_key(&addr1));
+        assert!(state.accounts.contains_key(&addr2));
+    }
+
+    /// Test destroyed accounts (None values) are inserted correctly
+    #[test]
+    fn test_hashed_post_state_extend_from_sorted_with_destroyed_accounts() {
+        let addr1 = B256::random();
+
+        let mut state = HashedPostState::default();
+
+        let mut sorted_state = HashedPostStateSorted::default();
+        sorted_state.accounts.push((addr1, None));
+
+        state.extend_from_sorted(&sorted_state);
+
+        assert!(state.accounts.contains_key(&addr1));
+        assert_eq!(state.accounts.get(&addr1), Some(&None));
+    }
+
+    /// Test non-wiped storage merges both zero and non-zero valued slots
+    #[test]
+    fn test_hashed_storage_extend_from_sorted_non_wiped() {
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        let slot3 = B256::random();
+
+        let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
+
+        let sorted = HashedStorageSorted {
+            storage_slots: vec![(slot2, U256::from(200)), (slot3, U256::ZERO)],
+            wiped: false,
+        };
+
+        storage.extend_from_sorted(&sorted);
+
+        assert!(!storage.wiped);
+        assert_eq!(storage.storage.len(), 3);
+        assert_eq!(storage.storage.get(&slot1), Some(&U256::from(100)));
+        assert_eq!(storage.storage.get(&slot2), Some(&U256::from(200)));
+        assert_eq!(storage.storage.get(&slot3), Some(&U256::ZERO));
+    }
+
+    /// Test wiped=true clears existing storage and only keeps new slots (critical edge case)
+    #[test]
+    fn test_hashed_storage_extend_from_sorted_wiped() {
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+
+        let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
+
+        let sorted =
+            HashedStorageSorted { storage_slots: vec![(slot2, U256::from(200))], wiped: true };
+
+        storage.extend_from_sorted(&sorted);
+
+        assert!(storage.wiped);
+        // After wipe, old storage should be cleared and only new storage remains
+        assert_eq!(storage.storage.len(), 1);
+        assert_eq!(storage.storage.get(&slot2), Some(&U256::from(200)));
     }
 
     #[test]

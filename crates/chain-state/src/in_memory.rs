@@ -17,7 +17,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -725,10 +725,10 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
-    /// Block's hashed state.
-    pub hashed_state: Arc<HashedPostState>,
-    /// Trie updates that result from calculating the state root for the block.
-    pub trie_updates: Arc<TrieUpdates>,
+    /// Block's sorted hashed state.
+    pub hashed_state: Arc<HashedPostStateSorted>,
+    /// Sorted trie updates that result from calculating the state root for the block.
+    pub trie_updates: Arc<TrieUpdatesSorted>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -763,13 +763,13 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Returns a reference to the hashed state result of the execution outcome
     #[inline]
-    pub fn hashed_state(&self) -> &HashedPostState {
+    pub fn hashed_state(&self) -> &HashedPostStateSorted {
         &self.hashed_state
     }
 
     /// Returns a reference to the trie updates resulting from the execution outcome
     #[inline]
-    pub fn trie_updates(&self) -> &TrieUpdates {
+    pub fn trie_updates(&self) -> &TrieUpdatesSorted {
         &self.trie_updates
     }
 
@@ -875,8 +875,8 @@ mod tests {
         StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{
-        AccountProof, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
-        StorageProof, TrieInput,
+        updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
     };
 
     fn create_mock_state(
