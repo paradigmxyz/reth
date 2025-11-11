@@ -115,7 +115,6 @@ where
         let tx_batch_sender = setup_range_recovery(provider);
 
         let block_body_indices = provider.block_body_indices_range(block_range.clone())?;
-        debug!(target: "sync::stages::sender_recovery", ?block_range, block_body_indices = block_body_indices.len(), "Block body indices");
         let mut blocks_with_indices = block_range.zip(block_body_indices);
 
         for range in batch {
@@ -126,11 +125,6 @@ where
                 tx_batch_sender.clone(),
                 &mut writer,
             )?;
-        }
-
-        // Drain block body indices to increment the destination block number
-        for (block_number, _) in blocks_with_indices {
-            writer.increment_block(block_number)?;
         }
 
         Ok(ExecOutput {
@@ -164,7 +158,7 @@ where
 
 fn recover_range<Provider, CURSOR>(
     tx_range: Range<TxNumber>,
-    block_body_indices: &mut impl Iterator<Item = (BlockNumber, StoredBlockBodyIndices)>,
+    blocks_with_indices: &mut impl Iterator<Item = (BlockNumber, StoredBlockBodyIndices)>,
     provider: &Provider,
     tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>,
     writer: &mut EitherWriter<'_, CURSOR, Provider::Primitives>,
@@ -195,7 +189,7 @@ where
 
     let mut processed_transactions = 0;
     let (mut current_block_number, mut current_block_body_indices) =
-        block_body_indices.next().unwrap();
+        blocks_with_indices.next().unwrap();
     let mut last_block_number = None;
     for channel in receivers {
         while let Ok(recovered) = channel.recv() {
@@ -239,7 +233,7 @@ where
             // need to update current block number and body indices we're processing
             if !current_block_body_indices.contains_tx(tx_id) {
                 (current_block_number, current_block_body_indices) =
-                    block_body_indices.next().unwrap();
+                    blocks_with_indices.next().unwrap();
             }
 
             // If this is the first block we're processing or the current block number was updated,
@@ -261,11 +255,6 @@ where
         }
     }
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Finished recovering senders batch");
-
-    // Drain block body indices to increment the destination block number
-    for (block_number, _) in block_body_indices {
-        writer.increment_block(block_number)?;
-    }
 
     // Fail safe to ensure that we do not proceed without having recovered all senders.
     let expected = tx_range.end - tx_range.start;
