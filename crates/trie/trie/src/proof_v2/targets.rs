@@ -10,6 +10,7 @@ pub struct ProofTargets {
     /// Vector of account hashes paired with their storage slot targets.
     /// - Empty vec means prove account only (no storage)
     /// - Non-empty vec means prove account and the specified storage slots
+    ///
     /// Storage slots within each account's vec must be sorted lexicographically.
     targets: Vec<(B256, Vec<B256>)>,
 }

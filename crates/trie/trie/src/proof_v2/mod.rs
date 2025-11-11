@@ -7,7 +7,10 @@
 //! - Re-uses cursors across calculations
 //! - Supports generic value types with lazy evaluation
 
-use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor};
+use crate::{
+    hashed_cursor::{HashedCursor, HashedStorageCursor},
+    trie_cursor::{TrieCursor, TrieStorageCursor},
+};
 use alloy_primitives::B256;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::SparseTrieNode;
@@ -111,6 +114,42 @@ where
     }
 }
 
+impl<TC, HC, RF, VE> ProofCalculator<TC, HC, RF, VE>
+where
+    TC: TrieStorageCursor,
+    HC: HashedStorageCursor,
+    RF: RlpNodeFut,
+    VE: ValueEncoder<RlpNodeFut = RF>,
+{
+    /// Generate a proof for a storage trie at the given hashed address.
+    ///
+    /// This method:
+    /// 1. Calls `set_hashed_address` on both the trie cursor and hashed cursor to switch to the
+    ///    specified storage trie
+    /// 2. Calls [`Self::proof`] with the provided targets to generate the proof
+    ///
+    /// Given target keys sorted lexicographically, returns proof nodes
+    /// for all targets sorted lexicographically by path.
+    ///
+    /// If given zero targets, returns just the root.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, panics if the targets are not sorted lexicographically.
+    pub fn storage_proof(
+        &mut self,
+        hashed_address: B256,
+        targets: impl IntoIterator<Item = B256>,
+    ) -> Result<Vec<SparseTrieNode>, StateProofError> {
+        // Switch both cursors to the specified storage trie
+        self.trie_cursor.set_hashed_address(hashed_address);
+        self.hashed_cursor.set_hashed_address(hashed_address);
+
+        // Generate the proof using the regular proof method
+        self.proof(targets)
+    }
+}
+
 /// A proof calculator for storage tries.
-pub type StorageProofCalculator<TC, HC> =
+pub type StorageProofCalculator<TC: TrieStorageCursor, HC: HashedStorageCursor> =
     ProofCalculator<TC, HC, StorageRlpNodeFut, StorageValueEncoder>;
