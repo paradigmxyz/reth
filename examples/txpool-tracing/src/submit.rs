@@ -11,7 +11,6 @@ use reth_ethereum::{
         AddedTransactionOutcome, PoolTransaction, TransactionEvent, TransactionOrigin,
         TransactionPool,
     },
-    primitives::SignerRecoverable,
     rpc::eth::primitives::TransactionRequest,
     EthPrimitives, TransactionSigned,
 };
