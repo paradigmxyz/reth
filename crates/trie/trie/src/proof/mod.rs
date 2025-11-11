@@ -16,7 +16,6 @@ use alloy_primitives::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
-use core::marker::PhantomData;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
