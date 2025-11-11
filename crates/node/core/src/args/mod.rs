@@ -26,7 +26,7 @@ pub use log::{ColorMode, LogArgs, Verbosity};
 
 /// `TraceArgs` for tracing and spans support
 mod trace;
-pub use trace::TraceArgs;
+pub use trace::{OtlpInitStatus, TraceArgs};
 
 /// `MetricArgs` to configure metrics.
 mod metric;
@@ -76,4 +76,5 @@ pub use ress_args::RessArgs;
 mod era;
 pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 
+mod error;
 pub mod types;

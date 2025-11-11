@@ -5,7 +5,7 @@ use clap::Parser;
 use eyre::{eyre, Result, WrapErr};
 use reth_chainspec::Chain;
 use reth_cli_runner::CliContext;
-use reth_node_core::args::{DatadirArgs, LogArgs};
+use reth_node_core::args::{DatadirArgs, LogArgs, TraceArgs};
 use reth_tracing::FileWorkerGuard;
 use std::{net::TcpListener, path::PathBuf, str::FromStr};
 use tokio::process::Command;
@@ -130,6 +130,9 @@ pub(crate) struct Args {
 
     #[command(flatten)]
     pub logs: LogArgs,
+
+    #[command(flatten)]
+    pub traces: TraceArgs,
 
     /// Additional arguments to pass to baseline reth node command
     ///

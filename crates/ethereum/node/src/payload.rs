@@ -52,7 +52,9 @@ where
             ctx.provider().clone(),
             pool,
             evm_config,
-            EthereumBuilderConfig::new().with_gas_limit(gas_limit),
+            EthereumBuilderConfig::new()
+                .with_gas_limit(gas_limit)
+                .with_max_blobs_per_block(conf.max_blobs_per_block()),
         ))
     }
 }
