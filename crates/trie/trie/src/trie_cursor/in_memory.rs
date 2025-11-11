@@ -278,14 +278,23 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
     }
 
     fn reset(&mut self) {
-        // Reset the cursors
-        self.cursor.reset();
-        self.in_memory_cursor.reset();
+        let Self {
+            cursor,
+            cursor_wiped,
+            cursor_entry,
+            in_memory_cursor,
+            last_key,
+            seeked,
+            trie_updates: _,
+        } = self;
 
-        // Reset cursor state
-        self.cursor_entry = None;
-        self.last_key = None;
-        self.seeked = false;
+        cursor.reset();
+        in_memory_cursor.reset();
+
+        *cursor_wiped = false;
+        *cursor_entry = None;
+        *last_key = None;
+        *seeked = false;
     }
 }
 

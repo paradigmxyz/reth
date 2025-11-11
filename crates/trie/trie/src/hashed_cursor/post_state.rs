@@ -322,14 +322,23 @@ where
     }
 
     fn reset(&mut self) {
-        // Reset the cursors
-        self.cursor.reset();
-        self.post_state_cursor.reset();
+        let Self {
+            cursor,
+            cursor_wiped,
+            cursor_entry,
+            post_state_cursor,
+            last_key,
+            seeked,
+            post_state: _,
+        } = self;
 
-        // Reset cursor state
-        self.cursor_entry = None;
-        self.last_key = None;
-        self.seeked = false;
+        cursor.reset();
+        post_state_cursor.reset();
+
+        *cursor_wiped = false;
+        *cursor_entry = None;
+        *last_key = None;
+        *seeked = false;
     }
 }
 
