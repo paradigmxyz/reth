@@ -8,7 +8,7 @@
 mod models;
 pub use models::*;
 
-mod store;
+pub(crate) mod store;
 pub use store::MdbxProofsStorage;
 
 mod cursor;

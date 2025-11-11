@@ -51,4 +51,6 @@ pub mod cursor_factory;
 pub use cursor_factory::{OpProofsHashedAccountCursorFactory, OpProofsTrieCursorFactory};
 
 pub mod error;
+mod prune;
+
 pub use error::{OpProofsStorageError, OpProofsStorageResult};
