@@ -66,8 +66,9 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
+    BlockHashReader, BlockNumReader, MetadataWriter, ProviderError, ProviderFactory,
+    ProviderResult, StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
+    StorageSettingsCache,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -472,6 +473,11 @@ where
         let factory =
             ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
                 .with_prune_modes(self.prune_modes());
+
+        let mut provider_rw = factory.provider_rw()?;
+        provider_rw.write_storage_settings(
+            provider_rw.cached_storage_settings().with_senders_in_static_files(),
+        )?;
 
         let has_receipt_pruning = self.toml_config().prune.has_receipts_pruning();
 
