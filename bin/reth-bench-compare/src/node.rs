@@ -335,8 +335,7 @@ impl NodeManager {
     pub(crate) async fn wait_for_node_ready_and_get_tip(&self) -> Result<u64> {
         info!("Waiting for node to be ready and synced...");
 
-        // Allow more time in CI and when tracing/profiling is enabled
-        let max_wait = Duration::from_secs(300);
+        let max_wait = Duration::from_secs(120); // 2 minutes to allow for sync
         let check_interval = Duration::from_secs(2);
         let rpc_url = "http://localhost:8545";
 
@@ -346,25 +345,29 @@ impl NodeManager {
 
         timeout(max_wait, async {
             loop {
-                // Treat successful block number as readiness, regardless of syncing status
-                match provider.get_block_number().await {
-                    Ok(tip) => {
-                        info!("Node RPC is responsive at block: {}", tip);
-                        return Ok(tip);
-                    }
-                    Err(e) => {
-                        debug!("RPC not ready yet (block_number): {}", e);
-                    }
-                }
-
-                // Log syncing state for visibility but don't gate readiness on it
+                // First check if RPC is up and node is not syncing
                 match provider.syncing().await {
-                    Ok(SyncStatus::Info(sync_info)) => {
-                        debug!("Sync status: {sync_info:?}");
+                    Ok(sync_result) => {
+                        match sync_result {
+                            SyncStatus::Info(sync_info) => {
+                                debug!("Node is still syncing {sync_info:?}, waiting...");
+                            }
+                            _ => {
+                                // Node is not syncing, now get the tip
+                                match provider.get_block_number().await {
+                                    Ok(tip) => {
+                                        info!("Node is ready and not syncing at block: {}", tip);
+                                        return Ok(tip);
+                                    }
+                                    Err(e) => {
+                                        debug!("Failed to get block number: {}", e);
+                                    }
+                                }
+                            }
+                        }
                     }
-                    Ok(_) => {}
                     Err(e) => {
-                        debug!("Failed to fetch sync status: {}", e);
+                        debug!("Node RPC not ready yet or failed to check sync status: {}", e);
                     }
                 }
 
