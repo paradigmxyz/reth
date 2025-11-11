@@ -35,6 +35,11 @@ pub trait PayloadBuilderConfig {
     /// Maximum number of tasks to spawn for building a payload.
     fn max_payload_tasks(&self) -> usize;
 
+    /// Maximum number of blobs to include per block (EIP-7872).
+    ///
+    /// If `None`, defaults to the protocol maximum.
+    fn max_blobs_per_block(&self) -> Option<u64>;
+
     /// Returns the configured gas limit if set, or a chain-specific default.
     fn gas_limit_for(&self, chain: Chain) -> u64 {
         if let Some(limit) = self.gas_limit() {

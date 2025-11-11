@@ -35,6 +35,10 @@ pub struct PayloadBuilderArgs {
     /// Maximum number of tasks to spawn for building a payload.
     #[arg(long = "builder.max-tasks", default_value = "3", value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
     pub max_payload_tasks: usize,
+
+    /// Maximum number of blobs to include per block.
+    #[arg(long = "builder.max-blobs", value_name = "COUNT")]
+    pub max_blobs_per_block: Option<u64>,
 }
 
 impl Default for PayloadBuilderArgs {
@@ -45,6 +49,7 @@ impl Default for PayloadBuilderArgs {
             gas_limit: None,
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
+            max_blobs_per_block: None,
         }
     }
 }
@@ -68,6 +73,10 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
 
     fn max_payload_tasks(&self) -> usize {
         self.max_payload_tasks
+    }
+
+    fn max_blobs_per_block(&self) -> Option<u64> {
+        self.max_blobs_per_block
     }
 }
 

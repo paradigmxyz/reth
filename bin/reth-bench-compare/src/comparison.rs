@@ -57,6 +57,8 @@ pub(crate) struct BenchmarkSummary {
     pub avg_new_payload_latency_ms: f64,
     pub gas_per_second: f64,
     pub blocks_per_second: f64,
+    pub min_block_number: u64,
+    pub max_block_number: u64,
 }
 
 /// Comparison report between two benchmark runs
@@ -307,6 +309,9 @@ impl ComparisonGenerator {
             0.0
         };
 
+        let min_block_number = combined_data.first().unwrap().block_number;
+        let max_block_number = combined_data.last().unwrap().block_number;
+
         Ok(BenchmarkSummary {
             total_blocks,
             total_gas_used,
@@ -314,6 +319,8 @@ impl ComparisonGenerator {
             avg_new_payload_latency_ms,
             gas_per_second,
             blocks_per_second,
+            min_block_number,
+            max_block_number,
         })
     }
 
@@ -444,8 +451,10 @@ impl ComparisonGenerator {
         println!("Baseline Summary:");
         let baseline = &report.baseline.summary;
         println!(
-            "  Blocks: {}, Gas: {}, Duration: {:.2}s",
+            "  Blocks: {} (blocks {} to {}), Gas: {}, Duration: {:.2}s",
             baseline.total_blocks,
+            baseline.min_block_number,
+            baseline.max_block_number,
             baseline.total_gas_used,
             baseline.total_duration_ms as f64 / 1000.0
         );
@@ -464,8 +473,10 @@ impl ComparisonGenerator {
         println!("Feature Summary:");
         let feature = &report.feature.summary;
         println!(
-            "  Blocks: {}, Gas: {}, Duration: {:.2}s",
+            "  Blocks: {} (blocks {} to {}), Gas: {}, Duration: {:.2}s",
             feature.total_blocks,
+            feature.min_block_number,
+            feature.max_block_number,
             feature.total_gas_used,
             feature.total_duration_ms as f64 / 1000.0
         );
