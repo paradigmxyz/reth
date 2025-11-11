@@ -52,9 +52,7 @@ use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, RecoveredBlock, SealedHeader, StorageEntry,
 };
-use reth_prune_types::{
-    PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
-};
+use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
@@ -1619,11 +1617,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
-        // All receipts from the last 128 blocks are required for blockchain tree, even with
-        // [`PruneSegment::ContractLogs`].
-        let prunable_receipts =
-            PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
-
         // Prepare set of addresses which logs should not be pruned.
         let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
         for (_, addresses) in contract_log_pruner.range(..first_block) {
@@ -1639,11 +1632,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             receipts_writer.increment_block(block_number)?;
 
             // Skip writing receipts if pruning configuration requires us to.
-            if prunable_receipts &&
-                self.prune_modes
-                    .receipts
-                    .is_some_and(|mode| mode.should_prune(block_number, tip))
-            {
+            if self.prune_modes.receipts.is_some_and(|mode| mode.should_prune(block_number, tip)) {
                 continue
             }
 
@@ -1657,8 +1646,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 // Skip writing receipt if log filter is active and it does not have any logs to
                 // retain
-                if prunable_receipts &&
-                    has_contract_log_filter &&
+                if has_contract_log_filter &&
                     !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
                 {
                     continue
