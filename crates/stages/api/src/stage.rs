@@ -7,7 +7,7 @@ use std::{
     ops::{Range, RangeInclusive},
     task::{Context, Poll},
 };
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 /// Stage execution input, see [`Stage::execute`].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
