@@ -61,7 +61,7 @@ where
         trace!(target: "pruner", %pruned, %done, "Pruned transaction senders");
 
         let last_pruned_block = provider
-            .transaction_block(last_pruned_transaction)?
+            .block_by_transaction_id(last_pruned_transaction)?
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
             // If there's more transaction senders to prune, set the checkpoint block number to
             // previous, so we could finish pruning its transaction senders on the next run.

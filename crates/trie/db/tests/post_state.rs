@@ -208,6 +208,18 @@ fn fuzz_hashed_account_cursor() {
     );
 }
 
+/// Tests `is_storage_empty()` correctly distinguishes wiped storage from storage with zero values.
+///
+/// Key distinction:
+/// - `wiped = true`: Storage cleared/deleted → empty
+/// - `wiped = false` with zeros: Explicit zero values → not empty
+///
+/// Test cases:
+/// 1. No entries → empty
+/// 2. Non-zero values → not empty
+/// 3. Some zero values, not wiped → not empty
+/// 4. Wiped + zero post-state → empty
+/// 5. Wiped + non-zero post-state → not empty
 #[test]
 fn storage_is_empty() {
     let address = B256::random();
@@ -237,6 +249,23 @@ fn storage_is_empty() {
     // not empty
     {
         let sorted = HashedPostState::default().into_sorted();
+        let tx = db.tx().unwrap();
+        let factory =
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), &sorted);
+        let mut cursor = factory.hashed_storage_cursor(address).unwrap();
+        assert!(!cursor.is_storage_empty().unwrap());
+    }
+
+    // Some zero values, but not wiped
+    {
+        let wiped = false;
+        let mut hashed_storage = HashedStorage::new(wiped);
+        hashed_storage.storage.insert(B256::with_last_byte(0), U256::ZERO);
+
+        let mut hashed_post_state = HashedPostState::default();
+        hashed_post_state.storages.insert(address, hashed_storage);
+
+        let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
         let factory =
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), &sorted);
@@ -487,4 +516,81 @@ fn fuzz_hashed_storage_cursor() {
         let factory = HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), &sorted);
         assert_storage_cursor_order(&factory, expected.into_iter());
     });
+}
+
+#[test]
+fn all_storage_slots_deleted_not_wiped_exact_keys() {
+    // This test reproduces an edge case where:
+    // - wiped = false
+    // - All post state entries are deletions (None values)
+    // - Database has corresponding entries
+    // - Expected: NO leaves should be returned (all deleted)
+    let address = B256::random();
+
+    // Generate 42 storage entries with keys distributed across the keyspace
+    let db_entries: Vec<(B256, u64)> = (0..42)
+        .map(|i| {
+            let mut key_bytes = [0u8; 32];
+            key_bytes[0] = (i * 6) as u8; // Spread keys across keyspace
+            key_bytes[31] = i as u8; // Ensure uniqueness
+            (B256::from(key_bytes), i as u64 + 1)
+        })
+        .collect();
+
+    let db = create_test_rw_db();
+    db.update(|tx| {
+        for (key, value) in &db_entries {
+            tx.put::<tables::HashedStorages>(
+                address,
+                StorageEntry { key: *key, value: U256::from(*value) },
+            )
+            .unwrap();
+        }
+    })
+    .unwrap();
+
+    // Create post state with same keys but all Zero values (deletions)
+    let mut hashed_storage = HashedStorage::new(false);
+    for (key, _) in &db_entries {
+        hashed_storage.storage.insert(*key, U256::ZERO); // Zero value = deletion
+    }
+
+    let mut hashed_post_state = HashedPostState::default();
+    hashed_post_state.storages.insert(address, hashed_storage);
+
+    let sorted = hashed_post_state.into_sorted();
+    let tx = db.tx().unwrap();
+    let factory = HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), &sorted);
+
+    let mut cursor = factory.hashed_storage_cursor(address).unwrap();
+
+    // Seek to beginning should return None (all slots are deleted)
+    let result = cursor.seek(B256::ZERO).unwrap();
+    assert_eq!(
+        result, None,
+        "Expected no entries when all slots are deleted, but got {:?}",
+        result
+    );
+
+    // Test seek operations at various positions - all should return None
+    // Pattern: before all, early range, mid-early range, mid-late range, late range, near end
+    let seek_keys = vec![
+        B256::ZERO, // Before all entries
+        B256::right_padding_from(&[0x5d]),
+        B256::right_padding_from(&[0x5e]),
+        B256::right_padding_from(&[0x5f]),
+        B256::right_padding_from(&[0xc2]),
+        B256::right_padding_from(&[0xc5]),
+        B256::right_padding_from(&[0xc9]),
+        B256::right_padding_from(&[0xf0]),
+    ];
+
+    for seek_key in seek_keys {
+        let result = cursor.seek(seek_key).unwrap();
+        assert_eq!(result, None, "Expected None when seeking to {} but got {:?}", seek_key, result);
+    }
+
+    // next() should also always return None
+    let result = cursor.next().unwrap();
+    assert_eq!(result, None, "Expected None from next() but got {:?}", result);
 }

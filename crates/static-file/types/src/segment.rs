@@ -48,6 +48,9 @@ impl StaticFileSegment {
     pub const fn as_str(&self) -> &'static str {
         // `strum` doesn't generate a doc comment for `into_str` when using `IntoStaticStr` derive
         // macro, so we need to manually implement it.
+        //
+        // NOTE: this name cannot have underscores in it, as underscores are used as delimiters in
+        // static file paths, for fetching static files for a specific block range
         match self {
             Self::Headers => "headers",
             Self::Transactions => "transactions",

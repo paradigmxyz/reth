@@ -11,9 +11,8 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
-    providers::StaticFileWriter, BlockReader, DBProvider, EitherWriter, HeaderProvider,
-    ProviderError, PruneCheckpointReader, StaticFileProviderFactory, StatsReader,
-    StorageSettingsCache, TransactionsProvider,
+    BlockReader, DBProvider, EitherWriter, HeaderProvider, ProviderError, PruneCheckpointReader,
+    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionsProvider,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_api::{
@@ -87,15 +86,7 @@ where
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
 
-        let static_file_provider = provider.static_file_provider();
-        let mut writer = if provider.cached_storage_settings().senders_in_static_files {
-            EitherWriter::StaticFile(
-                static_file_provider
-                    .get_writer(*block_range.start(), StaticFileSegment::TransactionSenders)?,
-            )
-        } else {
-            EitherWriter::Database(provider.tx_ref().cursor_write::<tables::TransactionSenders>()?)
-        };
+        let mut writer = EitherWriter::new_senders(provider, *block_range.start())?;
 
         // No transactions to walk over
         if tx_range.is_empty() {
