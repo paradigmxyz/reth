@@ -756,7 +756,6 @@ where
                         input,
                         proof_result_sender,
                         &mut storage_proofs_processed,
-                        #[cfg(feature = "metrics")]
                         &mut cursor_metrics_cache,
                     );
                 }
@@ -801,7 +800,7 @@ where
         input: StorageProofInput,
         proof_result_sender: ProofResultContext,
         storage_proofs_processed: &mut u64,
-        #[cfg(feature = "metrics")] cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
+        cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
@@ -1037,7 +1036,6 @@ where
                         storage_work_tx.clone(),
                         *input,
                         &mut account_proofs_processed,
-                        #[cfg(feature = "metrics")]
                         &mut cursor_metrics_cache,
                     );
                 }
@@ -1081,7 +1079,7 @@ where
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
-        #[cfg(feature = "metrics")] cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
+        cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
