@@ -441,7 +441,10 @@ mod tests {
             "010000000000000000000000000000001fa10700000000000100000000000000001fa107000000000001000000000000000034a107000000000001000000010000000000000035a1070000000000004010000000000000"
         );
         let receipts = hex!(
-            "010000000000000000000000000000001fa10700000000000100000000000000000000000000000000000200000001000000000000000000000000000000000000000000000000"
+            "010000000000000000000000000000001fa10700000000000100000000000000001fa107000000000001000000000000000034a107000000000002000000010000000000000035a1070000000000004010000000000000"
+        );
+        let senders = hex!(
+            "010000000000000000000000000000001fa10700000000000100000000000000001fa107000000000001000000000000000034a107000000000003000000010000000000000035a1070000000000004010000000000000"
         );
 
         {
@@ -474,11 +477,23 @@ mod tests {
             assert_eq!(
                 &SegmentHeader {
                     expected_block_range: SegmentRangeInclusive::new(0, 499999),
-                    block_range: Some(SegmentRangeInclusive::new(0, 0)),
-                    tx_range: None,
+                    block_range: Some(SegmentRangeInclusive::new(0, 499999)),
+                    tx_range: Some(SegmentRangeInclusive::new(0, 500020)),
                     segment: StaticFileSegment::Receipts,
                 },
                 receipts.user_header()
+            );
+        }
+        {
+            let senders = NippyJar::<SegmentHeader>::load_from_reader(&senders[..]).unwrap();
+            assert_eq!(
+                &SegmentHeader {
+                    expected_block_range: SegmentRangeInclusive::new(0, 499999),
+                    block_range: Some(SegmentRangeInclusive::new(0, 499999)),
+                    tx_range: Some(SegmentRangeInclusive::new(0, 500020)),
+                    segment: StaticFileSegment::TransactionSenders,
+                },
+                senders.user_header()
             );
         }
     }
