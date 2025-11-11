@@ -1,7 +1,7 @@
 use reth_metrics::{metrics::Histogram, Metrics};
 use reth_trie::{
-    hashed_cursor::metrics::{HashedCursorMetrics, HashedCursorMetricsCache},
-    trie_cursor::metrics::{TrieCursorMetrics, TrieCursorMetricsCache},
+    hashed_cursor::{HashedCursorMetrics, HashedCursorMetricsCache},
+    trie_cursor::{TrieCursorMetrics, TrieCursorMetricsCache},
     TrieType,
 };
 
@@ -50,6 +50,18 @@ impl ProofTaskCursorMetrics {
             storage_hashed_cursor: HashedCursorMetrics::new(TrieType::Storage),
         }
     }
+
+    /// Record the cached metrics from the provided cache and reset the cache counters.
+    ///
+    /// This method adds the current counter values from the cache to the Prometheus metrics
+    /// and then resets all cache counters to zero.
+    pub fn record(&mut self, cache: &mut ProofTaskCursorMetricsCache) {
+        self.account_trie_cursor.record(&mut cache.account_trie_cursor);
+        self.account_hashed_cursor.record(&mut cache.account_hashed_cursor);
+        self.storage_trie_cursor.record(&mut cache.storage_trie_cursor);
+        self.storage_hashed_cursor.record(&mut cache.storage_hashed_cursor);
+        cache.reset();
+    }
 }
 
 impl Default for ProofTaskCursorMetrics {
@@ -80,18 +92,6 @@ impl ProofTaskCursorMetricsCache {
         self.account_hashed_cursor.extend(&other.account_hashed_cursor);
         self.storage_trie_cursor.extend(&other.storage_trie_cursor);
         self.storage_hashed_cursor.extend(&other.storage_hashed_cursor);
-    }
-
-    /// Record the cached metrics to the provided Prometheus metrics and reset counters.
-    ///
-    /// This method adds the current counter values to the Prometheus metrics
-    /// and then resets all internal counters to zero.
-    pub fn record(&mut self, metrics: &mut ProofTaskCursorMetrics) {
-        self.account_trie_cursor.record(&mut metrics.account_trie_cursor);
-        self.account_hashed_cursor.record(&mut metrics.account_hashed_cursor);
-        self.storage_trie_cursor.record(&mut metrics.storage_trie_cursor);
-        self.storage_hashed_cursor.record(&mut metrics.storage_hashed_cursor);
-        self.reset();
     }
 
     /// Reset all counters to zero.

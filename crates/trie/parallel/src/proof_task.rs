@@ -788,7 +788,7 @@ where
         #[cfg(feature = "metrics")]
         {
             metrics.record_storage_nodes(storage_nodes_processed as usize);
-            cursor_metrics_cache.record(cursor_metrics);
+            cursor_metrics.record(&mut cursor_metrics_cache);
         }
 
         Ok(())
@@ -1066,7 +1066,7 @@ where
         #[cfg(feature = "metrics")]
         {
             metrics.record_account_nodes(account_nodes_processed as usize);
-            cursor_metrics_cache.record(cursor_metrics);
+            cursor_metrics.record(&mut cursor_metrics_cache);
         }
 
         Ok(())

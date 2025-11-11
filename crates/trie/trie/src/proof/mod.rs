@@ -1,13 +1,11 @@
-#[cfg(feature = "metrics")]
 use crate::{
-    hashed_cursor::metrics::{HashedCursorMetricsCache, InstrumentedHashedCursor},
-    trie_cursor::metrics::{InstrumentedTrieCursor, TrieCursorMetricsCache},
-};
-use crate::{
-    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
+    hashed_cursor::{
+        HashedCursorFactory, HashedCursorMetricsCache, HashedStorageCursor,
+        InstrumentedHashedCursor,
+    },
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    trie_cursor::TrieCursorFactory,
+    trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache},
     walker::TrieWalker,
     HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
@@ -214,13 +212,9 @@ pub struct StorageProof<'a, T, H, K = AddedRemovedKeys> {
     /// Provided by the user to give the necessary context to retain extra proofs.
     added_removed_keys: Option<K>,
     /// Optional reference to accumulate trie cursor metrics.
-    #[cfg(feature = "metrics")]
     trie_cursor_metrics: Option<&'a mut TrieCursorMetricsCache>,
     /// Optional reference to accumulate hashed cursor metrics.
-    #[cfg(feature = "metrics")]
     hashed_cursor_metrics: Option<&'a mut HashedCursorMetricsCache>,
-    /// Phantom data to hold the lifetime when metrics are disabled.
-    _phantom: PhantomData<&'a ()>,
 }
 
 impl<T, H> StorageProof<'static, T, H> {
@@ -238,11 +232,8 @@ impl<T, H> StorageProof<'static, T, H> {
             prefix_set: PrefixSetMut::default(),
             collect_branch_node_masks: false,
             added_removed_keys: None,
-            #[cfg(feature = "metrics")]
             trie_cursor_metrics: None,
-            #[cfg(feature = "metrics")]
             hashed_cursor_metrics: None,
-            _phantom: PhantomData,
         }
     }
 }
@@ -260,11 +251,8 @@ impl<'a, T, H, K> StorageProof<'a, T, H, K> {
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
             added_removed_keys: self.added_removed_keys,
-            #[cfg(feature = "metrics")]
             trie_cursor_metrics: self.trie_cursor_metrics,
-            #[cfg(feature = "metrics")]
             hashed_cursor_metrics: self.hashed_cursor_metrics,
-            _phantom: PhantomData,
         }
     }
 
@@ -280,11 +268,8 @@ impl<'a, T, H, K> StorageProof<'a, T, H, K> {
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
             added_removed_keys: self.added_removed_keys,
-            #[cfg(feature = "metrics")]
             trie_cursor_metrics: self.trie_cursor_metrics,
-            #[cfg(feature = "metrics")]
             hashed_cursor_metrics: self.hashed_cursor_metrics,
-            _phantom: PhantomData,
         }
     }
 
@@ -301,7 +286,6 @@ impl<'a, T, H, K> StorageProof<'a, T, H, K> {
     }
 
     /// Set the trie cursor metrics cache to accumulate metrics into.
-    #[cfg(feature = "metrics")]
     pub const fn with_trie_cursor_metrics(
         mut self,
         metrics: &'a mut TrieCursorMetricsCache,
@@ -311,7 +295,6 @@ impl<'a, T, H, K> StorageProof<'a, T, H, K> {
     }
 
     /// Set the hashed cursor metrics cache to accumulate metrics into.
-    #[cfg(feature = "metrics")]
     pub const fn with_hashed_cursor_metrics(
         mut self,
         metrics: &'a mut HashedCursorMetricsCache,
@@ -336,11 +319,8 @@ impl<'a, T, H, K> StorageProof<'a, T, H, K> {
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
             added_removed_keys,
-            #[cfg(feature = "metrics")]
             trie_cursor_metrics: self.trie_cursor_metrics,
-            #[cfg(feature = "metrics")]
             hashed_cursor_metrics: self.hashed_cursor_metrics,
-            _phantom: PhantomData,
         }
     }
 }
@@ -365,29 +345,22 @@ where
         self,
         targets: B256Set,
     ) -> Result<StorageMultiProof, StateProofError> {
-        #[cfg(feature = "metrics")]
         let mut discard_hashed_cursor_metrics = HashedCursorMetricsCache::default();
-        #[cfg(feature = "metrics")]
         let hashed_cursor_metrics =
             self.hashed_cursor_metrics.unwrap_or(&mut discard_hashed_cursor_metrics);
 
         let hashed_storage_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
 
-        #[cfg(feature = "metrics")]
         let mut hashed_storage_cursor =
             InstrumentedHashedCursor::new(hashed_storage_cursor, hashed_cursor_metrics);
-        #[cfg(not(feature = "metrics"))]
-        let mut hashed_storage_cursor = hashed_storage_cursor;
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
             return Ok(StorageMultiProof::empty())
         }
 
-        #[cfg(feature = "metrics")]
         let mut discard_trie_cursor_metrics = TrieCursorMetricsCache::default();
-        #[cfg(feature = "metrics")]
         let trie_cursor_metrics =
             self.trie_cursor_metrics.unwrap_or(&mut discard_trie_cursor_metrics);
 
@@ -397,7 +370,6 @@ where
 
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
 
-        #[cfg(feature = "metrics")]
         let trie_cursor = InstrumentedTrieCursor::new(trie_cursor, trie_cursor_metrics);
 
         let walker = TrieWalker::<_>::storage_trie(trie_cursor, prefix_set.freeze())
