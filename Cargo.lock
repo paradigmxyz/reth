@@ -9346,9 +9346,13 @@ dependencies = [
  "reth-db",
  "reth-exex",
  "reth-node-api",
+ "reth-node-builder",
  "reth-node-types",
+ "reth-optimism-chainspec",
+ "reth-optimism-node",
  "reth-optimism-trie",
  "reth-provider",
+ "tempfile",
  "tokio",
  "tracing",
 ]
