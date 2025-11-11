@@ -478,6 +478,7 @@ where
         provider_rw.write_storage_settings(
             provider_rw.cached_storage_settings().with_senders_in_static_files(),
         )?;
+        provider_rw.commit()?;
 
         let has_receipt_pruning = self.toml_config().prune.has_receipts_pruning();
 
