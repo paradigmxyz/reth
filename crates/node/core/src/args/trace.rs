@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use eyre::WrapErr;
-use reth_tracing::tracing_subscriber::EnvFilter;
+use reth_tracing::{tracing_subscriber::EnvFilter, Layers};
 use reth_tracing_otlp::OtlpProtocol;
 use url::Url;
 
@@ -92,13 +92,52 @@ impl Default for TraceArgs {
 }
 
 impl TraceArgs {
-    /// Validate the configuration
-    pub fn validate(&mut self) -> eyre::Result<()> {
-        if let Some(url) = &mut self.otlp {
-            self.protocol.validate_endpoint(url)?;
+    /// Initialize OTLP tracing with the given layers and runner.
+    ///
+    /// This method handles OTLP tracing initialization based on the configured options,
+    /// including validation, protocol selection, and feature flag checking.
+    ///
+    /// Returns the initialization status to allow callers to log appropriate messages.
+    ///
+    /// Note: even though this function is async, it does not actually perform any async operations.
+    /// It's needed only to be able to initialize the gRPC transport of OTLP tracing that needs to
+    /// be called inside a tokio runtime context.
+    pub async fn init_otlp_tracing(
+        &mut self,
+        _layers: &mut Layers,
+    ) -> eyre::Result<OtlpInitStatus> {
+        if let Some(endpoint) = self.otlp.as_mut() {
+            self.protocol.validate_endpoint(endpoint)?;
+
+            #[cfg(feature = "otlp")]
+            {
+                _layers.with_span_layer(
+                    self.service_name.clone(),
+                    endpoint.clone(),
+                    self.otlp_filter.clone(),
+                    self.protocol,
+                )?;
+                Ok(OtlpInitStatus::Started(endpoint.clone()))
+            }
+            #[cfg(not(feature = "otlp"))]
+            {
+                Ok(OtlpInitStatus::NoFeature)
+            }
+        } else {
+            Ok(OtlpInitStatus::Disabled)
         }
-        Ok(())
     }
+}
+
+/// Status of OTLP tracing initialization.
+#[derive(Debug)]
+pub enum OtlpInitStatus {
+    /// OTLP tracing was successfully started with the given endpoint.
+    Started(Url),
+    /// OTLP tracing is disabled (no endpoint configured).
+    Disabled,
+    /// OTLP arguments provided but feature is not compiled.
+    NoFeature,
 }
 
 // Parses an OTLP endpoint url.
