@@ -65,7 +65,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let components = components(provider_factory.chain_spec());
 
         let min_block = self.from;
-        let max_block = self.to.unwrap_or(provider.best_block_number()?);
+        let best_block = provider.best_block_number()?;
+        let mut max_block = best_block;
+        if let Some(to) = self.to {
+            if to > best_block {
+                warn!(
+                    requested = to,
+                    best_block,
+                    "Requested --to is beyond available chain head; clamping to best block"
+                );
+            } else {
+                max_block = to;
+            }
+        };
 
         let total_blocks = max_block - min_block;
         let total_gas = calculate_gas_used_from_headers(
