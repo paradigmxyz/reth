@@ -51,7 +51,6 @@ metrics.workspace = true
 # errors
 eyre.workspace = true
 
-ringbuffer.workspace = true
 derive_more.workspace = true
 
 [dev-dependencies]
