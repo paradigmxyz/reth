@@ -7,6 +7,7 @@ use std::{
     ops::{Range, RangeInclusive},
     task::{Context, Poll},
 };
+use tracing::debug;
 
 /// Stage execution input, see [`Stage::execute`].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -85,6 +86,14 @@ impl ExecInput {
 
         let start_block = self.next_block().max(lowest_transactions_block);
         let target_block = self.target();
+
+        debug!(
+            target: "sync::stages",
+            lowest_transactions_block,
+            start_block,
+            target_block,
+            "Calculating next block range with transaction threshold"
+        );
 
         let start_block_body = provider
             .block_body_indices(start_block)?
