@@ -66,19 +66,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         let min_block = self.from;
         let best_block = provider.best_block_number()?;
-        let max_block = if let Some(to) = self.to {
+        let mut max_block = best_block;
+        if let Some(to) = self.to {
             if to > best_block {
                 warn!(
                     requested = to,
                     best_block,
                     "Requested --to is beyond available chain head; clamping to best block"
                 );
-                best_block
             } else {
-                to
+                max_block = to;
             }
-        } else {
-            best_block
         };
 
         let total_blocks = max_block - min_block;
