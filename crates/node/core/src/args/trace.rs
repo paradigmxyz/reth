@@ -67,13 +67,15 @@ pub struct TraceArgs {
     /// This name will be used to identify the service in distributed tracing systems
     /// like Jaeger or Zipkin. Useful for differentiating between multiple reth instances.
     ///
-    /// Set via OTEL_SERVICE_NAME environment variable. Defaults to "reth" if not specified.
+    /// Set via `OTEL_SERVICE_NAME` environment variable. Defaults to "reth" if not specified.
     #[arg(
+        long = "tracing-otlp.service-name",
         env = "OTEL_SERVICE_NAME",
         global = true,
         value_name = "NAME",
         default_value = "reth",
-        hide = true
+        hide = true,
+        help_heading = "Tracing"
     )]
     pub service_name: String,
 }
