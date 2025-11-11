@@ -105,13 +105,11 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         }
     }
 
-    /// Sets the in-memory overlay to use based on the `hashed_address`.
-    /// Returns the forward cursor and a boolean indicating if the storage was wiped.
+    /// Returns the storage overlay for `hashed_address` and whether it was deleted.
     fn get_storage_overlay(
         trie_updates: &'a TrieUpdatesSorted,
         hashed_address: B256,
     ) -> (ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>, bool) {
-        // Update the in-memory cursor to use the storage trie for the new address
         const EMPTY_UPDATES: &[(Nibbles, Option<BranchNodeCompact>)] = &[];
 
         let storage_trie_updates = trie_updates.storage_tries_ref().get(&hashed_address);

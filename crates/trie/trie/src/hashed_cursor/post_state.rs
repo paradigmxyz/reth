@@ -151,13 +151,11 @@ where
         }
     }
 
-    /// Sets the post state overlay to use based on the `hashed_address`.
-    /// Returns the forward cursor and a boolean indicating if the storage was wiped.
+    /// Returns the storage overlay for `hashed_address` and whether it was wiped.
     fn get_storage_overlay(
         post_state: &'a HashedPostStateSorted,
         hashed_address: B256,
     ) -> (ForwardInMemoryCursor<'a, B256, U256>, bool) {
-        // Update the post state cursor to use the storage for the new address
         const EMPTY_UPDATES: &[(B256, U256)] = &[];
 
         let post_state_storage = post_state.storages.get(&hashed_address);
