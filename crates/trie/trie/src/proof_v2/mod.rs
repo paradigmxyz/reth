@@ -13,7 +13,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_execution_errors::trie::StateProofError;
-use reth_trie_common::SparseTrieNode;
+use reth_trie_common::{Nibbles, SparseTrieNode, TrieMasks, TrieNode};
 
 mod targets;
 pub use targets::*;
@@ -30,7 +30,7 @@ pub use value::*;
 /// - Automatically resets after each calculation
 /// - Re-uses cursors from one calculation to the next
 #[derive(Debug)]
-pub struct ProofCalculator<TC, HC, RF, VE: ValueEncoder<RlpNodeFut = RF>> {
+pub struct ProofCalculator<TC, HC, VE> {
     /// Trie cursor for traversing stored branch nodes.
     trie_cursor: TC,
     /// Hashed cursor for iterating over leaf data.
@@ -40,51 +40,23 @@ pub struct ProofCalculator<TC, HC, RF, VE: ValueEncoder<RlpNodeFut = RF>> {
     value_encoder: VE,
 }
 
-impl<TC, HC, RF, VE: ValueEncoder<RlpNodeFut = RF> + Default> ProofCalculator<TC, HC, RF, VE> {
-    /// Create a new [`ProofCalculator`] instance.
-    pub fn new(trie_cursor: TC, hashed_cursor: HC) -> Self {
-        Self { trie_cursor, hashed_cursor, value_encoder: Default::default() }
+impl<TC, HC, VE> ProofCalculator<TC, HC, VE> {
+    /// Create a new [`ProofCalculator`] instance for calculating account proofs.
+    pub const fn new(trie_cursor: TC, hashed_cursor: HC, value_encoder: VE) -> Self {
+        Self { trie_cursor, hashed_cursor, value_encoder }
     }
 }
 
-impl<TC, HC, RF, VE> ProofCalculator<TC, HC, RF, VE>
+impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
     TC: TrieCursor,
     HC: HashedCursor,
-    RF: RlpNodeFut,
-    VE: ValueEncoder<RlpNodeFut = RF>,
+    VE: ValueEncoder,
 {
-    /// Replace the value encoder with a new one.
-    ///
-    /// This allows converting between different proof calculator types (e.g., to use a custom
-    /// account value encoder) while reusing the same cursors.
-    pub fn with_value_encoder<RF2, VE2>(
-        self,
-        value_encoder: VE2,
-    ) -> ProofCalculator<TC, HC, RF2, VE2>
-    where
-        VE2: ValueEncoder<RlpNodeFut = RF2>,
-        RF2: RlpNodeFut,
-    {
-        ProofCalculator {
-            trie_cursor: self.trie_cursor,
-            hashed_cursor: self.hashed_cursor,
-            value_encoder,
-        }
-    }
-
-    /// Generate a proof for the given targets.
-    ///
-    /// Given target keys sorted lexicographically, returns proof nodes
-    /// for all targets sorted lexicographically by path.
-    ///
-    /// If given zero targets, returns just the root.
-    ///
-    /// # Panics
-    ///
-    /// In debug builds, panics if the targets are not sorted lexicographically.
-    pub fn proof(
-        &mut self,
+    /// Internal implementation of proof calculation. Assumes both cursors have already been reset.
+    /// See docs on [`Self::proof`] for expected behavior.
+    fn proof_inner(
+        &self,
         targets: impl IntoIterator<Item = B256>,
     ) -> Result<Vec<SparseTrieNode>, StateProofError> {
         // In debug builds, verify that targets are sorted
@@ -114,19 +86,46 @@ where
     }
 }
 
-impl<TC, HC, RF, VE> ProofCalculator<TC, HC, RF, VE>
+impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
+where
+    TC: TrieCursor,
+    HC: HashedCursor,
+    VE: ValueEncoder,
+{
+    /// Generate a proof for the given targets.
+    ///
+    /// Given target keys sorted lexicographically, returns proof nodes
+    /// for all targets sorted lexicographically by path.
+    ///
+    /// If given zero targets, returns just the root.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, panics if the targets are not sorted lexicographically.
+    pub fn proof(
+        &mut self,
+        targets: impl IntoIterator<Item = B256>,
+    ) -> Result<Vec<SparseTrieNode>, StateProofError> {
+        self.trie_cursor.reset();
+        self.hashed_cursor.reset();
+        self.proof_inner(targets)
+    }
+}
+
+impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
     TC: TrieStorageCursor,
     HC: HashedStorageCursor,
-    RF: RlpNodeFut,
-    VE: ValueEncoder<RlpNodeFut = RF>,
+    VE: ValueEncoder,
 {
     /// Generate a proof for a storage trie at the given hashed address.
     ///
     /// This method:
     /// 1. Calls `set_hashed_address` on both the trie cursor and hashed cursor to switch to the
     ///    specified storage trie
-    /// 2. Calls [`Self::proof`] with the provided targets to generate the proof
+    /// 2. Checks if the storage is empty using `is_storage_empty()` - if so, returns a single
+    ///    `EmptyRoot` node as a shortcut
+    /// 3. Otherwise, calls [`Self::proof`] with the provided targets to generate the proof
     ///
     /// Given target keys sorted lexicographically, returns proof nodes
     /// for all targets sorted lexicographically by path.
@@ -141,15 +140,33 @@ where
         hashed_address: B256,
         targets: impl IntoIterator<Item = B256>,
     ) -> Result<Vec<SparseTrieNode>, StateProofError> {
-        // Switch both cursors to the specified storage trie
-        self.trie_cursor.set_hashed_address(hashed_address);
         self.hashed_cursor.set_hashed_address(hashed_address);
 
+        // Shortcut: check if storage is empty
+        if self.hashed_cursor.is_storage_empty()? {
+            // Return a single EmptyRoot node at the root path
+            return Ok(vec![SparseTrieNode {
+                path: Nibbles::default(),
+                node: TrieNode::EmptyRoot,
+                masks: TrieMasks::none(),
+            }])
+        }
+
+        // Don't call `set_hashed_address` on the trie cursor until after the previous shortcut has
+        // been checked.
+        self.trie_cursor.set_hashed_address(hashed_address);
+
         // Generate the proof using the regular proof method
-        self.proof(targets)
+        self.proof_inner(targets)
     }
 }
 
 /// A proof calculator for storage tries.
-pub type StorageProofCalculator<TC: TrieStorageCursor, HC: HashedStorageCursor> =
-    ProofCalculator<TC, HC, StorageRlpNodeFut, StorageValueEncoder>;
+pub type StorageProofCalculator<TC, HC> = ProofCalculator<TC, HC, StorageValueEncoder>;
+
+impl<TC, HC> StorageProofCalculator<TC, HC> {
+    /// Create a new [`StorageProofCalculator`] instance.
+    pub const fn new_storage(trie_cursor: TC, hashed_cursor: HC) -> Self {
+        Self::new(trie_cursor, hashed_cursor, StorageValueEncoder)
+    }
+}
