@@ -12,14 +12,18 @@ use crate::{
     trie_cursor::{TrieCursor, TrieStorageCursor},
 };
 use alloy_primitives::{B256, U256};
+use alloy_trie::TrieMask;
 use reth_execution_errors::trie::StateProofError;
-use reth_trie_common::{Nibbles, SparseTrieNode, TrieMasks, TrieNode};
+use reth_trie_common::{BranchNode, Nibbles, RlpNode, SparseTrieNode, TrieMasks, TrieNode};
 
 mod targets;
 pub use targets::*;
 
 mod value;
 pub use value::*;
+
+mod node;
+use node::*;
 
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
@@ -30,18 +34,49 @@ pub use value::*;
 /// - Automatically resets after each calculation
 /// - Re-uses cursors from one calculation to the next
 #[derive(Debug)]
-pub struct ProofCalculator<TC, HC, VE> {
+pub struct ProofCalculator<TC, HC, VE: ValueEncoder> {
     /// Trie cursor for traversing stored branch nodes.
     trie_cursor: TC,
     /// Hashed cursor for iterating over leaf data.
     hashed_cursor: HC,
-    value_encoder: core::marker::PhantomData<VE>,
+    /// Branches which are currently in the process of being constructed, each being a child of
+    /// the previous one.
+    branch_stack: Vec<ProofTrieBranch>,
+    /// The path of the last branch in `branch_stack`.
+    branch_path: Nibbles,
+    /// Children of branches in the `branch_stack`.
+    ///
+    /// Each branch in `branch_stack` tracks which children are in this stack using its
+    /// `state_mask`; the number of children the branch has in this stack is equal to the number of
+    /// bits set in its `state_mask`.
+    ///
+    /// The children for the bottom branch in `branch_stack` are found at the bottom of this stack,
+    /// and so on. When a branch is removed from `branch_stack` its children are removed from this
+    /// one, and the branch's [`RlpNode`] is pushed onto this stack in their place (see
+    /// [`Self::pop_branch`].
+    child_stack: Vec<ProofTrieBranchChild<VE::Fut>>,
+    /// Free-list of re-usable buffers of [`RlpNode`]s, used for encoding branch nodes to RLP.
+    ///
+    /// We are generally able to re-use these buffers across different branch nodes for the
+    /// duration of a proof calculation, but occasionally we will lose one when when a branch
+    /// node is returned as a `SparseTrieNode`.
+    rlp_nodes_bufs: Vec<Vec<RlpNode>>,
+    /// Re-usable byte buffer, used for RLP encoding.
+    rlp_encode_buf: Vec<u8>,
 }
 
-impl<TC, HC, VE> ProofCalculator<TC, HC, VE> {
+impl<TC, HC, VE: ValueEncoder> ProofCalculator<TC, HC, VE> {
     /// Create a new [`ProofCalculator`] instance for calculating account proofs.
     pub const fn new(trie_cursor: TC, hashed_cursor: HC) -> Self {
-        Self { trie_cursor, hashed_cursor, value_encoder: core::marker::PhantomData }
+        Self {
+            trie_cursor,
+            hashed_cursor,
+            branch_stack: Vec::<_>::new(),
+            branch_path: Nibbles::new(),
+            child_stack: Vec::<_>::new(),
+            rlp_nodes_bufs: Vec::<_>::new(),
+            rlp_encode_buf: Vec::<_>::new(),
+        }
     }
 }
 
@@ -51,11 +86,229 @@ where
     HC: HashedCursor,
     VE: ValueEncoder<Value = HC::Value>,
 {
+    /// Takes a re-usable `RlpNode` buffer from the internal free-list, or allocates a new one if
+    /// the free-list is empty.
+    ///
+    /// The returned Vec will have a length of zero.
+    fn take_rlp_nodes_buf(&mut self) -> Vec<RlpNode> {
+        self.rlp_nodes_bufs
+            .pop()
+            .map(|mut buf| {
+                buf.clear();
+                buf
+            })
+            .unwrap_or_else(|| Vec::with_capacity(16))
+    }
+
+    /// Pushes a new branch onto the `branch_stack`, while also pushing the given leaf onto the
+    /// `child_stack`.
+    ///
+    /// This method expects that there already exists a child on the `child_stack`, and that that
+    /// child has a non-zero short key. The new branch is constructed based on the top child from
+    /// the `child_stack` and the given leaf.
+    fn push_new_branch(&mut self, leaf_key: Nibbles, leaf_val: VE::Fut) {
+        // First determine the new leaf's shortkey relative to the current branch. If there is no
+        // current branch then the short key is the full key.
+        let leaf_short_key = if self.branch_stack.is_empty() {
+            leaf_key
+        } else {
+            // When there is a current branch then trim off its path as well as the nibble that it
+            // has set for this leaf.
+            leaf_key.slice_unchecked(self.branch_path.len() + 1, leaf_key.len())
+        };
+
+        // Get the new branch's first child, which is the child on the top of the stack with which
+        // the new leaf shares the same nibble on the current branch.
+        let first_child = self
+            .child_stack
+            .last_mut()
+            .expect("push_branch can't be called with empty child_stack");
+
+        let first_child_short_key = first_child.short_key();
+        debug_assert!(
+            !first_child_short_key.is_empty(),
+            "push_branch called when top child on stack is not a leaf or extension with a short key",
+        );
+
+        // Determine how many nibbles are shared between the new branch's first child and the new
+        // leaf. This common prefix will be the extension of the new branch
+        let common_prefix_len = first_child_short_key.common_prefix_length(&leaf_short_key);
+
+        // Trim off the common prefix from the first child's short key, plus one nibble which will
+        // stored by the new branch itself in its state mask.
+        let first_child_nibble = first_child_short_key.get_unchecked(common_prefix_len);
+        first_child.trim_short_key_prefix(common_prefix_len + 1);
+
+        // Similarly, trim off the common prefix, plus one nibble for the new branch, from the new
+        // leaf's short key.
+        let leaf_nibble = leaf_short_key.get_unchecked(common_prefix_len);
+        let leaf_short_key = trim_nibbles_prefix(&leaf_short_key, common_prefix_len + 1);
+
+        // Push the new leaf onto the child stack; it will be the second child of the new branch.
+        // The new branch's first child is the child already on the top of the stack, for which
+        // we've already adjusted its short key.
+        self.child_stack
+            .push(ProofTrieBranchChild::Leaf { short_key: leaf_short_key, value: leaf_val });
+
+        // Construct the state mask of the new branch, and push the new branch onto the branch
+        // stack.
+        self.branch_stack.push(ProofTrieBranch {
+            ext_len: common_prefix_len as u8,
+            state_mask: {
+                let mut m = TrieMask::default();
+                m.set_bit(first_child_nibble);
+                m.set_bit(leaf_nibble);
+                m
+            },
+            tree_mask: TrieMask::default(),
+            hash_mask: TrieMask::default(),
+        });
+
+        // Update the branch path to reflect the new branch which was just pushed. Its path will be
+        // the path of the previous branch, plus the nibble shared by each child, plus the parent
+        // extension (denoted by a non-zero `ext_len`). Since the new branch's path is a prefix of
+        // the original leaf_key we can just slice that.
+        self.branch_path =
+            leaf_key.slice_unchecked(0, self.branch_path.len() + 1 + common_prefix_len);
+    }
+
+    /// Pops the top branch off of the `branch_stack`, and hashes it (and its extension node as
+    /// well, if there is one). The `branch_path` field will be updated accordingly.
+    ///
+    /// If there remains another branch on the stack then that branch is updated. If not then a
+    /// single [`ProofTrieBranchChild::Hash`] is left on the `child_stack`.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if `branch_stack` is empty.
+    fn pop_branch(&mut self) -> Result<(), StateProofError> {
+        let mut rlp_nodes_buf = self.take_rlp_nodes_buf();
+        let branch = self.branch_stack.pop().expect("branch_stack cannot be empty");
+
+        // Take the branch's children off the stack, using the state mask to determine how many
+        // there are.
+        let num_children = branch.state_mask.count_ones() as usize;
+        debug_assert!(num_children > 1, "A branch must have at least two children");
+        debug_assert!(
+            self.child_stack.len() >= num_children,
+            "Stack is missing necessary children"
+        );
+        let children = self.child_stack.drain(self.child_stack.len() - num_children..);
+
+        // Update the branch_path, removing the nibble for this branch and any nibble's from its
+        // parent extension as well (if there is one).
+        debug_assert!(self.branch_path.len() > 1 + branch.ext_len as usize);
+        let new_path_len = self.branch_path.len() - 1 - branch.ext_len as usize;
+        self.branch_path = self.branch_path.slice_unchecked(0, new_path_len);
+
+        // From here we will be encoding the branch node and pushing it onto the child stack,
+        // replacing its children.
+
+        // Collect children into an `RlpNode` Vec by calling into_rlp on each.
+        for child in children {
+            let (child_rlp_node, freed_rlp_nodes_buf) = child.into_rlp(&mut self.rlp_encode_buf)?;
+            rlp_nodes_buf.push(child_rlp_node);
+
+            // If there is an `RlpNode` buffer which can be re-used then push it onto the free-list.
+            if let Some(buf) = freed_rlp_nodes_buf {
+                self.rlp_nodes_bufs.push(buf);
+            }
+        }
+
+        debug_assert_eq!(
+            rlp_nodes_buf.len(),
+            branch.state_mask.count_ones() as usize,
+            "children length must match number of bits set in state_mask"
+        );
+
+        // Construct the `BranchNode`.
+        let branch_node = BranchNode::new(rlp_nodes_buf, branch.state_mask);
+
+        // Wrap the `BranchNode` so it can be pushed onto the child stack.
+        let branch_as_child = if branch.ext_len == 0 {
+            // If there is no extension then push a branch node
+            ProofTrieBranchChild::Branch(branch_node)
+        } else {
+            // Otherwise compute the extension's short key and push an extension node
+            let short_key = trim_nibbles_prefix(
+                &self.branch_path,
+                self.branch_path.len() - branch.ext_len as usize,
+            );
+            ProofTrieBranchChild::Extension { short_key, child: branch_node }
+        };
+
+        self.child_stack.push(branch_as_child);
+        Ok(())
+    }
+
+    /// Adds a single leaf for a key to the stack, possibly collapsing an existing branch and/or
+    /// creating a new one depending on the path of the key.
+    fn add_leaf(&mut self, key: Nibbles, val: VE::Fut) -> Result<(), StateProofError> {
+        loop {
+            // Get the branch currently being built. If there are no branches on the stack then it
+            // means either the trie is empty or only a single leaf has been added previously.
+            let curr_branch = match self.branch_stack.last_mut() {
+                Some(curr_branch) => curr_branch,
+                None if self.child_stack.is_empty() => {
+                    // If the child stack is empty then this is the first leaf, push it and be done
+                    self.child_stack
+                        .push(ProofTrieBranchChild::Leaf { short_key: key, value: val });
+                    return Ok(())
+                }
+                None => {
+                    // If the child stack is not empty then it must only have a single other child
+                    // which is either a leaf or extension with a non-zero short key.
+                    debug_assert_eq!(self.child_stack.len(), 1);
+                    debug_assert!(!self
+                        .child_stack
+                        .last()
+                        .expect("already checked for emptiness")
+                        .short_key()
+                        .is_empty());
+                    self.push_new_branch(key, val);
+                    return Ok(())
+                }
+            };
+
+            // Find the common prefix length, which is the number of nibbles shared between the
+            // current branch and the key.
+            let common_prefix_len = self.branch_path.common_prefix_length(&key);
+
+            // If the current branch does not share all of its nibbles with the key then it is not
+            // the parent of the new key. In this case the current branch will have no more
+            // children. We can pop it and loop back to the top to try again with its parent branch.
+            if common_prefix_len < self.branch_path.len() {
+                self.pop_branch()?;
+                continue
+            }
+
+            // If the current branch is a prefix of the new key then the leaf is a child of the
+            // branch. If the branch doesn't have the leaf's nibble set then the leaf can be added
+            // directly, otherwise a new branch must be created in-between this branch and that
+            // existing child.
+            let nibble = key.get_unchecked(common_prefix_len);
+            if curr_branch.state_mask.is_bit_set(nibble) {
+                // This method will also push the new leaf onto the `child_stack`.
+                self.push_new_branch(key, val);
+            } else {
+                curr_branch.state_mask.set_bit(nibble);
+
+                // Push the leaf onto the stack.
+                self.child_stack.push(ProofTrieBranchChild::Leaf {
+                    short_key: key.slice_unchecked(common_prefix_len + 1, key.len()),
+                    value: val,
+                });
+            }
+
+            return Ok(())
+        }
+    }
+
     /// Internal implementation of proof calculation. Assumes both cursors have already been reset.
     /// See docs on [`Self::proof`] for expected behavior.
     fn proof_inner(
-        &self,
-        _value_encoder: &VE,
+        &mut self,
+        value_encoder: &VE,
         targets: impl IntoIterator<Item = B256>,
     ) -> Result<Vec<SparseTrieNode>, StateProofError> {
         // In debug builds, verify that targets are sorted
@@ -78,10 +331,63 @@ where
         #[cfg(not(debug_assertions))]
         let targets = targets.into_iter();
 
+        // Ensure initial state is cleared. By the end of the method call these should be empty once
+        // again.
+        debug_assert!(self.branch_stack.is_empty());
+        debug_assert!(self.branch_path.is_empty());
+        debug_assert!(self.child_stack.is_empty());
+
         // Silence unused variable warning for now
         let _ = targets;
 
-        todo!("proof not yet implemented")
+        let mut proof_nodes = Vec::new();
+        loop {
+            // Fetch the next leaf from the hashed cursor, converting the key to Nibbles and
+            // immediately creating the ValueEncoderFut so that encoding of the leaf value can begin
+            // ASAP.
+            let Some((key, val)) = self.hashed_cursor.next()?.map(|(key, val)| {
+                debug_assert_eq!(key.len(), 32);
+                // SAFETY: key is a B256 and so is exactly 32-bytes.
+                let key = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
+                let val = value_encoder.encoder_fut(val);
+                (key, val)
+            }) else {
+                break
+            };
+
+            self.add_leaf(key, val)?;
+        }
+
+        // Once there's no more leafs we can pop the remaining branches, if any.
+        while !self.branch_stack.is_empty() {
+            self.pop_branch()?;
+        }
+
+        // At this point the branch stack should be empty. If the child stack is empty it means no
+        // keys were ever iterated from the hashed cursor in the first place. Otherwise there should
+        // only be a single node left: the root node.
+        debug_assert!(self.branch_stack.is_empty());
+        debug_assert!(self.branch_path.is_empty());
+        debug_assert!(self.child_stack.len() < 2);
+
+        // Determine the root node based on the child stack, and push the proof of the root node
+        // onto the result stack.
+        let root_node = if let Some(node) = self.child_stack.pop() {
+            node.into_trie_node(&mut self.rlp_encode_buf)?
+        } else {
+            TrieNode::EmptyRoot
+        };
+
+        proof_nodes.push(SparseTrieNode {
+            path: Nibbles::new(), // root path
+            node: root_node,
+            masks: TrieMasks::none(),
+        });
+
+        // Proofs will have been pushed in depth-first order, reverse them so that they are returned
+        // in depth-last (ie root-first) order.
+        proof_nodes.reverse();
+        Ok(proof_nodes)
     }
 }
 
