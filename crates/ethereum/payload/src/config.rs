@@ -9,6 +9,10 @@ pub struct EthereumBuilderConfig {
     /// Waits for the first payload to be built if there is no payload built when the payload is
     /// being resolved.
     pub await_payload_on_missing: bool,
+    /// Maximum number of blobs to include per block (EIP-7872).
+    ///
+    /// If `None`, defaults to the protocol maximum.
+    pub max_blobs_per_block: Option<u64>,
 }
 
 impl Default for EthereumBuilderConfig {
@@ -20,7 +24,11 @@ impl Default for EthereumBuilderConfig {
 impl EthereumBuilderConfig {
     /// Create new payload builder config.
     pub const fn new() -> Self {
-        Self { desired_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M, await_payload_on_missing: true }
+        Self {
+            desired_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            await_payload_on_missing: true,
+            max_blobs_per_block: None,
+        }
     }
 
     /// Set desired gas limit.
@@ -33,6 +41,12 @@ impl EthereumBuilderConfig {
     /// resolved and no payload has been built yet.
     pub const fn with_await_payload_on_missing(mut self, await_payload_on_missing: bool) -> Self {
         self.await_payload_on_missing = await_payload_on_missing;
+        self
+    }
+
+    /// Set the maximum number of blobs per block (EIP-7872).
+    pub const fn with_max_blobs_per_block(mut self, max_blobs_per_block: Option<u64>) -> Self {
+        self.max_blobs_per_block = max_blobs_per_block;
         self
     }
 }
