@@ -38,7 +38,7 @@ use reth_ethereum::{
     tasks::TaskManager,
     EthPrimitives,
 };
-use reth_tracing::{RethTracer, Tracer};
+use reth_tracing::RethTracer;
 use std::sync::OnceLock;
 
 /// Custom EVM configuration.
