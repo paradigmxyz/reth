@@ -236,7 +236,8 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
         let mut accounts = HashMap::new();
         let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
         for entry in account_changesets_cursor.walk_range(account_range)? {
-            let (_, AccountBeforeTx { address, info }) = entry?;
+            let (_block, AccountBeforeTx { address, info }) = entry?;
+            tracing::debug!(target: "sync::stages::merkle_changesets", entry=?(_block, AccountBeforeTx { address, info }), "Got account changeset entry");
             accounts.entry(address).or_insert(info);
         }
 
