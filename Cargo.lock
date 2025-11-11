@@ -8413,10 +8413,8 @@ dependencies = [
  "reth-node-metrics",
  "reth-rpc-server-types",
  "reth-tracing",
- "reth-tracing-otlp",
  "tempfile",
  "tracing",
- "url",
 ]
 
 [[package]]
@@ -9369,13 +9367,11 @@ dependencies = [
  "reth-static-file",
  "reth-static-file-types",
  "reth-tracing",
- "reth-tracing-otlp",
  "serde",
  "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
- "url",
 ]
 
 [[package]]
