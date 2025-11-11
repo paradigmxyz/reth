@@ -366,48 +366,39 @@ where
         targets: B256Set,
     ) -> Result<StorageMultiProof, StateProofError> {
         #[cfg(feature = "metrics")]
-        let (mut hashed_storage_cursor, _) = {
-            let mut discard_hashed_cursor_metrics = HashedCursorMetricsCache::default();
-            let hashed_cursor_metrics =
-                self.hashed_cursor_metrics.unwrap_or(&mut discard_hashed_cursor_metrics);
-            (
-                InstrumentedHashedCursor::new(
-                    self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?,
-                    hashed_cursor_metrics,
-                ),
-                discard_hashed_cursor_metrics,
-            )
-        };
+        let mut discard_hashed_cursor_metrics = HashedCursorMetricsCache::default();
+        #[cfg(feature = "metrics")]
+        let hashed_cursor_metrics =
+            self.hashed_cursor_metrics.unwrap_or(&mut discard_hashed_cursor_metrics);
 
-        #[cfg(not(feature = "metrics"))]
-        let mut hashed_storage_cursor =
+        let hashed_storage_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
+
+        #[cfg(feature = "metrics")]
+        let mut hashed_storage_cursor =
+            InstrumentedHashedCursor::new(hashed_storage_cursor, hashed_cursor_metrics);
+        #[cfg(not(feature = "metrics"))]
+        let mut hashed_storage_cursor = hashed_storage_cursor;
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
             return Ok(StorageMultiProof::empty())
         }
 
+        #[cfg(feature = "metrics")]
+        let mut discard_trie_cursor_metrics = TrieCursorMetricsCache::default();
+        #[cfg(feature = "metrics")]
+        let trie_cursor_metrics =
+            self.trie_cursor_metrics.unwrap_or(&mut discard_trie_cursor_metrics);
+
         let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();
         let mut prefix_set = self.prefix_set;
         prefix_set.extend_keys(target_nibbles.clone());
 
-        #[cfg(feature = "metrics")]
-        let (trie_cursor, _) = {
-            let mut discard_trie_cursor_metrics = TrieCursorMetricsCache::default();
-            let trie_cursor_metrics =
-                self.trie_cursor_metrics.unwrap_or(&mut discard_trie_cursor_metrics);
-            (
-                InstrumentedTrieCursor::new(
-                    self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?,
-                    trie_cursor_metrics,
-                ),
-                discard_trie_cursor_metrics,
-            )
-        };
-
-        #[cfg(not(feature = "metrics"))]
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
+
+        #[cfg(feature = "metrics")]
+        let trie_cursor = InstrumentedTrieCursor::new(trie_cursor, trie_cursor_metrics);
 
         let walker = TrieWalker::<_>::storage_trie(trie_cursor, prefix_set.freeze())
             .with_added_removed_keys(self.added_removed_keys.as_ref());

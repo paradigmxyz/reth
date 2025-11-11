@@ -1,5 +1,6 @@
+#[cfg(feature = "metrics")]
+use crate::metrics::ParallelTrieMetrics;
 use crate::{
-    metrics::ParallelTrieMetrics,
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
         StorageProofInput,

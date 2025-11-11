@@ -72,7 +72,9 @@ use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, trace};
 
 #[cfg(feature = "metrics")]
-use crate::proof_task_metrics::{ProofTaskCursorMetrics, ProofTaskTrieMetrics};
+use crate::proof_task_metrics::{
+    ProofTaskCursorMetrics, ProofTaskCursorMetricsCache, ProofTaskTrieMetrics,
+};
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
@@ -666,7 +668,7 @@ struct StorageProofWorker<Factory> {
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
-    /// Cursor metrics collector for this worker
+    /// Cursor metrics for this worker
     #[cfg(feature = "metrics")]
     cursor_metrics: ProofTaskCursorMetrics,
 }
@@ -737,6 +739,7 @@ where
 
         let mut storage_proofs_processed = 0u64;
         let mut storage_nodes_processed = 0u64;
+        let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
         // Initially mark this worker as available.
         available_workers.fetch_add(1, Ordering::Relaxed);
@@ -754,7 +757,7 @@ where
                         proof_result_sender,
                         &mut storage_proofs_processed,
                         #[cfg(feature = "metrics")]
-                        cursor_metrics,
+                        &mut cursor_metrics_cache,
                     );
                 }
 
@@ -783,7 +786,10 @@ where
         );
 
         #[cfg(feature = "metrics")]
-        metrics.record_storage_nodes(storage_nodes_processed as usize);
+        {
+            metrics.record_storage_nodes(storage_nodes_processed as usize);
+            cursor_metrics_cache.record(cursor_metrics);
+        }
 
         Ok(())
     }
@@ -795,7 +801,7 @@ where
         input: StorageProofInput,
         proof_result_sender: ProofResultContext,
         storage_proofs_processed: &mut u64,
-        #[cfg(feature = "metrics")] cursor_metrics: &mut ProofTaskCursorMetrics,
+        #[cfg(feature = "metrics")] cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
@@ -861,8 +867,14 @@ where
 
         #[cfg(feature = "metrics")]
         {
-            trie_cursor_metrics.record(&mut cursor_metrics.storage_trie_cursor);
-            hashed_cursor_metrics.record(&mut cursor_metrics.storage_hashed_cursor);
+            // Accumulate per-proof metrics into the worker's cache
+            let per_proof_cache = ProofTaskCursorMetricsCache {
+                account_trie_cursor: TrieCursorMetricsCache::default(),
+                account_hashed_cursor: HashedCursorMetricsCache::default(),
+                storage_trie_cursor: trie_cursor_metrics,
+                storage_hashed_cursor: hashed_cursor_metrics,
+            };
+            cursor_metrics_cache.extend(&per_proof_cache);
         }
     }
 
@@ -932,7 +944,7 @@ struct AccountProofWorker<Factory> {
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
-    /// Cursor metrics collector for this worker
+    /// Cursor metrics for this worker
     #[cfg(feature = "metrics")]
     cursor_metrics: ProofTaskCursorMetrics,
 }
@@ -1006,6 +1018,7 @@ where
 
         let mut account_proofs_processed = 0u64;
         let mut account_nodes_processed = 0u64;
+        let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
         // Count this worker as available only after successful initialization.
         available_workers.fetch_add(1, Ordering::Relaxed);
@@ -1023,7 +1036,7 @@ where
                         *input,
                         &mut account_proofs_processed,
                         #[cfg(feature = "metrics")]
-                        cursor_metrics,
+                        &mut cursor_metrics_cache,
                     );
                 }
 
@@ -1051,7 +1064,10 @@ where
         );
 
         #[cfg(feature = "metrics")]
-        metrics.record_account_nodes(account_nodes_processed as usize);
+        {
+            metrics.record_account_nodes(account_nodes_processed as usize);
+            cursor_metrics_cache.record(cursor_metrics);
+        }
 
         Ok(())
     }
@@ -1063,7 +1079,7 @@ where
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
-        #[cfg(feature = "metrics")] cursor_metrics: &mut ProofTaskCursorMetrics,
+        #[cfg(feature = "metrics")] cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
@@ -1139,11 +1155,7 @@ where
 
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
-
-        let mut account_trie_cursor_metrics = tracker.account_trie_cursor_metrics;
-        let mut account_hashed_cursor_metrics = tracker.account_hashed_cursor_metrics;
-        let mut storage_trie_cursor_metrics = tracker.storage_trie_cursor_metrics;
-        let mut storage_hashed_cursor_metrics = tracker.storage_hashed_cursor_metrics;
+        let proof_cursor_metrics = tracker.cursor_metrics;
 
         let stats = tracker.finish();
         let result = result.map(|proof| ProofResult::AccountMultiproof { proof, stats });
@@ -1172,20 +1184,16 @@ where
             proof_time_us = proof_elapsed.as_micros(),
             total_elapsed_us = total_elapsed.as_micros(),
             total_processed = account_proofs_processed,
-            ?account_trie_cursor_metrics,
-            ?account_hashed_cursor_metrics,
-            ?storage_trie_cursor_metrics,
-            ?storage_hashed_cursor_metrics,
+            account_trie_cursor_metrics = ?proof_cursor_metrics.account_trie_cursor,
+            account_hashed_cursor_metrics = ?proof_cursor_metrics.account_hashed_cursor,
+            storage_trie_cursor_metrics = ?proof_cursor_metrics.storage_trie_cursor,
+            storage_hashed_cursor_metrics = ?proof_cursor_metrics.storage_hashed_cursor,
             "Account multiproof completed"
         );
 
         #[cfg(feature = "metrics")]
-        {
-            account_trie_cursor_metrics.record(&mut cursor_metrics.account_trie_cursor);
-            account_hashed_cursor_metrics.record(&mut cursor_metrics.account_hashed_cursor);
-            storage_trie_cursor_metrics.record(&mut cursor_metrics.storage_trie_cursor);
-            storage_hashed_cursor_metrics.record(&mut cursor_metrics.storage_hashed_cursor);
-        }
+        // Accumulate per-proof metrics into the worker's cache
+        cursor_metrics_cache.extend(&proof_cursor_metrics);
     }
 
     /// Processes a blinded account node lookup request.
@@ -1347,10 +1355,10 @@ where
                                     StorageProof::new_hashed(provider, provider, hashed_address)
                                         .with_prefix_set_mut(Default::default())
                                         .with_trie_cursor_metrics(
-                                            &mut tracker.storage_trie_cursor_metrics,
+                                            &mut tracker.cursor_metrics.storage_trie_cursor,
                                         )
                                         .with_hashed_cursor_metrics(
-                                            &mut tracker.storage_hashed_cursor_metrics,
+                                            &mut tracker.cursor_metrics.storage_hashed_cursor,
                                         )
                                         .storage_multiproof(
                                             ctx.targets
@@ -1410,8 +1418,8 @@ where
     };
 
     // Extend tracker with accumulated metrics from account cursors
-    tracker.account_trie_cursor_metrics.extend(&account_trie_cursor_metrics);
-    tracker.account_hashed_cursor_metrics.extend(&account_hashed_cursor_metrics);
+    tracker.cursor_metrics.account_trie_cursor.extend(&account_trie_cursor_metrics);
+    tracker.cursor_metrics.account_hashed_cursor.extend(&account_hashed_cursor_metrics);
 
     Ok(DecodedMultiProof {
         account_subtree: decoded_account_subtree,

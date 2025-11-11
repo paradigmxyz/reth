@@ -106,6 +106,8 @@ where
             let factory = self.factory.clone();
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
+            #[cfg(not(feature = "metrics"))]
+            let metrics = reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage);
 
             let (tx, rx) = mpsc::sync_channel(1);
 
@@ -118,7 +120,6 @@ where
                         &provider,
                         hashed_address,
                         prefix_set,
-                        #[cfg(feature = "metrics")]
                         metrics,
                     )
                     .calculate(retain_updates)?)
@@ -163,13 +164,18 @@ where
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
                             tracker.inc_missed_leaves();
+                            #[cfg(feature = "metrics")]
+                            let metrics = self.metrics.storage_trie.clone();
+                            #[cfg(not(feature = "metrics"))]
+                            let metrics = reth_trie::metrics::TrieRootMetrics::new(
+                                reth_trie::TrieType::Storage,
+                            );
                             StorageRoot::new_hashed(
                                 &provider,
                                 &provider,
                                 hashed_address,
                                 Default::default(),
-                                #[cfg(feature = "metrics")]
-                                self.metrics.storage_trie.clone(),
+                                metrics,
                             )
                             .calculate(retain_updates)?
                         }
