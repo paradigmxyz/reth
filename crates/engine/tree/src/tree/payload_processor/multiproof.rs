@@ -1112,11 +1112,18 @@ impl MultiProofTask {
                                 // Batch consecutive PrefetchProofs messages into one
                                 let mut merged_targets = targets;
                                 let mut num_batched = 1;
-                                while let Ok(MultiProofMessage::PrefetchProofs(next_targets)) =
-                                    self.rx.try_recv()
-                                {
-                                    merged_targets.extend(next_targets);
-                                    num_batched += 1;
+                                loop {
+                                    match self.rx.try_recv() {
+                                        Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
+                                            merged_targets.extend(next_targets);
+                                            num_batched += 1;
+                                        }
+                                        Ok(other_msg) => {
+                                            let _ = self.tx.send(other_msg);
+                                            break;
+                                        }
+                                        Err(_) => break,
+                                    }
                                 }
 
                                 let account_targets = merged_targets.len();
@@ -1149,11 +1156,18 @@ impl MultiProofTask {
                                 // (observability only).
                                 let mut merged_update = update;
                                 let mut num_batched = 1;
-                                while let Ok(MultiProofMessage::StateUpdate(_new_source, next_update)) =
-                                    self.rx.try_recv()
-                                {
-                                    merged_update.extend(next_update);
-                                    num_batched += 1;
+                                loop {
+                                    match self.rx.try_recv() {
+                                        Ok(MultiProofMessage::StateUpdate(_new_source, next_update)) => {
+                                            merged_update.extend(next_update);
+                                            num_batched += 1;
+                                        }
+                                        Ok(other_msg) => {
+                                            let _ = self.tx.send(other_msg);
+                                            break;
+                                        }
+                                        Err(_) => break,
+                                    }
                                 }
 
                                 let len = merged_update.len();
@@ -1165,7 +1179,7 @@ impl MultiProofTask {
                                     ?state_update_proofs_requested,
                                     num_batched,
                                     "Received new state update"
-                                );
+                                 );
                             }
                             MultiProofMessage::FinishedStateUpdates => {
                                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
