@@ -10,14 +10,13 @@ use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::Account;
 use reth_trie_common::RlpNode;
+use std::rc::Rc;
 
 /// A trait for deferred RLP encoding of proof values.
 ///
 /// This trait is implemented by types that can encode themselves into an RLP buffer
 /// on demand, allowing for lazy computation of storage roots and other deferred work.
-///
-/// The lifetime `'a` ensures that the future cannot outlive the encoder that created it.
-pub trait RlpNodeFut<'a>: 'a {
+pub trait RlpNodeFut {
     /// Encodes the value as RLP into the provided buffer and returns the `RlpNode`.
     ///
     /// # Arguments
@@ -42,11 +41,7 @@ pub trait ValueEncoder {
     type Value;
 
     /// The type that will compute and encode the RLP node when needed.
-    ///
-    /// The lifetime parameter ensures that the future cannot outlive the encoder.
-    type RlpNodeFut<'a>: RlpNodeFut<'a>
-    where
-        Self: 'a;
+    type RlpNodeFut: RlpNodeFut;
 
     /// Returns a future-like value that will compute the RLP node when called.
     ///
@@ -56,7 +51,7 @@ pub trait ValueEncoder {
     ///
     /// The returned future should be called as late as possible in the algorithm to maximize
     /// the time available for parallel computation (e.g., storage root calculation).
-    fn rlp_fut(&self, value: Self::Value) -> Self::RlpNodeFut<'_>;
+    fn rlp_fut(&self, value: Self::Value) -> Self::RlpNodeFut;
 }
 
 /// An encoder for storage slot values.
@@ -69,7 +64,7 @@ pub struct StorageValueEncoder;
 #[derive(Debug, Clone, Copy)]
 pub struct StorageRlpNodeFut(U256);
 
-impl<'a> RlpNodeFut<'a> for StorageRlpNodeFut {
+impl RlpNodeFut for StorageRlpNodeFut {
     fn get(self, buf: &mut Vec<u8>) -> Result<RlpNode, StateProofError> {
         buf.clear();
         self.0.encode(buf);
@@ -79,53 +74,48 @@ impl<'a> RlpNodeFut<'a> for StorageRlpNodeFut {
 
 impl ValueEncoder for StorageValueEncoder {
     type Value = U256;
-    type RlpNodeFut<'a>
-        = StorageRlpNodeFut
-    where
-        Self: 'a;
+    type RlpNodeFut = StorageRlpNodeFut;
 
-    fn rlp_fut(&self, value: Self::Value) -> Self::RlpNodeFut<'_> {
+    fn rlp_fut(&self, value: Self::Value) -> Self::RlpNodeFut {
         StorageRlpNodeFut(value)
     }
 }
 
 /// An account value encoder that synchronously computes storage roots.
 ///
-/// This encoder contains a reference to a provider that can create trie and hashed cursors.
+/// This encoder contains a provider that can create trie and hashed cursors.
 /// Storage roots are computed lazily within the RLP encoding future by creating
 /// a storage proof calculator on demand.
-#[derive(Debug, Clone, Copy)]
-pub struct SyncAccountValueEncoder<'a, P> {
+#[derive(Debug, Clone)]
+pub struct SyncAccountValueEncoder<P> {
     /// Provider for creating trie and hashed cursors.
-    provider: &'a P,
+    provider: Rc<P>,
 }
 
-impl<'a, P> SyncAccountValueEncoder<'a, P> {
-    /// Create a new account value encoder with the given provider reference.
-    pub const fn new(provider: &'a P) -> Self {
+impl<P> SyncAccountValueEncoder<P> {
+    /// Create a new account value encoder with the given provider.
+    pub const fn new(provider: Rc<P>) -> Self {
         Self { provider }
     }
 }
 
 /// The RLP encoding future for an account value with synchronous storage root calculation.
-#[derive(Debug, Clone, Copy)]
-pub struct SyncAccountRlpNodeFut<'a, P> {
-    provider: &'a P,
+#[derive(Debug, Clone)]
+pub struct SyncAccountRlpNodeFut<P> {
+    provider: Rc<P>,
     hashed_address: B256,
     account: Account,
 }
 
-impl<'fut, 'provider, P> RlpNodeFut<'fut> for SyncAccountRlpNodeFut<'provider, P>
+impl<P> RlpNodeFut for SyncAccountRlpNodeFut<P>
 where
-    'provider: 'fut,
     P: TrieCursorFactory + HashedCursorFactory,
-    P::StorageTrieCursor<'provider>: TrieStorageCursor,
-    P::StorageCursor<'provider>: HashedStorageCursor,
 {
     fn get(self, buf: &mut Vec<u8>) -> Result<RlpNode, StateProofError> {
         // Create cursors for storage proof calculation
-        let trie_cursor = self.provider.storage_trie_cursor(self.hashed_address)?;
-        let hashed_cursor = self.provider.hashed_storage_cursor(self.hashed_address)?;
+        let provider = &*self.provider;
+        let trie_cursor = provider.storage_trie_cursor(self.hashed_address)?;
+        let hashed_cursor = provider.hashed_storage_cursor(self.hashed_address)?;
 
         // Create storage proof calculator with StorageValueEncoder
         let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
@@ -160,23 +150,17 @@ where
     }
 }
 
-impl<'provider, P> ValueEncoder for SyncAccountValueEncoder<'provider, P>
+impl<P> ValueEncoder for SyncAccountValueEncoder<P>
 where
     P: TrieCursorFactory + HashedCursorFactory,
-    P::StorageTrieCursor<'provider>: TrieStorageCursor,
-    P::StorageCursor<'provider>: HashedStorageCursor,
 {
     type Value = (B256, Account);
-    type RlpNodeFut<'fut>
-        = SyncAccountRlpNodeFut<'provider, P>
-    where
-        Self: 'fut,
-        'provider: 'fut;
+    type RlpNodeFut = SyncAccountRlpNodeFut<P>;
 
-    fn rlp_fut(&self, value: Self::Value) -> Self::RlpNodeFut<'_> {
+    fn rlp_fut(&self, value: Self::Value) -> Self::RlpNodeFut {
         let (hashed_address, account) = value;
 
         // Return a future that will compute the storage root when get() is called
-        SyncAccountRlpNodeFut { provider: self.provider, hashed_address, account }
+        SyncAccountRlpNodeFut { provider: self.provider.clone(), hashed_address, account }
     }
 }
