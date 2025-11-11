@@ -158,12 +158,12 @@ where
         hashed_address: B256,
     ) -> (ForwardInMemoryCursor<'a, B256, U256>, bool) {
         // Update the post state cursor to use the storage for the new address
-        static EMPTY_UPDATES: Vec<(B256, U256)> = Vec::new();
+        const EMPTY_UPDATES: &[(B256, U256)] = &[];
 
         let post_state_storage = post_state.storages.get(&hashed_address);
         let cursor_wiped = post_state_storage.is_some_and(|u| u.is_wiped());
         let storage_slots =
-            post_state_storage.map(|u| u.storage_slots_ref()).unwrap_or(&EMPTY_UPDATES);
+            post_state_storage.map(|u| u.storage_slots_ref()).unwrap_or(EMPTY_UPDATES);
 
         (ForwardInMemoryCursor::new(storage_slots), cursor_wiped)
     }

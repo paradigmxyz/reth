@@ -112,12 +112,12 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         hashed_address: B256,
     ) -> (ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>, bool) {
         // Update the in-memory cursor to use the storage trie for the new address
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+        const EMPTY_UPDATES: &[(Nibbles, Option<BranchNodeCompact>)] = &[];
 
         let storage_trie_updates = trie_updates.storage_tries_ref().get(&hashed_address);
         let cursor_wiped = storage_trie_updates.is_some_and(|u| u.is_deleted());
         let storage_nodes =
-            storage_trie_updates.map(|u| u.storage_nodes_ref()).unwrap_or(&EMPTY_UPDATES);
+            storage_trie_updates.map(|u| u.storage_nodes_ref()).unwrap_or(EMPTY_UPDATES);
 
         (ForwardInMemoryCursor::new(storage_nodes), cursor_wiped)
     }
