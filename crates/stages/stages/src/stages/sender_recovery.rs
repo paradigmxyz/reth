@@ -103,7 +103,7 @@ where
             })
         }
 
-        info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
+        info!(target: "sync::stages::sender_recovery", ?tx_range, ?writer, "Recovering senders");
 
         // Iterate over transactions in batches, recover the senders and append them
         let batch = tx_range
