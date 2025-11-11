@@ -9432,6 +9432,7 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-revm",

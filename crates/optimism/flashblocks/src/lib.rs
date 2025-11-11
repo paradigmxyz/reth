@@ -11,6 +11,9 @@
 use reth_primitives_traits::NodePrimitives;
 use std::sync::Arc;
 
+// Included to enable serde feature for OpReceipt type used transitively
+use reth_optimism_primitives as _;
+
 mod consensus;
 pub use consensus::FlashBlockConsensusClient;
 
