@@ -4979,6 +4979,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "insta"
+version = "1.43.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46fdb647ebde000f43b5b53f773c30cf9b0cb4300453208713fa38b2c70935a0"
+dependencies = [
+ "console",
+ "once_cell",
+ "similar",
+]
+
+[[package]]
 name = "instability"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8413,10 +8424,8 @@ dependencies = [
  "reth-node-metrics",
  "reth-rpc-server-types",
  "reth-tracing",
- "reth-tracing-otlp",
  "tempfile",
  "tracing",
- "url",
 ]
 
 [[package]]
@@ -9369,13 +9378,11 @@ dependencies = [
  "reth-static-file",
  "reth-static-file-types",
  "reth-tracing",
- "reth-tracing-otlp",
  "serde",
  "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
- "url",
 ]
 
 [[package]]
@@ -10567,6 +10574,7 @@ version = "1.9.2"
 dependencies = [
  "alloy-primitives",
  "clap",
+ "insta",
  "reth-nippy-jar",
  "serde",
  "serde_json",
