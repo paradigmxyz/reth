@@ -506,7 +506,6 @@ where
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine::tree", "invoked new payload");
-        self.metrics.engine.new_payload_messages.increment(1);
 
         // start timing for the new payload process
         let start = Instant::now();
@@ -985,7 +984,7 @@ where
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
 
         // Record metrics
-        self.record_forkchoice_metrics(&attrs);
+        self.record_forkchoice_metrics();
 
         // Pre-validation of forkchoice state
         if let Some(early_result) = self.validate_forkchoice_state(state)? {
@@ -1008,11 +1007,7 @@ where
     }
 
     /// Records metrics for forkchoice updated calls
-    fn record_forkchoice_metrics(&self, attrs: &Option<T::PayloadAttributes>) {
-        self.metrics.engine.forkchoice_updated_messages.increment(1);
-        if attrs.is_some() {
-            self.metrics.engine.forkchoice_with_attributes_updated_messages.increment(1);
-        }
+    fn record_forkchoice_metrics(&self) {
         self.canonical_in_memory_state.on_forkchoice_update_received();
     }
 
@@ -1286,7 +1281,7 @@ where
             .map(|b| b.recovered_block().num_hash())
             .expect("Checked non-empty persisting blocks");
 
-        debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
+        debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
         let (tx, rx) = oneshot::channel();
         let _ = self.persistence.save_blocks(blocks_to_persist, tx);
 
@@ -1393,6 +1388,9 @@ where
                                 tx,
                                 version,
                             } => {
+                                let has_attrs = payload_attrs.is_some();
+
+                                let start = Instant::now();
                                 let mut output =
                                     self.on_forkchoice_updated(state, payload_attrs, version);
 
@@ -1412,6 +1410,13 @@ where
                                     self.on_maybe_tree_event(res.event.take())?;
                                 }
 
+                                self.metrics.engine.forkchoice_updated.update_response_metrics(
+                                    start,
+                                    &mut self.metrics.engine.new_payload.latest_at,
+                                    has_attrs,
+                                    &output,
+                                );
+
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(Into::into))
                                 {
@@ -1423,7 +1428,13 @@ where
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
+                                let start = Instant::now();
+                                let gas_used = payload.gas_used();
                                 let mut output = self.on_new_payload(payload);
+                                self.metrics
+                                    .engine
+                                    .new_payload
+                                    .update_response_metrics(start, &output, gas_used);
 
                                 let maybe_event =
                                     output.as_mut().ok().and_then(|out| out.event.take());

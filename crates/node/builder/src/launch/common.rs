@@ -67,7 +67,7 @@ use reth_node_metrics::{
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
     BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderFactory,
+    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -405,14 +405,13 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     where
         ChainSpec: reth_chainspec::EthereumHardforks,
     {
-        let toml_config = self.toml_config().prune.clone();
         let Some(mut node_prune_config) = self.node_config().prune_config() else {
             // No CLI config is set, use the toml config.
-            return toml_config;
+            return self.toml_config().prune.clone();
         };
 
         // Otherwise, use the CLI configuration and merge with toml config.
-        node_prune_config.merge(toml_config);
+        node_prune_config.merge(self.toml_config().prune.clone());
         node_prune_config
     }
 
@@ -465,13 +464,14 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = ProviderFactory::new(
-            self.right().clone(),
-            self.chain_spec(),
-            StaticFileProvider::read_write(self.data_dir().static_files())?,
-        )
-        .with_prune_modes(self.prune_modes())
-        .with_static_files_metrics();
+        let static_file_provider =
+            StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
+                .with_metrics()
+                .build()?;
+
+        let factory =
+            ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
+                .with_prune_modes(self.prune_modes());
 
         let has_receipt_pruning = self.toml_config().prune.has_receipts_pruning();
 
@@ -1171,7 +1171,6 @@ mod tests {
                     storage_history_before: None,
                     bodies_pre_merge: false,
                     bodies_distance: None,
-                    #[expect(deprecated)]
                     receipts_log_filter: None,
                     bodies_before: None,
                 },

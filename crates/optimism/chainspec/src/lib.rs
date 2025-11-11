@@ -520,9 +520,10 @@ mod tests {
     use alloc::string::{String, ToString};
     use alloy_genesis::{ChainConfig, Genesis};
     use alloy_op_hardforks::{
-        BASE_MAINNET_JOVIAN_TIMESTAMP, OP_MAINNET_JOVIAN_TIMESTAMP, OP_SEPOLIA_JOVIAN_TIMESTAMP,
+        BASE_MAINNET_JOVIAN_TIMESTAMP, BASE_SEPOLIA_JOVIAN_TIMESTAMP, OP_MAINNET_JOVIAN_TIMESTAMP,
+        OP_SEPOLIA_JOVIAN_TIMESTAMP,
     };
-    use alloy_primitives::b256;
+    use alloy_primitives::{b256, hex};
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
     use reth_optimism_forks::{OpHardfork, OpHardforks};
@@ -824,14 +825,14 @@ mod tests {
                     Head { number: 0, timestamp: 1744905600, ..Default::default() },
                     ForkId {
                         hash: ForkHash([0x06, 0x0a, 0x4d, 0x1d]),
-                        next: OP_SEPOLIA_JOVIAN_TIMESTAMP,
-                    }, /* TODO: update timestamp when Jovian is planned */
+                        next: BASE_SEPOLIA_JOVIAN_TIMESTAMP,
+                    },
                 ),
                 // Jovian
                 (
                     Head {
                         number: 0,
-                        timestamp: OP_SEPOLIA_JOVIAN_TIMESTAMP,
+                        timestamp: BASE_SEPOLIA_JOVIAN_TIMESTAMP,
                         ..Default::default()
                     },
                     BASE_SEPOLIA.hardfork_fork_id(OpHardfork::Jovian).unwrap(),
@@ -879,7 +880,7 @@ mod tests {
     #[test]
     fn latest_base_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0xfa, 0x71, 0x70, 0xef]), next: 0 },
+            ForkId { hash: ForkHash(hex!("1cfeafc9")), next: 0 },
             BASE_MAINNET.latest_fork_id()
         )
     }
@@ -888,7 +889,7 @@ mod tests {
     fn latest_base_mainnet_fork_id_with_builder() {
         let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
         assert_eq!(
-            ForkId { hash: ForkHash([0xfa, 0x71, 0x70, 0xef]), next: 0 },
+            ForkId { hash: ForkHash(hex!("1cfeafc9")), next: 0 },
             base_mainnet.latest_fork_id()
         )
     }

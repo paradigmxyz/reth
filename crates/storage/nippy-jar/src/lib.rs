@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     fs::File,
-    io::Read,
+    io::{Read, Write},
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -200,6 +200,9 @@ impl<H: NippyJarHeader> NippyJar<H> {
         // Read [`Self`] located at the data file.
         let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
         let config_file = File::open(&config_path)
+            .inspect_err(|e| {
+                warn!( ?path, %e, "Failed to load static file jar");
+            })
             .map_err(|err| reth_fs_util::FsPathError::open(err, config_path))?;
 
         let mut obj = Self::load_from_reader(config_file)?;
@@ -210,6 +213,11 @@ impl<H: NippyJarHeader> NippyJar<H> {
     /// Deserializes an instance of [`Self`] from a [`Read`] type.
     pub fn load_from_reader<R: Read>(reader: R) -> Result<Self, NippyJarError> {
         Ok(bincode::deserialize_from(reader)?)
+    }
+
+    /// Serializes an instance of [`Self`] to a [`Write`] type.
+    pub fn save_to_writer<W: Write>(&self, writer: W) -> Result<(), NippyJarError> {
+        Ok(bincode::serialize_into(writer, self)?)
     }
 
     /// Returns the path for the data file
@@ -255,9 +263,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Writes all necessary configuration to file.
     fn freeze_config(&self) -> Result<(), NippyJarError> {
-        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| {
-            bincode::serialize_into(file, &self)
-        })?)
+        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| self.save_to_writer(file))?)
     }
 }
 

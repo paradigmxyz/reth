@@ -73,16 +73,30 @@ where
     F: DatabaseProviderFactory,
     F::Provider: TrieReader + StageCheckpointReader + PruneCheckpointReader + BlockNumReader,
 {
-    /// Validates that there are sufficient changesets to revert to the requested block number.
+    /// Returns the block number for [`Self`]'s `block_hash` field, if any.
+    fn get_block_number(&self, provider: &F::Provider) -> ProviderResult<Option<BlockNumber>> {
+        if let Some(block_hash) = self.block_hash {
+            Ok(Some(
+                provider
+                    .convert_hash_or_number(block_hash.into())?
+                    .ok_or_else(|| ProviderError::BlockHashNotFound(block_hash))?,
+            ))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Returns whether or not it is required to collect reverts, and validates that there are
+    /// sufficient changesets to revert to the requested block number if so.
     ///
     /// Returns an error if the `MerkleChangeSets` checkpoint doesn't cover the requested block.
     /// Takes into account both the stage checkpoint and the prune checkpoint to determine the
     /// available data range.
-    fn validate_changesets_availability(
+    fn reverts_required(
         &self,
         provider: &F::Provider,
         requested_block: BlockNumber,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<bool> {
         // Get the MerkleChangeSets stage and prune checkpoints.
         let stage_checkpoint = provider.get_stage_checkpoint(StageId::MerkleChangeSets)?;
         let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::MerkleChangeSets)?;
@@ -99,19 +113,21 @@ where
         // If the requested block is the DB tip (determined by the MerkleChangeSets stage
         // checkpoint) then there won't be any reverts necessary, and we can simply return Ok.
         if upper_bound == requested_block {
-            return Ok(())
+            return Ok(false)
         }
 
-        // Extract the lower bound from prune checkpoint if available
+        // Extract the lower bound from prune checkpoint if available.
+        //
+        // If not available we assume pruning has never ran and so there is no lower bound. This
+        // should not generally happen, since MerkleChangeSets always have pruning enabled, but when
+        // starting a new node from scratch (e.g. in a test case or benchmark) it can surface.
+        //
         // The prune checkpoint's block_number is the highest pruned block, so data is available
         // starting from the next block
         let lower_bound = prune_checkpoint
             .and_then(|chk| chk.block_number)
             .map(|block_number| block_number + 1)
-            .ok_or_else(|| ProviderError::InsufficientChangesets {
-                requested: requested_block,
-                available: 0..=upper_bound,
-            })?;
+            .unwrap_or_default();
 
         let available_range = lower_bound..=upper_bound;
 
@@ -123,7 +139,7 @@ where
             });
         }
 
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -140,15 +156,10 @@ where
         let provider = self.factory.database_provider_ro()?;
 
         // If block_hash is provided, collect reverts
-        let (trie_updates, hashed_state) = if let Some(block_hash) = self.block_hash {
-            // Convert block hash to block number
-            let from_block = provider
-                .convert_hash_or_number(block_hash.into())?
-                .ok_or_else(|| ProviderError::BlockHashNotFound(block_hash))?;
-
-            // Validate that we have sufficient changesets for the requested block
-            self.validate_changesets_availability(&provider, from_block)?;
-
+        let (trie_updates, hashed_state) = if let Some(from_block) =
+            self.get_block_number(&provider)? &&
+            self.reverts_required(&provider, from_block)?
+        {
             // Collect trie reverts
             let mut trie_reverts = provider.trie_reverts(from_block + 1)?;
 
@@ -186,7 +197,7 @@ where
 
             debug!(
                 target: "providers::state::overlay",
-                ?block_hash,
+                block_hash = ?self.block_hash,
                 ?from_block,
                 num_trie_updates = ?trie_updates.total_len(),
                 num_state_updates = ?hashed_state_updates.total_len(),

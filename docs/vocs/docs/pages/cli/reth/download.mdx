@@ -59,7 +59,11 @@ Database:
           [possible values: true, false]
 
       --db.max-size <MAX_SIZE>
-          Maximum database size (e.g., 4TB, 8MB)
+          Maximum database size (e.g., 4TB, 8TB).
+
+          This sets the "map size" of the database. If the database grows beyond this limit, the node will stop with an "environment map size limit reached" error.
+
+          The default value is 8TB.
 
       --db.growth-step <GROWTH_STEP>
           Database growth step (e.g., 4GB, 4KB)
@@ -81,7 +85,7 @@ Database:
           - https://publicnode.com/snapshots (full nodes & testnets)
 
           If no URL is provided, the latest mainnet archive snapshot
-          will be proposed for download from merkle.io
+          will be proposed for download from https://downloads.merkle.io
 
 Logging:
       --log.stdout.format <FORMAT>

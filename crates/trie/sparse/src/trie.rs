@@ -974,6 +974,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
         // Helper function to check if a value matches the expected value
+        #[inline]
         fn check_value_match(
             actual_value: &Vec<u8>,
             expected_value: Option<&Vec<u8>>,
@@ -2355,7 +2356,7 @@ mod tests {
     use reth_primitives_traits::Account;
     use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
     use reth_trie::{
-        hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
+        hashed_cursor::{noop::NoopHashedCursor, HashedPostStateCursor},
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
@@ -2415,8 +2416,8 @@ mod tests {
             .into_sorted();
         let mut node_iter = TrieNodeIter::state_trie(
             walker,
-            HashedPostStateAccountCursor::new(
-                NoopHashedAccountCursor::default(),
+            HashedPostStateCursor::new(
+                Option::<NoopHashedCursor<Account>>::None,
                 hashed_post_state.accounts(),
             ),
         );

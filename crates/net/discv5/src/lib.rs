@@ -673,6 +673,7 @@ pub async fn lookup(target: discv5::enr::NodeId, discv5: &discv5::Discv5, metric
 
 #[cfg(test)]
 mod test {
+    #![allow(deprecated)]
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
     use rand_08::thread_rng;

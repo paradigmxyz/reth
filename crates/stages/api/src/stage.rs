@@ -105,7 +105,7 @@ impl ExecInput {
             // get tx block number. next_tx_num in this case will be less than all_tx_cnt.
             // So we are sure that transaction must exist.
             let end_block_number = provider
-                .transaction_block(first_tx_num + tx_threshold)?
+                .block_by_transaction_id(first_tx_num + tx_threshold)?
                 .expect("block of tx must exist");
             // we want to get range of all transactions of this block, so we are fetching block
             // body.
