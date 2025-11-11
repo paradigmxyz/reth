@@ -32,7 +32,7 @@ pub enum EitherWriter<'a, CURSOR, N> {
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
 }
 
-impl Display for EitherWriter<'_, (), ()> {
+impl<'a, CURSOR, N> Display for EitherWriter<'a, CURSOR, N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             EitherWriter::Database(_) => write!(f, "Database"),
