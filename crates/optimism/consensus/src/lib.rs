@@ -12,7 +12,9 @@
 extern crate alloc;
 
 use alloc::{format, sync::Arc};
-use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{
+    constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, EMPTY_OMMER_ROOT_HASH,
+};
 use alloy_primitives::B64;
 use core::fmt::Debug;
 use reth_chainspec::EthChainSpec;
