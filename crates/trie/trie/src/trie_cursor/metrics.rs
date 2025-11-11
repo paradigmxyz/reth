@@ -6,33 +6,51 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "metrics")]
 use crate::TrieType;
 #[cfg(feature = "metrics")]
-use reth_metrics::{
-    metrics::{Counter, Histogram},
-    Metrics,
-};
+use reth_metrics::metrics::{self, Counter, Histogram};
 
 /// Prometheus metrics for trie cursor operations.
 ///
 /// Tracks the number of cursor operations for monitoring and performance analysis.
 #[cfg(feature = "metrics")]
-#[derive(Metrics, Clone)]
-#[metrics(scope = "trie.cursor")]
+#[derive(Clone, Debug)]
 pub struct TrieCursorMetrics {
-    /// Total number of `next()` calls
-    next_total: Counter,
-    /// Total number of `seek()` calls
-    seek_total: Counter,
-    /// Total number of `seek_exact()` calls
-    seek_exact_total: Counter,
     /// Histogram tracking overall time spent in database operations
     overall_duration: Histogram,
+    /// Counter for `next()` operations
+    next_counter: Counter,
+    /// Counter for `seek()` operations
+    seek_counter: Counter,
+    /// Counter for `seek_exact()` operations
+    seek_exact_counter: Counter,
 }
 
 #[cfg(feature = "metrics")]
 impl TrieCursorMetrics {
     /// Create a new metrics instance with the specified trie type label.
     pub fn new(trie_type: TrieType) -> Self {
-        Self::new_with_labels(&[("type", trie_type.as_str())])
+        let trie_type_str = trie_type.as_str();
+
+        Self {
+            overall_duration: metrics::histogram!(
+                "trie.cursor.overall_duration",
+                "type" => trie_type_str
+            ),
+            next_counter: metrics::counter!(
+                "trie.cursor.operations_total",
+                "type" => trie_type_str,
+                "operation" => "next"
+            ),
+            seek_counter: metrics::counter!(
+                "trie.cursor.operations_total",
+                "type" => trie_type_str,
+                "operation" => "seek"
+            ),
+            seek_exact_counter: metrics::counter!(
+                "trie.cursor.operations_total",
+                "type" => trie_type_str,
+                "operation" => "seek_exact"
+            ),
+        }
     }
 
     /// Record the cached metrics from the provided cache and reset the cache counters.
@@ -40,9 +58,9 @@ impl TrieCursorMetrics {
     /// This method adds the current counter values from the cache to the Prometheus metrics
     /// and then resets all cache counters to zero.
     pub fn record(&mut self, cache: &mut TrieCursorMetricsCache) {
-        self.next_total.increment(cache.next_count as u64);
-        self.seek_total.increment(cache.seek_count as u64);
-        self.seek_exact_total.increment(cache.seek_exact_count as u64);
+        self.next_counter.increment(cache.next_count as u64);
+        self.seek_counter.increment(cache.seek_count as u64);
+        self.seek_exact_counter.increment(cache.seek_exact_count as u64);
         self.overall_duration.record(cache.total_duration.as_secs_f64());
         cache.reset();
     }
