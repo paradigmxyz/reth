@@ -174,7 +174,7 @@ impl ProofWorkerHandle {
         drop(parent_span);
 
         let parent_span =
-            debug_span!(target: "trie::proof_task", "account proof workers", ?storage_worker_count)
+            debug_span!(target: "trie::proof_task", "account proof workers", ?account_worker_count)
                 .entered();
         // Spawn account workers
         for worker_id in 0..account_worker_count {
@@ -424,7 +424,8 @@ where
         let span = debug_span!(
             target: "trie::proof_task",
             "Storage proof calculation",
-            hashed_address = ?hashed_address,
+            ?hashed_address,
+            target_slots = ?target_slots.len(),
             worker_id = self.id,
         );
         let _span_guard = span.enter();
