@@ -1,6 +1,6 @@
 use crate::{error::StageError, StageCheckpoint, StageId};
 use alloy_primitives::{BlockNumber, TxNumber};
-use reth_provider::{BlockReader, ProviderError};
+use reth_provider::{BlockReader, ProviderError, StaticFileProviderFactory, StaticFileSegment};
 use std::{
     cmp::{max, min},
     future::{poll_fn, Future},
@@ -76,9 +76,14 @@ impl ExecInput {
         tx_threshold: u64,
     ) -> Result<(Range<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError>
     where
-        Provider: BlockReader,
+        Provider: StaticFileProviderFactory + BlockReader,
     {
-        let start_block = self.next_block();
+        let lowest_transactions_block = provider
+            .static_file_provider()
+            .get_lowest_static_file_block(StaticFileSegment::Transactions)
+            .unwrap_or_default();
+
+        let start_block = self.next_block().max(lowest_transactions_block);
         let target_block = self.target();
 
         let start_block_body = provider
