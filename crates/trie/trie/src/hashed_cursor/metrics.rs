@@ -1,11 +1,15 @@
 use super::{HashedCursor, HashedStorageCursor};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "metrics")]
 use crate::TrieType;
 #[cfg(feature = "metrics")]
-use reth_metrics::{metrics::Counter, Metrics};
+use reth_metrics::{
+    metrics::{Counter, Histogram},
+    Metrics,
+};
 
 /// Prometheus metrics for hashed cursor operations.
 ///
@@ -20,6 +24,8 @@ pub struct HashedCursorMetrics {
     seek_total: Counter,
     /// Total number of `is_storage_empty()` calls
     is_storage_empty_total: Counter,
+    /// Histogram tracking overall time spent in database operations
+    overall_duration: Histogram,
 }
 
 #[cfg(feature = "metrics")]
@@ -37,12 +43,13 @@ impl HashedCursorMetrics {
         self.next_total.increment(cache.next_count as u64);
         self.seek_total.increment(cache.seek_count as u64);
         self.is_storage_empty_total.increment(cache.is_storage_empty_count as u64);
+        self.overall_duration.record(cache.total_duration.as_secs_f64());
         cache.reset();
     }
 }
 
 /// Cached metrics counters for hashed cursor operations.
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct HashedCursorMetricsCache {
     /// Counter for `next()` calls
     pub next_count: usize,
@@ -50,6 +57,19 @@ pub struct HashedCursorMetricsCache {
     pub seek_count: usize,
     /// Counter for `is_storage_empty()` calls (if applicable)
     pub is_storage_empty_count: usize,
+    /// Total duration spent in database operations
+    pub total_duration: Duration,
+}
+
+impl Default for HashedCursorMetricsCache {
+    fn default() -> Self {
+        Self {
+            next_count: 0,
+            seek_count: 0,
+            is_storage_empty_count: 0,
+            total_duration: Duration::ZERO,
+        }
+    }
 }
 
 impl HashedCursorMetricsCache {
@@ -58,15 +78,17 @@ impl HashedCursorMetricsCache {
         self.next_count = 0;
         self.seek_count = 0;
         self.is_storage_empty_count = 0;
+        self.total_duration = Duration::ZERO;
     }
 
     /// Extend this cache by adding the counts from another cache.
     ///
     /// This accumulates the counter values from `other` into this cache.
-    pub const fn extend(&mut self, other: &Self) {
+    pub fn extend(&mut self, other: &Self) {
         self.next_count += other.next_count;
         self.seek_count += other.seek_count;
         self.is_storage_empty_count += other.is_storage_empty_count;
+        self.total_duration += other.total_duration;
     }
 }
 
@@ -97,13 +119,19 @@ where
     type Value = C::Value;
 
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        let start = Instant::now();
         self.metrics.seek_count += 1;
-        self.cursor.seek(key)
+        let result = self.cursor.seek(key);
+        self.metrics.total_duration += start.elapsed();
+        result
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        let start = Instant::now();
         self.metrics.next_count += 1;
-        self.cursor.next()
+        let result = self.cursor.next();
+        self.metrics.total_duration += start.elapsed();
+        result
     }
 }
 
@@ -112,7 +140,10 @@ where
     C: HashedStorageCursor,
 {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
+        let start = Instant::now();
         self.metrics.is_storage_empty_count += 1;
-        self.cursor.is_storage_empty()
+        let result = self.cursor.is_storage_empty();
+        self.metrics.total_duration += start.elapsed();
+        result
     }
 }

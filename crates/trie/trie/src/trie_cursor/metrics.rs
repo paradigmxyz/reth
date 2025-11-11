@@ -1,11 +1,15 @@
 use super::TrieCursor;
 use crate::{BranchNodeCompact, Nibbles};
 use reth_storage_errors::db::DatabaseError;
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "metrics")]
 use crate::TrieType;
 #[cfg(feature = "metrics")]
-use reth_metrics::{metrics::Counter, Metrics};
+use reth_metrics::{
+    metrics::{Counter, Histogram},
+    Metrics,
+};
 
 /// Prometheus metrics for trie cursor operations.
 ///
@@ -20,6 +24,8 @@ pub struct TrieCursorMetrics {
     seek_total: Counter,
     /// Total number of `seek_exact()` calls
     seek_exact_total: Counter,
+    /// Histogram tracking overall time spent in database operations
+    overall_duration: Histogram,
 }
 
 #[cfg(feature = "metrics")]
@@ -37,12 +43,13 @@ impl TrieCursorMetrics {
         self.next_total.increment(cache.next_count as u64);
         self.seek_total.increment(cache.seek_count as u64);
         self.seek_exact_total.increment(cache.seek_exact_count as u64);
+        self.overall_duration.record(cache.total_duration.as_secs_f64());
         cache.reset();
     }
 }
 
 /// Cached metrics counters for trie cursor operations.
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct TrieCursorMetricsCache {
     /// Counter for `next()` calls
     pub next_count: usize,
@@ -50,6 +57,14 @@ pub struct TrieCursorMetricsCache {
     pub seek_count: usize,
     /// Counter for `seek_exact()` calls
     pub seek_exact_count: usize,
+    /// Total duration spent in database operations
+    pub total_duration: Duration,
+}
+
+impl Default for TrieCursorMetricsCache {
+    fn default() -> Self {
+        Self { next_count: 0, seek_count: 0, seek_exact_count: 0, total_duration: Duration::ZERO }
+    }
 }
 
 impl TrieCursorMetricsCache {
@@ -58,15 +73,17 @@ impl TrieCursorMetricsCache {
         self.next_count = 0;
         self.seek_count = 0;
         self.seek_exact_count = 0;
+        self.total_duration = Duration::ZERO;
     }
 
     /// Extend this cache by adding the counts from another cache.
     ///
     /// This accumulates the counter values from `other` into this cache.
-    pub const fn extend(&mut self, other: &Self) {
+    pub fn extend(&mut self, other: &Self) {
         self.next_count += other.next_count;
         self.seek_count += other.seek_count;
         self.seek_exact_count += other.seek_exact_count;
+        self.total_duration += other.total_duration;
     }
 }
 
@@ -96,21 +113,30 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let start = Instant::now();
         self.metrics.seek_exact_count += 1;
-        self.cursor.seek_exact(key)
+        let result = self.cursor.seek_exact(key);
+        self.metrics.total_duration += start.elapsed();
+        result
     }
 
     fn seek(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let start = Instant::now();
         self.metrics.seek_count += 1;
-        self.cursor.seek(key)
+        let result = self.cursor.seek(key);
+        self.metrics.total_duration += start.elapsed();
+        result
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let start = Instant::now();
         self.metrics.next_count += 1;
-        self.cursor.next()
+        let result = self.cursor.next();
+        self.metrics.total_duration += start.elapsed();
+        result
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {

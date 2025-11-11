@@ -87,7 +87,7 @@ impl ProofTaskCursorMetricsCache {
     /// Extend this cache by adding the counts from another cache.
     ///
     /// This accumulates the counter values from `other` into this cache.
-    pub const fn extend(&mut self, other: &Self) {
+    pub fn extend(&mut self, other: &Self) {
         self.account_trie_cursor.extend(&other.account_trie_cursor);
         self.account_hashed_cursor.extend(&other.account_hashed_cursor);
         self.storage_trie_cursor.extend(&other.storage_trie_cursor);
