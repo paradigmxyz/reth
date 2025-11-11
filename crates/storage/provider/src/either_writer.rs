@@ -1,5 +1,7 @@
 //! Generic writer abstraction for writing to either database tables or static files.
 
+use std::fmt::{Display, Formatter};
+
 use crate::{providers::StaticFileProviderRWRefMut, StaticFileProviderFactory};
 use alloy_primitives::{Address, BlockNumber, TxNumber};
 use reth_db::{
@@ -28,6 +30,15 @@ pub enum EitherWriter<'a, CURSOR, N> {
     Database(CURSOR),
     /// Write to static file
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
+}
+
+impl Display for EitherWriter<'_, (), ()> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EitherWriter::Database(_) => write!(f, "Database"),
+            EitherWriter::StaticFile(_) => write!(f, "StaticFile"),
+        }
+    }
 }
 
 /// Destination for writing data.
