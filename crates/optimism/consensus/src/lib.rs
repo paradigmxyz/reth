@@ -12,7 +12,7 @@
 extern crate alloc;
 
 use alloc::{format, sync::Arc};
-use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::B64;
 use core::fmt::Debug;
 use reth_chainspec::EthChainSpec;
@@ -39,9 +39,6 @@ pub use validation::{canyon, isthmus, validate_block_post_execution};
 pub mod error;
 pub use error::OpConsensusError;
 
-/// Default maximum extra data size in bytes (32 bytes as per Ethereum spec).
-const DEFAULT_MAX_EXTRA_DATA_SIZE: usize = 32;
-
 /// Optimism consensus implementation.
 ///
 /// Provides basic checks as outlined in the execution specs.
@@ -56,7 +53,7 @@ pub struct OpBeaconConsensus<ChainSpec> {
 impl<ChainSpec> OpBeaconConsensus<ChainSpec> {
     /// Create a new instance of [`OpBeaconConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, max_extra_data_size: DEFAULT_MAX_EXTRA_DATA_SIZE }
+        Self { chain_spec, max_extra_data_size: MAXIMUM_EXTRA_DATA_SIZE }
     }
 
     /// Returns the maximum allowed extra data size.

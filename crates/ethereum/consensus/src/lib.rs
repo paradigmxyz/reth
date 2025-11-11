@@ -12,7 +12,7 @@
 extern crate alloc;
 
 use alloc::{fmt::Debug, sync::Arc};
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
@@ -31,9 +31,6 @@ use reth_primitives_traits::{
 mod validation;
 pub use validation::validate_block_post_execution;
 
-/// Default maximum extra data size in bytes (32 bytes as per Ethereum spec).
-const DEFAULT_MAX_EXTRA_DATA_SIZE: usize = 32;
-
 /// Ethereum beacon consensus
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.
@@ -48,7 +45,7 @@ pub struct EthBeaconConsensus<ChainSpec> {
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
     /// Create a new instance of [`EthBeaconConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, max_extra_data_size: DEFAULT_MAX_EXTRA_DATA_SIZE }
+        Self { chain_spec, max_extra_data_size: MAXIMUM_EXTRA_DATA_SIZE }
     }
 
     /// Returns the maximum allowed extra data size.
