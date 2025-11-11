@@ -114,13 +114,14 @@ where
 
         let tx_batch_sender = setup_range_recovery(provider);
 
-        let mut block_body_indices =
-            block_range.clone().zip(provider.block_body_indices_range(block_range)?);
+        let block_body_indices = provider.block_body_indices_range(block_range.clone())?;
+        debug!(target: "sync::stages::sender_recovery", ?block_range, block_body_indices = block_body_indices.len(), "Block body indices");
+        let mut blocks_with_indices = block_range.zip(block_body_indices);
 
         for range in batch {
             recover_range(
                 range,
-                &mut block_body_indices,
+                &mut blocks_with_indices,
                 provider,
                 tx_batch_sender.clone(),
                 &mut writer,
@@ -128,7 +129,7 @@ where
         }
 
         // Drain block body indices to increment the destination block number
-        for (block_number, _) in block_body_indices {
+        for (block_number, _) in blocks_with_indices {
             writer.increment_block(block_number)?;
         }
 
