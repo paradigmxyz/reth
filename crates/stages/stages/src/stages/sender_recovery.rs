@@ -1,7 +1,7 @@
 use alloy_primitives::{Address, BlockNumber, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
-use reth_db::{models::StoredBlockBodyIndices, static_file::TransactionMask};
+use reth_db::static_file::TransactionMask;
 use reth_db_api::{
     cursor::DbCursorRW,
     table::Value,
@@ -115,16 +115,19 @@ where
         let tx_batch_sender = setup_range_recovery(provider);
 
         let block_body_indices = provider.block_body_indices_range(block_range.clone())?;
-        let mut blocks_with_indices = block_range.zip(block_body_indices);
+        let blocks_with_indices = block_range.zip(block_body_indices).collect::<Vec<_>>();
 
         for range in batch {
-            recover_range(
-                range,
-                &mut blocks_with_indices,
-                provider,
-                tx_batch_sender.clone(),
-                &mut writer,
-            )?;
+            let block_numbers = range
+                .clone()
+                .map(|tx| {
+                    blocks_with_indices
+                        .iter()
+                        .find_map(|(block, index)| index.contains_tx(tx).then_some(*block))
+                        .unwrap()
+                })
+                .collect();
+            recover_range(range, block_numbers, provider, tx_batch_sender.clone(), &mut writer)?;
         }
 
         Ok(ExecOutput {
@@ -158,7 +161,7 @@ where
 
 fn recover_range<Provider, CURSOR>(
     tx_range: Range<TxNumber>,
-    blocks_with_indices: &mut impl Iterator<Item = (BlockNumber, StoredBlockBodyIndices)>,
+    block_numbers: Vec<BlockNumber>,
     provider: &Provider,
     tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>,
     writer: &mut EitherWriter<'_, CURSOR, Provider::Primitives>,
@@ -188,8 +191,7 @@ where
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Appending recovered senders to the database");
 
     let mut processed_transactions = 0;
-    let (mut current_block_number, mut current_block_body_indices) =
-        blocks_with_indices.next().unwrap();
+    let mut block_numbers = block_numbers.into_iter();
     let mut last_block_number = None;
     for channel in receivers {
         while let Ok(recovered) = channel.recv() {
@@ -229,25 +231,18 @@ where
                 }
             };
 
-            // If current block body indices do not contain the transaction we're recovering, we
-            // need to update current block number and body indices we're processing
-            if !current_block_body_indices.contains_tx(tx_id) {
-                (current_block_number, current_block_body_indices) =
-                    blocks_with_indices.next().unwrap();
-            }
+            let new_block_number = block_numbers.next().unwrap();
 
             // If this is the first block we're processing or the current block number was updated,
             // increment the destination block number
-            if last_block_number
-                .is_none_or(|last_block_number| last_block_number != current_block_number)
-            {
+            if last_block_number != Some(new_block_number) {
                 // Special case for block number #0 that cannot have transactions, but still needs
                 // to be incremented
-                if current_block_number == 1 {
+                if new_block_number == 1 {
                     writer.increment_block(0)?;
                 }
-                writer.increment_block(current_block_number)?;
-                last_block_number = Some(current_block_number);
+                writer.increment_block(new_block_number)?;
+                last_block_number = Some(new_block_number);
             }
 
             writer.append_sender(tx_id, &sender)?;
