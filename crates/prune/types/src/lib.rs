@@ -12,18 +12,113 @@
 extern crate alloc;
 
 mod checkpoint;
-mod event;
-mod mode;
-mod pruner;
-mod segment;
-mod target;
-
 pub use checkpoint::PruneCheckpoint;
+mod event;
 pub use event::PrunerEvent;
+mod mode;
 pub use mode::PruneMode;
+mod pruner;
 pub use pruner::{
     PruneInterruptReason, PruneProgress, PrunedSegmentInfo, PrunerOutput, SegmentOutput,
     SegmentOutputCheckpoint,
 };
+mod segment;
 pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
+mod target;
 pub use target::{PruneModes, UnwindTargetPrunedError, MINIMUM_PRUNING_DISTANCE};
+
+use alloc::{collections::BTreeMap, vec::Vec};
+use alloy_primitives::{Address, BlockNumber};
+use derive_more::{Deref, DerefMut, From};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Deserializer};
+
+/// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut, From)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
+pub struct ReceiptsLogPruneConfig(pub BTreeMap<Address, PruneMode>);
+
+impl ReceiptsLogPruneConfig {
+    /// Creates an empty config.
+    pub const fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    /// Returns `true` if the config is empty.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Validates the configuration and fixes any issues if possible.
+    pub fn validate_and_fix(&mut self) -> Vec<PruneSegmentError> {
+        let mut errors = Vec::new();
+        self.retain(|address, mode| {
+            if mode.is_distance() {
+                errors.push(PruneSegmentError::UnsupportedReceiptsLogFilterDistance(*address));
+                return false;
+            }
+
+            true
+        });
+        errors
+    }
+
+    /// Given the `tip` block number, consolidates the structure so it can easily be queried for
+    /// filtering across a range of blocks.
+    ///
+    /// Example:
+    ///
+    /// `{ addrA: Before(872), addrB: Before(500), addrC: Distance(128) }`
+    ///
+    ///    for `tip: 1000`, gets transformed to a map such as:
+    ///
+    /// `{ 500: [addrB], 872: [addrA, addrC] }`
+    ///
+    /// The [`BlockNumber`] key of the new map should be viewed as `PruneMode::Before(block)`, which
+    /// makes the previous result equivalent to
+    ///
+    /// `{ Before(500): [addrB], Before(872): [addrA, addrC] }`
+    pub fn group_by_block(
+        &self,
+        tip: BlockNumber,
+        pruned_block: Option<BlockNumber>,
+    ) -> Result<BTreeMap<BlockNumber, Vec<Address>>, PruneSegmentError> {
+        let mut map = BTreeMap::new();
+        let base_block = pruned_block.unwrap_or_default() + 1;
+
+        for (address, mode) in &self.0 {
+            // Getting `None`, means that there is nothing to prune yet, so we need it to include in
+            // the BTreeMap (block = 0), otherwise it will be excluded.
+            // Reminder that this BTreeMap works as an inclusion list that excludes (prunes) all
+            // other receipts.
+            //
+            // Reminder, that we increment because the [`BlockNumber`] key of the new map should be
+            // viewed as `PruneMode::Before(block)`
+            let block = base_block.max(
+                mode.prune_target_block(tip, PruneSegment::ContractLogs, PrunePurpose::User)?
+                    .map(|(block, _)| block)
+                    .unwrap_or_default() +
+                    1,
+            );
+
+            map.entry(block).or_insert_with(Vec::new).push(*address)
+        }
+        Ok(map)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for ReceiptsLogPruneConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let mut config = Self(BTreeMap::deserialize(deserializer)?);
+        let errors = config.validate_and_fix();
+        #[cfg(feature = "std")]
+        for error in errors {
+            reth_tracing::tracing::warn!("Receipt log pruning config error: {}", error);
+        }
+        Ok(config)
+    }
+}

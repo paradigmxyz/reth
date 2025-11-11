@@ -2,7 +2,7 @@ use alloy_primitives::BlockNumber;
 use derive_more::Display;
 use thiserror::Error;
 
-use crate::{PruneCheckpoint, PruneMode, PruneSegment};
+use crate::{PruneCheckpoint, PruneMode, PruneSegment, ReceiptsLogPruneConfig};
 
 /// Minimum distance from the tip necessary for the node to work correctly:
 /// 1. Minimum 2 epochs (32 blocks per epoch) required to handle any reorg according to the
@@ -99,10 +99,16 @@ pub struct PruneModes {
         )
     )]
     pub merkle_changesets: PruneMode,
-    /// Receipts log filtering has been deprecated and will be removed in a future release.
-    #[deprecated]
-    #[cfg_attr(any(test, feature = "serde"), serde(skip))]
-    pub receipts_log_filter: (),
+    /// Receipts pruning configuration by retaining only those receipts that contain logs emitted
+    /// by the specified addresses, discarding others. This setting is overridden by `receipts`.
+    ///
+    /// The [`BlockNumber`](`crate::BlockNumber`) represents the starting block from which point
+    /// onwards the receipts are preserved.
+    #[cfg_attr(
+        any(test, feature = "serde"),
+        serde(skip_serializing_if = "ReceiptsLogPruneConfig::is_empty",)
+    )]
+    pub receipts_log_filter: ReceiptsLogPruneConfig,
 }
 
 impl Default for PruneModes {
@@ -115,8 +121,7 @@ impl Default for PruneModes {
             storage_history: None,
             bodies_history: None,
             merkle_changesets: default_merkle_changesets_mode(),
-            #[expect(deprecated)]
-            receipts_log_filter: (),
+            receipts_log_filter: ReceiptsLogPruneConfig::new(),
         }
     }
 }
@@ -132,14 +137,13 @@ impl PruneModes {
             storage_history: Some(PruneMode::Full),
             bodies_history: Some(PruneMode::Full),
             merkle_changesets: PruneMode::Full,
-            #[expect(deprecated)]
-            receipts_log_filter: (),
+            receipts_log_filter: ReceiptsLogPruneConfig::new(),
         }
     }
 
     /// Returns whether there is any kind of receipt pruning configuration.
-    pub const fn has_receipts_pruning(&self) -> bool {
-        self.receipts.is_some()
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.receipts.is_some() || !self.receipts_log_filter.is_empty()
     }
 
     /// Returns an error if we can't unwind to the targeted block because the target block is
@@ -265,7 +269,10 @@ fn serde_deserialize_validate<'a, 'de, const MIN_BLOCKS: u64, D: serde::Deserial
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
+    use alloy_primitives::address;
     use assert_matches::assert_matches;
     use serde::Deserialize;
 
@@ -286,6 +293,30 @@ mod tests {
         assert_matches!(
             serde_json::from_str::<V>(r#""full""#),
             Err(err) if err.to_string() == "invalid value: string \"full\", expected prune mode that leaves at least 10 blocks in the database"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_receipts_log_filter() {
+        let addr1 = address!("0x0000000000000000000000000000000000000001");
+        let addr2 = address!("0x0000000000000000000000000000000000000002");
+        let addr3 = address!("0x0000000000000000000000000000000000000003");
+
+        let prune_modes: PruneModes = serde_json::from_str(&format!(
+            r#"
+                {{
+                    "receipts_log_filter": {{
+                        "{addr1}": "full",
+                        "{addr2}": {{ "distance": 1000 }},
+                        "{addr3}": {{ "before": 5000000 }}
+                    }}
+                }}"#
+        ))
+        .unwrap();
+
+        assert_eq!(
+            prune_modes.receipts_log_filter,
+            BTreeMap::from([(addr1, PruneMode::Full), (addr3, PruneMode::Before(5000000))]).into()
         );
     }
 
