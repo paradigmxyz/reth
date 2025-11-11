@@ -7,7 +7,7 @@ use std::{
     ops::{Range, RangeInclusive},
     task::{Context, Poll},
 };
-use tracing::debug;
+use tracing::{debug, instrument};
 
 /// Stage execution input, see [`Stage::execute`].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -71,6 +71,7 @@ impl ExecInput {
     /// Return the next block range determined the number of transactions within it.
     /// This function walks the block indices until either the end of the range is reached or
     /// the number of transactions exceeds the threshold.
+    #[instrument(level = "debug", target = "sync::stages", skip(provider), ret)]
     pub fn next_block_range_with_transaction_threshold<Provider>(
         &self,
         provider: &Provider,
@@ -86,14 +87,6 @@ impl ExecInput {
 
         let start_block = self.next_block().max(lowest_transactions_block);
         let target_block = self.target();
-
-        debug!(
-            target: "sync::stages",
-            lowest_transactions_block,
-            start_block,
-            target_block,
-            "Calculating next block range with transaction threshold"
-        );
 
         let start_block_body = provider
             .block_body_indices(start_block)?
