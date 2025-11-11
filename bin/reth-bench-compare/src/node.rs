@@ -29,6 +29,7 @@ pub(crate) struct NodeManager {
     output_dir: PathBuf,
     additional_reth_args: Vec<String>,
     comparison_dir: Option<PathBuf>,
+    tracing_endpoint: Option<String>,
 }
 
 impl NodeManager {
@@ -44,6 +45,7 @@ impl NodeManager {
             output_dir: args.output_dir_path(),
             additional_reth_args: args.reth_args.clone(),
             comparison_dir: None,
+            tracing_endpoint: args.traces.otlp.as_ref().map(|u| u.to_string()),
         }
     }
 
@@ -119,6 +121,7 @@ impl NodeManager {
         &self,
         binary_path_str: &str,
         additional_args: &[String],
+        ref_type: &str,
     ) -> (Vec<String>, String) {
         let mut reth_args = vec![binary_path_str.to_string(), "node".to_string()];
 
@@ -145,6 +148,13 @@ impl NodeManager {
             "--disable-discovery".to_string(),
             "--trusted-only".to_string(),
         ]);
+
+        // Add tracing arguments if OTLP endpoint is configured
+        if let Some(ref endpoint) = self.tracing_endpoint {
+            info!("Enabling OTLP tracing export to: {} (service: reth-{})", endpoint, ref_type);
+            // Endpoint requires equals per clap settings in reth
+            reth_args.push(format!("--tracing-otlp={}", endpoint));
+        }
 
         // Add any additional arguments passed via command line (common to both baseline and
         // feature)
@@ -225,7 +235,7 @@ impl NodeManager {
         self.binary_path = Some(binary_path.to_path_buf());
 
         let binary_path_str = binary_path.to_string_lossy();
-        let (reth_args, _) = self.build_reth_args(&binary_path_str, additional_args);
+        let (reth_args, _) = self.build_reth_args(&binary_path_str, additional_args, ref_type);
 
         // Log additional arguments if any
         if !self.additional_reth_args.is_empty() {
@@ -245,6 +255,13 @@ impl NodeManager {
         #[cfg(unix)]
         {
             cmd.process_group(0);
+        }
+
+        // Set high queue size to prevent trace dropping during benchmarks
+        if self.tracing_endpoint.is_some() {
+            cmd.env("OTEL_BLRP_MAX_QUEUE_SIZE", "10000");
+            // Set service name to differentiate baseline vs feature runs in Jaeger
+            cmd.env("OTEL_SERVICE_NAME", format!("reth-{}", ref_type));
         }
 
         debug!("Executing reth command: {cmd:?}");
