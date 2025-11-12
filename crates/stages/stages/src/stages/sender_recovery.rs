@@ -103,7 +103,7 @@ where
             })
         }
 
-        writer.ensure_at_block(*block_range.start())?;
+        writer.ensure_at_before_block(*block_range.start())?;
 
         info!(target: "sync::stages::sender_recovery", ?tx_range, %writer, "Recovering senders");
 
@@ -238,14 +238,12 @@ where
             // If this is the first block we're processing or the current block number was updated,
             // increment the destination block number
             if last_block_number != Some(new_block_number) {
-                if last_block_number.is_some() {
-                    // Special case for block number #0 that cannot have transactions, but still
-                    // needs to be incremented
-                    if new_block_number == 1 {
-                        writer.increment_block(0)?;
-                    }
-                    writer.increment_block(new_block_number)?;
+                // Special case for block number #0 that cannot have transactions, but still
+                // needs to be incremented
+                if new_block_number == 1 {
+                    writer.increment_block(0)?;
                 }
+                writer.increment_block(new_block_number)?;
                 last_block_number = Some(new_block_number);
             }
 

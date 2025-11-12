@@ -340,14 +340,15 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
     }
 
-    pub fn ensure_at_block(&mut self, block_number: BlockNumber) -> ProviderResult<()> {
+    pub fn ensure_at_before_block(&mut self, block_number: BlockNumber) -> ProviderResult<()> {
+        let advance_to = block_number.saturating_sub(1);
         let highest_block = self
             .reader()
             .get_highest_static_file_block(self.writer.user_header().segment())
             .unwrap_or_default();
-        match highest_block.cmp(&block_number) {
+        match highest_block.cmp(&advance_to) {
             Ordering::Less => {
-                for block in highest_block..=block_number {
+                for block in highest_block..=advance_to {
                     self.increment_block(block)?;
                 }
             }
@@ -356,7 +357,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 return Err(ProviderError::UnexpectedStaticFileBlockNumber(
                     self.writer.user_header().segment(),
                     highest_block,
-                    block_number,
+                    advance_to,
                 ));
             }
         }
