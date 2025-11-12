@@ -44,6 +44,7 @@ impl<C: ChainSpecParser> Command<C> {
             StageEnum::Headers => Some(StaticFileSegment::Headers),
             StageEnum::Bodies => Some(StaticFileSegment::Transactions),
             StageEnum::Execution => Some(StaticFileSegment::Receipts),
+            StageEnum::Senders => Some(StaticFileSegment::TransactionSenders),
             _ => None,
         };
 
