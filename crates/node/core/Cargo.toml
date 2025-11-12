@@ -30,6 +30,7 @@ reth-config = { workspace = true, features = ["serde"] }
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
+reth-net-banlist.workspace = true
 reth-network-peers.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
@@ -54,6 +55,7 @@ serde.workspace = true
 strum = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 url.workspace = true
+ipnet = "2.11"
 
 # io
 dirs-next.workspace = true

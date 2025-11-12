@@ -18,6 +18,7 @@ use reth_discv5::{
     discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
+use reth_net_banlist::IpFilter;
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
@@ -205,6 +206,16 @@ pub struct NetworkArgs {
     /// Optional network ID to override the chain specification's network ID for P2P connections
     #[arg(long)]
     pub network_id: Option<u64>,
+
+    /// Restrict network communication to the given IP networks (CIDR masks).
+    ///
+    /// Comma separated list of CIDR network specifications.
+    /// Only peers with IP addresses within these ranges will be allowed to connect.
+    /// Similar to geth's --netrestrict flag.
+    ///
+    /// Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
+    #[arg(long, value_name = "NETRESTRICT")]
+    pub netrestrict: Option<String>,
 }
 
 impl NetworkArgs {
@@ -276,11 +287,13 @@ impl NetworkArgs {
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
+        let ip_filter = self.ip_filter().unwrap_or_default();
         let peers_config = config
             .peers
             .clone()
             .with_max_inbound_opt(self.max_inbound_peers)
-            .with_max_outbound_opt(self.max_outbound_peers);
+            .with_max_outbound_opt(self.max_outbound_peers)
+            .with_ip_filter(ip_filter);
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key)
@@ -381,6 +394,17 @@ impl NetworkArgs {
             get_secret_key(&secret_key_path)
         }
     }
+
+    /// Creates an IP filter from the netrestrict argument.
+    ///
+    /// Returns an error if the CIDR format is invalid.
+    pub fn ip_filter(&self) -> Result<IpFilter, ipnet::AddrParseError> {
+        if let Some(ref netrestrict) = self.netrestrict {
+            IpFilter::from_cidr_string(netrestrict)
+        } else {
+            Ok(IpFilter::allow_all())
+        }
+    }
 }
 
 impl Default for NetworkArgs {
@@ -416,6 +440,7 @@ impl Default for NetworkArgs {
             propagation_mode: TransactionPropagationMode::Sqrt,
             required_block_hashes: vec![],
             network_id: None,
+            netrestrict: None,
         }
     }
 }
@@ -818,5 +843,69 @@ mod tests {
 
         // Verify the secret key matches the hex input
         assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), hex);
+    }
+
+    #[test]
+    fn parse_netrestrict_single_network() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "192.168.0.0/16"])
+                .args;
+
+        assert_eq!(args.netrestrict, Some("192.168.0.0/16".to_string()));
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn parse_netrestrict_multiple_networks() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--netrestrict",
+            "192.168.0.0/16,10.0.0.0/8",
+        ])
+        .args;
+
+        assert_eq!(args.netrestrict, Some("192.168.0.0/16,10.0.0.0/8".to_string()));
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(ip_filter.is_allowed(&"10.5.10.20".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"172.16.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn parse_netrestrict_ipv6() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "2001:db8::/32"])
+                .args;
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"2001:db8::1".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"2001:db9::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn netrestrict_not_set() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.netrestrict, None);
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(!ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn netrestrict_invalid_cidr() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "invalid-cidr"])
+                .args;
+
+        assert!(args.ip_filter().is_err());
     }
 }
