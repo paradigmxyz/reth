@@ -291,6 +291,11 @@ pub trait EthApi<
     #[method(name = "gasPrice")]
     async fn gas_price(&self) -> RpcResult<U256>;
 
+    // For xlayer
+    /// Returns the minimum gas price (base fee + default suggested fee) in wei.
+    #[method(name = "minGasPrice")]
+    async fn min_gas_price(&self) -> RpcResult<U256>;
+
     /// Returns the account details by specifying an address and a block number/tag
     #[method(name = "getAccount")]
     async fn get_account(
@@ -796,6 +801,13 @@ where
     async fn gas_price(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
         Ok(EthFees::gas_price(self).await?)
+    }
+
+    // For xlayer
+    /// Handler for: `eth_minGasPrice`
+    async fn min_gas_price(&self) -> RpcResult<U256> {
+        trace!(target: "rpc::eth", "Serving eth_minGasPrice");
+        Ok(EthFees::min_gas_price(self).await?)
     }
 
     /// Handler for: `eth_getAccount`

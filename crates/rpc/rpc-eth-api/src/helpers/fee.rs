@@ -33,6 +33,15 @@ pub trait EthFees:
         LoadFee::gas_price(self)
     }
 
+    // For xlayer
+    /// Returns the minimum gas price (base fee + default suggested fee).
+    fn min_gas_price(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send
+    where
+        Self: LoadBlock,
+    {
+        LoadFee::min_gas_price(self)
+    }
+
     /// Returns a suggestion for a base fee for blob transactions.
     fn blob_base_fee(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send
     where
@@ -353,6 +362,17 @@ where
             let suggested_tip = self.suggested_priority_fee().await?;
             let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
             Ok(suggested_tip + U256::from(base_fee))
+        }
+    }
+
+    // For xlayer
+    /// Returns the minimum gas price (base fee + default suggested fee).
+    fn min_gas_price(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send {
+        async move {
+            let header = self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+            let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
+            let default_suggested_fee = self.gas_oracle().config().default_suggested_fee.unwrap_or_default();
+            Ok(U256::from(base_fee) + default_suggested_fee)
         }
     }
 
