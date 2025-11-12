@@ -46,7 +46,7 @@ jobs:
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace --exclude ef-tests \
+            --workspace --exclude ef-tests --exclude xlayer-e2e-test \
             -E "kind(test) and not binary(e2e_testsuite)"
       - if: matrix.network == 'optimism'
         name: Run tests

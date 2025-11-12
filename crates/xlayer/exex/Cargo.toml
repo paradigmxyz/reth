@@ -1,0 +1,30 @@
+[package]
+name = "xlayer-exex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["full", "cli"] }
+reth-tracing.workspace = true
+reth-revm.workspace = true
+reth-evm.workspace = true
+reth-primitives-traits.workspace = true
+
+revm-database.workspace = true
+
+alloy-evm.workspace = true
+alloy-consensus.workspace = true
+alloy-rlp.workspace = true
+
+futures.workspace = true
+eyre.workspace = true
+
+xlayer-db.workspace = true
+
+[lints]
+workspace = true

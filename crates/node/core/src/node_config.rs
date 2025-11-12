@@ -3,7 +3,7 @@
 use crate::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
+        PruningArgs, RpcServerArgs, TransactionTraceArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
     utils::get_single_header,
@@ -147,6 +147,9 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All ERA import related arguments with --era prefix
     pub era: EraArgs,
+
+    /// X Layer: All transaction trace related arguments with --tx-trace prefix
+    pub tx_trace: TransactionTraceArgs,
 }
 
 impl NodeConfig<ChainSpec> {
@@ -177,6 +180,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             datadir: DatadirArgs::default(),
             engine: EngineArgs::default(),
             era: EraArgs::default(),
+            tx_trace: TransactionTraceArgs::default(),
         }
     }
 
@@ -499,6 +503,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             pruning: self.pruning,
             engine: self.engine,
             era: self.era,
+            tx_trace: self.tx_trace,
         }
     }
 
@@ -539,6 +544,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             datadir: self.datadir.clone(),
             engine: self.engine.clone(),
             era: self.era.clone(),
+            tx_trace: self.tx_trace.clone(),
         }
     }
 }

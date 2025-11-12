@@ -442,7 +442,7 @@ impl Default for RpcServerArgs {
             builder_disallow: Default::default(),
             legacy_rpc_url: None,
             legacy_cutoff_block: None,
-            legacy_rpc_timeout: None,
+            legacy_rpc_timeout: Some("30s".into()),
             rpc_send_raw_transaction_sync_timeout:
                 constants::RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
         }

@@ -86,6 +86,7 @@ derive_more = { workspace = true, features = ["constructor"] }
 # metrics
 reth-metrics.workspace = true
 metrics.workspace = true
+reth-node-metrics.workspace = true
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true

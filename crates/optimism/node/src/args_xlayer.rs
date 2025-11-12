@@ -12,6 +12,14 @@ pub struct XLayerArgs {
     /// Enable Apollo
     #[command(flatten)]
     pub apollo: ApolloArgs,
+
+    /// Enable inner transaction capture and storage
+    #[arg(
+        long = "xlayer.enable-innertx",
+        help = "Enable inner transaction capture and storage (disabled by default)",
+        default_value = "false"
+    )]
+    pub enable_inner_tx: bool,
     // /// Another X Layer feature
     // #[command(flatten)]
     // pub another_feature: AnotherFeatureArgs,

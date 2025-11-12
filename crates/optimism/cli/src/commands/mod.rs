@@ -2,6 +2,7 @@ use crate::chainspec::OpChainSpecParser;
 use clap::Subcommand;
 use import::ImportOpCommand;
 use import_receipts::ImportReceiptsOpCommand;
+use import_simple::ImportCommand;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
@@ -13,6 +14,7 @@ use std::{fmt, sync::Arc};
 
 pub mod import;
 pub mod import_receipts;
+pub mod import_simple;
 pub mod init_state;
 
 #[cfg(feature = "dev")]
@@ -31,6 +33,9 @@ pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + f
     /// Initialize the database from a state dump file.
     #[command(name = "init-state")]
     InitState(init_state::InitStateCommandOp<Spec>),
+    /// This syncs RLP encoded blocks from a file.
+    #[command(name = "import")]
+    Import(ImportCommand<Spec>),
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[command(name = "import-op")]
     ImportOp(ImportOpCommand<Spec>),
@@ -74,6 +79,7 @@ impl<
             Self::Node(cmd) => cmd.chain_spec(),
             Self::Init(cmd) => cmd.chain_spec(),
             Self::InitState(cmd) => cmd.chain_spec(),
+            Self::Import(cmd) => cmd.chain_spec(),
             Self::DumpGenesis(cmd) => cmd.chain_spec(),
             Self::Db(cmd) => cmd.chain_spec(),
             Self::Stage(cmd) => cmd.chain_spec(),

@@ -1,0 +1,26 @@
+[package]
+name = "xlayer-db"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-revm.workspace = true
+
+revm-context-interface.workspace = true
+revm-inspectors.workspace = true
+
+alloy-rlp.workspace = true
+alloy-primitives.workspace = true
+
+eyre.workspace = true
+once_cell.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true
