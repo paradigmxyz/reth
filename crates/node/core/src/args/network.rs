@@ -1,5 +1,6 @@
 //! clap [Args](clap::Args) for network related arguments.
 
+use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
@@ -38,6 +39,7 @@ use reth_network::{
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
+use std::str::FromStr;
 use tracing::error;
 
 /// Parameters for configuring the network more granularity via CLI
@@ -194,10 +196,11 @@ pub struct NetworkArgs {
     )]
     pub propagation_mode: TransactionPropagationMode,
 
-    /// Comma separated list of required block hashes.
+    /// Comma separated list of required block hashes or block number=hash pairs.
     /// Peers that don't have these blocks will be filtered out.
-    #[arg(long = "required-block-hashes", value_delimiter = ',')]
-    pub required_block_hashes: Vec<B256>,
+    /// Format: hash or `block_number=hash` (e.g., 23115201=0x1234...)
+    #[arg(long = "required-block-hashes", value_delimiter = ',', value_parser = parse_block_num_hash)]
+    pub required_block_hashes: Vec<BlockNumHash>,
 
     /// Optional network ID to override the chain specification's network ID for P2P connections
     #[arg(long)]
@@ -612,6 +615,19 @@ impl Default for DiscoveryArgs {
     }
 }
 
+/// Parse a block number=hash pair or just a hash into `BlockNumHash`
+fn parse_block_num_hash(s: &str) -> Result<BlockNumHash, String> {
+    if let Some((num_str, hash_str)) = s.split_once('=') {
+        let number = num_str.parse().map_err(|_| format!("Invalid block number: {}", num_str))?;
+        let hash = B256::from_str(hash_str).map_err(|_| format!("Invalid hash: {}", hash_str))?;
+        Ok(BlockNumHash::new(number, hash))
+    } else {
+        // For backward compatibility, treat as hash-only with number 0
+        let hash = B256::from_str(s).map_err(|_| format!("Invalid hash: {}", s))?;
+        Ok(BlockNumHash::new(0, hash))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -706,17 +722,21 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from([
             "reth",
             "--required-block-hashes",
-            "0x1111111111111111111111111111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222222222222222222222222222",
+            "0x1111111111111111111111111111111111111111111111111111111111111111,23115201=0x2222222222222222222222222222222222222222222222222222222222222222",
         ])
         .args;
 
         assert_eq!(args.required_block_hashes.len(), 2);
+        // First hash without block number (should default to 0)
+        assert_eq!(args.required_block_hashes[0].number, 0);
         assert_eq!(
-            args.required_block_hashes[0].to_string(),
+            args.required_block_hashes[0].hash.to_string(),
             "0x1111111111111111111111111111111111111111111111111111111111111111"
         );
+        // Second with block number=hash format
+        assert_eq!(args.required_block_hashes[1].number, 23115201);
         assert_eq!(
-            args.required_block_hashes[1].to_string(),
+            args.required_block_hashes[1].hash.to_string(),
             "0x2222222222222222222222222222222222222222222222222222222222222222"
         );
     }
@@ -725,6 +745,30 @@ mod tests {
     fn parse_empty_required_block_hashes() {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
         assert!(args.required_block_hashes.is_empty());
+    }
+
+    #[test]
+    fn test_parse_block_num_hash() {
+        // Test hash only format
+        let result = parse_block_num_hash(
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().number, 0);
+
+        // Test block_number=hash format
+        let result = parse_block_num_hash(
+            "23115201=0x2222222222222222222222222222222222222222222222222222222222222222",
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().number, 23115201);
+
+        // Test invalid formats
+        assert!(parse_block_num_hash("invalid").is_err());
+        assert!(parse_block_num_hash(
+            "abc=0x1111111111111111111111111111111111111111111111111111111111111111"
+        )
+        .is_err());
     }
 
     #[test]

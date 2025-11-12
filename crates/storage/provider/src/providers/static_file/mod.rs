@@ -61,7 +61,7 @@ mod tests {
         test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
-    use alloy_primitives::{map::HashMap, BlockHash, Signature, TxNumber, B256};
+    use alloy_primitives::{map::HashMap, Address, BlockHash, Signature, TxNumber, B256, U160};
     use rand::seq::SliceRandom;
     use reth_db::test_utils::create_test_static_files_dir;
     use reth_db_api::{transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};
@@ -328,7 +328,11 @@ mod tests {
                             receipt.cumulative_gas_used = *next_tx_num;
                             writer.append_receipt(*next_tx_num, &receipt).unwrap();
                         }
-                        StaticFileSegment::TransactionSenders => todo!(),
+                        StaticFileSegment::TransactionSenders => {
+                            // Used as ID for validation
+                            let sender = Address::from(U160::from(*next_tx_num));
+                            writer.append_transaction_sender(*next_tx_num, &sender).unwrap();
+                        }
                     }
                     *next_tx_num += 1;
                     tx_count -= 1;
@@ -459,7 +463,13 @@ mod tests {
                         sf_rw.receipt(id)?.map(|r| r.cumulative_gas_used),
                         "receipt mismatch",
                     )?,
-                    StaticFileSegment::TransactionSenders => todo!(),
+                    StaticFileSegment::TransactionSenders => assert_eyre(
+                        expected_tx_tip,
+                        sf_rw
+                            .transaction_sender(id)?
+                            .map(|s| u64::try_from(U160::from_be_bytes(s.0.into())).unwrap()),
+                        "sender mismatch",
+                    )?,
                 }
             }
 
