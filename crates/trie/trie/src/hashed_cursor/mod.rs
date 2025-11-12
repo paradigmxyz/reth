@@ -53,6 +53,13 @@ pub trait HashedCursor {
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError>;
+
+    /// Reset the cursor to its initial state.
+    ///
+    /// # Important
+    ///
+    /// After calling this method, the subsequent operation MUST be a [`HashedCursor::seek`] call.
+    fn reset(&mut self);
 }
 
 /// The cursor for iterating over hashed storage entries.
@@ -60,4 +67,11 @@ pub trait HashedCursor {
 pub trait HashedStorageCursor: HashedCursor {
     /// Returns `true` if there are no entries for a given key.
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError>;
+
+    /// Set the hashed address for the storage cursor.
+    ///
+    /// # Important
+    ///
+    /// After calling this method, the subsequent operation MUST be a [`HashedCursor::seek`] call.
+    fn set_hashed_address(&mut self, hashed_address: B256);
 }
