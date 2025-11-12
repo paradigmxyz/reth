@@ -1,5 +1,6 @@
 //! Multiproof task related functionality.
 
+use super::chunking::compute_chunk_plan;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
     keccak256,
@@ -679,9 +680,10 @@ pub(crate) struct MultiProofTaskMetrics {
 /// See the `run()` method documentation for detailed lifecycle flow.
 #[derive(Debug)]
 pub(super) struct MultiProofTask {
-    /// The size of proof targets chunk to spawn in one calculation.
-    /// If None, chunking is disabled and all targets are processed in a single proof.
-    chunk_size: Option<usize>,
+    /// Minimum chunk size when splitting work across idle workers.
+    /// Chunking is only applied if at least 2 chunks can be formed and
+    /// each chunk would be at least this size. If `None`, chunking is disabled.
+    min_chunk_size: Option<usize>,
     /// Receiver for state root related messages (prefetch, state updates, finish signal).
     rx: CrossbeamReceiver<MultiProofMessage>,
     /// Sender for state root related messages.
@@ -712,14 +714,14 @@ impl MultiProofTask {
     pub(super) fn new(
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
-        chunk_size: Option<usize>,
+        min_chunk_size: Option<usize>,
     ) -> Self {
         let (tx, rx) = unbounded();
         let (proof_result_tx, proof_result_rx) = unbounded();
         let metrics = MultiProofTaskMetrics::default();
 
         Self {
-            chunk_size,
+            min_chunk_size,
             rx,
             tx,
             proof_result_rx,
@@ -776,11 +778,11 @@ impl MultiProofTask {
         let num_chunks = dispatch_with_chunking(
             proof_targets,
             chunking_len,
-            self.chunk_size,
+            self.min_chunk_size,
             self.max_targets_for_chunking,
             available_account_workers,
             available_storage_workers,
-            MultiProofTargets::chunks,
+            |targets, base, increased| targets.chunks_with(base, increased),
             |proof_targets| {
                 self.multiproof_manager.dispatch(
                     MultiproofInput {
@@ -917,11 +919,11 @@ impl MultiProofTask {
         let num_chunks = dispatch_with_chunking(
             not_fetched_state_update,
             chunking_len,
-            self.chunk_size,
+            self.min_chunk_size,
             self.max_targets_for_chunking,
             available_account_workers,
             available_storage_workers,
-            HashedPostState::chunks,
+            |state, base, increased| state.chunks_with(base, increased),
             |hashed_state_update| {
                 let proof_targets = get_proof_targets(
                     &hashed_state_update,
@@ -1452,15 +1454,19 @@ fn get_proof_targets(
 
 /// Dispatches work items as a single unit or in chunks based on target size and worker
 /// availability.
+///
+/// Uses `compute_chunk_plan` to determine optimal chunk distribution based on available
+/// idle workers and minimum chunk size. This ensures work is distributed evenly across
+/// workers without creating too many small chunks.
 #[allow(clippy::too_many_arguments)]
 fn dispatch_with_chunking<T, I>(
     items: T,
     chunking_len: usize,
-    chunk_size: Option<usize>,
+    min_chunk_size: Option<usize>,
     max_targets_for_chunking: usize,
     available_account_workers: usize,
     available_storage_workers: usize,
-    chunker: impl FnOnce(T, usize) -> I,
+    chunker: impl FnOnce(T, usize, usize) -> I,
     mut dispatch: impl FnMut(T),
 ) -> usize
 where
@@ -1470,16 +1476,17 @@ where
         available_account_workers > 1 ||
         available_storage_workers > 1;
 
-    if should_chunk &&
-        let Some(chunk_size) = chunk_size &&
-        chunking_len > chunk_size
-    {
-        let mut num_chunks = 0usize;
-        for chunk in chunker(items, chunk_size) {
-            dispatch(chunk);
-            num_chunks += 1;
+    if should_chunk && let Some(min_chunk) = min_chunk_size {
+        // Use idle account workers to determine optimal chunk distribution
+        let idle_workers = available_account_workers;
+        if let Some(plan) = compute_chunk_plan(chunking_len, idle_workers, min_chunk) {
+            let mut num_chunks = 0usize;
+            for chunk in chunker(items, plan.base, plan.increased) {
+                dispatch(chunk);
+                num_chunks += 1;
+            }
+            return num_chunks;
         }
-        return num_chunks;
     }
 
     dispatch(items);
