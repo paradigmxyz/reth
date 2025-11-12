@@ -127,12 +127,18 @@ impl StaticFileSegment {
 
     /// Returns `true` if a segment row is linked to a transaction.
     pub const fn is_tx_based(&self) -> bool {
-        matches!(self, Self::Receipts | Self::Transactions)
+        match self {
+            Self::Receipts | Self::Transactions => true,
+            Self::Headers => false,
+        }
     }
 
     /// Returns `true` if a segment row is linked to a block.
     pub const fn is_block_based(&self) -> bool {
-        matches!(self, Self::Headers)
+        match self {
+            Self::Headers => true,
+            Self::Receipts | Self::Transactions => false,
+        }
     }
 }
 
