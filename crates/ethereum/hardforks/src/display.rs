@@ -124,20 +124,17 @@ impl core::fmt::Display for DisplayHardforks {
             Ok(())
         }
 
-        let pre_merge_printed = if self.pre_merge.is_empty() {
-            false
-        } else {
+        if !self.pre_merge.is_empty() {
             format(
                 "Pre-merge hard forks (block based)",
                 &self.pre_merge,
                 self.with_merge.is_empty(),
                 f,
             )?;
-            true
-        };
+        }
 
         if self.with_merge.is_empty() {
-            if pre_merge_printed && !self.post_merge.is_empty() {
+            if !self.pre_merge.is_empty() && !self.post_merge.is_empty() {
                 // need an extra line here in case we don't have a merge block (optimism)
                 writeln!(f)?;
             }
