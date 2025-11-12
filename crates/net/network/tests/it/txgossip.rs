@@ -131,8 +131,10 @@ async fn test_tx_ingress_policy_trusted_only() {
 
     let provider = MockEthProvider::default();
 
-    let mut tx_manager_config = TransactionsManagerConfig::default();
-    tx_manager_config.ingress_policy = TransactionIngressPolicy::Trusted;
+    let tx_manager_config = TransactionsManagerConfig {
+        ingress_policy: TransactionIngressPolicy::Trusted,
+        ..Default::default()
+    };
 
     let net = Testnet::create_with(2, provider.clone()).await;
     let net = net.with_eth_pool_config(tx_manager_config);
