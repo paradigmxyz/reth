@@ -243,7 +243,16 @@ where
                 if new_block_number == 1 {
                     writer.increment_block(0)?;
                 }
-                writer.increment_block(new_block_number)?;
+                loop {
+                    let Some(next_block_number) = writer.next_block_number() else {
+                        break;
+                    };
+                    if next_block_number > new_block_number {
+                        break;
+                    }
+
+                    writer.increment_block(next_block_number)?;
+                }
                 last_block_number = Some(new_block_number);
             }
 

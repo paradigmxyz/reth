@@ -134,6 +134,13 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         }
     }
 
+    pub fn next_block_number(&self) -> Option<BlockNumber> {
+        match self {
+            Self::Database(_) => None,
+            Self::StaticFile(writer) => Some(writer.next_block_number()),
+        }
+    }
+
     pub fn ensure_at_before_block(&mut self, block_number: BlockNumber) -> ProviderResult<()> {
         match self {
             Self::Database(_) => Ok(()),
