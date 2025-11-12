@@ -76,5 +76,9 @@ pub use ress_args::RessArgs;
 mod era;
 pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 
+/// `StaticFilesArgs` for configuring static files.
+mod static_files;
+pub use static_files::StaticFilesArgs;
+
 mod error;
 pub mod types;

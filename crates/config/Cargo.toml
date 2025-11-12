@@ -15,6 +15,7 @@ workspace = true
 reth-network-types.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
+reth-static-file-types.workspace = true
 
 # serde
 serde = { workspace = true, optional = true }
@@ -22,7 +23,7 @@ humantime-serde = { workspace = true, optional = true }
 
 # toml
 toml = { workspace = true, optional = true }
-eyre = { workspace = true, optional = true }
+eyre.workspace = true
 
 # value objects
 url.workspace = true
@@ -31,7 +32,6 @@ url.workspace = true
 serde = [
     "dep:serde",
     "dep:toml",
-    "dep:eyre",
     "dep:humantime-serde",
     "reth-network-types/serde",
     "reth-prune-types/serde",
