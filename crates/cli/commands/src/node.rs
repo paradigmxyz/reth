@@ -314,7 +314,7 @@ mod tests {
         let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
-        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
+        let data_dir = cmd.datadir.resolve_datadir(&*cmd.chain);
         let config_path = cmd.config.unwrap_or_else(|| data_dir.config());
         assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
@@ -322,7 +322,7 @@ mod tests {
             NodeCommand::try_parse_args_from(["reth"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
-        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
+        let data_dir = cmd.datadir.resolve_datadir(&*cmd.chain);
         let config_path = cmd.config.clone().unwrap_or_else(|| data_dir.config());
         let end = format!("{}/reth.toml", SUPPORTED_CHAINS[0]);
         assert!(config_path.ends_with(end), "{:?}", cmd.config);
@@ -332,7 +332,7 @@ mod tests {
     fn parse_db_path() {
         let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth"]).unwrap();
-        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
+        let data_dir = cmd.datadir.resolve_datadir(&*cmd.chain);
 
         let db_path = data_dir.db();
         let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
@@ -340,7 +340,7 @@ mod tests {
 
         let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--datadir", "my/custom/path"]).unwrap();
-        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
+        let data_dir = cmd.datadir.resolve_datadir(&*cmd.chain);
 
         let db_path = data_dir.db();
         assert_eq!(db_path, Path::new("my/custom/path/db"));

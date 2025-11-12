@@ -90,7 +90,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
                 None => self.env.chain.chain().kind().try_to_url()?,
             };
             let folder =
-                self.env.datadir.resolve_datadir(self.env.chain.chain()).data_dir().join("era");
+                self.env.datadir.resolve_datadir(&*self.env.chain).data_dir().join("era");
 
             fs::create_dir_all(&folder)?;
 

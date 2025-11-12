@@ -56,7 +56,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
             None => self
                 .env
                 .datadir
-                .resolve_datadir(self.env.chain.chain())
+                .resolve_datadir(&*self.env.chain)
                 .data_dir()
                 .join(ERA1_EXPORT_FOLDER_NAME),
         };
