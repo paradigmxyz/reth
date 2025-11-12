@@ -13,7 +13,7 @@ use crate::{
 use alloy_provider::Provider;
 use clap::Parser;
 use csv::Writer;
-use eyre::Context;
+use eyre::{Context, OptionExt};
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use std::time::{Duration, Instant};
@@ -25,6 +25,16 @@ pub struct Command {
     /// The RPC url to use for getting data.
     #[arg(long, value_name = "RPC_URL", verbatim_doc_comment)]
     rpc_url: String,
+
+    /// The size of the block buffer (channel capacity) for prefetching blocks from the RPC
+    /// endpoint.
+    #[arg(
+        long = "rpc-block-buffer-size",
+        value_name = "RPC_BLOCK_BUFFER_SIZE",
+        default_value = "20",
+        verbatim_doc_comment
+    )]
+    rpc_block_buffer_size: usize,
 
     #[command(flatten)]
     benchmark: BenchmarkArgs,
@@ -41,7 +51,12 @@ impl Command {
             is_optimism,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
-        let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
+        let buffer_size = self.rpc_block_buffer_size;
+
+        // Use a oneshot channel to propagate errors from the spawned task
+        let (error_sender, mut error_receiver) = tokio::sync::oneshot::channel();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer_size);
+
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
                 let block_res = block_provider
@@ -49,13 +64,30 @@ impl Command {
                     .full()
                     .await
                     .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"));
-                let block = block_res.unwrap().unwrap();
+                let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
+                    Ok(block) => block,
+                    Err(e) => {
+                        tracing::error!("Failed to fetch block {next_block}: {e}");
+                        let _ = error_sender.send(e);
+                        break;
+                    }
+                };
                 let header = block.header.clone();
 
-                let (version, params) = block_to_new_payload(block, is_optimism).unwrap();
+                let (version, params) = match block_to_new_payload(block, is_optimism) {
+                    Ok(result) => result,
+                    Err(e) => {
+                        tracing::error!("Failed to convert block to new payload: {e}");
+                        let _ = error_sender.send(e);
+                        break;
+                    }
+                };
 
                 next_block += 1;
-                sender.send((header, version, params)).await.unwrap();
+                if let Err(e) = sender.send((header, version, params)).await {
+                    tracing::error!("Failed to send block data: {e}");
+                    break;
+                }
             }
         });
 
@@ -96,6 +128,11 @@ impl Command {
             results.push((row, new_payload_result));
         }
 
+        // Check if the spawned task encountered an error
+        if let Ok(error) = error_receiver.try_recv() {
+            return Err(error);
+        }
+
         let (gas_output_results, new_payload_results): (_, Vec<NewPayloadResult>) =
             results.into_iter().unzip();
 
@@ -123,7 +160,7 @@ impl Command {
         }
 
         // accumulate the results and calculate the overall Ggas/s
-        let gas_output = TotalGasOutput::new(gas_output_results);
+        let gas_output = TotalGasOutput::new(gas_output_results)?;
         info!(
             total_duration=?gas_output.total_duration,
             total_gas_used=?gas_output.total_gas_used,

@@ -6,13 +6,13 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod allocator;
 
 /// Helper function to load a secret key from a file.
 pub mod load_secret_key;
-pub use load_secret_key::get_secret_key;
+pub use load_secret_key::{get_secret_key, parse_secret_key_from_hex};
 
 /// Cli parsers functions.
 pub mod parsers;

@@ -7,8 +7,8 @@ pub use event::*;
 use futures_util::Future;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader, BlockNumReader,
-    ChainStateBlockReader, ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory,
+    providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ChainStateBlockReader,
+    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
     PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_prune::PrunerBuilder;
@@ -391,7 +391,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             ))?;
                         }
 
-                        UnifiedStorageWriter::commit_unwind(provider_rw)?;
+                        provider_rw.commit()?;
 
                         stage.post_unwind_commit()?;
 
@@ -481,7 +481,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                     // Commit processed data to the database.
-                    UnifiedStorageWriter::commit(provider_rw)?;
+                    provider_rw.commit()?;
 
                     // Invoke stage post commit hook.
                     self.stage(stage_index).post_execute_commit()?;
@@ -572,14 +572,18 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     // FIXME: When handling errors, we do not commit the database transaction. This
                     // leads to the Merkle stage not clearing its checkpoint, and restarting from an
                     // invalid place.
-                    let provider_rw = self.provider_factory.database_provider_rw()?;
-                    provider_rw.save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
-                    provider_rw.save_stage_checkpoint(
-                        StageId::MerkleExecute,
-                        prev_checkpoint.unwrap_or_default(),
-                    )?;
+                    // Only reset MerkleExecute checkpoint if MerkleExecute itself failed
+                    if stage_id == StageId::MerkleExecute {
+                        let provider_rw = self.provider_factory.database_provider_rw()?;
+                        provider_rw
+                            .save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
+                        provider_rw.save_stage_checkpoint(
+                            StageId::MerkleExecute,
+                            prev_checkpoint.unwrap_or_default(),
+                        )?;
 
-                    UnifiedStorageWriter::commit(provider_rw)?;
+                        provider_rw.commit()?;
+                    }
 
                     // We unwind because of a validation error. If the unwind itself
                     // fails, we bail entirely,
@@ -617,7 +621,10 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 "Stage is missing static file data."
             );
 
-            Ok(Some(ControlFlow::Unwind { target: block.block.number - 1, bad_block: block }))
+            Ok(Some(ControlFlow::Unwind {
+                target: block.block.number.saturating_sub(1),
+                bad_block: block,
+            }))
         } else if err.is_fatal() {
             error!(target: "sync::pipeline", stage = %stage_id, "Stage encountered a fatal error: {err}");
             Err(err.into())

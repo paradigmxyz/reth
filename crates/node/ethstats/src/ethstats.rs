@@ -109,10 +109,9 @@ where
             "Attempting to connect to EthStats server at {}", self.credentials.host
         );
         let full_url = format!("ws://{}/api", self.credentials.host);
-        let url = Url::parse(&full_url)
-            .map_err(|e| EthStatsError::InvalidUrl(format!("Invalid URL: {full_url} - {e}")))?;
+        let url = Url::parse(&full_url).map_err(EthStatsError::Url)?;
 
-        match timeout(CONNECT_TIMEOUT, connect_async(url.to_string())).await {
+        match timeout(CONNECT_TIMEOUT, connect_async(url.as_str())).await {
             Ok(Ok((ws_stream, _))) => {
                 debug!(
                     target: "ethstats",
@@ -123,7 +122,7 @@ where
                 self.login().await?;
                 Ok(())
             }
-            Ok(Err(e)) => Err(EthStatsError::InvalidUrl(e.to_string())),
+            Ok(Err(e)) => Err(EthStatsError::WebSocket(e)),
             Err(_) => {
                 debug!(target: "ethstats", "Connection to EthStats server timed out");
                 Err(EthStatsError::Timeout)
@@ -181,14 +180,14 @@ where
         let response =
             timeout(READ_TIMEOUT, conn.read_json()).await.map_err(|_| EthStatsError::Timeout)??;
 
-        if let Some(ack) = response.get("emit") {
-            if ack.get(0) == Some(&Value::String("ready".to_string())) {
-                info!(
-                    target: "ethstats",
-                    "Login successful to EthStats server as node_id {}", self.credentials.node_id
-                );
-                return Ok(());
-            }
+        if let Some(ack) = response.get("emit") &&
+            ack.get(0) == Some(&Value::String("ready".to_string()))
+        {
+            info!(
+                target: "ethstats",
+                "Login successful to EthStats server as node_id {}", self.credentials.node_id
+            );
+            return Ok(());
         }
 
         debug!(target: "ethstats", "Login failed: Unauthorized or unexpected login response");
@@ -559,24 +558,32 @@ where
 
         // Start the read loop in a separate task
         let read_handle = {
-            let conn = self.conn.clone();
+            let conn_arc = self.conn.clone();
             let message_tx = message_tx.clone();
             let shutdown_tx = shutdown_tx.clone();
 
             tokio::spawn(async move {
                 loop {
-                    let conn = conn.read().await;
-                    if let Some(conn) = conn.as_ref() {
+                    let conn_guard = conn_arc.read().await;
+                    if let Some(conn) = conn_guard.as_ref() {
                         match conn.read_json().await {
                             Ok(msg) => {
                                 if message_tx.send(msg).await.is_err() {
                                     break;
                                 }
                             }
-                            Err(e) => {
-                                debug!(target: "ethstats", "Read error: {}", e);
-                                break;
-                            }
+                            Err(e) => match e {
+                                crate::error::ConnectionError::Serialization(err) => {
+                                    debug!(target: "ethstats", "JSON parse error from stats server: {}", err);
+                                }
+                                other => {
+                                    debug!(target: "ethstats", "Read error: {}", other);
+                                    drop(conn_guard);
+                                    if let Some(conn) = conn_arc.write().await.take() {
+                                        let _ = conn.close().await;
+                                    }
+                                }
+                            },
                         }
                     } else {
                         sleep(RECONNECT_INTERVAL).await;
@@ -595,10 +602,10 @@ where
             tokio::spawn(async move {
                 loop {
                     let head = canonical_stream.next().await;
-                    if let Some(head) = head {
-                        if head_tx.send(head).await.is_err() {
-                            break;
-                        }
+                    if let Some(head) = head &&
+                        head_tx.send(head).await.is_err()
+                    {
+                        break;
                     }
                 }
 
@@ -659,10 +666,12 @@ where
                 }
 
                 // Handle reconnection
-                _ = reconnect_interval.tick(), if self.conn.read().await.is_none() => {
-                    match self.connect().await {
-                        Ok(_) => info!(target: "ethstats", "Reconnected successfully"),
-                        Err(e) => debug!(target: "ethstats", "Reconnect failed: {}", e),
+                _ = reconnect_interval.tick() => {
+                    if self.conn.read().await.is_none() {
+                        match self.connect().await {
+                            Ok(_) => info!(target: "ethstats", "Reconnected successfully"),
+                            Err(e) => debug!(target: "ethstats", "Reconnect failed: {}", e),
+                        }
                     }
                 }
             }
@@ -681,10 +690,10 @@ where
     /// Attempts to close the connection cleanly and logs any errors
     /// that occur during the process.
     async fn disconnect(&self) {
-        if let Some(conn) = self.conn.write().await.take() {
-            if let Err(e) = conn.close().await {
-                debug!(target: "ethstats", "Error closing connection: {}", e);
-            }
+        if let Some(conn) = self.conn.write().await.take() &&
+            let Err(e) = conn.close().await
+        {
+            debug!(target: "ethstats", "Error closing connection: {}", e);
         }
     }
 
@@ -733,16 +742,13 @@ mod tests {
 
             // Handle ping
             while let Some(Ok(msg)) = ws_stream.next().await {
-                if let Message::Text(text) = msg {
-                    if text.contains("node-ping") {
-                        let pong = json!({
-                            "emit": ["node-pong", {"id": "test-node"}]
-                        });
-                        ws_stream
-                            .send(Message::Text(Utf8Bytes::from(pong.to_string())))
-                            .await
-                            .unwrap();
-                    }
+                if let Message::Text(text) = msg &&
+                    text.contains("node-ping")
+                {
+                    let pong = json!({
+                        "emit": ["node-pong", {"id": "test-node"}]
+                    });
+                    ws_stream.send(Message::Text(Utf8Bytes::from(pong.to_string()))).await.unwrap();
                 }
             }
         });

@@ -17,7 +17,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use alloy_network::{Ethereum, IntoWallet};
@@ -34,7 +34,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
     OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
@@ -310,7 +310,7 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
@@ -619,11 +619,12 @@ where
     EvmConfig: ConfigureEvm,
 {
     /// Instantiates `AdminApi`
-    pub fn admin_api(&self) -> AdminApi<Network, Provider::ChainSpec>
+    pub fn admin_api(&self) -> AdminApi<Network, Provider::ChainSpec, Pool>
     where
         Network: Peers,
+        Pool: TransactionPool + Clone + 'static,
     {
-        AdminApi::new(self.network.clone(), self.provider.chain_spec())
+        AdminApi::new(self.network.clone(), self.provider.chain_spec(), self.pool.clone())
     }
 
     /// Instantiates `Web3Api`
@@ -635,6 +636,7 @@ where
     pub fn register_admin(&mut self) -> &mut Self
     where
         Network: Peers,
+        Pool: TransactionPool + Clone + 'static,
     {
         let adminapi = self.admin_api();
         self.modules.insert(RethRpcModule::Admin, adminapi.into_rpc().into());
@@ -668,6 +670,7 @@ where
             RpcBlock<EthApi::NetworkTypes>,
             RpcReceipt<EthApi::NetworkTypes>,
             RpcHeader<EthApi::NetworkTypes>,
+            TxTy<N>,
         > + EthApiTypes,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -689,7 +692,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self
     where
-        EthApi: TraceExt + EthTransactions,
+        EthApi: TraceExt + EthTransactions<Primitives = N>,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -842,7 +845,7 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
@@ -923,11 +926,13 @@ where
                 self.modules
                     .entry(namespace.clone())
                     .or_insert_with(|| match namespace.clone() {
-                        RethRpcModule::Admin => {
-                            AdminApi::new(self.network.clone(), self.provider.chain_spec())
-                                .into_rpc()
-                                .into()
-                        }
+                        RethRpcModule::Admin => AdminApi::new(
+                            self.network.clone(),
+                            self.provider.chain_spec(),
+                            self.pool.clone(),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Debug => {
                             DebugApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
                                 .into_rpc()
@@ -1961,6 +1966,25 @@ impl TransportRpcModules {
         self.add_or_replace_ipc(other)?;
         Ok(())
     }
+    /// Adds or replaces the given [`Methods`] in the transport modules where the specified
+    /// [`RethRpcModule`] is configured.
+    pub fn add_or_replace_if_module_configured(
+        &mut self,
+        module: RethRpcModule,
+        other: impl Into<Methods>,
+    ) -> Result<(), RegisterMethodError> {
+        let other = other.into();
+        if self.module_config().contains_http(&module) {
+            self.add_or_replace_http(other.clone())?;
+        }
+        if self.module_config().contains_ws(&module) {
+            self.add_or_replace_ws(other.clone())?;
+        }
+        if self.module_config().contains_ipc(&module) {
+            self.add_or_replace_ipc(other)?;
+        }
+        Ok(())
+    }
 }
 
 /// Returns the methods installed in the given module that match the given filter.
@@ -2516,5 +2540,57 @@ mod tests {
         assert!(modules.http.as_ref().unwrap().method("anything").is_some());
         assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
         assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
+    }
+
+    #[test]
+    fn test_add_or_replace_if_module_configured() {
+        // Create a config that enables RethRpcModule::Eth for HTTP and WS, but NOT IPC
+        let config = TransportRpcModuleConfig::default()
+            .with_http([RethRpcModule::Eth])
+            .with_ws([RethRpcModule::Eth]);
+
+        // Create HTTP module with an existing method (to test "replace")
+        let mut http_module = RpcModule::new(());
+        http_module.register_method("eth_existing", |_, _, _| "original").unwrap();
+
+        // Create WS module with the same existing method
+        let mut ws_module = RpcModule::new(());
+        ws_module.register_method("eth_existing", |_, _, _| "original").unwrap();
+
+        // Create IPC module (empty, to ensure no changes)
+        let ipc_module = RpcModule::new(());
+
+        // Set up TransportRpcModules with the config and modules
+        let mut modules = TransportRpcModules {
+            config,
+            http: Some(http_module),
+            ws: Some(ws_module),
+            ipc: Some(ipc_module),
+        };
+
+        // Create new methods: one to replace an existing method, one to add a new one
+        let mut new_module = RpcModule::new(());
+        new_module.register_method("eth_existing", |_, _, _| "replaced").unwrap(); // Replace
+        new_module.register_method("eth_new", |_, _, _| "added").unwrap(); // Add
+        let new_methods: Methods = new_module.into();
+
+        // Call the function for RethRpcModule::Eth
+        let result = modules.add_or_replace_if_module_configured(RethRpcModule::Eth, new_methods);
+        assert!(result.is_ok(), "Function should succeed");
+
+        // Verify HTTP: existing method still exists (replaced), new method added
+        let http = modules.http.as_ref().unwrap();
+        assert!(http.method("eth_existing").is_some());
+        assert!(http.method("eth_new").is_some());
+
+        // Verify WS: existing method still exists (replaced), new method added
+        let ws = modules.ws.as_ref().unwrap();
+        assert!(ws.method("eth_existing").is_some());
+        assert!(ws.method("eth_new").is_some());
+
+        // Verify IPC: no changes (Eth not configured for IPC)
+        let ipc = modules.ipc.as_ref().unwrap();
+        assert!(ipc.method("eth_existing").is_none());
+        assert!(ipc.method("eth_new").is_none());
     }
 }

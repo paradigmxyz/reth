@@ -9,6 +9,7 @@ use alloy_eips::{eip2718::WithEncoded, Decodable2718};
 use alloy_evm::EvmEnv;
 use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_rpc_types_engine::PayloadError;
+use op_alloy_rpc_types_engine::flashblock::OpFlashblockPayloadBase;
 use op_revm::OpSpecId;
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_ethereum::{
@@ -23,7 +24,6 @@ use reth_op::{
     node::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder},
     primitives::SignedTransaction,
 };
-use reth_optimism_flashblocks::ExecutionPayloadBaseV1;
 use reth_rpc_api::eth::helpers::pending_block::BuildPendingEnv;
 use std::sync::Arc;
 
@@ -62,7 +62,7 @@ impl ConfigureEvm for CustomEvmConfig {
         &self.block_assembler
     }
 
-    fn evm_env(&self, header: &CustomHeader) -> EvmEnv<OpSpecId> {
+    fn evm_env(&self, header: &CustomHeader) -> Result<EvmEnv<OpSpecId>, Self::Error> {
         self.inner.evm_env(header)
     }
 
@@ -74,59 +74,65 @@ impl ConfigureEvm for CustomEvmConfig {
         self.inner.next_evm_env(parent, &attributes.inner)
     }
 
-    fn context_for_block(&self, block: &SealedBlock<Block>) -> CustomBlockExecutionCtx {
-        CustomBlockExecutionCtx {
+    fn context_for_block(
+        &self,
+        block: &SealedBlock<Block>,
+    ) -> Result<CustomBlockExecutionCtx, Self::Error> {
+        Ok(CustomBlockExecutionCtx {
             inner: OpBlockExecutionCtx {
                 parent_hash: block.header().parent_hash(),
                 parent_beacon_block_root: block.header().parent_beacon_block_root(),
                 extra_data: block.header().extra_data().clone(),
             },
             extension: block.extension,
-        }
+        })
     }
 
     fn context_for_next_block(
         &self,
         parent: &SealedHeader<CustomHeader>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> CustomBlockExecutionCtx {
-        CustomBlockExecutionCtx {
+    ) -> Result<CustomBlockExecutionCtx, Self::Error> {
+        Ok(CustomBlockExecutionCtx {
             inner: OpBlockExecutionCtx {
                 parent_hash: parent.hash(),
                 parent_beacon_block_root: attributes.inner.parent_beacon_block_root,
                 extra_data: attributes.inner.extra_data,
             },
             extension: attributes.extension,
-        }
+        })
     }
 }
 
 impl ConfigureEngineEvm<CustomExecutionData> for CustomEvmConfig {
-    fn evm_env_for_payload(&self, payload: &CustomExecutionData) -> EvmEnvFor<Self> {
+    fn evm_env_for_payload(
+        &self,
+        payload: &CustomExecutionData,
+    ) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env_for_payload(&payload.inner)
     }
 
     fn context_for_payload<'a>(
         &self,
         payload: &'a CustomExecutionData,
-    ) -> ExecutionCtxFor<'a, Self> {
-        CustomBlockExecutionCtx {
-            inner: self.inner.context_for_payload(&payload.inner),
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+        Ok(CustomBlockExecutionCtx {
+            inner: self.inner.context_for_payload(&payload.inner)?,
             extension: payload.extension,
-        }
+        })
     }
 
     fn tx_iterator_for_payload(
         &self,
         payload: &CustomExecutionData,
-    ) -> impl ExecutableTxIterator<Self> {
-        payload.inner.payload.transactions().clone().into_iter().map(|encoded| {
+    ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
+        Ok(payload.inner.payload.transactions().clone().into_iter().map(|encoded| {
             let tx = CustomTransaction::decode_2718_exact(encoded.as_ref())
                 .map_err(Into::into)
                 .map_err(PayloadError::Decode)?;
             let signer = tx.try_recover().map_err(NewPayloadError::other)?;
             Ok::<_, NewPayloadError>(WithEncoded::new(encoded, tx.with_signer(signer)))
-        })
+        }))
     }
 }
 
@@ -137,8 +143,8 @@ pub struct CustomNextBlockEnvAttributes {
     extension: u64,
 }
 
-impl From<ExecutionPayloadBaseV1> for CustomNextBlockEnvAttributes {
-    fn from(value: ExecutionPayloadBaseV1) -> Self {
+impl From<OpFlashblockPayloadBase> for CustomNextBlockEnvAttributes {
+    fn from(value: OpFlashblockPayloadBase) -> Self {
         Self { inner: value.into(), extension: 0 }
     }
 }

@@ -81,7 +81,11 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
     let modified_root = loader.root().unwrap();
 
     // Update the intermediate roots table so that we can run the incremental verification
-    tx.write_individual_storage_trie_updates(hashed_address, &trie_updates).unwrap();
+    tx.write_storage_trie_updates_sorted(core::iter::once((
+        &hashed_address,
+        &trie_updates.into_sorted(),
+    )))
+    .unwrap();
 
     // 3. Calculate the incremental root
     let mut storage_changes = PrefixSetMut::default();
@@ -428,6 +432,7 @@ fn account_and_storage_trie() {
 
     let (nibbles1a, node1a) = account_updates.first().unwrap();
     assert_eq!(nibbles1a.to_vec(), vec![0xB]);
+    let node1a = node1a.as_ref().unwrap();
     assert_eq!(node1a.state_mask, TrieMask::new(0b1011));
     assert_eq!(node1a.tree_mask, TrieMask::new(0b0001));
     assert_eq!(node1a.hash_mask, TrieMask::new(0b1001));
@@ -436,6 +441,7 @@ fn account_and_storage_trie() {
 
     let (nibbles2a, node2a) = account_updates.last().unwrap();
     assert_eq!(nibbles2a.to_vec(), vec![0xB, 0x0]);
+    let node2a = node2a.as_ref().unwrap();
     assert_eq!(node2a.state_mask, TrieMask::new(0b10001));
     assert_eq!(node2a.tree_mask, TrieMask::new(0b00000));
     assert_eq!(node2a.hash_mask, TrieMask::new(0b10000));
@@ -471,6 +477,7 @@ fn account_and_storage_trie() {
 
     let (nibbles1b, node1b) = account_updates.first().unwrap();
     assert_eq!(nibbles1b.to_vec(), vec![0xB]);
+    let node1b = node1b.as_ref().unwrap();
     assert_eq!(node1b.state_mask, TrieMask::new(0b1011));
     assert_eq!(node1b.tree_mask, TrieMask::new(0b0001));
     assert_eq!(node1b.hash_mask, TrieMask::new(0b1011));
@@ -481,6 +488,7 @@ fn account_and_storage_trie() {
 
     let (nibbles2b, node2b) = account_updates.last().unwrap();
     assert_eq!(nibbles2b.to_vec(), vec![0xB, 0x0]);
+    let node2b = node2b.as_ref().unwrap();
     assert_eq!(node2a, node2b);
     tx.commit().unwrap();
 
@@ -520,8 +528,9 @@ fn account_and_storage_trie() {
 
         assert_eq!(trie_updates.account_nodes_ref().len(), 1);
 
-        let (nibbles1c, node1c) = trie_updates.account_nodes_ref().iter().next().unwrap();
-        assert_eq!(nibbles1c.to_vec(), vec![0xB]);
+        let entry = trie_updates.account_nodes_ref().iter().next().unwrap();
+        assert_eq!(entry.0.to_vec(), vec![0xB]);
+        let node1c = entry.1;
 
         assert_eq!(node1c.state_mask, TrieMask::new(0b1011));
         assert_eq!(node1c.tree_mask, TrieMask::new(0b0000));
@@ -578,8 +587,9 @@ fn account_and_storage_trie() {
 
         assert_eq!(trie_updates.account_nodes_ref().len(), 1);
 
-        let (nibbles1d, node1d) = trie_updates.account_nodes_ref().iter().next().unwrap();
-        assert_eq!(nibbles1d.to_vec(), vec![0xB]);
+        let entry = trie_updates.account_nodes_ref().iter().next().unwrap();
+        assert_eq!(entry.0.to_vec(), vec![0xB]);
+        let node1d = entry.1;
 
         assert_eq!(node1d.state_mask, TrieMask::new(0b1011));
         assert_eq!(node1d.tree_mask, TrieMask::new(0b0000));
@@ -614,7 +624,7 @@ fn account_trie_around_extension_node_with_dbtrie() {
 
     let (got, updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
     assert_eq!(expected, got);
-    tx.write_trie_updates(&updates).unwrap();
+    tx.write_trie_updates(updates).unwrap();
 
     // read the account updates from the db
     let mut accounts_trie = tx.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
@@ -661,7 +671,7 @@ proptest! {
                 state.iter().map(|(&key, &balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
             );
             assert_eq!(expected_root, state_root);
-            tx.write_trie_updates(&trie_updates).unwrap();
+            tx.write_trie_updates(trie_updates).unwrap();
         }
     }
 }

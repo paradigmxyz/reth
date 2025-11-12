@@ -334,7 +334,7 @@ impl<T: TxTy> InMemorySize for Receipt<T> {
         self.tx_type.size() +
             core::mem::size_of::<bool>() +
             core::mem::size_of::<u64>() +
-            self.logs.capacity() * core::mem::size_of::<Log>()
+            self.logs.iter().map(|log| log.size()).sum::<usize>()
     }
 }
 

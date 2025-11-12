@@ -35,13 +35,6 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS: u32 = DEFAULT_BUD
 // Default is 40 pending pool imports.
 pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 4 * DEFAULT_BUDGET_TRY_DRAIN_STREAM;
 
-/// Default budget to try and stream hashes of successfully imported transactions from the pool.
-///
-/// Default is naturally same as the number of transactions to attempt importing,
-/// [`DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS`], so 40 pool imports.
-pub const DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS: u32 =
-    DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS;
-
 /// Polls the given stream. Breaks with `true` if there maybe is more work.
 #[macro_export]
 macro_rules! poll_nested_stream_with_budget {

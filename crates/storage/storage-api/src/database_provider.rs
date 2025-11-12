@@ -37,9 +37,7 @@ pub trait DBProvider: Sized {
     }
 
     /// Commit database transaction
-    fn commit(self) -> ProviderResult<bool> {
-        Ok(self.into_tx().commit()?)
-    }
+    fn commit(self) -> ProviderResult<bool>;
 
     /// Returns a reference to prune modes.
     fn prune_modes_ref(&self) -> &PruneModes;
@@ -161,6 +159,29 @@ pub trait DatabaseProviderFactory: Send + Sync {
 
 /// Helper type alias to get the associated transaction type from a [`DatabaseProviderFactory`].
 pub type FactoryTx<F> = <<F as DatabaseProviderFactory>::DB as Database>::TX;
+
+/// A trait which can be used to describe any factory-like type which returns a read-only provider.
+pub trait DatabaseProviderROFactory {
+    /// Provider type returned by this factory.
+    ///
+    /// This type is intentionally left unconstrained; constraints can be added as-needed when this
+    /// is used.
+    type Provider;
+
+    /// Creates and returns a Provider.
+    fn database_provider_ro(&self) -> ProviderResult<Self::Provider>;
+}
+
+impl<T> DatabaseProviderROFactory for T
+where
+    T: DatabaseProviderFactory,
+{
+    type Provider = T::Provider;
+
+    fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+        <T as DatabaseProviderFactory>::database_provider_ro(self)
+    }
+}
 
 fn range_size_hint(range: &impl RangeBounds<u64>) -> Option<usize> {
     let start = match range.start_bound().cloned() {

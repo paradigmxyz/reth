@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
 use alloy_consensus::Transaction;
@@ -176,8 +176,8 @@ where
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
-    let block_gas_limit: u64 = builder.evm_mut().block().gas_limit;
-    let base_fee = builder.evm_mut().block().basefee;
+    let block_gas_limit: u64 = builder.evm_mut().block().gas_limit();
+    let base_fee = builder.evm_mut().block().basefee();
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
@@ -198,8 +198,15 @@ where
     let mut block_transactions_rlp_length = 0;
 
     let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp);
-    let max_blob_count =
-        blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_default();
+    let protocol_max_blob_count =
+        blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_else(Default::default);
+
+    // Apply user-configured blob limit (EIP-7872)
+    // Per EIP-7872: if the minimum is zero, set it to one
+    let max_blob_count = builder_config
+        .max_blobs_per_block
+        .map(|user_limit| std::cmp::min(user_limit, protocol_max_blob_count).max(1))
+        .unwrap_or(protocol_max_blob_count);
 
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
 
@@ -232,10 +239,10 @@ where
         if is_osaka && estimated_block_size_with_tx > MAX_RLP_BLOCK_SIZE {
             best_txs.mark_invalid(
                 &pool_tx,
-                InvalidPoolTransactionError::OversizedData(
-                    estimated_block_size_with_tx,
-                    MAX_RLP_BLOCK_SIZE,
-                ),
+                InvalidPoolTransactionError::OversizedData {
+                    size: estimated_block_size_with_tx,
+                    limit: MAX_RLP_BLOCK_SIZE,
+                },
             );
             continue;
         }

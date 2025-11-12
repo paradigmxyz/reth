@@ -10,7 +10,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
@@ -383,15 +383,17 @@ impl TaskExecutor {
     {
         let on_shutdown = self.on_shutdown.clone();
 
-        // Clone only the specific counter that we need.
-        let finished_regular_tasks_total_metrics =
-            self.metrics.finished_regular_tasks_total.clone();
+        // Choose the appropriate finished counter based on task kind
+        let finished_counter = match task_kind {
+            TaskKind::Default => self.metrics.finished_regular_tasks_total.clone(),
+            TaskKind::Blocking => self.metrics.finished_regular_blocking_tasks_total.clone(),
+        };
+
         // Wrap the original future to increment the finished tasks counter upon completion
         let task = {
             async move {
                 // Create an instance of IncCounterOnDrop with the counter to increment
-                let _inc_counter_on_drop =
-                    IncCounterOnDrop::new(finished_regular_tasks_total_metrics);
+                let _inc_counter_on_drop = IncCounterOnDrop::new(finished_counter);
                 let fut = pin!(fut);
                 let _ = select(on_shutdown, fut).await;
             }
@@ -642,7 +644,7 @@ impl TaskSpawner for TaskExecutor {
     }
 
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.metrics.inc_regular_tasks();
+        self.metrics.inc_regular_blocking_tasks();
         self.spawn_blocking(fut)
     }
 

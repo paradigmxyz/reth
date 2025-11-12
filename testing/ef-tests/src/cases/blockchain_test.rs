@@ -10,17 +10,20 @@ use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
-use reth_ethereum_primitives::Block;
+use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{Block as BlockTrait, RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
-    StateWriter, StorageLocation,
+    StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
-use reth_stateless::{validation::stateless_validation, ExecutionWitness};
+use reth_stateless::{
+    trie::StatelessSparseTrie, validation::stateless_validation_with_trie, ExecutionWitness,
+    UncompressedPublicKey,
+};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 use std::{
@@ -54,8 +57,10 @@ impl Suite for BlockchainTests {
 /// An Ethereum blockchain test.
 #[derive(Debug, PartialEq, Eq)]
 pub struct BlockchainTestCase {
-    tests: BTreeMap<String, BlockchainTest>,
-    skip: bool,
+    /// The tests within this test case.
+    pub tests: BTreeMap<String, BlockchainTest>,
+    /// Whether to skip this test case.
+    pub skip: bool,
 }
 
 impl BlockchainTestCase {
@@ -96,39 +101,45 @@ impl BlockchainTestCase {
     }
 
     /// Execute a single `BlockchainTest`, validating the outcome against the
-    /// expectations encoded in the JSON file.
-    fn run_single_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
+    /// expectations encoded in the JSON file. Returns the list of executed blocks
+    /// with their execution witnesses.
+    pub fn run_single_case(
+        name: &str,
+        case: &BlockchainTest,
+    ) -> Result<Vec<(RecoveredBlock<Block>, ExecutionWitness)>, Error> {
         let expectation = Self::expected_failure(case);
         match run_case(case) {
             // All blocks executed successfully.
-            Ok(()) => {
+            Ok(program_inputs) => {
                 // Check if the test case specifies that it should have failed
                 if let Some((block, msg)) = expectation {
                     Err(Error::Assertion(format!(
                         "Test case: {name}\nExpected failure at block {block} - {msg}, but all blocks succeeded",
                     )))
                 } else {
-                    Ok(())
+                    Ok(program_inputs)
                 }
             }
 
             // A block processing failure occurred.
-            err @ Err(Error::BlockProcessingFailed { block_number, .. }) => match expectation {
-                // It happened on exactly the block we were told to fail on
-                Some((expected, _)) if block_number == expected => Ok(()),
+            Err(Error::BlockProcessingFailed { block_number, partial_program_inputs, err }) => {
+                match expectation {
+                    // It happened on exactly the block we were told to fail on
+                    Some((expected, _)) if block_number == expected => Ok(partial_program_inputs),
 
-                // Uncle side‑chain edge case, we accept as long as it failed.
-                // But we don't check the exact block number.
-                _ if Self::is_uncle_sidechain_case(name) => Ok(()),
+                    // Uncle side‑chain edge case, we accept as long as it failed.
+                    // But we don't check the exact block number.
+                    _ if Self::is_uncle_sidechain_case(name) => Ok(partial_program_inputs),
 
-                // Expected failure, but block number does not match
-                Some((expected, _)) => Err(Error::Assertion(format!(
-                    "Test case: {name}\nExpected failure at block {expected}\nGot failure at block {block_number}",
-                ))),
+                    // Expected failure, but block number does not match
+                    Some((expected, _)) => Err(Error::Assertion(format!(
+                        "Test case: {name}\nExpected failure at block {expected}\nGot failure at block {block_number}",
+                    ))),
 
-                // No failure expected at all - bubble up original error.
-                None => err,
-            },
+                    // No failure expected at all - bubble up original error.
+                    None => Err(Error::BlockProcessingFailed { block_number, partial_program_inputs, err }),
+                }
+            }
 
             // Non‑processing error – forward as‑is.
             //
@@ -170,14 +181,14 @@ impl Case for BlockchainTestCase {
             .iter()
             .filter(|(_, case)| !Self::excluded_fork(case.network))
             .par_bridge()
-            .try_for_each(|(name, case)| Self::run_single_case(name, case))?;
+            .try_for_each(|(name, case)| Self::run_single_case(name, case).map(|_| ()))?;
 
         Ok(())
     }
 }
 
-/// Executes a single `BlockchainTest`, returning an error if the blockchain state
-/// does not match the expected outcome after all blocks are executed.
+/// Executes a single `BlockchainTest` returning an error as soon as any block has a consensus
+/// validation failure.
 ///
 /// A `BlockchainTest` represents a self-contained scenario:
 /// - It initializes a fresh blockchain state.
@@ -186,9 +197,13 @@ impl Case for BlockchainTestCase {
 ///   outcome.
 ///
 /// Returns:
-/// - `Ok(())` if all blocks execute successfully and the final state is correct.
-/// - `Err(Error)` if any block fails to execute correctly, or if the post-state validation fails.
-fn run_case(case: &BlockchainTest) -> Result<(), Error> {
+/// - `Ok(_)` if all blocks execute successfully, returning recovered blocks and full block
+///   execution witness.
+/// - `Err(Error)` if any block fails to execute correctly, returning a partial block execution
+///   witness if the error is of variant `BlockProcessingFailed`.
+fn run_case(
+    case: &BlockchainTest,
+) -> Result<Vec<(RecoveredBlock<Block>, ExecutionWitness)>, Error> {
     // Create a new test database and initialize a provider for the test case.
     let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
     let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
@@ -203,16 +218,23 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     .unwrap();
 
     provider
-        .insert_block(genesis_block.clone(), StorageLocation::Database)
-        .map_err(|err| Error::block_failed(0, err))?;
+        .insert_block(genesis_block.clone())
+        .map_err(|err| Error::block_failed(0, Default::default(), err))?;
+
+    // Increment block number for receipts static file
+    provider
+        .static_file_provider()
+        .latest_writer(StaticFileSegment::Receipts)
+        .and_then(|mut writer| writer.increment_block(0))
+        .map_err(|err| Error::block_failed(0, Default::default(), err))?;
 
     let genesis_state = case.pre.clone().into_genesis_state();
     insert_genesis_state(&provider, genesis_state.iter())
-        .map_err(|err| Error::block_failed(0, err))?;
+        .map_err(|err| Error::block_failed(0, Default::default(), err))?;
     insert_genesis_hashes(&provider, genesis_state.iter())
-        .map_err(|err| Error::block_failed(0, err))?;
+        .map_err(|err| Error::block_failed(0, Default::default(), err))?;
     insert_genesis_history(&provider, genesis_state.iter())
-        .map_err(|err| Error::block_failed(0, err))?;
+        .map_err(|err| Error::block_failed(0, Default::default(), err))?;
 
     // Decode blocks
     let blocks = decode_blocks(&case.blocks)?;
@@ -227,12 +249,19 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Insert the block into the database
         provider
-            .insert_block(block.clone(), StorageLocation::Database)
-            .map_err(|err| Error::block_failed(block_number, err))?;
+            .insert_block(block.clone())
+            .map_err(|err| Error::block_failed(block_number, Default::default(), err))?;
+        // Commit static files, so we can query the headers for stateless execution below
+        provider
+            .static_file_provider()
+            .commit()
+            .map_err(|err| Error::block_failed(block_number, Default::default(), err))?;
 
         // Consensus checks before block execution
-        pre_execution_checks(chain_spec.clone(), &parent, block)
-            .map_err(|err| Error::block_failed(block_number, err))?;
+        pre_execution_checks(chain_spec.clone(), &parent, block).map_err(|err| {
+            program_inputs.push((block.clone(), execution_witness_with_parent(&parent)));
+            Error::block_failed(block_number, program_inputs.clone(), err)
+        })?;
 
         let mut witness_record = ExecutionWitnessRecord::default();
 
@@ -242,14 +271,14 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         let executor = executor_provider.batch_executor(state_db);
 
         let output = executor
-            .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
+            .execute_with_state_closure_always(&(*block).clone(), |statedb: &State<_>| {
                 witness_record.record_executed_state(statedb);
             })
-            .map_err(|err| Error::block_failed(block_number, err))?;
+            .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         // Consensus checks after block execution
         validate_block_post_execution(block, &chain_spec, &output.receipts, &output.requests)
-            .map_err(|err| Error::block_failed(block_number, err))?;
+            .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         // Generate the stateless witness
         // TODO: Most of this code is copy-pasted from debug_executionWitness
@@ -283,29 +312,26 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
         let (computed_state_root, _) =
             StateRoot::overlay_root_with_updates(provider.tx_ref(), hashed_state.clone())
-                .map_err(|err| Error::block_failed(block_number, err))?;
+                .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
         if computed_state_root != block.state_root {
             return Err(Error::block_failed(
                 block_number,
+                program_inputs.clone(),
                 Error::Assertion("state root mismatch".to_string()),
-            ))
+            ));
         }
 
         // Commit the post state/state diff to the database
         provider
-            .write_state(
-                &ExecutionOutcome::single(block.number, output),
-                OriginalValuesKnown::Yes,
-                StorageLocation::Database,
-            )
-            .map_err(|err| Error::block_failed(block_number, err))?;
+            .write_state(&ExecutionOutcome::single(block.number, output), OriginalValuesKnown::Yes)
+            .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         provider
             .write_hashed_state(&hashed_state.into_sorted())
-            .map_err(|err| Error::block_failed(block_number, err))?;
+            .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
         provider
             .update_history_indices(block.number..=block.number)
-            .map_err(|err| Error::block_failed(block_number, err))?;
+            .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         // Since there were no errors, update the parent block
         parent = block.clone()
@@ -333,17 +359,24 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     }
 
     // Now validate using the stateless client if everything else passes
-    for (block, execution_witness) in program_inputs {
-        stateless_validation(
+    for (recovered_block, execution_witness) in &program_inputs {
+        let block = recovered_block.clone().into_block();
+
+        // Recover the actual public keys from the transaction signatures
+        let public_keys = recover_signers(block.body().transactions())
+            .expect("Failed to recover public keys from transaction signatures");
+
+        stateless_validation_with_trie::<StatelessSparseTrie, _, _>(
             block,
-            execution_witness,
+            public_keys,
+            execution_witness.clone(),
             chain_spec.clone(),
             EthEvmConfig::new(chain_spec.clone()),
         )
         .expect("stateless validation failed");
     }
 
-    Ok(())
+    Ok(program_inputs)
 }
 
 fn decode_blocks(
@@ -356,10 +389,12 @@ fn decode_blocks(
         let block_number = (block_index + 1) as u64;
 
         let decoded = SealedBlock::<Block>::decode(&mut block.rlp.as_ref())
-            .map_err(|err| Error::block_failed(block_number, err))?;
+            .map_err(|err| Error::block_failed(block_number, Default::default(), err))?;
 
-        let recovered_block =
-            decoded.clone().try_recover().map_err(|err| Error::block_failed(block_number, err))?;
+        let recovered_block = decoded
+            .clone()
+            .try_recover()
+            .map_err(|err| Error::block_failed(block_number, Default::default(), err))?;
 
         blocks.push(recovered_block);
     }
@@ -386,6 +421,26 @@ fn pre_execution_checks(
     consensus.validate_block_pre_execution(block)?;
 
     Ok(())
+}
+
+/// Recover public keys from transaction signatures.
+fn recover_signers<'a, I>(txs: I) -> Result<Vec<UncompressedPublicKey>, Box<dyn std::error::Error>>
+where
+    I: IntoIterator<Item = &'a TransactionSigned>,
+{
+    txs.into_iter()
+        .enumerate()
+        .map(|(i, tx)| {
+            tx.signature()
+                .recover_from_prehash(&tx.signature_hash())
+                .map(|keys| {
+                    UncompressedPublicKey(
+                        keys.to_encoded_point(false).as_bytes().try_into().unwrap(),
+                    )
+                })
+                .map_err(|e| format!("failed to recover signature for tx #{i}: {e}").into())
+        })
+        .collect::<Result<Vec<UncompressedPublicKey>, _>>()
 }
 
 /// Returns whether the test at the given path should be skipped.
@@ -453,4 +508,10 @@ pub fn should_skip(path: &Path) -> bool {
 fn path_contains(path_str: &str, rhs: &[&str]) -> bool {
     let rhs = rhs.join(std::path::MAIN_SEPARATOR_STR);
     path_str.contains(&rhs)
+}
+
+fn execution_witness_with_parent(parent: &RecoveredBlock<Block>) -> ExecutionWitness {
+    let mut serialized_header = Vec::new();
+    parent.header().encode(&mut serialized_header);
+    ExecutionWitness { headers: vec![serialized_header.into()], ..Default::default() }
 }

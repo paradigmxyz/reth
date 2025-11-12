@@ -1,7 +1,8 @@
 use crate::FlashBlockCompleteSequenceRx;
 use alloy_primitives::B256;
-use reth_node_api::{ConsensusEngineHandle, EngineApiMessageVersion};
+use reth_engine_primitives::ConsensusEngineHandle;
 use reth_optimism_payload_builder::OpPayloadTypes;
+use reth_payload_primitives::EngineApiMessageVersion;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use tracing::warn;
 
@@ -49,6 +50,10 @@ impl FlashBlockConsensusClient {
                     let block_hash = sequence.payload_base().parent_hash;
                     previous_block_hashes.push(block_hash);
 
+                    if sequence.state_root().is_none() {
+                        warn!(target: "flashblocks", "Missing state root for the complete sequence")
+                    }
+
                     // Load previous block hashes. We're using (head - 32) and (head - 64) as the
                     // safe and finalized block hashes.
                     let safe_block_hash = self.get_previous_block_hash(&previous_block_hashes, 32);
@@ -69,7 +74,7 @@ impl FlashBlockConsensusClient {
                 }
                 Err(err) => {
                     warn!(
-                        target: "consensus::flashblock-client",
+                        target: "flashblocks",
                         %err,
                         "error while fetching flashblock completed sequence"
                     );

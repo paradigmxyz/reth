@@ -20,7 +20,7 @@ use tracing::trace;
 /// Result: 0x11, 0x12, 0x1, 0x21
 /// ```
 pub fn cmp(a: &Nibbles, b: &Nibbles) -> Ordering {
-    // If the two are equal length then compare them lexicographically
+    // If the two are of equal length, then compare them lexicographically
     if a.len() == b.len() {
         return a.cmp(b)
     }
@@ -261,7 +261,7 @@ mod tests {
 
         // Expected depth-first order:
         // All descendants come before ancestors
-        // Within same level, lexicographical order
+        // Within the same level, lexicographical order
         assert_eq!(paths[0], Nibbles::from_nibbles([0x1, 0x1, 0x1])); // 0x111 (deepest in 0x1 branch)
         assert_eq!(paths[1], Nibbles::from_nibbles([0x1, 0x1, 0x2])); // 0x112 (sibling of 0x111)
         assert_eq!(paths[2], Nibbles::from_nibbles([0x1, 0x1])); // 0x11 (parent of 0x111, 0x112)

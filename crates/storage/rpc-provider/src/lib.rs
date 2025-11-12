@@ -22,7 +22,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
@@ -338,9 +338,9 @@ where
 {
     type Header = HeaderTy<Node>;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         let block_response = self.block_on_async(async {
-            self.provider.get_block_by_hash(*block_hash).await.map_err(ProviderError::other)
+            self.provider.get_block_by_hash(block_hash).await.map_err(ProviderError::other)
         })?;
 
         let Some(block_response) = block_response else {
@@ -362,18 +362,6 @@ where
         };
 
         Ok(Some(sealed_header.into_header()))
-    }
-
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        let header = self.header(hash).map_err(ProviderError::other)?;
-
-        Ok(header.map(|b| b.difficulty()))
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        let header = self.header_by_number(number).map_err(ProviderError::other)?;
-
-        Ok(header.map(|b| b.difficulty()))
     }
 
     fn headers_range(
@@ -508,6 +496,10 @@ where
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         Err(ProviderError::UnsupportedProvider)
     }
 }
@@ -680,10 +672,6 @@ where
         &self,
         _hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1063,16 +1051,13 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
         {
             Ok(None)
         } else {
-            let bytecode = if account_info.code.is_empty() {
-                None
-            } else {
-                Some(Bytecode::new_raw(account_info.code))
-            };
+            let bytecode_hash =
+                if account_info.code.is_empty() { None } else { Some(account_info.code_hash()) };
 
             Ok(Some(Account {
                 balance: account_info.balance,
                 nonce: account_info.nonce,
-                bytecode_hash: bytecode.as_ref().map(|b| b.hash_slow()),
+                bytecode_hash,
             }))
         }
     }
@@ -1372,6 +1357,10 @@ where
         self
     }
 
+    fn commit(self) -> ProviderResult<bool> {
+        unimplemented!("commit not supported for RPC provider")
+    }
+
     fn prune_modes_ref(&self) -> &reth_prune_types::PruneModes {
         unimplemented!("prune modes not supported for RPC provider")
     }
@@ -1538,6 +1527,10 @@ where
     ) -> Result<Vec<RecoveredBlock<Self::Block>>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl<P, Node, N> TransactionsProvider for RpcBlockchainStateProvider<P, Node, N>
@@ -1571,10 +1564,6 @@ where
         &self,
         _hash: B256,
     ) -> Result<Option<(Self::Transaction, TransactionMeta)>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn transaction_block(&self, _id: TxNumber) -> Result<Option<BlockNumber>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1657,19 +1646,11 @@ where
 {
     type Header = HeaderTy<Node>;
 
-    fn header(&self, _block_hash: &BlockHash) -> Result<Option<Self::Header>, ProviderError> {
+    fn header(&self, _block_hash: BlockHash) -> Result<Option<Self::Header>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn header_by_number(&self, _num: BlockNumber) -> Result<Option<Self::Header>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn header_td_by_number(&self, _number: BlockNumber) -> Result<Option<U256>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1753,6 +1734,14 @@ where
         &self,
         _block_number: BlockNumber,
     ) -> Result<Vec<reth_db_api::models::AccountBeforeTx>, ProviderError> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn get_account_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<reth_db_api::models::AccountBeforeTx>> {
         Err(ProviderError::UnsupportedProvider)
     }
 }

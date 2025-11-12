@@ -11,6 +11,7 @@ use std::{
 use crate::version::version_metadata;
 use clap::Args;
 use reth_chainspec::EthChainSpec;
+use reth_cli_util::{get_secret_key, load_secret_key::SecretKeyError};
 use reth_config::Config;
 use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
@@ -20,7 +21,7 @@ use reth_discv5::{
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
-        config::TransactionPropagationKind,
+        config::{TransactionIngressPolicy, TransactionPropagationKind},
         constants::{
             tx_fetcher::{
                 DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
@@ -83,8 +84,15 @@ pub struct NetworkArgs {
     ///
     /// This will also deterministically set the peer ID. If not specified, it will be set in the
     /// data dir for the chain being used.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", conflicts_with = "p2p_secret_key_hex")]
     pub p2p_secret_key: Option<PathBuf>,
+
+    /// Hex encoded secret key to use for this node.
+    ///
+    /// This will also deterministically set the peer ID. Cannot be used together with
+    /// `--p2p-secret-key`.
+    #[arg(long, value_name = "HEX", conflicts_with = "p2p_secret_key")]
+    pub p2p_secret_key_hex: Option<B256>,
 
     /// Do not persist peers.
     #[arg(long, verbatim_doc_comment)]
@@ -102,11 +110,11 @@ pub struct NetworkArgs {
     #[arg(long = "port", value_name = "PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
 
-    /// Maximum number of outbound requests. default: 100
+    /// Maximum number of outbound peers. default: 100
     #[arg(long)]
     pub max_outbound_peers: Option<usize>,
 
-    /// Maximum number of inbound requests. default: 30
+    /// Maximum number of inbound peers. default: 30
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
 
@@ -164,6 +172,12 @@ pub struct NetworkArgs {
     #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
     pub tx_propagation_policy: TransactionPropagationKind,
 
+    /// Transaction ingress policy
+    ///
+    /// Determines which peers' transactions are accepted over P2P.
+    #[arg(long = "tx-ingress-policy", default_value_t = TransactionIngressPolicy::All)]
+    pub tx_ingress_policy: TransactionIngressPolicy,
+
     /// Disable transaction pool gossip
     ///
     /// Disables gossiping of transactions in the mempool to peers. This can be omitted for
@@ -187,6 +201,10 @@ pub struct NetworkArgs {
     /// Format: hash or `block_number=hash` (e.g., 23115201=0x1234...)
     #[arg(long = "required-block-hashes", value_delimiter = ',', value_parser = parse_block_num_hash)]
     pub required_block_hashes: Vec<BlockNumHash>,
+
+    /// Optional network ID to override the chain specification's network ID for P2P connections
+    #[arg(long)]
+    pub network_id: Option<u64>,
 }
 
 impl NetworkArgs {
@@ -229,6 +247,7 @@ impl NetworkArgs {
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             propagation_mode: self.propagation_mode,
+            ingress_policy: self.tx_ingress_policy,
         }
     }
 
@@ -300,6 +319,7 @@ impl NetworkArgs {
             ))
             .disable_tx_gossip(self.disable_tx_gossip)
             .required_block_hashes(self.required_block_hashes.clone())
+            .network_id(self.network_id)
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -342,6 +362,25 @@ impl NetworkArgs {
         )
         .await
     }
+
+    /// Load the p2p secret key from the provided options.
+    ///
+    /// If `p2p_secret_key_hex` is provided, it will be used directly.
+    /// If `p2p_secret_key` is provided, it will be loaded from the file.
+    /// If neither is provided, the `default_secret_key_path` will be used.
+    pub fn secret_key(
+        &self,
+        default_secret_key_path: PathBuf,
+    ) -> Result<SecretKey, SecretKeyError> {
+        if let Some(b256) = &self.p2p_secret_key_hex {
+            // Use the B256 value directly (already validated as 32 bytes)
+            SecretKey::from_slice(b256.as_slice()).map_err(SecretKeyError::SecretKeyDecodeError)
+        } else {
+            // Load from file (either provided path or default)
+            let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
+            get_secret_key(&secret_key_path)
+        }
+    }
 }
 
 impl Default for NetworkArgs {
@@ -355,6 +394,7 @@ impl Default for NetworkArgs {
             peers_file: None,
             identity: version_metadata().p2p_client_version.to_string(),
             p2p_secret_key: None,
+            p2p_secret_key_hex: None,
             no_persist_peers: false,
             nat: NatResolver::Any,
             addr: DEFAULT_DISCOVERY_ADDR,
@@ -371,9 +411,11 @@ impl Default for NetworkArgs {
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
             tx_propagation_policy: TransactionPropagationKind::default(),
+            tx_ingress_policy: TransactionIngressPolicy::default(),
             disable_tx_gossip: false,
             propagation_mode: TransactionPropagationMode::Sqrt,
             required_block_hashes: vec![],
+            network_id: None,
         }
     }
 }
@@ -727,5 +769,54 @@ mod tests {
             "abc=0x1111111111111111111111111111111111111111111111111111111111111111"
         )
         .is_err());
+    }
+
+    #[test]
+    fn parse_p2p_secret_key_hex() {
+        let hex = "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
+        let expected: B256 = hex.parse().unwrap();
+        assert_eq!(args.p2p_secret_key_hex, Some(expected));
+        assert_eq!(args.p2p_secret_key, None);
+    }
+
+    #[test]
+    fn parse_p2p_secret_key_hex_with_0x_prefix() {
+        let hex = "0x4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
+        let expected: B256 = hex.parse().unwrap();
+        assert_eq!(args.p2p_secret_key_hex, Some(expected));
+        assert_eq!(args.p2p_secret_key, None);
+    }
+
+    #[test]
+    fn test_p2p_secret_key_and_hex_are_mutually_exclusive() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--p2p-secret-key",
+            "/path/to/key",
+            "--p2p-secret-key-hex",
+            "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f",
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_secret_key_method_with_hex() {
+        let hex = "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
+        let temp_dir = std::env::temp_dir();
+        let default_path = temp_dir.join("default_key");
+        let secret_key = args.secret_key(default_path).unwrap();
+
+        // Verify the secret key matches the hex input
+        assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), hex);
     }
 }

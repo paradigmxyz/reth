@@ -7,9 +7,6 @@ use reth_network::{protocol::IntoRlpxSubProtocol, NetworkPrimitives};
 use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, time::Duration};
 
-/// 45M gas limit
-const ETHEREUM_BLOCK_GAS_LIMIT_45M: u64 = 45_000_000;
-
 /// 60M gas limit
 const ETHEREUM_BLOCK_GAS_LIMIT_60M: u64 = 60_000_000;
 
@@ -38,6 +35,11 @@ pub trait PayloadBuilderConfig {
     /// Maximum number of tasks to spawn for building a payload.
     fn max_payload_tasks(&self) -> usize;
 
+    /// Maximum number of blobs to include per block (EIP-7872).
+    ///
+    /// If `None`, defaults to the protocol maximum.
+    fn max_blobs_per_block(&self) -> Option<u64>;
+
     /// Returns the configured gas limit if set, or a chain-specific default.
     fn gas_limit_for(&self, chain: Chain) -> u64 {
         if let Some(limit) = self.gas_limit() {
@@ -45,10 +47,9 @@ pub trait PayloadBuilderConfig {
         }
 
         match chain.kind() {
-            ChainKind::Named(NamedChain::Sepolia | NamedChain::Holesky | NamedChain::Hoodi) => {
-                ETHEREUM_BLOCK_GAS_LIMIT_60M
-            }
-            ChainKind::Named(NamedChain::Mainnet) => ETHEREUM_BLOCK_GAS_LIMIT_45M,
+            ChainKind::Named(
+                NamedChain::Mainnet | NamedChain::Sepolia | NamedChain::Holesky | NamedChain::Hoodi,
+            ) => ETHEREUM_BLOCK_GAS_LIMIT_60M,
             _ => ETHEREUM_BLOCK_GAS_LIMIT_36M,
         }
     }

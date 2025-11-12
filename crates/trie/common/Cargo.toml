@@ -23,6 +23,7 @@ reth-codecs = { workspace = true, optional = true }
 alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
 
+arrayvec = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 derive_more.workspace = true
 itertools = { workspace = true, features = ["use_alloc"] }
@@ -52,6 +53,7 @@ alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-trie = { workspace = true, features = ["arbitrary", "serde"] }
 bytes.workspace = true
+arrayvec.workspace = true
 hash-db.workspace = true
 plain_hasher.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
@@ -74,6 +76,7 @@ std = [
     "alloy-rpc-types-eth?/std",
     "alloy-serde?/std",
     "alloy-trie/std",
+    "arrayvec?/std",
     "bytes?/std",
     "derive_more/std",
     "nybbles/std",
@@ -87,6 +90,7 @@ std = [
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [
     "dep:serde",
+    "arrayvec?/serde",
     "bytes?/serde",
     "nybbles/serde",
     "alloy-primitives/serde",
@@ -98,7 +102,7 @@ serde = [
     "revm-database/serde",
     "revm-state/serde",
 ]
-reth-codec = ["dep:reth-codecs", "dep:bytes"]
+reth-codec = ["dep:reth-codecs", "dep:bytes", "dep:arrayvec"]
 serde-bincode-compat = [
     "serde",
     "reth-primitives-traits/serde-bincode-compat",

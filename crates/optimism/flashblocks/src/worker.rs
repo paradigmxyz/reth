@@ -1,6 +1,7 @@
-use crate::ExecutionPayloadBaseV1;
+use crate::PendingFlashBlock;
 use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag};
 use alloy_primitives::B256;
+use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::{CanonStateSubscriptions, ExecutedBlock};
 use reth_errors::RethError;
 use reth_evm::{
@@ -38,15 +39,18 @@ impl<EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider> {
 }
 
 pub(crate) struct BuildArgs<I> {
-    pub base: ExecutionPayloadBaseV1,
-    pub transactions: I,
-    pub cached_state: Option<(B256, CachedReads)>,
+    pub(crate) base: OpFlashblockPayloadBase,
+    pub(crate) transactions: I,
+    pub(crate) cached_state: Option<(B256, CachedReads)>,
+    pub(crate) last_flashblock_index: u64,
+    pub(crate) last_flashblock_hash: B256,
+    pub(crate) compute_state_root: bool,
 }
 
 impl<N, EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider>
 where
     N: NodePrimitives,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>,
     Provider: StateProviderFactory
         + CanonStateSubscriptions<Primitives = N>
         + BlockReaderIdExt<
@@ -56,15 +60,15 @@ where
             Receipt = ReceiptTy<N>,
         > + Unpin,
 {
-    /// Returns the [`PendingBlock`] made purely out of transactions and [`ExecutionPayloadBaseV1`]
-    /// in `args`.
+    /// Returns the [`PendingFlashBlock`] made purely out of transactions and
+    /// [`OpFlashblockPayloadBase`] in `args`.
     ///
     /// Returns `None` if the flashblock doesn't attach to the latest header.
     pub(crate) fn execute<I: IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>(
         &self,
         mut args: BuildArgs<I>,
-    ) -> eyre::Result<Option<(PendingBlock<N>, CachedReads)>> {
-        trace!("Attempting new pending block from flashblocks");
+    ) -> eyre::Result<Option<(PendingFlashBlock<N>, CachedReads)>> {
+        trace!(target: "flashblocks", "Attempting new pending block from flashblocks");
 
         let latest = self
             .provider
@@ -73,7 +77,7 @@ where
         let latest_hash = latest.hash();
 
         if args.base.parent_hash != latest_hash {
-            trace!(flashblock_parent = ?args.base.parent_hash, local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
+            trace!(target: "flashblocks", flashblock_parent = ?args.base.parent_hash, local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
             // doesn't attach to the latest block
             return Ok(None)
         }
@@ -100,8 +104,13 @@ where
             let _gas_used = builder.execute_transaction(tx)?;
         }
 
+        // if the real state root should be computed
         let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
-            builder.finish(NoopProvider::default())?;
+            if args.compute_state_root {
+                builder.finish(&state_provider)?
+            } else {
+                builder.finish(NoopProvider::default())?
+            };
 
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
@@ -110,17 +119,23 @@ where
             vec![execution_result.requests],
         );
 
-        Ok(Some((
-            PendingBlock::with_executed_block(
-                Instant::now() + Duration::from_secs(1),
-                ExecutedBlock {
-                    recovered_block: block.into(),
-                    execution_output: Arc::new(execution_outcome),
-                    hashed_state: Arc::new(hashed_state),
-                },
-            ),
-            request_cache,
-        )))
+        let pending_block = PendingBlock::with_executed_block(
+            Instant::now() + Duration::from_secs(1),
+            ExecutedBlock {
+                recovered_block: block.into(),
+                execution_output: Arc::new(execution_outcome),
+                hashed_state: Arc::new(hashed_state),
+                trie_updates: Arc::default(),
+            },
+        );
+        let pending_flashblock = PendingFlashBlock::new(
+            pending_block,
+            args.last_flashblock_index,
+            args.last_flashblock_hash,
+            args.compute_state_root,
+        );
+
+        Ok(Some((pending_flashblock, request_cache)))
     }
 }
 

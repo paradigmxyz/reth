@@ -5,20 +5,17 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     executor::WorkloadExecutor,
     instrumented_state::InstrumentedStateProvider,
-    payload_processor::PayloadProcessor,
-    persistence_state::CurrentPersistenceAction,
+    payload_processor::{multiproof::MultiProofConfig, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
-    PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
+    StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
-use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
-};
+use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -35,16 +32,16 @@ use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockHashReader, BlockNumReader, BlockReader, DBProvider,
-    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, HeaderProvider,
-    ProviderError, StateProvider, StateProviderFactory, StateReader, StateRootProvider,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
+    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
+    StateRootProvider, TrieReader,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
-use reth_trie_db::DatabaseHashedPostState;
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use tracing::{debug, debug_span, error, info, trace, warn};
+use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
 /// Context providing access to tree state during validation.
 ///
@@ -53,8 +50,6 @@ use tracing::{debug, debug_span, error, info, trace, warn};
 pub struct TreeCtx<'a, N: NodePrimitives> {
     /// The engine API tree state
     state: &'a mut EngineApiTreeState<N>,
-    /// Information about the current persistence state
-    persistence: &'a PersistenceState,
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
 }
@@ -63,7 +58,6 @@ impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TreeCtx")
             .field("state", &"EngineApiTreeState")
-            .field("persistence_info", &self.persistence)
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .finish()
     }
@@ -73,10 +67,9 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     /// Creates a new tree context
     pub const fn new(
         state: &'a mut EngineApiTreeState<N>,
-        persistence: &'a PersistenceState,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
     ) -> Self {
-        Self { state, persistence, canonical_in_memory_state }
+        Self { state, canonical_in_memory_state }
     }
 
     /// Returns a reference to the engine tree state
@@ -89,42 +82,9 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         self.state
     }
 
-    /// Returns a reference to the persistence info
-    pub const fn persistence(&self) -> &PersistenceState {
-        self.persistence
-    }
-
     /// Returns a reference to the canonical in-memory state
     pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
         self.canonical_in_memory_state
-    }
-
-    /// Determines the persisting kind for the given block based on persistence info.
-    ///
-    /// Based on the given header it returns whether any conflicting persistence operation is
-    /// currently in progress.
-    ///
-    /// This is adapted from the `persisting_kind_for` method in `EngineApiTreeHandler`.
-    pub fn persisting_kind_for(&self, block: BlockWithParent) -> PersistingKind {
-        // Check that we're currently persisting.
-        let Some(action) = self.persistence().current_action() else {
-            return PersistingKind::NotPersisting
-        };
-        // Check that the persistince action is saving blocks, not removing them.
-        let CurrentPersistenceAction::SavingBlocks { highest } = action else {
-            return PersistingKind::PersistingNotDescendant
-        };
-
-        // The block being validated can only be a descendant if its number is higher than
-        // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.block.number > highest.number &&
-            self.state().tree_state.is_descendant(*highest, block)
-        {
-            return PersistingKind::PersistingDescendant
-        }
-
-        // In all other cases, the block is not a descendant.
-        PersistingKind::PersistingNotDescendant
     }
 }
 
@@ -161,13 +121,16 @@ where
     metrics: EngineApiMetrics,
     /// Validator for the payload.
     validator: V,
+    /// A cleared trie input, kept around to be reused so allocations can be minimized.
+    trie_input: Option<TrieInput>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory<Provider: BlockReader>
-        + BlockReader<Header = N::BlockHeader>
+    P: DatabaseProviderFactory<
+            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+        > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
@@ -203,6 +166,7 @@ where
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
             validator,
+            trie_input: Default::default(),
         }
     }
 
@@ -224,14 +188,14 @@ where
     pub fn evm_env_for<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &BlockOrPayload<T>,
-    ) -> EvmEnvFor<Evm>
+    ) -> Result<EvmEnvFor<Evm>, Evm::Error>
     where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => self.evm_config.evm_env_for_payload(payload),
-            BlockOrPayload::Block(block) => self.evm_config.evm_env(block.header()),
+            BlockOrPayload::Payload(payload) => Ok(self.evm_config.evm_env_for_payload(payload)?),
+            BlockOrPayload::Block(block) => Ok(self.evm_config.evm_env(block.header())?),
         }
     }
 
@@ -246,7 +210,10 @@ where
     {
         match input {
             BlockOrPayload::Payload(payload) => Ok(Either::Left(
-                self.evm_config.tx_iterator_for_payload(payload).map(|res| res.map(Either::Left)),
+                self.evm_config
+                    .tx_iterator_for_payload(payload)
+                    .map_err(NewPayloadError::other)?
+                    .map(|res| res.map(Either::Left)),
             )),
             BlockOrPayload::Block(block) => {
                 let transactions = block.clone_transactions_recovered().collect::<Vec<_>>();
@@ -259,14 +226,14 @@ where
     pub fn execution_ctx_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &'a BlockOrPayload<T>,
-    ) -> ExecutionCtxFor<'a, Evm>
+    ) -> Result<ExecutionCtxFor<'a, Evm>, Evm::Error>
     where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => self.evm_config.context_for_payload(payload),
-            BlockOrPayload::Block(block) => self.evm_config.context_for_block(block),
+            BlockOrPayload::Payload(payload) => Ok(self.evm_config.context_for_payload(payload)?),
+            BlockOrPayload::Block(block) => Ok(self.evm_config.context_for_block(block)?),
         }
     }
 
@@ -279,12 +246,12 @@ where
         input: BlockOrPayload<T>,
         execution_err: InsertBlockErrorKind,
         parent_block: &SealedHeader<N::BlockHeader>,
-    ) -> Result<ExecutedBlockWithTrieUpdates<N>, InsertPayloadError<N::Block>>
+    ) -> Result<ExecutedBlock<N>, InsertPayloadError<N::Block>>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
         debug!(
-            target: "engine::tree",
+            target: "engine::tree::payload_validator",
             ?execution_err,
             block = ?input.num_hash(),
             "Block execution failed, checking for header validation errors"
@@ -319,6 +286,15 @@ where
     /// - Block execution
     /// - State root computation
     /// - Fork detection
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_validator",
+        skip_all,
+        fields(
+            parent = ?input.parent_hash(),
+            type_name = ?input.type_name(),
+        )
+    )]
     pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &mut self,
         input: BlockOrPayload<T>,
@@ -329,6 +305,7 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         /// A helper macro that returns the block in case there was an error
+        /// This macro is used for early returns before block conversion
         macro_rules! ensure_ok {
             ($expr:expr) => {
                 match $expr {
@@ -343,10 +320,26 @@ where
             };
         }
 
+        /// A helper macro for handling errors after the input has been converted to a block
+        macro_rules! ensure_ok_post_block {
+            ($expr:expr, $block:expr) => {
+                match $expr {
+                    Ok(val) => val,
+                    Err(e) => {
+                        return Err(
+                            InsertBlockError::new($block.into_sealed_block(), e.into()).into()
+                        )
+                    }
+                }
+            };
+        }
+
         let parent_hash = input.parent_hash();
         let block_num_hash = input.num_hash();
 
-        trace!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Fetching block state provider");
+        trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
+        let _enter =
+            debug_span!(target: "engine::tree::payload_validator", "state provider").entered();
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
@@ -357,8 +350,8 @@ where
             )
             .into())
         };
-
         let state_provider = ensure_ok!(provider_builder.build());
+        drop(_enter);
 
         // fetch parent block
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
@@ -370,109 +363,33 @@ where
             .into())
         };
 
-        let evm_env = self.evm_env_for(&input);
+        let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm env")
+            .in_scope(|| self.evm_env_for(&input))
+            .map_err(NewPayloadError::other)?;
 
         let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
 
-        // We only run the parallel state root if we are not currently persisting any blocks or
-        // persisting blocks that are all ancestors of the one we are executing.
-        //
-        // If we're committing ancestor blocks, then: any trie updates being committed are a subset
-        // of the in-memory trie updates collected before fetching reverts. So any diff in
-        // reverts (pre vs post commit) is already covered by the in-memory trie updates we
-        // collect in `compute_state_root_parallel`.
-        //
-        // See https://github.com/paradigmxyz/reth/issues/12688 for more details
-        let persisting_kind = ctx.persisting_kind_for(input.block_with_parent());
-        // don't run parallel if state root fallback is set
-        let run_parallel_state_root =
-            persisting_kind.can_run_parallel_state_root() && !self.config.state_root_fallback();
-
-        // Use state root task only if:
-        // 1. No persistence is in progress
-        // 2. Config allows it
-        // 3. No ancestors with missing trie updates. If any exist, it will mean that every state
-        //    root task proof calculation will include a lot of unrelated paths in the prefix sets.
-        //    It's cheaper to run a parallel state root that does one walk over trie tables while
-        //    accounting for the prefix sets.
-        let has_ancestors_with_missing_trie_updates =
-            self.has_ancestors_with_missing_trie_updates(input.block_with_parent(), ctx.state());
-        let mut use_state_root_task = run_parallel_state_root &&
-            self.config.use_state_root_task() &&
-            !has_ancestors_with_missing_trie_updates;
+        // Plan the strategy used for state root computation.
+        let strategy = self.plan_state_root_computation();
 
         debug!(
-            target: "engine::tree",
-            block=?block_num_hash,
-            run_parallel_state_root,
-            has_ancestors_with_missing_trie_updates,
-            use_state_root_task,
-            config_allows_state_root_task=self.config.use_state_root_task(),
+            target: "engine::tree::payload_validator",
+            ?strategy,
             "Deciding which state root algorithm to run"
         );
 
         // use prewarming background task
         let txs = self.tx_iterator_for(&input)?;
-        let mut handle = if use_state_root_task {
-            // use background tasks for state root calc
-            let consistent_view =
-                ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
 
-            // get allocated trie input if it exists
-            let allocated_trie_input = self.payload_processor.take_trie_input();
-
-            // Compute trie input
-            let trie_input_start = Instant::now();
-            let trie_input = ensure_ok!(self.compute_trie_input(
-                persisting_kind,
-                ensure_ok!(consistent_view.provider_ro()),
-                parent_hash,
-                ctx.state(),
-                allocated_trie_input,
-            ));
-
-            self.metrics
-                .block_validation
-                .trie_input_duration
-                .record(trie_input_start.elapsed().as_secs_f64());
-
-            // Use state root task only if prefix sets are empty, otherwise proof generation is too
-            // expensive because it requires walking over the paths in the prefix set in every
-            // proof.
-            let spawn_payload_processor_start = Instant::now();
-            let handle = if trie_input.prefix_sets.is_empty() {
-                self.payload_processor.spawn(
-                    env.clone(),
-                    txs,
-                    provider_builder,
-                    consistent_view,
-                    trie_input,
-                    &self.config,
-                )
-            } else {
-                debug!(target: "engine::tree", block=?block_num_hash, "Disabling state root task due to non-empty prefix sets");
-                use_state_root_task = false;
-                self.payload_processor.spawn_cache_exclusive(env.clone(), txs, provider_builder)
-            };
-
-            // record prewarming initialization duration
-            self.metrics
-                .block_validation
-                .spawn_payload_processor
-                .record(spawn_payload_processor_start.elapsed().as_secs_f64());
-            handle
-        } else {
-            let prewarming_start = Instant::now();
-            let handle =
-                self.payload_processor.spawn_cache_exclusive(env.clone(), txs, provider_builder);
-
-            // Record prewarming initialization duration
-            self.metrics
-                .block_validation
-                .spawn_payload_processor
-                .record(prewarming_start.elapsed().as_secs_f64());
-            handle
-        };
+        // Spawn the appropriate processor based on strategy
+        let mut handle = ensure_ok!(self.spawn_payload_processor(
+            env.clone(),
+            txs,
+            provider_builder,
+            parent_hash,
+            ctx.state(),
+            strategy,
+        ));
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
@@ -500,72 +417,30 @@ where
 
         let block = self.convert_to_block(input)?;
 
-        // A helper macro that returns the block in case there was an error
-        macro_rules! ensure_ok {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(val) => val,
-                    Err(e) => return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into()),
-                }
-            };
-        }
+        let hashed_state = ensure_ok_post_block!(
+            self.validate_post_execution(&block, &parent_block, &output, &mut ctx),
+            block
+        );
 
-        let post_execution_start = Instant::now();
-        trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
-        // validate block consensus rules
-        ensure_ok!(self.validate_block_inner(&block));
-
-        // now validate against the parent
-        if let Err(e) =
-            self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
-        {
-            warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into())
-        }
-
-        if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
-            // call post-block hook
-            self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
-        }
-
-        let hashed_state = self.provider.hashed_post_state(&output.state);
-
-        if let Err(err) =
-            self.validator.validate_block_post_execution_with_hashed_state(&hashed_state, &block)
-        {
-            // call post-block hook
-            self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
-        }
-
-        // record post-execution validation duration
-        self.metrics
-            .block_validation
-            .post_execution_validation_duration
-            .record(post_execution_start.elapsed().as_secs_f64());
-
-        debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
+        debug!(target: "engine::tree::payload_validator", "Calculating block state root");
 
         let root_time = Instant::now();
 
         let mut maybe_state_root = None;
 
-        if run_parallel_state_root {
-            // if we new payload extends the current canonical change we attempt to use the
-            // background task or try to compute it in parallel
-            if use_state_root_task {
-                debug!(target: "engine::tree", block=?block_num_hash, "Using sparse trie state root algorithm");
+        match strategy {
+            StateRootStrategy::StateRootTask => {
+                debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
                 match handle.state_root() {
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         let elapsed = root_time.elapsed();
-                        info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
+                        info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
                             maybe_state_root = Some((state_root, trie_updates, elapsed))
                         } else {
                             warn!(
-                                target: "engine::tree",
+                                target: "engine::tree::payload_validator",
                                 ?state_root,
                                 block_state_root = ?block.header().state_root(),
                                 "State root task returned incorrect state root"
@@ -573,33 +448,38 @@ where
                         }
                     }
                     Err(error) => {
-                        debug!(target: "engine::tree", %error, "State root task failed");
+                        debug!(target: "engine::tree::payload_validator", %error, "State root task failed");
                     }
                 }
-            } else {
-                debug!(target: "engine::tree", block=?block_num_hash, "Using parallel state root algorithm");
+            }
+            StateRootStrategy::Parallel => {
+                debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
                 match self.compute_state_root_parallel(
-                    persisting_kind,
                     block.parent_hash(),
                     &hashed_state,
                     ctx.state(),
                 ) {
                     Ok(result) => {
+                        let elapsed = root_time.elapsed();
                         info!(
-                            target: "engine::tree",
-                            block = ?block_num_hash,
+                            target: "engine::tree::payload_validator",
                             regular_state_root = ?result.0,
+                            ?elapsed,
                             "Regular root task finished"
                         );
-                        maybe_state_root = Some((result.0, result.1, root_time.elapsed()));
+                        maybe_state_root = Some((result.0, result.1, elapsed));
                     }
                     Err(error) => {
-                        debug!(target: "engine::tree", %error, "Parallel state root computation failed");
+                        debug!(target: "engine::tree::payload_validator", %error, "Parallel state root computation failed");
                     }
                 }
             }
+            StateRootStrategy::Synchronous => {}
         }
 
+        // Determine the state root.
+        // If the state root was computed in parallel, we use it.
+        // Otherwise, we fall back to computing it synchronously.
         let (state_root, trie_output, root_elapsed) = if let Some(maybe_state_root) =
             maybe_state_root
         {
@@ -607,19 +487,21 @@ where
         } else {
             // fallback is to compute the state root regularly in sync
             if self.config.state_root_fallback() {
-                debug!(target: "engine::tree", block=?block_num_hash, "Using state root fallback for testing");
+                debug!(target: "engine::tree::payload_validator", "Using state root fallback for testing");
             } else {
-                warn!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
+                warn!(target: "engine::tree::payload_validator", "Failed to compute state root in parallel");
                 self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
             }
 
-            let (root, updates) =
-                ensure_ok!(state_provider.state_root_with_updates(hashed_state.clone()));
+            let (root, updates) = ensure_ok_post_block!(
+                state_provider.state_root_with_updates(hashed_state.clone()),
+                block
+            );
             (root, updates, root_time.elapsed())
         };
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
-        debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
+        debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
 
         // ensure state root matches
         if state_root != block.header().state_root() {
@@ -643,40 +525,13 @@ where
         }
 
         // terminate prewarming task with good state output
-        handle.terminate_caching(Some(output.state.clone()));
+        handle.terminate_caching(Some(&output.state));
 
-        // If the block doesn't connect to the database tip, we don't save its trie updates, because
-        // they may be incorrect as they were calculated on top of the forked block.
-        //
-        // We also only save trie updates if all ancestors have trie updates, because otherwise the
-        // trie updates may be incorrect.
-        //
-        // Instead, they will be recomputed on persistence.
-        let connects_to_last_persisted =
-            ensure_ok!(self.block_connects_to_last_persisted(ctx, &block));
-        let should_discard_trie_updates =
-            !connects_to_last_persisted || has_ancestors_with_missing_trie_updates;
-        debug!(
-            target: "engine::tree",
-            block = ?block_num_hash,
-            connects_to_last_persisted,
-            has_ancestors_with_missing_trie_updates,
-            should_discard_trie_updates,
-            "Checking if should discard trie updates"
-        );
-        let trie_updates = if should_discard_trie_updates {
-            ExecutedTrieUpdates::Missing
-        } else {
-            ExecutedTrieUpdates::Present(Arc::new(trie_output))
-        };
-
-        Ok(ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(block),
-                execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
-                hashed_state: Arc::new(hashed_state),
-            },
-            trie: trie_updates,
+        Ok(ExecutedBlock {
+            recovered_block: Arc::new(block),
+            execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
+            hashed_state: Arc::new(hashed_state),
+            trie_updates: Arc::new(trie_output),
         })
     }
 
@@ -700,12 +555,12 @@ where
     /// and block body itself.
     fn validate_block_inner(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
-            error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
+            error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
         if let Err(e) = self.consensus.validate_block_pre_execution(block.sealed_block()) {
-            error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
+            error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
 
@@ -713,6 +568,7 @@ where
     }
 
     /// Executes a block with the given state provider
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn execute_block<S, Err, T>(
         &mut self,
         state_provider: S,
@@ -727,11 +583,7 @@ where
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
-        let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
-
-        let span = debug_span!(target: "engine::tree", "execute_block", num = ?num_hash.number, hash = ?num_hash.hash);
-        let _enter = span.enter();
-        debug!(target: "engine::tree", "Executing block");
+        debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
@@ -740,7 +592,8 @@ where
             .build();
 
         let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
-        let ctx = self.execution_ctx_for(input);
+        let ctx =
+            self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
         let mut executor = self.evm_config.create_executor(evm, ctx);
 
         if !self.config.precompile_cache_disabled() {
@@ -769,7 +622,7 @@ where
         )?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
-        debug!(target: "engine::tree", elapsed = ?execution_time, number=?num_hash.number, "Executed block");
+        debug!(target: "engine::tree::payload_validator", elapsed = ?execution_time, "Executed block");
         Ok(output)
     }
 
@@ -781,92 +634,187 @@ where
     /// Returns `Err(_)` if error was encountered during computation.
     /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
     /// should be used instead.
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn compute_state_root_parallel(
         &self,
-        persisting_kind: PersistingKind,
         parent_hash: B256,
         hashed_state: &HashedPostState,
         state: &EngineApiTreeState<N>,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+        let (mut input, block_hash) = self.compute_trie_input(parent_hash, state, None)?;
 
-        let mut input = self.compute_trie_input(
-            persisting_kind,
-            consistent_view.provider_ro()?,
-            parent_hash,
-            state,
-            None,
-        )?;
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
+        // Convert the TrieInput into a MultProofConfig, since everything uses the sorted
+        // forms of the state/trie fields.
+        let (_, multiproof_config) = MultiProofConfig::from_input(input);
+
+        let factory = OverlayStateProviderFactory::new(self.provider.clone())
+            .with_block_hash(Some(block_hash))
+            .with_trie_overlay(Some(multiproof_config.nodes_sorted))
+            .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
+
+        // The `hashed_state` argument is already taken into account as part of the overlay, but we
+        // need to use the prefix sets which were generated from it to indicate to the
+        // ParallelStateRoot which parts of the trie need to be recomputed.
+        let prefix_sets = Arc::into_inner(multiproof_config.prefix_sets)
+            .expect("MultiProofConfig was never cloned")
+            .freeze();
+
+        ParallelStateRoot::new(factory, prefix_sets).incremental_root_with_updates()
     }
 
-    /// Checks if the given block connects to the last persisted block, i.e. if the last persisted
-    /// block is the ancestor of the given block.
+    /// Validates the block after execution.
     ///
-    /// This checks the database for the actual last persisted block, not [`PersistenceState`].
-    fn block_connects_to_last_persisted(
+    /// This performs:
+    /// - parent header validation
+    /// - post-execution consensus validation
+    /// - state-root based post-execution validation
+    fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
-        ctx: TreeCtx<'_, N>,
         block: &RecoveredBlock<N::Block>,
-    ) -> ProviderResult<bool> {
-        let provider = self.provider.database_provider_ro()?;
-        let last_persisted_block = provider.best_block_number()?;
-        let last_persisted_hash = provider
-            .block_hash(last_persisted_block)?
-            .ok_or(ProviderError::HeaderNotFound(last_persisted_block.into()))?;
-        let last_persisted = NumHash::new(last_persisted_block, last_persisted_hash);
+        parent_block: &SealedHeader<N::BlockHeader>,
+        output: &BlockExecutionOutput<N::Receipt>,
+        ctx: &mut TreeCtx<'_, N>,
+    ) -> Result<HashedPostState, InsertBlockErrorKind>
+    where
+        V: PayloadValidator<T, Block = N::Block>,
+    {
+        let start = Instant::now();
 
-        let parent_num_hash = |hash: B256| -> ProviderResult<NumHash> {
-            let parent_num_hash =
-                if let Some(header) = ctx.state().tree_state.sealed_header_by_hash(&hash) {
-                    Some(header.parent_num_hash())
-                } else {
-                    provider.sealed_header_by_hash(hash)?.map(|header| header.parent_num_hash())
-                };
-
-            parent_num_hash.ok_or(ProviderError::BlockHashNotFound(hash))
-        };
-
-        let mut parent_block = block.parent_num_hash();
-        while parent_block.number > last_persisted.number {
-            parent_block = parent_num_hash(parent_block.hash)?;
+        trace!(target: "engine::tree::payload_validator", block=?block.num_hash(), "Validating block consensus");
+        // validate block consensus rules
+        if let Err(e) = self.validate_block_inner(block) {
+            return Err(e.into())
         }
 
-        let connects = parent_block == last_persisted;
+        // now validate against the parent
+        if let Err(e) =
+            self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
+        {
+            warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
+            return Err(e.into())
+        }
 
-        debug!(
-            target: "engine::tree",
-            num_hash = ?block.num_hash(),
-            ?last_persisted,
-            ?parent_block,
-            "Checking if block connects to last persisted block"
-        );
+        if let Err(err) = self.consensus.validate_block_post_execution(block, output) {
+            // call post-block hook
+            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
+            return Err(err.into())
+        }
 
-        Ok(connects)
+        let hashed_state = self.provider.hashed_post_state(&output.state);
+
+        if let Err(err) =
+            self.validator.validate_block_post_execution_with_hashed_state(&hashed_state, block)
+        {
+            // call post-block hook
+            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
+            return Err(err.into())
+        }
+
+        // record post-execution validation duration
+        self.metrics
+            .block_validation
+            .post_execution_validation_duration
+            .record(start.elapsed().as_secs_f64());
+
+        Ok(hashed_state)
     }
 
-    /// Check if the given block has any ancestors with missing trie updates.
-    fn has_ancestors_with_missing_trie_updates(
-        &self,
-        target_header: BlockWithParent,
+    /// Spawns a payload processor task based on the state root strategy.
+    ///
+    /// This method determines how to execute the block and compute its state root based on
+    /// the selected strategy:
+    /// - `StateRootTask`: Uses a dedicated task for state root computation with proof generation
+    /// - `Parallel`: Computes state root in parallel with block execution
+    /// - `Synchronous`: Falls back to sequential execution and state root computation
+    ///
+    /// The method handles strategy fallbacks if the preferred approach fails, ensuring
+    /// block execution always completes with a valid state root.
+    #[allow(clippy::too_many_arguments)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_validator",
+        skip_all,
+        fields(strategy)
+    )]
+    fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
+        &mut self,
+        env: ExecutionEnv<Evm>,
+        txs: T,
+        provider_builder: StateProviderBuilder<N, P>,
+        parent_hash: B256,
         state: &EngineApiTreeState<N>,
-    ) -> bool {
-        // Walk back through the chain starting from the parent of the target block
-        let mut current_hash = target_header.parent;
-        while let Some(block) = state.tree_state.blocks_by_hash.get(&current_hash) {
-            // Check if this block is missing trie updates
-            if block.trie.is_missing() {
-                return true;
+        strategy: StateRootStrategy,
+    ) -> Result<
+        PayloadHandle<
+            impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
+            impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
+        >,
+        InsertBlockErrorKind,
+    > {
+        match strategy {
+            StateRootStrategy::StateRootTask => {
+                // get allocated trie input if it exists
+                let allocated_trie_input = self.trie_input.take();
+
+                // Compute trie input
+                let trie_input_start = Instant::now();
+                let (trie_input, block_hash) =
+                    self.compute_trie_input(parent_hash, state, allocated_trie_input)?;
+
+                // Convert the TrieInput into a MultProofConfig, since everything uses the sorted
+                // forms of the state/trie fields.
+                let (trie_input, multiproof_config) = MultiProofConfig::from_input(trie_input);
+                self.trie_input.replace(trie_input);
+
+                // Create OverlayStateProviderFactory with the multiproof config, for use with
+                // multiproofs.
+                let multiproof_provider_factory =
+                    OverlayStateProviderFactory::new(self.provider.clone())
+                        .with_block_hash(Some(block_hash))
+                        .with_trie_overlay(Some(multiproof_config.nodes_sorted))
+                        .with_hashed_state_overlay(Some(multiproof_config.state_sorted));
+
+                // Use state root task only if prefix sets are empty, otherwise proof generation is
+                // too expensive because it requires walking all paths in every proof.
+                self.metrics
+                    .block_validation
+                    .trie_input_duration
+                    .record(trie_input_start.elapsed().as_secs_f64());
+
+                let spawn_start = Instant::now();
+                let handle = self.payload_processor.spawn(
+                    env,
+                    txs,
+                    provider_builder,
+                    multiproof_provider_factory,
+                    &self.config,
+                );
+
+                // record prewarming initialization duration
+                self.metrics
+                    .block_validation
+                    .spawn_payload_processor
+                    .record(spawn_start.elapsed().as_secs_f64());
+
+                Ok(handle)
             }
+            StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
+                let start = Instant::now();
+                let handle =
+                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
 
-            // Move to the parent block
-            current_hash = block.recovered_block().parent_hash();
+                // Record prewarming initialization duration
+                self.metrics
+                    .block_validation
+                    .spawn_payload_processor
+                    .record(start.elapsed().as_secs_f64());
+
+                Ok(handle)
+            }
         }
-
-        false
     }
 
     /// Creates a `StateProviderBuilder` for the given parent hash.
@@ -879,7 +827,7 @@ where
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<StateProviderBuilder<N, P>>> {
         if let Some((historical, blocks)) = state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
+            debug!(target: "engine::tree::payload_validator", %hash, %historical, "found canonical state for block in memory, creating provider builder");
             // the block leads back to the canonical chain
             return Ok(Some(StateProviderBuilder::new(
                 self.provider.clone(),
@@ -889,15 +837,35 @@ where
         }
 
         // Check if the block is persisted
-        if let Some(header) = self.provider.header(&hash)? {
-            debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
+        if let Some(header) = self.provider.header(hash)? {
+            debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
             return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
         }
 
-        debug!(target: "engine::tree", %hash, "no canonical state found for block");
+        debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
         Ok(None)
+    }
+
+    /// Determines the state root computation strategy based on configuration.
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
+    fn plan_state_root_computation(&self) -> StateRootStrategy {
+        let strategy = if self.config.state_root_fallback() {
+            StateRootStrategy::Synchronous
+        } else if self.config.use_state_root_task() {
+            StateRootStrategy::StateRootTask
+        } else {
+            StateRootStrategy::Parallel
+        };
+
+        debug!(
+            target: "engine::tree::payload_validator",
+            ?strategy,
+            "Planned state root computation strategy"
+        );
+
+        strategy
     }
 
     /// Called when an invalid block is encountered during validation.
@@ -916,113 +884,65 @@ where
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
 
-    /// Computes the trie input at the provided parent hash.
+    /// Computes the trie input at the provided parent hash, as well as the block number of the
+    /// highest persisted ancestor.
     ///
     /// The goal of this function is to take in-memory blocks and generate a [`TrieInput`] that
     /// serves as an overlay to the database blocks.
     ///
     /// It works as follows:
     /// 1. Collect in-memory blocks that are descendants of the provided parent hash using
-    ///    [`crate::tree::TreeState::blocks_by_hash`].
-    /// 2. If the persistence is in progress, and the block that we're computing the trie input for
-    ///    is a descendant of the currently persisting blocks, we need to be sure that in-memory
-    ///    blocks are not overlapping with the database blocks that may have been already persisted.
-    ///    To do that, we're filtering out in-memory blocks that are lower than the highest database
-    ///    block.
-    /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
-    ///    [`HashedPostState`] from them.
-    fn compute_trie_input<TP: DBProvider + BlockNumReader>(
+    ///    [`crate::tree::TreeState::blocks_by_hash`]. This returns the highest persisted ancestor
+    ///    hash (`block_hash`) and the list of in-memory descendant blocks.
+    /// 2. Extend the `TrieInput` with the contents of these in-memory blocks (from oldest to
+    ///    newest) to build the overlay state and trie updates that sit on top of the database view
+    ///    anchored at `block_hash`.
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_validator",
+        skip_all,
+        fields(parent_hash)
+    )]
+    fn compute_trie_input(
         &self,
-        persisting_kind: PersistingKind,
-        provider: TP,
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
         allocated_trie_input: Option<TrieInput>,
-    ) -> ProviderResult<TrieInput> {
+    ) -> ProviderResult<(TrieInput, B256)> {
         // get allocated trie input or use a default trie input
         let mut input = allocated_trie_input.unwrap_or_default();
 
-        let best_block_number = provider.best_block_number()?;
-
-        let (mut historical, mut blocks) = state
-            .tree_state
-            .blocks_by_hash(parent_hash)
-            .map_or_else(|| (parent_hash.into(), vec![]), |(hash, blocks)| (hash.into(), blocks));
-
-        // If the current block is a descendant of the currently persisting blocks, then we need to
-        // filter in-memory blocks, so that none of them are already persisted in the database.
-        if persisting_kind.is_descendant() {
-            // Iterate over the blocks from oldest to newest.
-            while let Some(block) = blocks.last() {
-                let recovered_block = block.recovered_block();
-                if recovered_block.number() <= best_block_number {
-                    // Remove those blocks that lower than or equal to the highest database
-                    // block.
-                    blocks.pop();
-                } else {
-                    // If the block is higher than the best block number, stop filtering, as it's
-                    // the first block that's not in the database.
-                    break
-                }
-            }
-
-            historical = if let Some(block) = blocks.last() {
-                // If there are any in-memory blocks left after filtering, set the anchor to the
-                // parent of the oldest block.
-                (block.recovered_block().number() - 1).into()
-            } else {
-                // Otherwise, set the anchor to the original provided parent hash.
-                parent_hash.into()
-            };
-        }
+        let (block_hash, blocks) =
+            state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
         if blocks.is_empty() {
-            debug!(target: "engine::tree", %parent_hash, "Parent found on disk");
+            debug!(target: "engine::tree::payload_validator", "Parent found on disk");
         } else {
-            debug!(target: "engine::tree", %parent_hash, %historical, blocks = blocks.len(), "Parent found in memory");
+            debug!(target: "engine::tree::payload_validator", historical = ?block_hash, blocks = blocks.len(), "Parent found in memory");
         }
-
-        // Convert the historical block to the block number.
-        let block_number = provider
-            .convert_hash_or_number(historical)?
-            .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
-
-        // Retrieve revert state for historical block.
-        let revert_state = if block_number == best_block_number {
-            // We do not check against the `last_block_number` here because
-            // `HashedPostState::from_reverts` only uses the database tables, and not static files.
-            debug!(target: "engine::tree", block_number, best_block_number, "Empty revert state");
-            HashedPostState::default()
-        } else {
-            let revert_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
-                provider.tx_ref(),
-                block_number + 1,
-            )
-            .map_err(ProviderError::from)?;
-            debug!(
-                target: "engine::tree",
-                block_number,
-                best_block_number,
-                accounts = revert_state.accounts.len(),
-                storages = revert_state.storages.len(),
-                "Non-empty revert state"
-            );
-            revert_state
-        };
-        input.append(revert_state);
 
         // Extend with contents of parent in-memory blocks.
         input.extend_with_blocks(
             blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())),
         );
 
-        Ok(input)
+        Ok((input, block_hash))
     }
 }
 
 /// Output of block or payload validation.
-pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
-    Result<ExecutedBlockWithTrieUpdates<N>, E>;
+pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> = Result<ExecutedBlock<N>, E>;
+
+/// Strategy describing how to compute the state root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StateRootStrategy {
+    /// Use the state root task (background sparse trie computation).
+    StateRootTask,
+    /// Run the parallel state root computation on the calling thread.
+    Parallel,
+    /// Fall back to synchronous computation via the state provider.
+    Synchronous,
+}
 
 /// Type that validates the payloads processed by the engine.
 ///
@@ -1077,8 +997,9 @@ pub trait EngineValidator<
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
-    P: DatabaseProviderFactory<Provider: BlockReader>
-        + BlockReader<Header = N::BlockHeader>
+    P: DatabaseProviderFactory<
+            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+        > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
@@ -1161,6 +1082,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.block_with_parent(),
             Self::Block(block) => block.block_with_parent(),
+        }
+    }
+
+    /// Returns a string showing whether or not this is a block or payload.
+    pub const fn type_name(&self) -> &'static str {
+        match self {
+            Self::Payload(_) => "payload",
+            Self::Block(_) => "block",
         }
     }
 }

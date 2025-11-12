@@ -11,7 +11,6 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use futures::{stream_select, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
@@ -37,7 +36,7 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -61,27 +60,22 @@ impl EngineNodeLauncher {
     ) -> Self {
         Self { ctx: LaunchContext::new(task_executor, data_dir), engine_tree_config }
     }
-}
 
-impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
-where
-    Types: NodeTypesForProvider + NodeTypes,
-    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
-    T: FullNodeTypes<
-        Types = Types,
-        DB = DB,
-        Provider = BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
-    >,
-    CB: NodeComponentsBuilder<T>,
-    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
-{
-    type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
-
-    async fn launch_node(
+    async fn launch_node<T, CB, AO>(
         self,
         target: NodeBuilderWithComponents<T, CB, AO>,
-    ) -> eyre::Result<Self::Node> {
+    ) -> eyre::Result<NodeHandle<NodeAdapter<T, CB::Components>, AO>>
+    where
+        T: FullNodeTypes<
+            Types: NodeTypesForProvider,
+            Provider = BlockchainProvider<
+                NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
+            >,
+        >,
+        CB: NodeComponentsBuilder<T>,
+        AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
+            + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+    {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
@@ -112,7 +106,7 @@ where
                 debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
             })
             .with_genesis()?
-            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<Types::ChainSpec>, _>>| {
+            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, _>>| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
             .with_metrics_task()
@@ -122,9 +116,6 @@ where
                 Ok(BlockchainProvider::new(provider_factory)?)
             })?
             .with_components(components_builder, on_component_initialized).await?;
-
-        // Try to expire pre-merge transaction history if configured
-        ctx.expire_pre_merge_transactions()?;
 
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
@@ -174,7 +165,7 @@ where
         }
         let pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
         let pruner_events = pruner.events();
-        info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
+        info!(target: "reth::cli", prune_config=?ctx.prune_config(), "Pruner initialized");
 
         let event_sender = EventSender::default();
 
@@ -234,6 +225,7 @@ where
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
+        #[allow(clippy::needless_continue)]
         let events = stream_select!(
             event_sender.new_listener().map(Into::into),
             pipeline_events.map(Into::into),
@@ -269,12 +261,16 @@ where
         let provider = ctx.blockchain_db().clone();
         let (exit, rx) = oneshot::channel();
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
+        let startup_sync_state_idle = ctx.node_config().debug.startup_sync_state_idle;
 
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
+                // network_handle's sync state is already initialized at Syncing
                 engine_service.orchestrator_mut().start_backfill_sync(initial_target);
+            } else if startup_sync_state_idle {
+                network_handle.update_sync_state(SyncState::Idle);
             }
 
             let mut res = Ok(());
@@ -284,8 +280,8 @@ where
                 tokio::select! {
                     payload = built_payloads.select_next_some() => {
                         if let Some(executed_block) = payload.executed_block() {
-                            debug!(target: "reth::cli", block=?executed_block.recovered_block().num_hash(),  "inserting built payload");
-                            engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block).into());
+                            debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
+                            engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block.into_executed_payload()).into());
                         }
                     }
                     event = engine_service.next() => {
@@ -296,6 +292,9 @@ where
                                 if terminate_after_backfill {
                                     debug!(target: "reth::cli", "Terminating after initial backfill");
                                     break
+                                }
+                                if startup_sync_state_idle {
+                                    network_handle.update_sync_state(SyncState::Idle);
                                 }
                             }
                             ChainEvent::BackfillSyncStarted => {
@@ -366,5 +365,26 @@ where
         };
 
         Ok(handle)
+    }
+}
+
+impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+where
+    T: FullNodeTypes<
+        Types: NodeTypesForProvider,
+        Provider = BlockchainProvider<
+            NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
+        >,
+    >,
+    CB: NodeComponentsBuilder<T> + 'static,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
+        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
+        + 'static,
+{
+    type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
+    type Future = Pin<Box<dyn Future<Output = eyre::Result<Self::Node>> + Send>>;
+
+    fn launch_node(self, target: NodeBuilderWithComponents<T, CB, AO>) -> Self::Future {
+        Box::pin(self.launch_node(target))
     }
 }

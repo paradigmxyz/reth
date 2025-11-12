@@ -5,7 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use std::{
@@ -244,7 +244,7 @@ pub async fn test_exex_context_with_chain_spec(
         db,
         chain_spec.clone(),
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
-    );
+    )?;
 
     let genesis_hash = init_genesis(&provider_factory)?;
     let provider = BlockchainProvider::new(provider_factory.clone())?;
