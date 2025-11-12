@@ -1,12 +1,19 @@
 use super::LaunchNode;
 use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
+use alloy_consensus::transaction::Either;
 use alloy_provider::network::AnyNetwork;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_local::LocalMiner;
-use reth_node_api::{BlockTy, FullNodeComponents, PayloadAttributesBuilder, PayloadTypes};
-use std::sync::Arc;
+use reth_node_api::{
+    BlockTy, FullNodeComponents, PayloadAttrTy, PayloadAttributesBuilder, PayloadTypes,
+};
+use std::{
+    future::{Future, IntoFuture},
+    pin::Pin,
+    sync::Arc,
+};
 use tracing::info;
 
 /// [`Node`] extension with support for debugging utilities.
@@ -79,8 +86,8 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
 /// ## RPC Consensus Client
 ///
 /// When `--debug.rpc-consensus-ws <URL>` is provided, the launcher will:
-/// - Connect to an external RPC `WebSocket` endpoint
-/// - Fetch blocks from that endpoint
+/// - Connect to an external RPC endpoint (`WebSocket` or HTTP)
+/// - Fetch blocks from that endpoint (using subscriptions for `WebSocket`, polling for HTTP)
 /// - Submit them to the local engine for execution
 /// - Useful for testing engine behavior with real network data
 ///
@@ -104,23 +111,61 @@ impl<L> DebugNodeLauncher<L> {
     }
 }
 
-impl<L, Target, N, AddOns> LaunchNode<Target> for DebugNodeLauncher<L>
+/// Future for the [`DebugNodeLauncher`].
+#[expect(missing_debug_implementations, clippy::type_complexity)]
+pub struct DebugNodeLauncherFuture<L, Target, N>
+where
+    N: FullNodeComponents<Types: DebugNode<N>>,
+{
+    inner: L,
+    target: Target,
+    local_payload_attributes_builder:
+        Option<Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>>>>,
+    map_attributes:
+        Option<Box<dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync>>,
+}
+
+impl<L, Target, N, AddOns> DebugNodeLauncherFuture<L, Target, N>
 where
     N: FullNodeComponents<Types: DebugNode<N>>,
     AddOns: RethRpcAddOns<N>,
     L: LaunchNode<Target, Node = NodeHandle<N, AddOns>>,
 {
-    type Node = NodeHandle<N, AddOns>;
+    pub fn with_payload_attributes_builder(
+        self,
+        builder: impl PayloadAttributesBuilder<PayloadAttrTy<N::Types>>,
+    ) -> Self {
+        Self {
+            inner: self.inner,
+            target: self.target,
+            local_payload_attributes_builder: Some(Box::new(builder)),
+            map_attributes: None,
+        }
+    }
 
-    async fn launch_node(self, target: Target) -> eyre::Result<Self::Node> {
-        let handle = self.inner.launch_node(target).await?;
+    pub fn map_debug_payload_attributes(
+        self,
+        f: impl Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            inner: self.inner,
+            target: self.target,
+            local_payload_attributes_builder: None,
+            map_attributes: Some(Box::new(f)),
+        }
+    }
+
+    async fn launch_node(self) -> eyre::Result<NodeHandle<N, AddOns>> {
+        let Self { inner, target, local_payload_attributes_builder, map_attributes } = self;
+
+        let handle = inner.launch_node(target).await?;
 
         let config = &handle.node.config;
-        if let Some(ws_url) = config.debug.rpc_consensus_ws.clone() {
-            info!(target: "reth::cli", "Using RPC WebSocket consensus client: {}", ws_url);
+        if let Some(url) = config.debug.rpc_consensus_url.clone() {
+            info!(target: "reth::cli", "Using RPC consensus client: {}", url);
 
             let block_provider =
-                RpcBlockProvider::<AnyNetwork, _>::new(ws_url.as_str(), |block_response| {
+                RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), |block_response| {
                     let json = serde_json::to_value(block_response)
                         .expect("Block serialization cannot fail");
                     let rpc_block =
@@ -179,11 +224,23 @@ where
             let pool = handle.node.pool.clone();
             let payload_builder_handle = handle.node.payload_builder_handle.clone();
 
+            let builder = if let Some(builder) = local_payload_attributes_builder {
+                Either::Left(builder)
+            } else {
+                let local = N::Types::local_payload_attributes_builder(&chain_spec);
+                let builder = if let Some(f) = map_attributes {
+                    Either::Left(move |block_number| f(local.build(block_number)))
+                } else {
+                    Either::Right(local)
+                };
+                Either::Right(builder)
+            };
+
             let dev_mining_mode = handle.node.config.dev_mining_mode(pool);
             handle.node.task_executor.spawn_critical("local engine", async move {
                 LocalMiner::new(
                     blockchain_db,
-                    N::Types::local_payload_attributes_builder(&chain_spec),
+                    builder,
                     beacon_engine_handle,
                     dev_mining_mode,
                     payload_builder_handle,
@@ -194,5 +251,40 @@ where
         }
 
         Ok(handle)
+    }
+}
+
+impl<L, Target, N, AddOns> IntoFuture for DebugNodeLauncherFuture<L, Target, N>
+where
+    Target: Send + 'static,
+    N: FullNodeComponents<Types: DebugNode<N>>,
+    AddOns: RethRpcAddOns<N> + 'static,
+    L: LaunchNode<Target, Node = NodeHandle<N, AddOns>> + 'static,
+{
+    type Output = eyre::Result<NodeHandle<N, AddOns>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = eyre::Result<NodeHandle<N, AddOns>>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(self.launch_node())
+    }
+}
+
+impl<L, Target, N, AddOns> LaunchNode<Target> for DebugNodeLauncher<L>
+where
+    Target: Send + 'static,
+    N: FullNodeComponents<Types: DebugNode<N>>,
+    AddOns: RethRpcAddOns<N> + 'static,
+    L: LaunchNode<Target, Node = NodeHandle<N, AddOns>> + 'static,
+{
+    type Node = NodeHandle<N, AddOns>;
+    type Future = DebugNodeLauncherFuture<L, Target, N>;
+
+    fn launch_node(self, target: Target) -> Self::Future {
+        DebugNodeLauncherFuture {
+            inner: self.inner,
+            target,
+            local_payload_attributes_builder: None,
+            map_attributes: None,
+        }
     }
 }

@@ -101,6 +101,7 @@ where
         kind: SubscriptionKind,
         params: Option<Params>,
     ) -> Result<(), ErrorObject<'static>> {
+        #[allow(unreachable_patterns)]
         match kind {
             SubscriptionKind::NewHeads => {
                 pipe_from_stream(accepted_sink, self.new_headers_stream()).await
@@ -198,6 +199,10 @@ where
                 }
 
                 Ok(())
+            }
+            _ => {
+                // TODO: implement once https://github.com/alloy-rs/alloy/pull/2974 is released
+                Err(invalid_params_rpc_err("Unsupported subscription kind"))
             }
         }
     }

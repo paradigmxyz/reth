@@ -3,34 +3,47 @@
 use crate::{OpEthApi, OpEthApiError, SequencerClient};
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
+use futures::StreamExt;
 use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
+use reth_chain_state::CanonStateSubscriptions;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{BlockBody, Recovered, SignedTransaction, WithEncoded};
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
-    try_into_op_tx_info, FromEthApiError, RpcConvert, RpcNodeCore, TxInfoMapper,
+    helpers::{spec::SignersForRpc, EthTransactions, LoadReceipt, LoadTransaction},
+    try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
+    RpcReceipt, TxInfoMapper,
 };
-use reth_rpc_eth_types::utils::recover_raw_transaction;
+use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 use reth_transaction_pool::{
-    AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
+    AddedTransactionOutcome, PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool,
 };
-use std::fmt::{Debug, Formatter};
+use std::{
+    fmt::{Debug, Formatter},
+    future::Future,
+    time::Duration,
+};
+use tokio_stream::wrappers::WatchStream;
 
 impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
+    OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.eth_api.signers()
     }
 
-    /// Decodes and recovers the transaction and submits it to the pool.
-    ///
-    /// Returns the hash of the transaction.
-    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
-        let recovered = recover_raw_transaction(&tx)?;
+    fn send_raw_transaction_sync_timeout(&self) -> Duration {
+        self.inner.eth_api.send_raw_transaction_sync_timeout()
+    }
+
+    async fn send_transaction(
+        &self,
+        tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
+    ) -> Result<B256, Self::Error> {
+        let (tx, recovered) = tx.split();
 
         // broadcast raw transaction to subscribers if there is any.
         self.eth_api().broadcast_raw_transaction(tx.clone());
@@ -62,11 +75,108 @@ where
 
         Ok(hash)
     }
+
+    /// Decodes and recovers the transaction and submits it to the pool.
+    ///
+    /// And awaits the receipt, checking both canonical blocks and flashblocks for faster
+    /// confirmation.
+    fn send_raw_transaction_sync(
+        &self,
+        tx: Bytes,
+    ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send {
+        let this = self.clone();
+        let timeout_duration = self.send_raw_transaction_sync_timeout();
+        async move {
+            let mut canonical_stream = this.provider().canonical_state_stream();
+            let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
+            let mut flashblock_stream = this.pending_block_rx().map(WatchStream::new);
+
+            tokio::time::timeout(timeout_duration, async {
+                loop {
+                    tokio::select! {
+                        biased;
+                        // check if the tx was preconfirmed in a new flashblock
+                        flashblock = async {
+                            if let Some(stream) = &mut flashblock_stream {
+                                stream.next().await
+                            } else {
+                                futures::future::pending().await
+                            }
+                        } => {
+                            if let Some(flashblock) = flashblock.flatten() {
+                                // if flashblocks are supported, attempt to find id from the pending block
+                                if let Some(receipt) = flashblock
+                                .find_and_convert_transaction_receipt(hash, this.tx_resp_builder())
+                                {
+                                    return receipt;
+                                }
+                            }
+                        }
+                        // Listen for regular canonical block updates for inclusion
+                        canonical_notification = canonical_stream.next() => {
+                            if let Some(notification) = canonical_notification {
+                                let chain = notification.committed();
+                                for block in chain.blocks_iter() {
+                                    if block.body().contains_transaction(&hash)
+                                        && let Some(receipt) = this.transaction_receipt(hash).await? {
+                                            return Ok(receipt);
+                                        }
+                                }
+                            } else {
+                                // Canonical stream ended
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(Self::Error::from_eth_err(EthApiError::TransactionConfirmationTimeout {
+                    hash,
+                    duration: timeout_duration,
+                }))
+            })
+            .await
+            .unwrap_or_else(|_elapsed| {
+                Err(Self::Error::from_eth_err(EthApiError::TransactionConfirmationTimeout {
+                    hash,
+                    duration: timeout_duration,
+                }))
+            })
+        }
+    }
+
+    /// Returns the transaction receipt for the given hash.
+    ///
+    /// With flashblocks, we should also lookup the pending block for the transaction
+    /// because this is considered confirmed/mined.
+    fn transaction_receipt(
+        &self,
+        hash: B256,
+    ) -> impl Future<Output = Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error>> + Send
+    {
+        let this = self.clone();
+        async move {
+            // first attempt to fetch the mined transaction receipt data
+            let tx_receipt = this.load_transaction_and_receipt(hash).await?;
+
+            if tx_receipt.is_none() {
+                // if flashblocks are supported, attempt to find id from the pending block
+                if let Ok(Some(pending_block)) = this.pending_flashblock().await &&
+                    let Some(Ok(receipt)) = pending_block
+                        .find_and_convert_transaction_receipt(hash, this.tx_resp_builder())
+                {
+                    return Ok(Some(receipt));
+                }
+            }
+            let Some((tx, meta, receipt)) = tx_receipt else { return Ok(None) };
+            self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+        }
+    }
 }
 
 impl<N, Rpc> LoadTransaction for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
+    OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
 }

@@ -4,7 +4,7 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::{Args, Parser};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_era::execution_types::MAX_BLOCKS_PER_ERA1;
+use reth_era::era1::types::execution::MAX_BLOCKS_PER_ERA1;
 use reth_era_utils as era1;
 use reth_provider::DatabaseProviderFactory;
 use std::{path::PathBuf, sync::Arc};

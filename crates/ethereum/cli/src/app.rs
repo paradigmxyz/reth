@@ -10,12 +10,13 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_node_core::args::OtlpInitStatus;
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
 use reth_tracing::{FileWorkerGuard, Layers};
 use std::{fmt, sync::Arc};
-use tracing::info;
+use tracing::{info, warn};
 
 /// A wrapper around a parsed CLI that handles command execution.
 #[derive(Debug)]
@@ -82,10 +83,7 @@ where
         ) -> Result<()>,
     ) -> Result<()>
     where
-        N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader: CliHeader>,
-            ChainSpec: Hardforks + EthChainSpec,
-        >,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let runner = match self.runner.take() {
@@ -99,7 +97,8 @@ where
                 self.cli.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
 
-        self.init_tracing()?;
+        self.init_tracing(&runner)?;
+
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
@@ -109,11 +108,24 @@ where
     /// Initializes tracing with the configured options.
     ///
     /// If file logging is enabled, this function stores guard to the struct.
-    pub fn init_tracing(&mut self) -> Result<()> {
+    /// For gRPC OTLP, it requires tokio runtime context.
+    pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
         if self.guard.is_none() {
-            let layers = self.layers.take().unwrap_or_default();
+            let mut layers = self.layers.take().unwrap_or_default();
+
+            let otlp_status = runner.block_on(self.cli.traces.init_otlp_tracing(&mut layers))?;
+
             self.guard = self.cli.logs.init_tracing_with_layers(layers)?;
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
+            match otlp_status {
+                OtlpInitStatus::Started(endpoint) => {
+                    info!(target: "reth::cli", "Started OTLP {:?} tracing export to {endpoint}", self.cli.traces.protocol);
+                }
+                OtlpInitStatus::NoFeature => {
+                    warn!(target: "reth::cli", "Provided OTLP tracing arguments do not have effect, compile with the `otlp` feature")
+                }
+                OtlpInitStatus::Disabled => {}
+            }
         }
         Ok(())
     }
@@ -165,9 +177,6 @@ where
         }
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<N>()),
         Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Recover(command) => {
-            runner.run_command_until_exit(|ctx| command.execute::<N>(ctx))
-        }
         Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<N>()),
         #[cfg(feature = "dev")]
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),

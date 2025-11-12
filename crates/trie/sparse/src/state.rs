@@ -18,7 +18,7 @@ use reth_trie_common::{
     DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, RlpNode, StorageMultiProof,
     TrieAccount, TrieMask, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use tracing::trace;
+use tracing::{instrument, trace};
 
 /// Provides type-safe re-use of cleared [`SparseStateTrie`]s, which helps to save allocations
 /// across payload runs.
@@ -41,6 +41,32 @@ where
         trie.storage.clear();
         trie.account_rlp_buf.clear();
         Self(trie)
+    }
+
+    /// Shrink the cleared sparse trie's capacity to the given node and value size.
+    /// This helps reduce memory usage when the trie has excess capacity.
+    /// The capacity is distributed equally across the account trie and all storage tries.
+    pub fn shrink_to(&mut self, node_size: usize, value_size: usize) {
+        // Count total number of storage tries (active + cleared + default)
+        let storage_tries_count = self.0.storage.tries.len() + self.0.storage.cleared_tries.len();
+
+        // Total tries = 1 account trie + all storage tries
+        let total_tries = 1 + storage_tries_count;
+
+        // Distribute capacity equally among all tries
+        let node_size_per_trie = node_size / total_tries;
+        let value_size_per_trie = value_size / total_tries;
+
+        // Shrink the account trie
+        self.0.state.shrink_nodes_to(node_size_per_trie);
+        self.0.state.shrink_values_to(value_size_per_trie);
+
+        // Give storage tries the remaining capacity after account trie allocation
+        let storage_node_size = node_size.saturating_sub(node_size_per_trie);
+        let storage_value_size = value_size.saturating_sub(value_size_per_trie);
+
+        // Shrink all storage tries (they will redistribute internally)
+        self.0.storage.shrink_to(storage_node_size, storage_value_size);
     }
 
     /// Returns the cleared [`SparseStateTrie`], consuming this instance.
@@ -208,6 +234,14 @@ where
 
     /// Reveal unknown trie paths from decoded multiproof.
     /// NOTE: This method does not extensively validate the proof.
+    #[instrument(
+        target = "trie::sparse",
+        skip_all,
+        fields(
+            account_nodes = multiproof.account_subtree.len(),
+            storages = multiproof.storages.len()
+        )
+    )]
     pub fn reveal_decoded_multiproof(
         &mut self,
         multiproof: DecodedMultiProof,
@@ -532,6 +566,7 @@ where
     /// Calculates the hashes of subtries.
     ///
     /// If the trie has not been revealed, this function does nothing.
+    #[instrument(target = "trie::sparse", skip_all)]
     pub fn calculate_subtries(&mut self) {
         if let SparseTrie::Revealed(trie) = &mut self.state {
             trie.update_subtrie_hashes();
@@ -584,6 +619,7 @@ where
     }
 
     /// Returns sparse trie root and trie updates if the trie has been revealed.
+    #[instrument(target = "trie::sparse", skip_all)]
     pub fn root_with_updates(
         &mut self,
         provider_factory: impl TrieNodeProviderFactory,
@@ -679,6 +715,7 @@ where
     ///
     /// Returns false if the new account info and storage trie are empty, indicating the account
     /// leaf should be removed.
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
     pub fn update_account(
         &mut self,
         address: B256,
@@ -721,6 +758,7 @@ where
     ///
     /// Returns false if the new storage root is empty, and the account info was already empty,
     /// indicating the account leaf should be removed.
+    #[instrument(target = "trie::sparse", skip_all)]
     pub fn update_account_storage_root(
         &mut self,
         address: B256,
@@ -768,6 +806,7 @@ where
     }
 
     /// Remove the account leaf node.
+    #[instrument(target = "trie::sparse", skip_all)]
     pub fn remove_account_leaf(
         &mut self,
         path: &Nibbles,
@@ -820,6 +859,31 @@ impl<S: SparseTrieInterface> StorageTries<S> {
             set.clear();
             set
         }));
+    }
+
+    /// Shrinks the capacity of all storage tries (active, cleared, and default) to the given sizes.
+    /// The capacity is distributed equally among all tries that have allocations.
+    fn shrink_to(&mut self, node_size: usize, value_size: usize) {
+        // Count total number of tries with capacity (active + cleared + default)
+        let active_count = self.tries.len();
+        let cleared_count = self.cleared_tries.len();
+        let total_tries = 1 + active_count + cleared_count;
+
+        // Distribute capacity equally among all tries
+        let node_size_per_trie = node_size / total_tries;
+        let value_size_per_trie = value_size / total_tries;
+
+        // Shrink active storage tries
+        for trie in self.tries.values_mut() {
+            trie.shrink_nodes_to(node_size_per_trie);
+            trie.shrink_values_to(value_size_per_trie);
+        }
+
+        // Shrink cleared storage tries
+        for trie in &mut self.cleared_tries {
+            trie.shrink_nodes_to(node_size_per_trie);
+            trie.shrink_values_to(value_size_per_trie);
+        }
     }
 }
 

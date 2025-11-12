@@ -29,7 +29,6 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
-reth-evm.workspace = true
 reth-chain-state.workspace = true
 reth-node-types.workspace = true
 reth-static-file-types.workspace = true
@@ -71,6 +70,7 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-primitives.workspace = true
+reth-tracing.workspace = true
 
 revm-database-interface.workspace = true
 revm-state.workspace = true
@@ -90,7 +90,6 @@ test-utils = [
     "reth-ethereum-engine-primitives",
     "reth-ethereum-primitives/test-utils",
     "reth-chainspec/test-utils",
-    "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",

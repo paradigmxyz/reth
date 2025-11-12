@@ -1,15 +1,16 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{
-    proofs, Block, BlockBody, BlockHeader, Header, Transaction, TxReceipt, EMPTY_OMMER_ROOT_HASH,
+    proofs::{self, calculate_receipt_root},
+    Block, BlockBody, BlockHeader, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
 use alloy_primitives::Bytes;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::logs_bloom;
+use reth_primitives_traits::{logs_bloom, Receipt, SignedTransaction};
+use revm::context::Block as _;
 
 /// Block builder for Ethereum.
 #[derive(Debug, Clone)]
@@ -31,31 +32,33 @@ impl<F, ChainSpec> BlockAssembler<F> for EthBlockAssembler<ChainSpec>
 where
     F: for<'a> BlockExecutorFactory<
         ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
-        Transaction = TransactionSigned,
-        Receipt = Receipt,
+        Transaction: SignedTransaction,
+        Receipt: Receipt,
     >,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
-    type Block = Block<TransactionSigned>;
+    type Block = Block<F::Transaction>;
 
     fn assemble_block(
         &self,
         input: BlockAssemblerInput<'_, '_, F>,
-    ) -> Result<Block<TransactionSigned>, BlockExecutionError> {
+    ) -> Result<Self::Block, BlockExecutionError> {
         let BlockAssemblerInput {
             evm_env,
             execution_ctx: ctx,
             parent,
             transactions,
-            output: BlockExecutionResult { receipts, requests, gas_used },
+            output: BlockExecutionResult { receipts, requests, gas_used, blob_gas_used },
             state_root,
             ..
         } = input;
 
-        let timestamp = evm_env.block_env.timestamp.saturating_to();
+        let timestamp = evm_env.block_env.timestamp().saturating_to();
 
         let transactions_root = proofs::calculate_transaction_root(&transactions);
-        let receipts_root = Receipt::calculate_receipt_root_no_memo(receipts);
+        let receipts_root = calculate_receipt_root(
+            &receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>(),
+        );
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
 
         let withdrawals = self
@@ -71,12 +74,11 @@ where
             .then(|| requests.requests_hash());
 
         let mut excess_blob_gas = None;
-        let mut blob_gas_used = None;
+        let mut block_blob_gas_used = None;
 
         // only determine cancun fields when active
         if self.chain_spec.is_cancun_active_at_timestamp(timestamp) {
-            blob_gas_used =
-                Some(transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum());
+            block_blob_gas_used = Some(*blob_gas_used);
             excess_blob_gas = if self.chain_spec.is_cancun_active_at_timestamp(parent.timestamp) {
                 parent.maybe_next_block_excess_blob_gas(
                     self.chain_spec.blob_params_at_timestamp(timestamp),
@@ -94,23 +96,23 @@ where
         let header = Header {
             parent_hash: ctx.parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: evm_env.block_env.beneficiary,
+            beneficiary: evm_env.block_env.beneficiary(),
             state_root,
             transactions_root,
             receipts_root,
             withdrawals_root,
             logs_bloom,
             timestamp,
-            mix_hash: evm_env.block_env.prevrandao.unwrap_or_default(),
+            mix_hash: evm_env.block_env.prevrandao().unwrap_or_default(),
             nonce: BEACON_NONCE.into(),
-            base_fee_per_gas: Some(evm_env.block_env.basefee),
-            number: evm_env.block_env.number.saturating_to(),
-            gas_limit: evm_env.block_env.gas_limit,
-            difficulty: evm_env.block_env.difficulty,
+            base_fee_per_gas: Some(evm_env.block_env.basefee()),
+            number: evm_env.block_env.number().saturating_to(),
+            gas_limit: evm_env.block_env.gas_limit(),
+            difficulty: evm_env.block_env.difficulty(),
             gas_used: *gas_used,
             extra_data: self.extra_data.clone(),
             parent_beacon_block_root: ctx.parent_beacon_block_root,
-            blob_gas_used,
+            blob_gas_used: block_blob_gas_used,
             excess_blob_gas,
             requests_hash,
         };

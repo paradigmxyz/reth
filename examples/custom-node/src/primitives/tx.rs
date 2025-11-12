@@ -1,6 +1,8 @@
 use super::TxPayment;
 use alloy_consensus::{
-    crypto::RecoveryError, transaction::SignerRecoverable, Signed, TransactionEnvelope,
+    crypto::RecoveryError,
+    transaction::{SignerRecoverable, TxHashRef},
+    Signed, TransactionEnvelope,
 };
 use alloy_eips::Encodable2718;
 use alloy_primitives::{Sealed, Signature, B256};
@@ -21,7 +23,7 @@ pub enum CustomTransaction {
     /// A regular Optimism transaction as defined by [`OpTxEnvelope`].
     #[envelope(flatten)]
     Op(OpTxEnvelope),
-    /// A [`TxPayment`] tagged with type 0x7E.
+    /// A [`TxPayment`] tagged with type 0x2A (decimal 42).
     #[envelope(ty = 42)]
     Payment(Signed<TxPayment>),
 }
@@ -31,7 +33,7 @@ impl RlpBincode for CustomTransaction {}
 impl reth_codecs::alloy::transaction::Envelope for CustomTransaction {
     fn signature(&self) -> &Signature {
         match self {
-            CustomTransaction::Op(tx) => tx.signature(),
+            CustomTransaction::Op(tx) => reth_codecs::alloy::transaction::Envelope::signature(tx),
             CustomTransaction::Payment(tx) => tx.signature(),
         }
     }
@@ -121,14 +123,16 @@ impl SignerRecoverable for CustomTransaction {
     }
 }
 
-impl SignedTransaction for CustomTransaction {
+impl TxHashRef for CustomTransaction {
     fn tx_hash(&self) -> &B256 {
         match self {
-            CustomTransaction::Op(tx) => SignedTransaction::tx_hash(tx),
+            CustomTransaction::Op(tx) => TxHashRef::tx_hash(tx),
             CustomTransaction::Payment(tx) => tx.hash(),
         }
     }
 }
+
+impl SignedTransaction for CustomTransaction {}
 
 impl InMemorySize for CustomTransaction {
     fn size(&self) -> usize {

@@ -4,14 +4,14 @@ use crate::common::{
     AccessRights, CliComponentsBuilder, CliNodeComponents, CliNodeTypes, Environment,
     EnvironmentArgs,
 };
-use alloy_consensus::{BlockHeader, TxReceipt};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use clap::Parser;
 use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected, SignedTransaction};
+use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
     StaticFileProviderFactory, TransactionVariant,
@@ -65,7 +65,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let components = components(provider_factory.chain_spec());
 
         let min_block = self.from;
-        let max_block = self.to.unwrap_or(provider.best_block_number()?);
+        let best_block = provider.best_block_number()?;
+        let mut max_block = best_block;
+        if let Some(to) = self.to {
+            if to > best_block {
+                warn!(
+                    requested = to,
+                    best_block,
+                    "Requested --to is beyond available chain head; clamping to best block"
+                );
+            } else {
+                max_block = to;
+            }
+        };
 
         let total_blocks = max_block - min_block;
         let total_gas = calculate_gas_used_from_headers(

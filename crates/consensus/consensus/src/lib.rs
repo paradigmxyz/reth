@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -16,7 +16,7 @@ use alloy_consensus::Header;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
-    constants::{MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
+    constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
     transaction::error::InvalidTransactionError,
     Block, GotExpected, GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock,
     SealedHeader,
@@ -62,8 +62,9 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     /// Validate a block disregarding world state, i.e. things that can be checked before sender
     /// recovery and execution.
     ///
-    /// See the Yellow Paper sections 4.3.2 "Holistic Validity", 4.3.4 "Block Header Validity", and
-    /// 11.1 "Ommer Validation".
+    /// See the Yellow Paper sections 4.4.2 "Holistic Validity", 4.4.4 "Block Header Validity".
+    /// Note: Ommer Validation (previously section 11.1) has been deprecated since the Paris hard
+    /// fork transition to proof of stake.
     ///
     /// **This should not be called for the genesis block**.
     ///
@@ -348,7 +349,7 @@ pub enum ConsensusError {
     },
 
     /// Error when the child gas limit exceeds the maximum allowed increase.
-    #[error("child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024")]
+    #[error("child gas_limit {child_gas_limit} exceeds the max allowed increase ({parent_gas_limit}/{GAS_LIMIT_BOUND_DIVISOR})")]
     GasLimitInvalidIncrease {
         /// The parent gas limit.
         parent_gas_limit: u64,
@@ -377,7 +378,7 @@ pub enum ConsensusError {
     },
 
     /// Error when the child gas limit exceeds the maximum allowed decrease.
-    #[error("child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024")]
+    #[error("child gas_limit {child_gas_limit} is below the max allowed decrease ({parent_gas_limit}/{GAS_LIMIT_BOUND_DIVISOR})")]
     GasLimitInvalidDecrease {
         /// The parent gas limit.
         parent_gas_limit: u64,
@@ -437,7 +438,7 @@ pub struct HeaderConsensusError<H>(ConsensusError, SealedHeader<H>);
 
 /// EIP-7825: Transaction gas limit exceeds maximum allowed
 #[derive(thiserror::Error, Debug, Eq, PartialEq, Clone)]
-#[error("transaction {tx_hash} gas limit {gas_limit} exceeds maximum {max_allowed}")]
+#[error("transaction gas limit ({gas_limit}) is greater than the cap ({max_allowed})")]
 pub struct TxGasLimitTooHighErr {
     /// Hash of the transaction that violates the rule
     pub tx_hash: B256,

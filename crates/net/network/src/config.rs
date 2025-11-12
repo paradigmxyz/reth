@@ -6,6 +6,7 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
+use alloy_primitives::B256;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
@@ -93,6 +94,9 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// This can be overridden to support custom handshake logic via the
     /// [`NetworkConfigBuilder`].
     pub handshake: Arc<dyn EthRlpxHandshake>,
+    /// List of block hashes to check for required blocks.
+    /// If non-empty, peers that don't have these blocks will be filtered out.
+    pub required_block_hashes: Vec<B256>,
 }
 
 // === impl NetworkConfig ===
@@ -220,6 +224,10 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The Ethereum P2P handshake, see also:
     /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
     handshake: Arc<dyn EthRlpxHandshake>,
+    /// List of block hashes to check for required blocks.
+    required_block_hashes: Vec<B256>,
+    /// Optional network id
+    network_id: Option<u64>,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -260,6 +268,8 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config: Default::default(),
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
+            required_block_hashes: Vec::new(),
+            network_id: None,
         }
     }
 
@@ -544,6 +554,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Sets the required block hashes for peer filtering.
+    pub fn required_block_hashes(mut self, hashes: Vec<B256>) -> Self {
+        self.required_block_hashes = hashes;
+        self
+    }
+
     /// Sets the block import type.
     pub fn block_import(mut self, block_import: Box<dyn BlockImport<N::NewBlockPayload>>) -> Self {
         self.block_import = Some(block_import);
@@ -571,6 +587,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// Overrides the default Eth `RLPx` handshake.
     pub fn eth_rlpx_handshake(mut self, handshake: Arc<dyn EthRlpxHandshake>) -> Self {
         self.handshake = handshake;
+        self
+    }
+
+    /// Set the optional network id.
+    pub const fn network_id(mut self, network_id: Option<u64>) -> Self {
+        self.network_id = network_id;
         self
     }
 
@@ -606,6 +628,8 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            required_block_hashes,
+            network_id,
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
@@ -632,7 +656,11 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         hello_message.port = listener_addr.port();
 
         // set the status
-        let status = UnifiedStatus::spec_builder(&chain_spec, &head);
+        let mut status = UnifiedStatus::spec_builder(&chain_spec, &head);
+
+        if let Some(id) = network_id {
+            status.chain = id.into();
+        }
 
         // set a fork filter based on the chain spec and head
         let fork_filter = chain_spec.fork_filter(head);
@@ -642,13 +670,11 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
         // If default DNS config is used then we add the known dns network to bootstrap from
         if let Some(dns_networks) =
-            dns_discovery_config.as_mut().and_then(|c| c.bootstrap_dns_networks.as_mut())
+            dns_discovery_config.as_mut().and_then(|c| c.bootstrap_dns_networks.as_mut()) &&
+            dns_networks.is_empty() &&
+            let Some(link) = chain_spec.chain().public_dns_network_protocol()
         {
-            if dns_networks.is_empty() {
-                if let Some(link) = chain_spec.chain().public_dns_network_protocol() {
-                    dns_networks.insert(link.parse().expect("is valid DNS link entry"));
-                }
-            }
+            dns_networks.insert(link.parse().expect("is valid DNS link entry"));
         }
 
         NetworkConfig {
@@ -674,6 +700,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            required_block_hashes,
         }
     }
 }

@@ -16,20 +16,21 @@ use alloy_rpc_types_engine::{
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
-use parking_lot::Mutex;
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload, PayloadOrAttributes,
-    PayloadTypes,
+    validate_payload_timestamp, EngineApiMessageVersion, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Instant, SystemTime},
+};
 use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
 
@@ -104,7 +105,6 @@ where
             capabilities,
             tx_pool,
             validator,
-            latest_new_payload_response: Mutex::new(None),
             accept_execution_requests_hash,
         });
         Self { inner }
@@ -144,12 +144,7 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
 
-        Ok(self
-            .inner
-            .beacon_consensus
-            .new_payload(payload)
-            .await
-            .inspect(|_| self.inner.on_new_payload_response())?)
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
     /// Metered version of `new_payload_v1`.
@@ -158,12 +153,9 @@ where
         payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
-        let gas_used = payload.gas_used();
-
         let res = Self::new_payload_v1(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v1.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         res
     }
 
@@ -180,12 +172,7 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
-        Ok(self
-            .inner
-            .beacon_consensus
-            .new_payload(payload)
-            .await
-            .inspect(|_| self.inner.on_new_payload_response())?)
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
     /// Metered version of `new_payload_v2`.
@@ -194,12 +181,9 @@ where
         payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
-        let gas_used = payload.gas_used();
-
         let res = Self::new_payload_v2(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v2.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         res
     }
 
@@ -217,12 +201,7 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V3, payload_or_attrs)?;
 
-        Ok(self
-            .inner
-            .beacon_consensus
-            .new_payload(payload)
-            .await
-            .inspect(|_| self.inner.on_new_payload_response())?)
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
     /// Metrics version of `new_payload_v3`
@@ -231,12 +210,10 @@ where
         payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
-        let gas_used = payload.gas_used();
 
         let res = Self::new_payload_v3(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v3.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -254,12 +231,7 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
-        Ok(self
-            .inner
-            .beacon_consensus
-            .new_payload(payload)
-            .await
-            .inspect(|_| self.inner.on_new_payload_response())?)
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
     /// Metrics version of `new_payload_v4`
@@ -268,13 +240,10 @@ where
         payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
-        let gas_used = payload.gas_used();
-
         let res = Self::new_payload_v4(self, payload).await;
 
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v4.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -317,7 +286,6 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v1(self, state, payload_attrs).await;
         self.inner.metrics.latency.fork_choice_updated_v1.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
         res
     }
 
@@ -343,7 +311,6 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v2(self, state, payload_attrs).await;
         self.inner.metrics.latency.fork_choice_updated_v2.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
         res
     }
 
@@ -369,7 +336,6 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v3(self, state, payload_attrs).await;
         self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
         res
     }
 
@@ -572,13 +538,18 @@ where
 
             // > Client software MUST NOT return trailing null values if the request extends past the current latest known block.
             // truncate the end if it's greater than the last block
-            if let Ok(best_block) = inner.provider.best_block_number() {
-                if end > best_block {
+            if let Ok(best_block) = inner.provider.best_block_number()
+                && end > best_block {
                     end = best_block;
                 }
-            }
 
+            // Check if the requested range starts before the earliest available block due to pruning/expiry
+            let earliest_block = inner.provider.earliest_block_number().unwrap_or(0);
             for num in start..=end {
+                if num < earliest_block {
+                    result.push(None);
+                    continue;
+                }
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
@@ -710,8 +681,6 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.inner.record_elapsed_time_on_fcu();
-
         if let Some(ref attrs) = payload_attrs {
             let attr_validation_res =
                 self.inner.validator.ensure_well_formed_attributes(version, attrs);
@@ -753,6 +722,15 @@ where
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
+        // Only allow this method before Osaka fork
+        let current_timestamp =
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+        if self.inner.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+            return Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+            ));
+        }
+
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
             return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
         }
@@ -788,6 +766,15 @@ where
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Option<Vec<BlobAndProofV2>>> {
+        // Check if Osaka fork is active
+        let current_timestamp =
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+        if !self.inner.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+            return Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+            ));
+        }
+
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
             return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
         }
@@ -1160,29 +1147,7 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     tx_pool: Pool,
     /// Engine validator.
     validator: Validator,
-    /// Start time of the latest payload request
-    latest_new_payload_response: Mutex<Option<Instant>>,
     accept_execution_requests_hash: bool,
-}
-
-impl<Provider, PayloadT, Pool, Validator, ChainSpec>
-    EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>
-where
-    PayloadT: PayloadTypes,
-{
-    /// Tracks the elapsed time between the new payload response and the received forkchoice update
-    /// request.
-    fn record_elapsed_time_on_fcu(&self) {
-        if let Some(start_time) = self.latest_new_payload_response.lock().take() {
-            let elapsed_time = start_time.elapsed();
-            self.metrics.latency.new_payload_forkchoice_updated_time_diff.record(elapsed_time);
-        }
-    }
-
-    /// Updates the timestamp for the latest new payload response.
-    fn on_new_payload_response(&self) {
-        self.latest_new_payload_response.lock().replace(Instant::now());
-    }
 }
 
 #[cfg(test)]
