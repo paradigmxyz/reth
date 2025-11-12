@@ -536,7 +536,8 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_state_at_block(state_at, move |state| {
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 // 1. apply pre-execution changes
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
