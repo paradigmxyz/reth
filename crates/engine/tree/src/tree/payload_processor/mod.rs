@@ -48,6 +48,7 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, warn};
 
+mod chunking;
 mod configured_sparse_trie;
 pub mod executor;
 pub mod multiproof;

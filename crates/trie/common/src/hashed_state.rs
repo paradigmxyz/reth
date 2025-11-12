@@ -278,6 +278,12 @@ impl HashedPostState {
         ChunkedHashedPostState::new(self, size)
     }
 
+    /// Returns an iterator that yields chunks where the first `increased` chunks have size
+    /// `size + 1` and the remaining have size `size`.
+    pub fn chunks_with(self, size: usize, increased: usize) -> ChunkedHashedPostState {
+        ChunkedHashedPostState::new_with_increased(self, size, increased)
+    }
+
     /// Returns the number of items that will be considered during chunking in `[Self::chunks]`.
     pub fn chunking_length(&self) -> usize {
         self.accounts.len() +
@@ -584,6 +590,7 @@ impl From<HashedPostStateSorted> for HashedPostState {
 pub struct ChunkedHashedPostState {
     flattened: alloc::vec::IntoIter<(B256, FlattenedHashedPostStateItem)>,
     size: usize,
+    increased: usize,
 }
 
 #[derive(Debug)]
@@ -623,7 +630,17 @@ impl ChunkedHashedPostState {
             // 3. Account update
             .sorted_by_key(|(address, _)| *address);
 
-        Self { flattened, size }
+        Self { flattened, size, increased: 0 }
+    }
+
+    fn new_with_increased(
+        hashed_post_state: HashedPostState,
+        size: usize,
+        increased: usize,
+    ) -> Self {
+        let mut this = Self::new(hashed_post_state, size);
+        this.increased = increased;
+        this
     }
 }
 
@@ -633,8 +650,10 @@ impl Iterator for ChunkedHashedPostState {
     fn next(&mut self) -> Option<Self::Item> {
         let mut chunk = HashedPostState::default();
 
+        let extra = usize::from(self.increased > 0);
+
         let mut current_size = 0;
-        while current_size < self.size {
+        while current_size < (self.size + extra) {
             let Some((address, item)) = self.flattened.next() else { break };
 
             match item {
@@ -655,6 +674,9 @@ impl Iterator for ChunkedHashedPostState {
         if chunk.is_empty() {
             None
         } else {
+            if extra == 1 {
+                self.increased -= 1;
+            }
             Some(chunk)
         }
     }
@@ -667,6 +689,27 @@ mod tests {
     use alloy_primitives::Bytes;
     use revm_database::{states::StorageSlot, StorageWithOriginalValues};
     use revm_state::{AccountInfo, Bytecode};
+
+    // Local copy for testing since chunking utilities are defined in the engine crate now.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct ChunkPlan {
+        chunks: usize,
+        base: usize,
+        increased: usize,
+    }
+
+    fn compute_chunk_plan(total: usize, idle: usize, min_chunk: usize) -> Option<ChunkPlan> {
+        if idle == 0 || total == 0 {
+            return None;
+        }
+        let max_chunks_amount = total / min_chunk;
+        let chunks = max_chunks_amount.min(idle);
+        (chunks >= 2).then(|| {
+            let base = total / chunks;
+            let increased = total % chunks;
+            ChunkPlan { chunks, base, increased }
+        })
+    }
 
     #[test]
     fn hashed_state_wiped_extension() {
@@ -1270,5 +1313,42 @@ mod tests {
                 chunking_length, size
             );
         }
+    }
+
+    #[test]
+    fn chunking_distribution_matches_plan() {
+        // Build a hashed post state with:
+        // addr1: wiped + 2 storage updates -> 3 items
+        // addr2: 1 storage update         -> 1 item
+        // addr3: account update (None)    -> 1 item
+        // total = 5 items
+        let addr1 = B256::with_last_byte(0xA1);
+        let addr2 = B256::with_last_byte(0xA2);
+        let addr3 = B256::with_last_byte(0xA3);
+
+        let mut state = HashedPostState::default();
+        let mut st1 = HashedStorage::new(true);
+        st1.storage.insert(B256::with_last_byte(0x01), U256::from(1));
+        st1.storage.insert(B256::with_last_byte(0x02), U256::from(2));
+        state.storages.insert(addr1, st1);
+
+        let mut st2 = HashedStorage::new(false);
+        st2.storage.insert(B256::with_last_byte(0x03), U256::from(3));
+        state.storages.insert(addr2, st2);
+
+        state.accounts.insert(addr3, None);
+
+        assert_eq!(state.chunking_length(), 5);
+
+        // idle=2, min=2 -> chunks=2 -> base=2, increased=1 -> sizes [3,2]
+        let plan = compute_chunk_plan(5, 2, 2).unwrap();
+        assert_eq!(plan, ChunkPlan { chunks: 2, base: 2, increased: 1 });
+
+        let sizes = state
+            .chunks_with(plan.base, plan.increased)
+            .map(|chunk| chunk.chunking_length())
+            .collect::<Vec<_>>();
+        assert_eq!(sizes, vec![3, 2]);
+        assert_eq!(sizes.len(), plan.chunks);
     }
 }
