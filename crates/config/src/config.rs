@@ -33,7 +33,7 @@ pub struct Config {
 
 impl Config {
     /// Sets the pruning configuration.
-    pub const fn set_prune_config(&mut self, prune_config: PruneConfig) {
+    pub fn set_prune_config(&mut self, prune_config: PruneConfig) {
         self.prune = prune_config;
     }
 }
@@ -451,14 +451,13 @@ impl PruneConfig {
     }
 
     /// Returns whether there is any kind of receipt pruning configuration.
-    pub const fn has_receipts_pruning(&self) -> bool {
-        self.segments.receipts.is_some()
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
     }
 
     /// Merges another `PruneConfig` into this one, taking values from the other config if and only
     /// if the corresponding value in this config is not set.
     pub fn merge(&mut self, other: Self) {
-        #[expect(deprecated)]
         let Self {
             block_interval,
             segments:
@@ -470,7 +469,7 @@ impl PruneConfig {
                     storage_history,
                     bodies_history,
                     merkle_changesets,
-                    receipts_log_filter: (),
+                    receipts_log_filter,
                 },
         } = other;
 
@@ -488,6 +487,10 @@ impl PruneConfig {
         self.segments.bodies_history = self.segments.bodies_history.or(bodies_history);
         // Merkle changesets is not optional, so we just replace it if provided
         self.segments.merkle_changesets = merkle_changesets;
+
+        if self.segments.receipts_log_filter.0.is_empty() && !receipts_log_filter.0.is_empty() {
+            self.segments.receipts_log_filter = receipts_log_filter;
+        }
     }
 }
 
@@ -514,9 +517,10 @@ where
 mod tests {
     use super::{Config, EXTENSION};
     use crate::PruneConfig;
+    use alloy_primitives::Address;
     use reth_network_peers::TrustedPeer;
-    use reth_prune_types::{PruneMode, PruneModes};
-    use std::{path::Path, str::FromStr, time::Duration};
+    use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig};
+    use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1005,8 +1009,10 @@ receipts = 'full'
                 storage_history: Some(PruneMode::Before(5000)),
                 bodies_history: None,
                 merkle_changesets: PruneMode::Before(0),
-                #[expect(deprecated)]
-                receipts_log_filter: (),
+                receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
+                    Address::random(),
+                    PruneMode::Full,
+                )])),
             },
         };
 
@@ -1020,11 +1026,14 @@ receipts = 'full'
                 storage_history: Some(PruneMode::Distance(3000)),
                 bodies_history: None,
                 merkle_changesets: PruneMode::Distance(10000),
-                #[expect(deprecated)]
-                receipts_log_filter: (),
+                receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([
+                    (Address::random(), PruneMode::Distance(1000)),
+                    (Address::random(), PruneMode::Before(2000)),
+                ])),
             },
         };
 
+        let original_filter = config1.segments.receipts_log_filter.clone();
         config1.merge(config2);
 
         // Check that the configuration has been merged. Any configuration present in config1
@@ -1036,6 +1045,7 @@ receipts = 'full'
         assert_eq!(config1.segments.account_history, Some(PruneMode::Distance(2000)));
         assert_eq!(config1.segments.storage_history, Some(PruneMode::Before(5000)));
         assert_eq!(config1.segments.merkle_changesets, PruneMode::Distance(10000));
+        assert_eq!(config1.segments.receipts_log_filter, original_filter);
     }
 
     #[test]

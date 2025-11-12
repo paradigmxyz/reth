@@ -22,7 +22,7 @@ use crate::{
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
-    BlockHeader,
+    BlockHeader, TxReceipt,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
@@ -214,7 +214,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
     #[cfg(feature = "test-utils")]
     /// Sets the prune modes for provider.
-    pub const fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+    pub fn set_prune_modes(&mut self, prune_modes: PruneModes) {
         self.prune_modes = prune_modes;
     }
 }
@@ -1621,10 +1621,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             .then(|| self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts))
             .transpose()?;
 
+        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
+        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
+
         // All receipts from the last 128 blocks are required for blockchain tree, even with
         // [`PruneSegment::ContractLogs`].
         let prunable_receipts =
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
+
+        // Prepare set of addresses which logs should not be pruned.
+        let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+        for (_, addresses) in contract_log_pruner.range(..first_block) {
+            allowed_addresses.extend(addresses.iter().copied());
+        }
 
         for (idx, (receipts, first_tx_index)) in
             execution_outcome.receipts.iter().zip(block_indices).enumerate()
@@ -1645,8 +1654,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 continue
             }
 
+            // If there are new addresses to retain after this block number, track them
+            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+                allowed_addresses.extend(new_addresses.iter().copied());
+            }
+
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
+                // Skip writing receipt if log filter is active and it does not have any logs to
+                // retain
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                {
+                    continue
+                }
 
                 if let Some(writer) = &mut receipts_static_writer {
                     writer.append_receipt(receipt_idx, receipt)?;
