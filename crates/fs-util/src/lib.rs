@@ -9,7 +9,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs::{self, File, OpenOptions, ReadDir},
-    io::{self, BufWriter, Error, Write},
+    io::{self, BufWriter, Error},
     path::{Path, PathBuf},
 };
 
