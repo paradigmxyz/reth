@@ -35,7 +35,7 @@ pub trait TrieCursorFactory {
         Self: 'a;
 
     /// The storage trie cursor type.
-    type StorageTrieCursor<'a>: TrieCursor
+    type StorageTrieCursor<'a>: TrieStorageCursor
     where
         Self: 'a;
 
@@ -68,6 +68,26 @@ pub trait TrieCursor {
 
     /// Get the current entry.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError>;
+
+    /// Reset the cursor to the beginning.
+    ///
+    /// # Important
+    ///
+    /// After calling this method, the subsequent operation MUST be a [`TrieCursor::seek`] or
+    /// [`TrieCursor::seek_exact`] call.
+    fn reset(&mut self);
+}
+
+/// A cursor for traversing storage trie nodes.
+#[auto_impl::auto_impl(&mut)]
+pub trait TrieStorageCursor: TrieCursor {
+    /// Set the hashed address for the storage trie cursor.
+    ///
+    /// # Important
+    ///
+    /// After calling this method, the subsequent operation MUST be a [`TrieCursor::seek`] or
+    /// [`TrieCursor::seek_exact`] call.
+    fn set_hashed_address(&mut self, hashed_address: B256);
 }
 
 /// Iterator wrapper for `TrieCursor` types

@@ -35,27 +35,16 @@ where
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
-        Ok(HashedPostStateCursor::new(Some(cursor), &self.post_state.as_ref().accounts))
+        Ok(HashedPostStateCursor::new_account(cursor, self.post_state.as_ref()))
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        static EMPTY_UPDATES: Vec<(B256, U256)> = Vec::new();
-
-        let post_state_storage = self.post_state.as_ref().storages.get(&hashed_address);
-        let (storage_slots, wiped) = post_state_storage
-            .map(|u| (u.storage_slots_ref(), u.is_wiped()))
-            .unwrap_or((&EMPTY_UPDATES, false));
-
-        let cursor = if wiped {
-            None
-        } else {
-            Some(self.cursor_factory.hashed_storage_cursor(hashed_address)?)
-        };
-
-        Ok(HashedPostStateCursor::new(cursor, storage_slots))
+        let post_state = self.post_state.as_ref();
+        let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
+        Ok(HashedPostStateCursor::new_storage(cursor, post_state, hashed_address))
     }
 }
 
@@ -101,8 +90,10 @@ pub struct HashedPostStateCursor<'a, C, V>
 where
     V: HashedPostStateCursorValue,
 {
-    /// The underlying `database_cursor`. If None then it is assumed there is no DB data.
-    cursor: Option<C>,
+    /// The underlying cursor.
+    cursor: C,
+    /// Whether the underlying cursor should be ignored (when storage was wiped).
+    cursor_wiped: bool,
     /// Entry that `database_cursor` is currently pointing to.
     cursor_entry: Option<(B256, V::NonZero)>,
     /// Forward-only in-memory cursor over underlying V.
@@ -113,6 +104,64 @@ where
     /// Tracks whether `seek` has been called. Used to prevent re-seeking the DB cursor
     /// when it has been exhausted by iteration.
     seeked: bool,
+    /// Reference to the full post state.
+    post_state: &'a HashedPostStateSorted,
+}
+
+impl<'a, C> HashedPostStateCursor<'a, C, Option<Account>>
+where
+    C: HashedCursor<Value = Account>,
+{
+    /// Create new account cursor which combines a DB cursor and the post state.
+    pub fn new_account(cursor: C, post_state: &'a HashedPostStateSorted) -> Self {
+        let post_state_cursor = ForwardInMemoryCursor::new(&post_state.accounts);
+        Self {
+            cursor,
+            cursor_wiped: false,
+            cursor_entry: None,
+            post_state_cursor,
+            last_key: None,
+            seeked: false,
+            post_state,
+        }
+    }
+}
+
+impl<'a, C> HashedPostStateCursor<'a, C, U256>
+where
+    C: HashedStorageCursor<Value = U256>,
+{
+    /// Create new storage cursor with full post state reference.
+    /// This allows the cursor to switch between storage tries when `set_hashed_address` is called.
+    pub fn new_storage(
+        cursor: C,
+        post_state: &'a HashedPostStateSorted,
+        hashed_address: B256,
+    ) -> Self {
+        let (post_state_cursor, cursor_wiped) =
+            Self::get_storage_overlay(post_state, hashed_address);
+        Self {
+            cursor,
+            cursor_wiped,
+            cursor_entry: None,
+            post_state_cursor,
+            last_key: None,
+            seeked: false,
+            post_state,
+        }
+    }
+
+    /// Returns the storage overlay for `hashed_address` and whether it was wiped.
+    fn get_storage_overlay(
+        post_state: &'a HashedPostStateSorted,
+        hashed_address: B256,
+    ) -> (ForwardInMemoryCursor<'a, B256, U256>, bool) {
+        let post_state_storage = post_state.storages.get(&hashed_address);
+        let cursor_wiped = post_state_storage.is_some_and(|u| u.is_wiped());
+        let storage_slots = post_state_storage.map(|u| u.storage_slots_ref()).unwrap_or(&[]);
+
+        (ForwardInMemoryCursor::new(storage_slots), cursor_wiped)
+    }
 }
 
 impl<'a, C, V> HashedPostStateCursor<'a, C, V>
@@ -120,22 +169,9 @@ where
     C: HashedCursor<Value = V::NonZero>,
     V: HashedPostStateCursorValue,
 {
-    /// Creates a new post state cursor which combines a DB cursor and in-memory post state updates.
-    ///
-    /// # Parameters
-    /// - `cursor`: The database cursor. Pass `None` to indicate:
-    ///   - For accounts: Empty database (no persisted accounts)
-    ///   - For storage: Wiped storage (e.g., via `SELFDESTRUCT` - all previous storage destroyed)
-    /// - `updates`: Pre-sorted post state updates.
-    pub fn new(cursor: Option<C>, updates: &'a [(B256, V)]) -> Self {
-        debug_assert!(updates.is_sorted_by_key(|(k, _)| k), "Overlay values must be sorted by key");
-        Self {
-            cursor,
-            cursor_entry: None,
-            post_state_cursor: ForwardInMemoryCursor::new(updates),
-            last_key: None,
-            seeked: false,
-        }
+    /// Returns a mutable reference to the underlying cursor if it's not wiped, None otherwise.
+    fn get_cursor_mut(&mut self) -> Option<&mut C> {
+        (!self.cursor_wiped).then_some(&mut self.cursor)
     }
 
     /// Asserts that the next entry to be returned from the cursor is not previous to the last entry
@@ -162,7 +198,7 @@ where
         };
 
         if should_seek {
-            self.cursor_entry = self.cursor.as_mut().map(|c| c.seek(key)).transpose()?.flatten();
+            self.cursor_entry = self.get_cursor_mut().map(|c| c.seek(key)).transpose()?.flatten();
         }
 
         Ok(())
@@ -175,7 +211,7 @@ where
         // If the previous entry is `None`, and we've done a seek previously, then the cursor is
         // exhausted, and we shouldn't call `next` again.
         if self.cursor_entry.is_some() {
-            self.cursor_entry = self.cursor.as_mut().map(|c| c.next()).transpose()?.flatten();
+            self.cursor_entry = self.get_cursor_mut().map(|c| c.next()).transpose()?.flatten();
         }
 
         Ok(())
@@ -281,14 +317,33 @@ where
         self.set_last_key(&entry);
         Ok(entry)
     }
+
+    fn reset(&mut self) {
+        let Self {
+            cursor,
+            cursor_wiped,
+            cursor_entry,
+            post_state_cursor,
+            last_key,
+            seeked,
+            post_state: _,
+        } = self;
+
+        cursor.reset();
+        post_state_cursor.reset();
+
+        *cursor_wiped = false;
+        *cursor_entry = None;
+        *last_key = None;
+        *seeked = false;
+    }
 }
 
 /// The cursor to iterate over post state hashed values and corresponding database entries.
 /// It will always give precedence to the data from the post state.
-impl<C, V> HashedStorageCursor for HashedPostStateCursor<'_, C, V>
+impl<C> HashedStorageCursor for HashedPostStateCursor<'_, C, U256>
 where
-    C: HashedStorageCursor<Value = V::NonZero>,
-    V: HashedPostStateCursorValue,
+    C: HashedStorageCursor<Value = U256>,
 {
     /// Returns `true` if the account has no storage entries.
     ///
@@ -301,8 +356,15 @@ where
         }
 
         // If no non-zero slots in post state, check the database.
-        // Returns true if cursor is None (wiped storage or empty DB).
-        self.cursor.as_mut().map_or(Ok(true), |c| c.is_storage_empty())
+        // Returns true if cursor is wiped.
+        self.get_cursor_mut().map_or(Ok(true), |c| c.is_storage_empty())
+    }
+
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.reset();
+        self.cursor.set_hashed_address(hashed_address);
+        (self.post_state_cursor, self.cursor_wiped) =
+            HashedPostStateCursor::<C, U256>::get_storage_overlay(self.post_state, hashed_address);
     }
 }
 
@@ -417,7 +479,18 @@ mod tests {
                 let db_nodes_arc = Arc::new(db_nodes_map);
                 let visited_keys = Arc::new(Mutex::new(Vec::new()));
                 let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys);
-                let mut test_cursor = HashedPostStateCursor::new(Some(mock_cursor), &post_state_nodes);
+
+                // Create a HashedPostStateSorted with the storage data
+                let hashed_address = B256::ZERO;
+                let storage_sorted = reth_trie_common::HashedStorageSorted {
+                    storage_slots: post_state_nodes,
+                    wiped: false,
+                };
+                let mut storages = alloy_primitives::map::B256Map::default();
+                storages.insert(hashed_address, storage_sorted);
+                let post_state = HashedPostStateSorted::new(Vec::new(), storages);
+
+                let mut test_cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, hashed_address);
 
                 // Test: seek to the beginning first
                 let control_first = control_cursor.seek(B256::ZERO).unwrap();
