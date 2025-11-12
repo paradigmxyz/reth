@@ -1283,11 +1283,11 @@ where
     }
 
     /// Returns true if the ingress policy allows processing messages from the given peer.
-    fn accepts_incoming_from(&self, peer_id: PeerId) -> bool {
+    fn accepts_incoming_from(&self, peer_id: &PeerId) -> bool {
         if self.config.ingress_policy.allows_all() {
             return true;
         }
-        let Some(peer) = self.peers.get(&peer_id) else {
+        let Some(peer) = self.peers.get(peer_id) else {
             return false;
         };
         self.config.ingress_policy.allows(peer.peer_kind())
@@ -1297,7 +1297,7 @@ where
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent<N>) {
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
-                if !self.accepts_incoming_from(peer_id) {
+                if !self.accepts_incoming_from(&peer_id) {
                     trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.ingress_policy, "Ignoring full transactions from peer blocked by ingress policy");
                     return;
                 }
@@ -1321,7 +1321,7 @@ where
                 }
             }
             NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
-                if !self.accepts_incoming_from(peer_id) {
+                if !self.accepts_incoming_from(&peer_id) {
                     trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.ingress_policy, "Ignoring transaction hashes from peer blocked by ingress policy");
                     return;
                 }
