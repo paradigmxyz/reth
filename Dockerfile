@@ -44,6 +44,9 @@ RUN cp /app/target/$BUILD_PROFILE/reth /app/reth
 FROM ubuntu AS runtime
 WORKDIR /app
 
+# Create non-root runtime user
+RUN useradd --system --home /app --shell /usr/sbin/nologin reth
+
 # Copy reth over from the build stage
 COPY --from=builder /app/reth /usr/local/bin
 
@@ -51,4 +54,5 @@ COPY --from=builder /app/reth /usr/local/bin
 COPY LICENSE-* ./
 
 EXPOSE 30303 30303/udp 9001 8545 8546
+USER reth
 ENTRYPOINT ["/usr/local/bin/reth"]
