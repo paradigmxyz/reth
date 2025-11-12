@@ -27,6 +27,10 @@ use reth_trie_parallel::{
 use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
+/// The default max targets, for limiting the number of account and storage proof targets to be
+/// fetched by a single worker.
+const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 20;
+
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
@@ -704,6 +708,10 @@ pub(super) struct MultiProofTask {
     multiproof_manager: MultiproofManager,
     /// multi proof task metrics
     metrics: MultiProofTaskMetrics,
+    /// If this number is exceeded and chunking is enabled, then this will override whether or not
+    /// there are any active workers and force chunking across workers. This is to prevent tasks
+    /// which are very long from hitting a single worker.
+    max_targets_for_chunking: usize,
 }
 
 impl MultiProofTask {
@@ -732,6 +740,7 @@ impl MultiProofTask {
                 proof_result_tx,
             ),
             metrics,
+            max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
         }
     }
 
@@ -921,11 +930,16 @@ impl MultiProofTask {
 
         let mut spawned_proof_targets = MultiProofTargets::default();
 
+        // Chunk regardless if there are many proof targets
+        let many_proof_targets =
+            not_fetched_state_update.chunking_length() > self.max_targets_for_chunking;
+
         // Only chunk if multiple account or storage workers are available to take advantage of
         // parallelism.
         let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
             1 ||
-            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
+            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1 ||
+            many_proof_targets;
 
         let mut dispatch = |hashed_state_update| {
             let proof_targets = get_proof_targets(
