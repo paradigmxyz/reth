@@ -90,7 +90,6 @@ where
         let block_number: u64 = builder.evm_mut().block().number().saturating_to();
 
         while let Some(tx) = best_txs.next(()) {
-            let tx_hash = *tx.hash();
             let interop = tx.interop_deadline();
             let tx_da_size = tx.estimated_da_size();
             let tx = tx.into_consensus();
