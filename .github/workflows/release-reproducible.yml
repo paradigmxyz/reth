@@ -1,11 +1,11 @@
-# This workflow is for building and pushing reproducible Docker images for releases.
+# This workflow is for building and pushing reproducible artifacts for releases
 
 name: release-reproducible
 
 on:
-  push:
-    tags:
-      - v*
+  workflow_run:
+    workflows: [release]
+    types: [completed]
 
 env:
   DOCKER_REPRODUCIBLE_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth-reproducible
@@ -13,23 +13,41 @@ env:
 jobs:
   extract-version:
     name: extract version
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Extract version
-        run: echo "VERSION=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_OUTPUT
+      - name: Extract version from triggering tag
         id: extract_version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the tag that points to the head SHA of the triggering workflow
+          TAG=$(gh api /repos/${{ github.repository }}/git/refs/tags \
+            --jq '.[] | select(.object.sha == "${{ github.event.workflow_run.head_sha }}") | .ref' \
+            | head -1 \
+            | sed 's|refs/tags/||')
+
+          if [ -z "$TAG" ]; then
+            echo "No tag found for SHA ${{ github.event.workflow_run.head_sha }}"
+            exit 1
+          fi
+
+          echo "VERSION=$TAG" >> $GITHUB_OUTPUT
     outputs:
       VERSION: ${{ steps.extract_version.outputs.VERSION }}
 
   build-reproducible:
-    name: build and push reproducible image
+    name: build and push reproducible image and binaries
     runs-on: ubuntu-latest
-    needs: extract-version
+    needs: [extract-version]
     permissions:
       packages: write
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.extract-version.outputs.VERSION }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -40,12 +58,37 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push reproducible image
+      - name: Extract Rust version
+        id: rust_version
+        run: |
+          RUST_TOOLCHAIN=$(rustc --version | cut -d' ' -f2)
+          echo "RUST_TOOLCHAIN=$RUST_TOOLCHAIN" >> $GITHUB_OUTPUT
+
+      - name: Build reproducible artifacts
+        uses: docker/build-push-action@v6
+        id: docker_build
+        with:
+          context: .
+          file: ./Dockerfile.reproducible
+          build-args: |
+            RUST_TOOLCHAIN=${{ steps.rust_version.outputs.RUST_TOOLCHAIN }}
+            VERSION=${{ needs.extract-version.outputs.VERSION }}
+          target: artifacts
+          outputs: type=local,dest=./docker-artifacts
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+
+      - name: Build and push final image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.reproducible
           push: true
+          build-args: |
+            RUST_TOOLCHAIN=${{ steps.rust_version.outputs.RUST_TOOLCHAIN }}
+            VERSION=${{ needs.extract-version.outputs.VERSION }}
           tags: |
             ${{ env.DOCKER_REPRODUCIBLE_IMAGE_NAME }}:${{ needs.extract-version.outputs.VERSION }}
             ${{ env.DOCKER_REPRODUCIBLE_IMAGE_NAME }}:latest
@@ -54,3 +97,30 @@ jobs:
           provenance: false
         env:
           DOCKER_BUILD_RECORD_UPLOAD: false
+
+      - name: Prepare artifacts from Docker build
+        run: |
+          mkdir reproducible-artifacts
+          cp docker-artifacts/reth reproducible-artifacts/reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu
+          cp docker-artifacts/*.deb reproducible-artifacts/reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu-reproducible.deb
+
+      - name: Configure GPG and create artifacts
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          export GPG_TTY=$(tty)
+          echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
+
+          cd reproducible-artifacts
+          tar -czf reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu --remove-files
+          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
+          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu-reproducible.deb
+
+      - name: Upload reproducible artifacts to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ needs.extract-version.outputs.VERSION }} \
+            reproducible-artifacts/*
+
