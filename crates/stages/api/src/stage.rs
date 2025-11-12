@@ -80,10 +80,12 @@ impl ExecInput {
     where
         Provider: StaticFileProviderFactory + BlockReader,
     {
-        let lowest_transactions_block = provider
+        let Some(lowest_transactions_block) = provider
             .static_file_provider()
             .get_lowest_static_file_block(StaticFileSegment::Transactions)
-            .unwrap_or_default();
+        else {
+            return Ok((0..0, 0..=0, true));
+        };
 
         let start_block = self.next_block().max(lowest_transactions_block);
         let target_block = self.target();
@@ -284,3 +286,164 @@ pub trait StageExt<Provider>: Stage<Provider> {
 }
 
 impl<Provider, S: Stage<Provider> + ?Sized> StageExt<Provider> for S {}
+
+#[cfg(test)]
+mod tests {
+    use reth_chainspec::MAINNET;
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
+    use reth_db_api::{models::StoredBlockBodyIndices, tables, transaction::DbTxMut};
+    use reth_provider::{
+        test_utils::MockNodeTypesWithDB, ProviderFactory, StaticFileProviderBuilder,
+        StaticFileProviderFactory, StaticFileSegment,
+    };
+    use reth_stages_types::StageCheckpoint;
+    use reth_testing_utils::generators::{self, random_signed_tx};
+
+    use crate::ExecInput;
+
+    #[test]
+    fn test_exec_input_next_block_range_with_transaction_threshold() {
+        let mut rng = generators::rng();
+        let provider_factory = ProviderFactory::<MockNodeTypesWithDB>::new(
+            create_test_rw_db(),
+            MAINNET.clone(),
+            StaticFileProviderBuilder::read_write(create_test_static_files_dir().0.keep())
+                .unwrap()
+                .with_blocks_per_file(1)
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+
+        // Without checkpoint, without transactions in static files
+        {
+            let exec_input = ExecInput { target: Some(100), checkpoint: None };
+
+            let (tx_range, block_range, is_final_range) = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(tx_range, 0..0);
+            assert_eq!(block_range, 0..=0);
+            assert!(is_final_range);
+        }
+
+        // With checkpoint at block 10, without transactions in static files
+        {
+            let exec_input =
+                ExecInput { target: Some(1), checkpoint: Some(StageCheckpoint::new(10)) };
+
+            let (tx_range, block_range, is_final_range) = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(tx_range, 0..0);
+            assert_eq!(block_range, 0..=0);
+            assert!(is_final_range);
+        }
+
+        // Without checkpoint, with transactions in static files starting from block 1
+        {
+            let exec_input = ExecInput { target: Some(1), checkpoint: None };
+
+            let mut provider_rw = provider_factory.provider_rw().unwrap();
+            provider_rw
+                .tx_mut()
+                .put::<tables::BlockBodyIndices>(
+                    1,
+                    StoredBlockBodyIndices { first_tx_num: 0, tx_count: 2 },
+                )
+                .unwrap();
+            let mut writer =
+                provider_rw.get_static_file_writer(0, StaticFileSegment::Transactions).unwrap();
+            writer.increment_block(0).unwrap();
+            writer.increment_block(1).unwrap();
+            writer.append_transaction(0, &random_signed_tx(&mut rng)).unwrap();
+            writer.append_transaction(1, &random_signed_tx(&mut rng)).unwrap();
+            drop(writer);
+            provider_rw.commit().unwrap();
+
+            let (tx_range, block_range, is_final_range) = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(tx_range, 0..2);
+            assert_eq!(block_range, 1..=1);
+            assert!(is_final_range);
+        }
+
+        // With checkpoint at block 1, with transactions in static files starting from block 1
+        {
+            let exec_input =
+                ExecInput { target: Some(2), checkpoint: Some(StageCheckpoint::new(1)) };
+
+            let mut provider_rw = provider_factory.provider_rw().unwrap();
+            provider_rw
+                .tx_mut()
+                .put::<tables::BlockBodyIndices>(
+                    2,
+                    StoredBlockBodyIndices { first_tx_num: 2, tx_count: 1 },
+                )
+                .unwrap();
+            let mut writer =
+                provider_rw.get_static_file_writer(1, StaticFileSegment::Transactions).unwrap();
+            writer.increment_block(2).unwrap();
+            writer.append_transaction(2, &random_signed_tx(&mut rng)).unwrap();
+            drop(writer);
+            provider_rw.commit().unwrap();
+
+            let (tx_range, block_range, is_final_range) = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(tx_range, 2..3);
+            assert_eq!(block_range, 2..=2);
+            assert!(is_final_range);
+        }
+
+        // Without checkpoint, with transactions in static files starting from block 2
+        {
+            let exec_input = ExecInput { target: Some(2), checkpoint: None };
+
+            provider_factory
+                .static_file_provider()
+                .delete_jar(StaticFileSegment::Transactions, 0)
+                .unwrap();
+            provider_factory
+                .static_file_provider()
+                .delete_jar(StaticFileSegment::Transactions, 1)
+                .unwrap();
+
+            let (tx_range, block_range, is_final_range) = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(tx_range, 2..3);
+            assert_eq!(block_range, 2..=2);
+            assert!(is_final_range);
+        }
+
+        // Without checkpoint, with transactions in static files starting from block 2
+        {
+            let exec_input =
+                ExecInput { target: Some(3), checkpoint: Some(StageCheckpoint::new(2)) };
+
+            let mut provider_rw = provider_factory.provider_rw().unwrap();
+            provider_rw
+                .tx_mut()
+                .put::<tables::BlockBodyIndices>(
+                    3,
+                    StoredBlockBodyIndices { first_tx_num: 3, tx_count: 1 },
+                )
+                .unwrap();
+            let mut writer =
+                provider_rw.get_static_file_writer(1, StaticFileSegment::Transactions).unwrap();
+            writer.increment_block(3).unwrap();
+            writer.append_transaction(3, &random_signed_tx(&mut rng)).unwrap();
+            drop(writer);
+            provider_rw.commit().unwrap();
+
+            let (tx_range, block_range, is_final_range) = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(tx_range, 3..4);
+            assert_eq!(block_range, 3..=3);
+            assert!(is_final_range);
+        }
+    }
+}
