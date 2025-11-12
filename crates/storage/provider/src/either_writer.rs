@@ -133,6 +133,13 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
             Self::StaticFile(writer) => writer.increment_block(expected_block_number),
         }
     }
+
+    pub fn ensure_at_block(&mut self, block_number: BlockNumber) -> ProviderResult<()> {
+        match self {
+            Self::Database(_) => Ok(()),
+            Self::StaticFile(writer) => writer.ensure_at_block(block_number),
+        }
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>

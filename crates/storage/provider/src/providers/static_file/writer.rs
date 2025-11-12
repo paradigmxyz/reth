@@ -13,6 +13,7 @@ use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive, StaticFileSeg
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
 use std::{
     borrow::Borrow,
+    cmp::Ordering,
     fmt::Debug,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
@@ -337,6 +338,30 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             });
 
         self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
+    }
+
+    pub fn ensure_at_block(&mut self, block_number: BlockNumber) -> ProviderResult<()> {
+        let highest_block = self
+            .reader()
+            .get_highest_static_file_block(self.writer.user_header().segment())
+            .unwrap_or_default();
+        match highest_block.cmp(&block_number) {
+            Ordering::Less => {
+                for block in highest_block..=block_number {
+                    self.increment_block(block)?;
+                }
+            }
+            Ordering::Equal => {}
+            Ordering::Greater => {
+                return Err(ProviderError::UnexpectedStaticFileBlockNumber(
+                    self.writer.user_header().segment(),
+                    highest_block,
+                    block_number,
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current static file,
