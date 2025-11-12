@@ -43,6 +43,9 @@ auto_impl.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+reth-chainspec.workspace = true
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-db-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["sync", "rt-multi-thread"] }
 tokio-stream.workspace = true
@@ -50,9 +53,12 @@ reth-testing-utils.workspace = true
 
 [features]
 test-utils = [
+    "reth-chainspec/test-utils",
     "reth-consensus/test-utils",
+    "reth-db-api/test-utils",
+    "reth-db/test-utils",
     "reth-network-p2p/test-utils",
+    "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-stages-types/test-utils",
-    "reth-primitives-traits/test-utils",
 ]
