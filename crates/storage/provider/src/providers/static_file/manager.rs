@@ -1205,17 +1205,34 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 "Unwinding static file segment."
             );
             let mut writer = self.latest_writer(segment)?;
-            if segment.is_headers() {
-                // TODO(joshie): is_block_meta
-                writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
-            } else if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
-                // todo joshie: is querying block_body_indices a potential issue once bbi is moved
-                // to sf as well
-                let number = highest_static_file_entry - block.last_tx_num();
-                if segment.is_receipts() {
-                    writer.prune_receipts(number, checkpoint_block_number)?;
-                } else {
-                    writer.prune_transactions(number, checkpoint_block_number)?;
+            match segment {
+                StaticFileSegment::Headers => {
+                    // TODO(joshie): is_block_meta
+                    writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
+                }
+                StaticFileSegment::Transactions => {
+                    if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
+                        // todo joshie: is querying block_body_indices a potential issue once bbi is
+                        // moved to sf as well
+                        let number = highest_static_file_entry - block.last_tx_num();
+                        writer.prune_transactions(number, checkpoint_block_number)?;
+                    }
+                }
+                StaticFileSegment::Receipts => {
+                    if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
+                        // todo joshie: is querying block_body_indices a potential issue once bbi is
+                        // moved to sf as well
+                        let number = highest_static_file_entry - block.last_tx_num();
+                        writer.prune_receipts(number, checkpoint_block_number)?;
+                    }
+                }
+                StaticFileSegment::TransactionSenders => {
+                    if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
+                        // todo joshie: is querying block_body_indices a potential issue once bbi is
+                        // moved to sf as well
+                        let number = highest_static_file_entry - block.last_tx_num();
+                        writer.prune_transaction_senders(number, checkpoint_block_number)?;
+                    }
                 }
             }
             writer.commit()?;
