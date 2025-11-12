@@ -2,16 +2,12 @@
 #![allow(unused)]
 #![allow(clippy::too_many_arguments)]
 
-use alloy_network::{Ethereum, EthereumWallet, NetworkWallet, TransactionBuilder};
+use alloy_network::{Ethereum, EthereumWallet, NetworkWallet};
 use alloy_primitives::{Address, TxHash, U256};
 use futures_util::StreamExt;
 use reth_ethereum::{
     node::api::{FullNodeComponents, NodeTypes},
-    pool::{
-        AddedTransactionOutcome, PoolTransaction, TransactionEvent, TransactionOrigin,
-        TransactionPool,
-    },
-    primitives::SignerRecoverable,
+    pool::{AddedTransactionOutcome, TransactionEvent, TransactionOrigin, TransactionPool},
     rpc::eth::primitives::TransactionRequest,
     EthPrimitives, TransactionSigned,
 };
