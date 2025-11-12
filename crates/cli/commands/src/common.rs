@@ -99,7 +99,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let (db, sfp) = match access {
             AccessRights::RW => (
                 Arc::new(init_db(db_path, self.db.database_args())?),
-                StaticFileProvider::read_write(sf_path)?,
+                StaticFileProvider::read_write(sf_path, self.db.enable_v2_static_files)?,
             ),
             AccessRights::RO | AccessRights::RoInconsistent => (
                 Arc::new(open_db_read_only(&db_path, self.db.database_args())?),

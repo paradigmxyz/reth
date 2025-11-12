@@ -308,7 +308,8 @@ mod tests {
         // We recreate the static file provider, since consistency heals are done on fetching the
         // writer for the first time.
         let mut static_file_provider = db.factory.static_file_provider();
-        static_file_provider = StaticFileProvider::read_write(static_file_provider.path()).unwrap();
+        static_file_provider =
+            StaticFileProvider::read_write(static_file_provider.path(), false).unwrap();
 
         // Simulate corruption by removing `prune_count` rows from the data file without updating
         // its offset list and configuration.
@@ -326,7 +327,8 @@ mod tests {
         // We recreate the static file provider, since consistency heals are done on fetching the
         // writer for the first time.
         let mut static_file_provider = db.factory.static_file_provider();
-        static_file_provider = StaticFileProvider::read_write(static_file_provider.path()).unwrap();
+        static_file_provider =
+            StaticFileProvider::read_write(static_file_provider.path(), false).unwrap();
         assert!(matches!(
             static_file_provider
                 .check_consistency(&db.factory.database_provider_ro().unwrap()),

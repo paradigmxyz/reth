@@ -123,6 +123,12 @@ pub enum ProviderError {
     /// Trying to insert data from an unexpected block number.
     #[error("trying to append row to {_0} at index #{_1} but expected index #{_2}")]
     UnexpectedStaticFileTxNumber(StaticFileSegment, TxNumber, TxNumber),
+    /// Changeset static file is corrupted, and does not have offsets for changesets in each block
+    #[error("changeset static file is corrupted, missing offsets for changesets in each block")]
+    CorruptedChangeSetStaticFile,
+    /// Error when constructing hashed post state reverts
+    #[error("Unbounded start is unsupported in from_reverts")]
+    UnboundedStartUnsupported,
     /// Static File Provider was initialized as read-only.
     #[error("cannot get a writer on a read-only environment.")]
     ReadOnlyStaticFileAccess,

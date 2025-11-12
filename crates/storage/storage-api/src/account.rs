@@ -4,7 +4,7 @@ use alloc::{
 };
 use alloy_primitives::{Address, BlockNumber};
 use auto_impl::auto_impl;
-use core::ops::{RangeBounds, RangeInclusive};
+use core::ops::{Range, RangeInclusive};
 use reth_db_models::AccountBeforeTx;
 use reth_primitives_traits::Account;
 use reth_storage_errors::provider::ProviderResult;
@@ -24,7 +24,7 @@ pub trait AccountExtReader {
     /// Iterate over account changesets and return all account address that were changed.
     fn changed_accounts_with_range(
         &self,
-        _range: impl RangeBounds<BlockNumber>,
+        _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeSet<Address>>;
 
     /// Get basic account information for multiple accounts. A more efficient version than calling
@@ -63,4 +63,12 @@ pub trait ChangeSetReader {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>>;
+
+    /// Get all account changesets in a range of blocks.
+    ///
+    /// Returns a vector of (`block_number`, changeset) pairs.
+    fn account_changesets_range(
+        &self,
+        range: Range<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>>;
 }
