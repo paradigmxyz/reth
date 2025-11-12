@@ -18,6 +18,26 @@ pub struct ExecInput {
     pub checkpoint: Option<StageCheckpoint>,
 }
 
+/// Return type for [`ExecInput::next_block_range_with_threshold`].
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct BlockRangeOutput {
+    /// The block range to execute.
+    pub block_range: RangeInclusive<BlockNumber>,
+    /// Whether this is the final range to execute.
+    pub is_final_range: bool,
+}
+
+/// Return type for [`ExecInput::next_block_range_with_transaction_threshold`].
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct TransactionRangeOutput {
+    /// The transaction range to execute.
+    pub tx_range: Range<TxNumber>,
+    /// The block range to execute.
+    pub block_range: RangeInclusive<BlockNumber>,
+    /// Whether this is the final range to execute.
+    pub is_final_range: bool,
+}
+
 impl ExecInput {
     /// Return the checkpoint of the stage or default.
     pub fn checkpoint(&self) -> StageCheckpoint {
@@ -43,8 +63,7 @@ impl ExecInput {
 
     /// Return next block range that needs to be executed.
     pub fn next_block_range(&self) -> RangeInclusive<BlockNumber> {
-        let (range, _) = self.next_block_range_with_threshold(u64::MAX);
-        range
+        self.next_block_range_with_threshold(u64::MAX).block_range
     }
 
     /// Return true if this is the first block range to execute.
@@ -53,11 +72,7 @@ impl ExecInput {
     }
 
     /// Return the next block range to execute.
-    /// Return pair of the block range and if this is final block range.
-    pub fn next_block_range_with_threshold(
-        &self,
-        threshold: u64,
-    ) -> (RangeInclusive<BlockNumber>, bool) {
+    pub fn next_block_range_with_threshold(&self, threshold: u64) -> BlockRangeOutput {
         let current_block = self.checkpoint();
         let start = current_block.block_number + 1;
         let target = self.target();
@@ -65,7 +80,7 @@ impl ExecInput {
         let end = min(target, current_block.block_number.saturating_add(threshold));
 
         let is_final_range = end == target;
-        (start..=end, is_final_range)
+        BlockRangeOutput { block_range: start..=end, is_final_range }
     }
 
     /// Return the next block range determined the number of transactions within it.
@@ -76,7 +91,7 @@ impl ExecInput {
         &self,
         provider: &Provider,
         tx_threshold: u64,
-    ) -> Result<(Range<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError>
+    ) -> Result<TransactionRangeOutput, StageError>
     where
         Provider: StaticFileProviderFactory + BlockReader,
     {
@@ -84,7 +99,11 @@ impl ExecInput {
         let Some(lowest_transactions_block) =
             provider.static_file_provider().get_lowest_range_start(StaticFileSegment::Transactions)
         else {
-            return Ok((0..0, 0..=0, true));
+            return Ok(TransactionRangeOutput {
+                tx_range: 0..0,
+                block_range: 0..=0,
+                is_final_range: true,
+            });
         };
 
         // We can only process transactions that have associated static files, so we cap the start
@@ -110,7 +129,11 @@ impl ExecInput {
 
         if all_tx_cnt == 0 {
             // if there is no more transaction return back.
-            return Ok((first_tx_num..first_tx_num, start_block..=target_block, true))
+            return Ok(TransactionRangeOutput {
+                tx_range: first_tx_num..first_tx_num,
+                block_range: start_block..=target_block,
+                is_final_range: true,
+            })
         }
 
         // get block of this tx
@@ -131,7 +154,11 @@ impl ExecInput {
         };
 
         let tx_range = first_tx_num..next_tx_num;
-        Ok((tx_range, start_block..=end_block, is_final_range))
+        Ok(TransactionRangeOutput {
+            tx_range,
+            block_range: start_block..=end_block,
+            is_final_range,
+        })
     }
 }
 
@@ -325,12 +352,12 @@ mod tests {
         {
             let exec_input = ExecInput { target: Some(100), checkpoint: None };
 
-            let (tx_range, block_range, is_final_range) = exec_input
+            let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
                 .unwrap();
-            assert_eq!(tx_range, 0..0);
-            assert_eq!(block_range, 0..=0);
-            assert!(is_final_range);
+            assert_eq!(range_output.tx_range, 0..0);
+            assert_eq!(range_output.block_range, 0..=0);
+            assert!(range_output.is_final_range);
         }
 
         // With checkpoint at block 10, without transactions in static files
@@ -338,12 +365,12 @@ mod tests {
             let exec_input =
                 ExecInput { target: Some(1), checkpoint: Some(StageCheckpoint::new(10)) };
 
-            let (tx_range, block_range, is_final_range) = exec_input
+            let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
                 .unwrap();
-            assert_eq!(tx_range, 0..0);
-            assert_eq!(block_range, 0..=0);
-            assert!(is_final_range);
+            assert_eq!(range_output.tx_range, 0..0);
+            assert_eq!(range_output.block_range, 0..=0);
+            assert!(range_output.is_final_range);
         }
 
         // Without checkpoint, with transactions in static files starting from block 1
@@ -367,12 +394,12 @@ mod tests {
             drop(writer);
             provider_rw.commit().unwrap();
 
-            let (tx_range, block_range, is_final_range) = exec_input
+            let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
                 .unwrap();
-            assert_eq!(tx_range, 0..2);
-            assert_eq!(block_range, 1..=1);
-            assert!(is_final_range);
+            assert_eq!(range_output.tx_range, 0..2);
+            assert_eq!(range_output.block_range, 1..=1);
+            assert!(range_output.is_final_range);
         }
 
         // With checkpoint at block 1, with transactions in static files starting from block 1
@@ -395,12 +422,12 @@ mod tests {
             drop(writer);
             provider_rw.commit().unwrap();
 
-            let (tx_range, block_range, is_final_range) = exec_input
+            let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
                 .unwrap();
-            assert_eq!(tx_range, 2..3);
-            assert_eq!(block_range, 2..=2);
-            assert!(is_final_range);
+            assert_eq!(range_output.tx_range, 2..3);
+            assert_eq!(range_output.block_range, 2..=2);
+            assert!(range_output.is_final_range);
         }
 
         // Without checkpoint, with transactions in static files starting from block 2
@@ -416,12 +443,12 @@ mod tests {
                 .delete_jar(StaticFileSegment::Transactions, 1)
                 .unwrap();
 
-            let (tx_range, block_range, is_final_range) = exec_input
+            let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
                 .unwrap();
-            assert_eq!(tx_range, 2..3);
-            assert_eq!(block_range, 2..=2);
-            assert!(is_final_range);
+            assert_eq!(range_output.tx_range, 2..3);
+            assert_eq!(range_output.block_range, 2..=2);
+            assert!(range_output.is_final_range);
         }
 
         // Without checkpoint, with transactions in static files starting from block 2
@@ -444,12 +471,12 @@ mod tests {
             drop(writer);
             provider_rw.commit().unwrap();
 
-            let (tx_range, block_range, is_final_range) = exec_input
+            let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
                 .unwrap();
-            assert_eq!(tx_range, 3..4);
-            assert_eq!(block_range, 3..=3);
-            assert!(is_final_range);
+            assert_eq!(range_output.tx_range, 3..4);
+            assert_eq!(range_output.block_range, 3..=3);
+            assert!(range_output.is_final_range);
         }
     }
 }
