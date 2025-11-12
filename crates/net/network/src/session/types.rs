@@ -11,7 +11,7 @@ use std::{
     },
 };
 
-/// Information about the range of blocks available from a peer.
+/// Information about the range of full blocks available from a peer.
 ///
 /// This represents the announced `eth69`
 /// [`BlockRangeUpdate`] of a peer.
@@ -45,12 +45,12 @@ impl BlockRangeInfo {
         RangeInclusive::new(earliest, latest)
     }
 
-    /// Returns the earliest block number available from the peer.
+    /// Returns the earliest full block number available from the peer.
     pub fn earliest(&self) -> u64 {
         self.inner.earliest.load(Ordering::Relaxed)
     }
 
-    /// Returns the latest block number available from the peer.
+    /// Returns the latest full block number available from the peer.
     pub fn latest(&self) -> u64 {
         self.inner.latest.load(Ordering::Relaxed)
     }
@@ -58,6 +58,11 @@ impl BlockRangeInfo {
     /// Returns the latest block hash available from the peer.
     pub fn latest_hash(&self) -> B256 {
         *self.inner.latest_hash.read()
+    }
+
+    /// Returns true if the peer has the full history available.
+    pub fn has_full_history(&self) -> bool {
+        self.earliest() == 0
     }
 
     /// Updates the range information.
