@@ -10,7 +10,7 @@ use std::{
 use crate::version::version_metadata;
 use clap::Args;
 use reth_chainspec::EthChainSpec;
-use reth_cli_util::{get_secret_key, parse_secret_key_from_hex, load_secret_key::SecretKeyError};
+use reth_cli_util::{get_secret_key, load_secret_key::SecretKeyError};
 use reth_config::Config;
 use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
@@ -90,7 +90,7 @@ pub struct NetworkArgs {
     /// This will also deterministically set the peer ID. Cannot be used together with
     /// `--p2p-secret-key`.
     #[arg(long, value_name = "HEX", conflicts_with = "p2p_secret_key")]
-    pub p2p_secret_key_hex: Option<String>,
+    pub p2p_secret_key_hex: Option<B256>,
 
     /// Do not persist peers.
     #[arg(long, verbatim_doc_comment)]
@@ -355,16 +355,16 @@ impl NetworkArgs {
 
     /// Load the p2p secret key from the provided options.
     ///
-    /// If `p2p_secret_key_hex` is provided, it will be parsed directly.
+    /// If `p2p_secret_key_hex` is provided, it will be used directly.
     /// If `p2p_secret_key` is provided, it will be loaded from the file.
     /// If neither is provided, the `default_secret_key_path` will be used.
     pub fn secret_key(
         &self,
         default_secret_key_path: PathBuf,
     ) -> Result<SecretKey, SecretKeyError> {
-        if let Some(hex) = &self.p2p_secret_key_hex {
-            // Parse hex string directly
-            parse_secret_key_from_hex(hex)
+        if let Some(b256) = &self.p2p_secret_key_hex {
+            // Use the B256 value directly (already validated as 32 bytes)
+            SecretKey::from_slice(b256.as_slice()).map_err(SecretKeyError::SecretKeyDecodeError)
         } else {
             // Load from file (either provided path or default)
             let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
@@ -729,7 +729,8 @@ mod tests {
         ])
         .args;
         
-        assert_eq!(args.p2p_secret_key_hex, Some(hex.to_string()));
+        let expected: B256 = hex.parse().unwrap();
+        assert_eq!(args.p2p_secret_key_hex, Some(expected));
         assert_eq!(args.p2p_secret_key, None);
     }
 
@@ -743,7 +744,8 @@ mod tests {
         ])
         .args;
         
-        assert_eq!(args.p2p_secret_key_hex, Some(hex.to_string()));
+        let expected: B256 = hex.parse().unwrap();
+        assert_eq!(args.p2p_secret_key_hex, Some(expected));
         assert_eq!(args.p2p_secret_key, None);
     }
 
