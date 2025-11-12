@@ -19,7 +19,7 @@ use reth_discv5::{
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
-        config::TransactionPropagationKind,
+        config::{TransactionIngressPolicy, TransactionPropagationKind},
         constants::{
             tx_fetcher::{
                 DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
@@ -162,6 +162,12 @@ pub struct NetworkArgs {
     #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
     pub tx_propagation_policy: TransactionPropagationKind,
 
+    /// Transaction ingress policy
+    ///
+    /// Determines which peers' transactions are accepted over P2P.
+    #[arg(long = "tx-ingress-policy", default_value_t = TransactionIngressPolicy::All)]
+    pub tx_ingress_policy: TransactionIngressPolicy,
+
     /// Disable transaction pool gossip
     ///
     /// Disables gossiping of transactions in the mempool to peers. This can be omitted for
@@ -230,6 +236,7 @@ impl NetworkArgs {
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             propagation_mode: self.propagation_mode,
+            ingress_policy: self.tx_ingress_policy,
         }
     }
 
@@ -373,6 +380,7 @@ impl Default for NetworkArgs {
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
             tx_propagation_policy: TransactionPropagationKind::default(),
+            tx_ingress_policy: TransactionIngressPolicy::default(),
             disable_tx_gossip: false,
             propagation_mode: TransactionPropagationMode::Sqrt,
             required_block_hashes: vec![],
