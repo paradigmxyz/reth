@@ -41,11 +41,12 @@ pub trait ValueEncoder {
     ///
     /// # Arguments
     ///
+    /// * `key` - The key the value was stored at in the DB
     /// * `value` - The value to encode
     ///
     /// The returned future will be called as late as possible in the algorithm to maximize
     /// the time available for parallel computation (e.g., storage root calculation).
-    fn encoder_fut(&self, value: Self::Value) -> Self::Fut;
+    fn encoder_fut(&self, key: B256, value: Self::Value) -> Self::Fut;
 }
 
 /// An encoder for storage slot values.
@@ -70,7 +71,7 @@ impl ValueEncoder for StorageValueEncoder {
     type Value = U256;
     type Fut = StorageValueEncoderFut;
 
-    fn encoder_fut(&self, value: Self::Value) -> Self::Fut {
+    fn encoder_fut(&self, _key: B256, value: Self::Value) -> Self::Fut {
         StorageValueEncoderFut(value)
     }
 }
@@ -147,12 +148,10 @@ impl<P> ValueEncoder for SyncAccountValueEncoder<P>
 where
     P: TrieCursorFactory + HashedCursorFactory,
 {
-    type Value = (B256, Account);
+    type Value = Account;
     type Fut = SyncAccountValueEncoderFut<P>;
 
-    fn encoder_fut(&self, value: Self::Value) -> Self::Fut {
-        let (hashed_address, account) = value;
-
+    fn encoder_fut(&self, hashed_address: B256, account: Self::Value) -> Self::Fut {
         // Return a future that will compute the storage root when encode() is called
         SyncAccountValueEncoderFut { provider: self.provider.clone(), hashed_address, account }
     }
