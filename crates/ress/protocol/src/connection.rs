@@ -124,10 +124,11 @@ where
     }
 
     fn on_block_bodies_request(&self, request: Vec<B256>) -> Vec<BlockBody> {
-        match self.provider.block_bodies(request.clone()) {
+        let req_len = request.len();
+        match self.provider.block_bodies(request) {
             Ok(bodies) => bodies,
             Err(error) => {
-                trace!(target: "ress::net::connection", peer_id = %self.peer_id, ?request, %error, "error retrieving block bodies");
+                trace!(target: "ress::net::connection", peer_id = %self.peer_id, len = req_len, %error, "error retrieving block bodies");
                 Default::default()
             }
         }
