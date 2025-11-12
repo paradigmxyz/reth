@@ -23,6 +23,13 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
         self.chain().id()
     }
 
+    /// Returns the name of the chain.
+    ///
+    /// Defaults to the string representation of the chain.
+    fn name(&self) -> String {
+        self.chain().to_string()
+    }
+
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams;
 
