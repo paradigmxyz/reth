@@ -5,11 +5,13 @@ use alloy_eips::BlockId;
 use alloy_json_rpc::{RpcRecv, RpcSend};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_client::RpcClient;
+use futures::{stream::FuturesOrdered, StreamExt};
+use jsonrpsee::{types::ErrorCode, BatchResponseBuilder};
 use jsonrpsee_core::{
-    middleware::{Batch, Notification, RpcServiceT},
+    middleware::{Batch, BatchEntry, Notification, RpcServiceT},
     server::MethodResponse,
 };
-use jsonrpsee_types::{Params, Request};
+use jsonrpsee_types::{ErrorObject, Id, Params, Request};
 use reth_storage_api::{BlockReaderIdExt, TransactionsProvider};
 use std::{future::Future, sync::Arc};
 use tracing::{debug, warn};
@@ -122,8 +124,14 @@ impl<S, P> HistoricalRpcService<S, P> {
 
 impl<S, P> RpcServiceT for HistoricalRpcService<S, P>
 where
-    S: RpcServiceT<MethodResponse = MethodResponse> + Send + Sync + Clone + 'static,
-
+    S: RpcServiceT<
+            MethodResponse = MethodResponse,
+            BatchResponse = MethodResponse,
+            NotificationResponse = MethodResponse,
+        > + Send
+        + Sync
+        + Clone
+        + 'static,
     P: BlockReaderIdExt + TransactionsProvider + Send + Sync + Clone + 'static,
 {
     type MethodResponse = S::MethodResponse;
@@ -145,8 +153,95 @@ where
         })
     }
 
-    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
-        self.inner.batch(req)
+    fn batch<'a>(
+        &self,
+        mut req: Batch<'a>,
+    ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+        use futures::future::{BoxFuture, FutureExt};
+
+        let inner_service = self.inner.clone();
+        let historical = self.historical.clone();
+
+        async move {
+            let mut needs_forwarding = false;
+            for entry in req.iter_mut() {
+                if let Ok(BatchEntry::Call(call)) = entry &&
+                    historical.should_forward_request(call)
+                {
+                    needs_forwarding = true;
+                    break;
+                }
+            }
+
+            if !needs_forwarding {
+                return inner_service.batch(req).await;
+            }
+
+            let entries: Vec<_> = req.into_iter().collect();
+            let mut forward_decisions = Vec::with_capacity(entries.len());
+
+            for entry in &entries {
+                if let Ok(BatchEntry::Call(call)) = entry {
+                    forward_decisions.push(historical.should_forward_request(call));
+                } else {
+                    forward_decisions.push(false);
+                }
+            }
+
+            let max_response_size = usize::MAX;
+            let mut batch_response = BatchResponseBuilder::new_with_limit(max_response_size);
+
+            let mut pending_calls: FuturesOrdered<BoxFuture<'a, MethodResponse>> = entries
+                .into_iter()
+                .zip(forward_decisions)
+                .filter_map(|(entry, should_forward)| match entry {
+                    Ok(BatchEntry::Call(call)) => {
+                        if should_forward {
+                            let historical = historical.clone();
+                            Some(
+                                async move {
+                                    historical.forward_to_historical(&call).await.unwrap_or_else(
+                                        || {
+                                            MethodResponse::error(
+                                        call.id.clone(),
+                                        ErrorObject::borrowed(
+                                            ErrorCode::InternalError.code(),
+                                            "Failed to forward request to historical endpoint",
+                                            None,
+                                        ),
+                                    )
+                                        },
+                                    )
+                                }
+                                .boxed(),
+                            )
+                        } else {
+                            Some(inner_service.call(call).boxed())
+                        }
+                    }
+                    Ok(BatchEntry::Notification(_n)) => None,
+                    Err(_err) => Some(
+                        async move {
+                            MethodResponse::error(
+                                Id::Null,
+                                ErrorObject::from(ErrorCode::InvalidRequest),
+                            )
+                        }
+                        .boxed(),
+                    ),
+                })
+                .collect();
+
+            while let Some(response) = pending_calls.next().await {
+                if let Err(too_large) = batch_response.append(response) {
+                    let mut error_batch = BatchResponseBuilder::new_with_limit(1);
+                    let _ = error_batch.append(too_large);
+                    return MethodResponse::from_batch(error_batch.finish());
+                }
+            }
+
+            MethodResponse::from_batch(batch_response.finish())
+        }
     }
 
     fn notification<'a>(
@@ -171,6 +266,17 @@ impl<P> HistoricalRpcInner<P>
 where
     P: BlockReaderIdExt + TransactionsProvider + Send + Sync + Clone,
 {
+    /// Checks if a request should be forwarded to the historical endpoint (synchronous check).
+    fn should_forward_request(&self, req: &Request<'_>) -> bool {
+        match req.method_name() {
+            "debug_traceTransaction" |
+            "eth_getTransactionByHash" |
+            "eth_getTransactionReceipt" |
+            "eth_getRawTransactionByHash" => self.should_forward_transaction(req),
+            method => self.should_forward_block_request(method, req),
+        }
+    }
+
     /// Checks if a request should be forwarded to the historical endpoint and returns
     /// the response if it was forwarded.
     async fn maybe_forward_request(&self, req: &Request<'_>) -> Option<MethodResponse> {
