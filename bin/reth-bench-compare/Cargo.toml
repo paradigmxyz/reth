@@ -24,6 +24,7 @@ reth-tracing.workspace = true
 reth-chainspec.workspace = true
 
 # alloy
+alloy-consensus.workspace = true
 alloy-provider = { workspace = true, features = ["reqwest-rustls-tls"], default-features = false }
 alloy-rpc-types-eth.workspace = true
 alloy-primitives.workspace = true
