@@ -18,6 +18,10 @@ pub struct StaticFilesArgs {
     /// Number of blocks per file for the receipts segment.
     #[arg(long = "static-files.blocks-per-file.receipts")]
     pub blocks_per_file_receipts: Option<u64>,
+
+    /// Whether receipts should be stored in static files.
+    #[arg(long = "static-files.receipts", default_value = "false", hide = true)]
+    pub receipts: bool,
 }
 
 impl StaticFilesArgs {
