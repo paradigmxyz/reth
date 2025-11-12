@@ -314,16 +314,20 @@ mod tests {
 
                 // Append transaction/receipt if there's still a transaction count to append
                 if tx_count > 0 {
-                    if segment.is_receipts() {
-                        // Used as ID for validation
-                        receipt.cumulative_gas_used = *next_tx_num;
-                        writer.append_receipt(*next_tx_num, &receipt).unwrap();
-                    } else {
-                        // Used as ID for validation
-                        tx.nonce = *next_tx_num;
-                        let tx: TransactionSigned =
-                            tx.clone().into_signed(Signature::test_signature()).into();
-                        writer.append_transaction(*next_tx_num, &tx).unwrap();
+                    match segment {
+                        StaticFileSegment::Headers => panic!("non tx based segment"),
+                        StaticFileSegment::Transactions => {
+                            // Used as ID for validation
+                            tx.nonce = *next_tx_num;
+                            let tx: TransactionSigned =
+                                tx.clone().into_signed(Signature::test_signature()).into();
+                            writer.append_transaction(*next_tx_num, &tx).unwrap();
+                        }
+                        StaticFileSegment::Receipts => {
+                            // Used as ID for validation
+                            receipt.cumulative_gas_used = *next_tx_num;
+                            writer.append_receipt(*next_tx_num, &receipt).unwrap();
+                        }
                     }
                     *next_tx_num += 1;
                     tx_count -= 1;
@@ -419,10 +423,12 @@ mod tests {
             let mut writer = sf_rw.latest_writer(segment)?;
 
             // Prune transactions or receipts based on the segment type
-            if segment.is_receipts() {
-                writer.prune_receipts(prune_count, last_block)?;
-            } else {
-                writer.prune_transactions(prune_count, last_block)?;
+            match segment {
+                StaticFileSegment::Headers => panic!("non tx based segment"),
+                StaticFileSegment::Transactions => {
+                    writer.prune_transactions(prune_count, last_block)?
+                }
+                StaticFileSegment::Receipts => writer.prune_receipts(prune_count, last_block)?,
             }
             writer.commit()?;
 
@@ -437,18 +443,18 @@ mod tests {
             // Verify that transactions and receipts are returned correctly. Uses
             // cumulative_gas_used & nonce as ids.
             if let Some(id) = expected_tx_tip {
-                if segment.is_receipts() {
-                    assert_eyre(
-                        expected_tx_tip,
-                        sf_rw.receipt(id)?.map(|r| r.cumulative_gas_used),
-                        "tx mismatch",
-                    )?;
-                } else {
-                    assert_eyre(
+                match segment {
+                    StaticFileSegment::Headers => panic!("non tx based segment"),
+                    StaticFileSegment::Transactions => assert_eyre(
                         expected_tx_tip,
                         sf_rw.transaction_by_id(id)?.map(|t| t.nonce()),
                         "tx mismatch",
-                    )?;
+                    )?,
+                    StaticFileSegment::Receipts => assert_eyre(
+                        expected_tx_tip,
+                        sf_rw.receipt(id)?.map(|r| r.cumulative_gas_used),
+                        "receipt mismatch",
+                    )?,
                 }
             }
 
