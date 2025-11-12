@@ -5,13 +5,12 @@ use alloy_eips::BlockId;
 use alloy_json_rpc::{RpcRecv, RpcSend};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_client::RpcClient;
-use futures::{future::Either, stream::FuturesOrdered, StreamExt};
-use jsonrpsee::{types::ErrorCode, BatchResponseBuilder};
+use jsonrpsee::BatchResponseBuilder;
 use jsonrpsee_core::{
     middleware::{Batch, BatchEntry, Notification, RpcServiceT},
     server::MethodResponse,
 };
-use jsonrpsee_types::{ErrorObject, Id, Params, Request};
+use jsonrpsee_types::{Params, Request};
 use reth_storage_api::{BlockReaderIdExt, TransactionsProvider};
 use std::{future::Future, sync::Arc};
 use tracing::{debug, warn};
@@ -157,7 +156,7 @@ where
         &self,
         mut req: Batch<'a>,
     ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
-        let inner_service = self.inner.clone();
+        let this = self.clone();
         let historical = self.historical.clone();
 
         async move {
@@ -172,36 +171,44 @@ where
             }
 
             if !needs_forwarding {
-                return inner_service.batch(req).await;
+                // no call needs to be forwarded and we can simply perform this batch request
+                return this.inner.batch(req).await;
             }
 
-            let entries: Vec<_> = req.into_iter().collect();
-            let max_response_size = usize::MAX;
-            let mut batch_response = BatchResponseBuilder::new_with_limit(max_response_size);
+            // the entire response is checked above so we can assume that these don't exceed
+            let mut batch_rp = BatchResponseBuilder::new_with_limit(usize::MAX);
+            let mut got_notification = false;
 
-            let mut pending_calls: FuturesOrdered<_> = entries
-                .into_iter()
-                .filter_map(|entry| match entry {
-                    Ok(BatchEntry::Call(call)) => Some(Either::Right(inner_service.call(call))),
-                    Ok(BatchEntry::Notification(_n)) => None,
-                    Err(_err) => Some(Either::Left(async move {
-                        MethodResponse::error(
-                            Id::Null,
-                            ErrorObject::from(ErrorCode::InvalidRequest),
-                        )
-                    })),
-                })
-                .collect();
-
-            while let Some(response) = pending_calls.next().await {
-                if let Err(too_large) = batch_response.append(response) {
-                    let mut error_batch = BatchResponseBuilder::new_with_limit(1);
-                    let _ = error_batch.append(too_large);
-                    return MethodResponse::from_batch(error_batch.finish());
+            for batch_entry in req {
+                match batch_entry {
+                    Ok(BatchEntry::Call(req)) => {
+                        let rp = this.call(req).await;
+                        if let Err(err) = batch_rp.append(rp) {
+                            return err;
+                        }
+                    }
+                    Ok(BatchEntry::Notification(n)) => {
+                        got_notification = true;
+                        this.notification(n).await;
+                    }
+                    Err(err) => {
+                        let (err, id) = err.into_parts();
+                        let rp = MethodResponse::error(id, err);
+                        if let Err(err) = batch_rp.append(rp) {
+                            return err;
+                        }
+                    }
                 }
             }
 
-            MethodResponse::from_batch(batch_response.finish())
+            // If the batch is empty and we got a notification, we return an empty response.
+            if batch_rp.is_empty() && got_notification {
+                MethodResponse::notification()
+            }
+            // An empty batch is regarded as an invalid request here.
+            else {
+                MethodResponse::from_batch(batch_rp.finish())
+            }
         }
     }
 
