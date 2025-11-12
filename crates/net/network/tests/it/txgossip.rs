@@ -5,7 +5,9 @@ use futures::StreamExt;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
-    transactions::config::TransactionPropagationKind,
+    transactions::config::{
+        TransactionIngressPolicy, TransactionPropagationKind, TransactionsManagerConfig,
+    },
     NetworkEvent, NetworkEventListenerProvider, Peers,
 };
 use reth_network_api::{events::PeerEvent, PeerKind, PeersInfo};
@@ -120,6 +122,71 @@ async fn test_tx_propagation_policy_trusted_only() {
     buff.push(peer1_tx_listener.recv().await.unwrap());
     buff.push(peer1_tx_listener.recv().await.unwrap());
 
+    assert!(buff.contains(&outcome_1.hash));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_tx_ingress_policy_trusted_only() {
+    reth_tracing::init_test_tracing();
+
+    let provider = MockEthProvider::default();
+
+    let mut tx_manager_config = TransactionsManagerConfig::default();
+    tx_manager_config.ingress_policy = TransactionIngressPolicy::Trusted;
+
+    let net = Testnet::create_with(2, provider.clone()).await;
+    let net = net.with_eth_pool_config(tx_manager_config);
+
+    let handle = net.spawn();
+
+    // connect all the peers
+    handle.connect_peers().await;
+
+    let peer_0_handle = &handle.peers()[0];
+    let peer_1_handle = &handle.peers()[1];
+
+    let mut peer0_tx_listener = peer_0_handle.pool().unwrap().pending_transactions_listener();
+
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+    let tx = tx_gen.gen_eip1559_pooled();
+
+    // ensure the sender has balance
+    let sender = tx.sender();
+    provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
+
+    // insert the tx in peer1's pool
+    let outcome_0 = peer_1_handle.pool().unwrap().add_external_transaction(tx).await.unwrap();
+
+    // ensure tx is not accepted by peer0
+    peer0_tx_listener.try_recv().expect_err("Empty");
+
+    let mut event_stream_0 = NetworkEventStream::new(peer_0_handle.network().event_listener());
+    let mut event_stream_1 = NetworkEventStream::new(peer_1_handle.network().event_listener());
+
+    // disconnect peer1 from peer0
+    peer_0_handle.network().remove_peer(*peer_1_handle.peer_id(), PeerKind::Static);
+    join!(event_stream_0.next_session_closed(), event_stream_1.next_session_closed());
+
+    // re register peer1 as trusted
+    peer_0_handle.network().add_trusted_peer(*peer_1_handle.peer_id(), peer_1_handle.local_addr());
+    join!(event_stream_0.next_session_established(), event_stream_1.next_session_established());
+
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+    let tx = tx_gen.gen_eip1559_pooled();
+
+    // ensure the sender has balance
+    let sender = tx.sender();
+    provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
+
+    // insert pending tx in peer1's pool
+    let outcome_1 = peer_1_handle.pool().unwrap().add_external_transaction(tx).await.unwrap();
+
+    // ensure peer0 now receives both pending txs from peer1 (the blocked one and the new one)
+    let mut buff = Vec::with_capacity(2);
+    buff.push(peer0_tx_listener.recv().await.unwrap());
+    buff.push(peer0_tx_listener.recv().await.unwrap());
+
+    assert!(buff.contains(&outcome_0.hash));
     assert!(buff.contains(&outcome_1.hash));
 }
 
