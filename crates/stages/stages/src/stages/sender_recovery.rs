@@ -103,6 +103,11 @@ where
             })
         }
 
+        // Increment writer up to the start of the block range
+        for block in input.checkpoint().block_number..*block_range.start() {
+            writer.increment_block(block)?;
+        }
+
         info!(target: "sync::stages::sender_recovery", ?tx_range, %writer, "Recovering senders");
 
         // Iterate over transactions in batches, recover the senders and append them
