@@ -22,7 +22,7 @@ use crate::{
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
-    BlockHeader,
+    BlockHeader, TxReceipt,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
@@ -218,7 +218,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
     #[cfg(feature = "test-utils")]
     /// Sets the prune modes for provider.
-    pub const fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+    pub fn set_prune_modes(&mut self, prune_modes: PruneModes) {
         self.prune_modes = prune_modes;
     }
 }
@@ -231,6 +231,14 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     /// Returns a static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
+    }
+
+    fn get_static_file_writer(
+        &self,
+        block: BlockNumber,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<crate::providers::StaticFileProviderRWRefMut<'_, Self::Primitives>> {
+        self.static_file_provider.get_writer(block, segment)
     }
 }
 
@@ -1267,11 +1275,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         Ok(None)
     }
 
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let mut cursor = self.tx.cursor_read::<tables::TransactionBlocks>()?;
-        Ok(cursor.seek(id)?.map(|(_, bn)| bn))
-    }
-
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -1613,17 +1616,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
-        // Write receipts to static files only if they're explicitly enabled or we don't have
-        // receipts pruning
-        let mut receipts_writer = if self.storage_settings.read().receipts_in_static_files ||
-            !self.prune_modes.has_receipts_pruning()
-        {
-            EitherWriter::StaticFile(
-                self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?,
-            )
-        } else {
-            EitherWriter::Database(self.tx.cursor_write::<tables::Receipts<Self::Receipt>>()?)
-        };
+        let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
+
+        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
+        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
         // [`PruneSegment::ContractLogs`].
@@ -1633,6 +1629,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // Pruner.
         let prunable_receipts = !self.cached_storage_settings().receipts_in_static_files &&
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
+
+        // Prepare set of addresses which logs should not be pruned.
+        let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+        for (_, addresses) in contract_log_pruner.range(..first_block) {
+            allowed_addresses.extend(addresses.iter().copied());
+        }
 
         for (idx, (receipts, first_tx_index)) in
             execution_outcome.receipts.iter().zip(block_indices).enumerate()
@@ -1651,8 +1653,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 continue
             }
 
+            // If there are new addresses to retain after this block number, track them
+            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+                allowed_addresses.extend(new_addresses.iter().copied());
+            }
+
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
+                // Skip writing receipt if log filter is active and it does not have any logs to
+                // retain
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                {
+                    continue
+                }
 
                 receipts_writer.append_receipt(receipt_idx, receipt)?;
             }
@@ -1797,10 +1812,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
+        for (hashed_address, account) in hashed_state.accounts() {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(hashed_address, &account)?;
-            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts_cursor.upsert(*hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
         }
@@ -1814,8 +1829,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage.storage_slots_sorted() {
-                let entry = StorageEntry { key: hashed_slot, value };
+            for (hashed_slot, value) in storage.storage_slots_ref() {
+                let entry = StorageEntry { key: *hashed_slot, value: *value };
+
                 if let Some(db_entry) =
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
                     db_entry.key == entry.key

@@ -1,11 +1,14 @@
 use crate::{
-    providers::{state::latest::LatestStateProvider, NodeTypesForProvider, StaticFileProvider},
+    providers::{
+        state::latest::LatestStateProvider, NodeTypesForProvider, StaticFileProvider,
+        StaticFileProviderRWRefMut,
+    },
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, MetadataProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    StaticFileProviderFactory, StaticFileWriter, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
@@ -113,7 +116,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
 impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Sets the pruning configuration for an existing [`ProviderFactory`].
-    pub const fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
+    pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
         self.prune_modes = prune_modes;
         self
     }
@@ -246,6 +249,14 @@ impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
     /// Returns static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
+    }
+
+    fn get_static_file_writer(
+        &self,
+        block: BlockNumber,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
+        self.static_file_provider.get_writer(block, segment)
     }
 }
 
@@ -429,10 +440,6 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         self.provider()?.transaction_by_hash_with_meta(tx_hash)
-    }
-
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        self.provider()?.transaction_block(id)
     }
 
     fn transactions_by_block(

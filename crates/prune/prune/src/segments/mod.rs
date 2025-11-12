@@ -10,8 +10,8 @@ pub use set::SegmentSet;
 use std::{fmt::Debug, ops::RangeInclusive};
 use tracing::error;
 pub use user::{
-    AccountHistory, Bodies, MerkleChangeSets, Receipts as UserReceipts, SenderRecovery,
-    StorageHistory, TransactionLookup,
+    AccountHistory, Bodies, MerkleChangeSets, Receipts as UserReceipts, ReceiptsByLogs,
+    SenderRecovery, StorageHistory, TransactionLookup,
 };
 
 /// A segment represents a pruning of some portion of the data.
