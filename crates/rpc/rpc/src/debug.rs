@@ -2,7 +2,7 @@ use alloy_consensus::{
     transaction::{SignerRecoverable, TxHashRef},
     BlockHeader,
 };
-use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip2718::Encodable2718, eip7928::BlockAccessList, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
@@ -96,8 +96,12 @@ where
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(state))
+                    .with_bal_builder()
+                    .build();
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
@@ -227,8 +231,12 @@ where
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(state))
+                    .with_bal_builder()
+                    .build();
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
@@ -533,8 +541,12 @@ where
             .spawn_with_state_at_block(at.into(), move |state| {
                 // the outer vec for the bundles
                 let mut all_bundles = Vec::with_capacity(bundles.len());
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(state))
+                    .with_bal_builder()
+                    .build();
+                db.bal_state.bal_index = 0;
+                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -956,6 +968,19 @@ where
         Ok(res.into())
     }
 
+    /// Handler for `getBlockAccessList` that returns BAL if present.
+    async fn debug_get_block_access_list(
+        &self,
+        block_id: BlockId,
+    ) -> RpcResult<Option<BlockAccessList>> {
+        let block = self
+            .provider()
+            .block_by_id(block_id)
+            .to_rpc_result()?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let block = block.into_ethereum_block();
+        Ok(block.body().block_access_list().clone())
+    }
     /// Handler for `debug_getRawTransaction`
     ///
     /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.

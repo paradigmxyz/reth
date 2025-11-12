@@ -4,11 +4,11 @@
 
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
-use reth_revm::{database::StateProviderDatabase, DatabaseRef};
+use reth_revm::{database::StateProviderDatabase, DatabaseRef, State};
 use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::{
-    database::{BundleState, State},
+    database::BundleState,
     primitives::HashMap,
     state::{AccountInfo, Bytecode},
     Database, DatabaseCommit,

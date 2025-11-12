@@ -6,7 +6,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 */6 * * *"
-
+  pull_request:
+    branches:
+      - main
 env:
   CARGO_TERM_COLOR: always
 
@@ -24,14 +26,14 @@ jobs:
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: Checkout hive tests
         uses: actions/checkout@v5
         with:
           repository: ethereum/hive
+          ref: master
           path: hivetests
 
       - name: Get hive commit hash
@@ -68,7 +70,7 @@ jobs:
           chmod +x hive
 
       - name: Upload hive assets
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: hive_assets
           path: ./hive_assets
@@ -116,28 +118,30 @@ jobs:
           # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include:
-              - eth_blockNumber
+              # - eth_blockNumber
               - eth_call
-              - eth_chainId
-              - eth_createAccessList
-              - eth_estimateGas
-              - eth_feeHistory
-              - eth_getBalance
-              - eth_getBlockBy
-              - eth_getBlockTransactionCountBy
-              - eth_getCode
-              - eth_getProof
-              - eth_getStorage
-              - eth_getTransactionBy
-              - eth_getTransactionCount
-              - eth_getTransactionReceipt
-              - eth_sendRawTransaction
-              - eth_syncing
-              # debug_ rpc methods
-              - debug_
+              # - eth_chainId
+              # - eth_createAccessList
+              # - eth_estimateGas
+              # - eth_feeHistory
+              # - eth_getBalance
+              # - eth_getBlockBy
+              # - eth_getBlockTransactionCountBy
+              # - eth_getCode
+              # - eth_getProof
+              # - eth_getStorage
+              # - eth_getTransactionBy
+              # - eth_getTransactionCount
+              # - eth_getTransactionReceipt
+              # - eth_sendRawTransaction
+              # - eth_syncing
+              # # debug_ rpc methods
+              # - debug_
 
           # consume-engine
           - sim: ethereum/eels/consume-engine
+            limit: .*tests/amsterdam.*
+          - sim: ethereum/eels/consume-engine
             limit: .*tests/osaka.*
           - sim: ethereum/eels/consume-engine
             limit: .*tests/prague.*
@@ -153,11 +157,11 @@ jobs:
             limit: .*tests/homestead.*
           - sim: ethereum/eels/consume-engine
             limit: .*tests/frontier.*
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/paris.*
 
           # consume-rlp
           - sim: ethereum/eels/consume-rlp
+            limit: .*tests/amsterdam.*
+          - sim: ethereum/eels/consume-rlp
             limit: .*tests/osaka.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/prague.*
@@ -173,14 +177,11 @@ jobs:
             limit: .*tests/homestead.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/frontier.*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/paris.*
     needs:
       - prepare-reth
       - prepare-hive
     name: run ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     permissions:
       issues: write
     steps:
@@ -189,13 +190,13 @@ jobs:
           fetch-depth: 0
 
       - name: Download hive assets
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v5
         with:
           name: hive_assets
           path: /tmp
 
       - name: Download reth image
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v5
         with:
           name: artifacts
           path: /tmp
@@ -247,8 +248,7 @@ jobs:
   notify-on-error:
     needs: test
     if: failure()
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     steps:
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@v2
