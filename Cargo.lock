@@ -7468,6 +7468,7 @@ dependencies = [
 name = "reth-bench-compare"
 version = "1.9.2"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types-eth",
