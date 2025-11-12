@@ -1,7 +1,7 @@
 //! reth data directories.
 
 use crate::{args::DatadirArgs, utils::parse_path};
-use reth_chainspec::Chain;
+use reth_chainspec::{Chain, EthChainSpec};
 use std::{
     env::VarError,
     fmt::{Debug, Display, Formatter},
@@ -12,6 +12,14 @@ use std::{
 /// Constructs a string to be used as a path for configuration and db paths.
 pub fn config_path_prefix(chain: Chain) -> String {
     chain.to_string()
+}
+
+/// Constructs a string to be used as a path for configuration and db paths from a chainspec.
+///
+/// Uses `EthChainSpec::name()` which defaults to the chain's canonical
+/// name or id, and can be overridden by custom/ephemeral chains.
+pub fn config_path_prefix_spec<S: EthChainSpec + ?Sized>(spec: &S) -> String {
+    spec.name()
 }
 
 /// Returns the path to the reth data directory.
@@ -162,9 +170,27 @@ impl<D> PlatformPath<D> {
         ChainPath::new(platform_path, chain, datadir_args)
     }
 
+    /// Converts the path to a `ChainPath` using a chain spec for name resolution.
+    ///
+    /// This respects custom naming via `EthChainSpec::name()` when present.
+    pub fn with_chain_spec<S: EthChainSpec + ?Sized>(
+        &self,
+        spec: &S,
+        datadir_args: DatadirArgs,
+    ) -> ChainPath<D> {
+        let platform_path = self.platform_path_from_name(config_path_prefix_spec(spec));
+        ChainPath::new(platform_path, spec.chain(), datadir_args)
+    }
+
     fn platform_path_from_chain(&self, chain: Chain) -> Self {
         let chain_name = config_path_prefix(chain);
         let path = self.0.join(chain_name);
+        Self(path, std::marker::PhantomData)
+    }
+
+    // Helper: derive a platform path using a given folder name.
+    fn platform_path_from_name(&self, name: String) -> Self {
+        let path = self.0.join(name);
         Self(path, std::marker::PhantomData)
     }
 
@@ -190,6 +216,23 @@ impl<D: XdgPath> MaybePlatformPath<D> {
                 .clone()
                 .unwrap_or_else(|| PlatformPath::default().platform_path_from_chain(chain)),
             chain,
+            datadir_args,
+        )
+    }
+
+    /// Returns the path if it is set, otherwise returns the default path for the given chainspec.
+    ///
+    /// The default folder name is derived from `EthChainSpec::name()`.
+    pub fn unwrap_or_spec_default<S: EthChainSpec + ?Sized>(
+        &self,
+        spec: &S,
+        datadir_args: DatadirArgs,
+    ) -> ChainPath<D> {
+        ChainPath(
+            self.0.clone().unwrap_or_else(|| {
+                PlatformPath::default().platform_path_from_name(config_path_prefix_spec(spec))
+            }),
+            spec.chain(),
             datadir_args,
         )
     }

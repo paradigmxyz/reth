@@ -74,15 +74,17 @@ pub struct StageCommand {
 macro_rules! handle_stage {
     ($stage_fn:ident, $tool:expr, $command:expr) => {{
         let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
+        // Use spec-aware naming for output datadir
         let output_datadir =
-            output_datadir.with_chain($tool.chain().chain(), DatadirArgs::default());
+            output_datadir.with_chain_spec($tool.chain().as_ref(), DatadirArgs::default());
         $stage_fn($tool, *from, *to, output_datadir, *dry_run).await?
     }};
 
     ($stage_fn:ident, $tool:expr, $command:expr, $executor:expr, $consensus:expr) => {{
         let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
+        // Use spec-aware naming for output datadir
         let output_datadir =
-            output_datadir.with_chain($tool.chain().chain(), DatadirArgs::default());
+            output_datadir.with_chain_spec($tool.chain().as_ref(), DatadirArgs::default());
         $stage_fn($tool, *from, *to, output_datadir, *dry_run, $executor, $consensus).await?
     }};
 }

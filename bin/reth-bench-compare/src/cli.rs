@@ -231,8 +231,8 @@ impl Args {
                 PathBuf::from(expanded.as_ref())
             }
             None => {
-                // Use the same logic as reth: <datadir>/<chain>/jwt.hex
-                let chain_path = self.datadir.clone().resolve_datadir(self.chain);
+                // Use chain-id/name based path (bench tool only has `Chain`)
+                let chain_path = self.datadir.clone().resolve_datadir_for_chain(self.chain);
                 chain_path.jwt()
             }
         }
@@ -240,7 +240,8 @@ impl Args {
 
     /// Get the resolved datadir path using the chain
     pub(crate) fn datadir_path(&self) -> PathBuf {
-        let chain_path = self.datadir.clone().resolve_datadir(self.chain);
+        // Use chain-id/name based path (bench tool only has `Chain`)
+        let chain_path = self.datadir.clone().resolve_datadir_for_chain(self.chain);
         chain_path.data_dir().to_path_buf()
     }
 

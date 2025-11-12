@@ -263,7 +263,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
         });
 
         let data_dir =
-            path.unwrap_or_chain_default(self.config.chain.chain(), self.config.datadir.clone());
+            path.unwrap_or_spec_default(self.config.chain.as_ref(), self.config.datadir.clone());
 
         let db = reth_db::test_utils::create_test_rw_db_with_path(data_dir.db());
 

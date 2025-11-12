@@ -70,7 +70,8 @@ macro_rules! db_ro_exec {
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `db` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
-        let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
+        // Use spec-aware naming for db paths
+        let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.as_ref());
         let db_path = data_dir.db();
         let static_files_path = data_dir.static_files();
         let exex_wal_path = data_dir.exex_wal();
@@ -191,6 +192,9 @@ mod tests {
             "stats",
         ])
         .unwrap();
-        assert_eq!(cmd.env.datadir.resolve_datadir(cmd.env.chain.chain).as_ref(), Path::new(&path));
+        assert_eq!(
+            cmd.env.datadir.resolve_datadir(cmd.env.chain.as_ref()).as_ref(),
+            Path::new(&path)
+        );
     }
 }

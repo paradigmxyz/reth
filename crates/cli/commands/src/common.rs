@@ -66,7 +66,8 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
+        // Use spec-aware naming for datadir (supports custom chain names)
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.as_ref());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
 

@@ -1,5 +1,5 @@
 use crate::{ChainSpec, DepositContract};
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use alloy_chains::Chain;
 use alloy_eips::{calc_next_block_base_fee, eip1559::BaseFeeParams, eip7840::BlobParams};
 use alloy_genesis::Genesis;
@@ -17,6 +17,14 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 
     /// Returns the [`Chain`] object this spec targets.
     fn chain(&self) -> Chain;
+
+    /// Returns the display name for this chain to be used in filesystem paths.
+    ///
+    /// Defaults to the chain's identifier or canonical name, e.g. "mainnet" or "17000".
+    /// Custom chain specs can override this to choose a stable, human-friendly name.
+    fn name(&self) -> String {
+        self.chain().to_string()
+    }
 
     /// Returns the chain id number
     fn chain_id(&self) -> u64 {

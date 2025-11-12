@@ -56,7 +56,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
             None => self
                 .env
                 .datadir
-                .resolve_datadir(self.env.chain.chain())
+                // Use spec-aware naming for default ERA1 export location
+                .resolve_datadir(self.env.chain.as_ref())
                 .data_dir()
                 .join(ERA1_EXPORT_FOLDER_NAME),
         };
