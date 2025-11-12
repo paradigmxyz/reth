@@ -155,7 +155,11 @@ impl<D> PlatformPath<D> {
 
 impl<D> PlatformPath<D> {
     /// Converts the path to a `ChainPath` with the given `Chain`.
-    pub fn with_chain(&self, chainspec: impl EthChainSpec, datadir_args: DatadirArgs) -> ChainPath<D> {
+    pub fn with_chain(
+        &self,
+        chainspec: impl EthChainSpec,
+        datadir_args: DatadirArgs,
+    ) -> ChainPath<D> {
         let platform_path = self.platform_path_from_name(chainspec.name().as_str());
         ChainPath::new(platform_path, chainspec.chain(), datadir_args)
     }
@@ -181,11 +185,15 @@ pub struct MaybePlatformPath<D>(Option<PlatformPath<D>>);
 
 impl<D: XdgPath> MaybePlatformPath<D> {
     /// Returns the path if it is set, otherwise returns the default path for the given chain.
-    pub fn unwrap_or_chain_default(&self, chainspec: impl EthChainSpec, datadir_args: DatadirArgs) -> ChainPath<D> {
+    pub fn unwrap_or_chain_default(
+        &self,
+        chainspec: impl EthChainSpec,
+        datadir_args: DatadirArgs,
+    ) -> ChainPath<D> {
         ChainPath(
-            self.0
-                .clone()
-                .unwrap_or_else(|| PlatformPath::default().platform_path_from_name(chainspec.name().as_str())),
+            self.0.clone().unwrap_or_else(|| {
+                PlatformPath::default().platform_path_from_name(chainspec.name().as_str())
+            }),
             chainspec.chain(),
             datadir_args,
         )

@@ -380,7 +380,7 @@ mod tests {
         // check network listening port number
         assert_eq!(cmd.network.port, 30305);
     }
-    
+
     #[test]
     fn parse_with_unused_ports() {
         let cmd: NodeCommand<EthereumChainSpecParser> =
