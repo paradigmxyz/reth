@@ -103,13 +103,27 @@ impl BanList {
     /// checks the ban list to see if it contains the given ip
     #[inline]
     pub fn is_banned_ip(&self, ip: &IpAddr) -> bool {
-        self.banned_ips.contains_key(ip)
+        match self.banned_ips.get(ip) {
+            Some(None) => true, // Indefinite ban
+            Some(Some(until)) => {
+                let now = Instant::now();
+                now <= *until // Ban is active if current time hasn't passed the expiration
+            }
+            None => false, // Not banned
+        }
     }
 
-    /// checks the ban list to see if it contains the given ip
+    /// checks the ban list to see if it contains the given peer id
     #[inline]
     pub fn is_banned_peer(&self, peer_id: &PeerId) -> bool {
-        self.banned_peers.contains_key(peer_id)
+        match self.banned_peers.get(peer_id) {
+            Some(None) => true, // Indefinite ban
+            Some(Some(until)) => {
+                let now = Instant::now();
+                now <= *until // Ban is active if current time hasn't passed the expiration
+            }
+            None => false, // Not banned
+        }
     }
 
     /// Unbans the ip address
@@ -213,5 +227,41 @@ mod tests {
         ip = IpAddr::from([172, 16, 0, 0]);
         banlist.ban_ip(ip);
         assert!(!banlist.is_banned_ip(&ip));
+    }
+
+    #[test]
+    fn expired_ban_is_not_active() {
+        use std::time::Duration;
+
+        let peer = PeerId::new([1; 64]);
+        let ip = IpAddr::from([1, 1, 1, 1]);
+        let mut banlist = BanList::default();
+
+        // Ban with expiration in the past
+        let past_time = Instant::now() - Duration::from_secs(10);
+        banlist.ban_peer_until(peer, past_time);
+        banlist.ban_ip_until(ip, past_time);
+
+        // Expired bans should not be active
+        assert!(!banlist.is_banned_peer(&peer));
+        assert!(!banlist.is_banned_ip(&ip));
+    }
+
+    #[test]
+    fn active_temporary_ban_is_checked() {
+        use std::time::Duration;
+
+        let peer = PeerId::new([2; 64]);
+        let ip = IpAddr::from([2, 2, 2, 2]);
+        let mut banlist = BanList::default();
+
+        // Ban with expiration in the future
+        let future_time = Instant::now() + Duration::from_secs(60);
+        banlist.ban_peer_until(peer, future_time);
+        banlist.ban_ip_until(ip, future_time);
+
+        // Active bans should be detected
+        assert!(banlist.is_banned_peer(&peer));
+        assert!(banlist.is_banned_ip(&ip));
     }
 }
