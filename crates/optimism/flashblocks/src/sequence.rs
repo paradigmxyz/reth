@@ -26,9 +26,6 @@ pub struct SequenceExecutionOutcome {
 #[derive(Debug)]
 pub struct FlashBlockPendingSequence<T> {
     /// tracks the individual flashblocks in order
-    ///
-    /// With a blocktime of 2s and flashblock tick-rate of 200ms plus one extra flashblock per new
-    /// pending block, we expect 11 flashblocks per slot.
     inner: BTreeMap<u64, PreparedFlashBlock<T>>,
     /// Broadcasts flashblocks to subscribers.
     block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence>,
