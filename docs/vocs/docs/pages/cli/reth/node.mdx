@@ -270,7 +270,7 @@ Networking:
           [default: sqrt]
 
       --required-block-hashes <REQUIRED_BLOCK_HASHES>
-          Comma separated list of required block hashes. Peers that don't have these blocks will be filtered out
+          Comma separated list of required block hashes or block number=hash pairs. Peers that don't have these blocks will be filtered out. Format: hash or `block_number=hash` (e.g., 23115201=0x1234...)
 
       --network-id <NETWORK_ID>
           Optional network ID to override the chain specification's network ID for P2P connections
