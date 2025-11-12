@@ -9030,7 +9030,6 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-chainspec",
- "reth-cli-util",
  "reth-config",
  "reth-consensus",
  "reth-consensus-debug-client",
