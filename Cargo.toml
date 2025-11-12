@@ -179,6 +179,9 @@ members = [
     "testing/runner",
     "tests/",
     "crates/tracing-otlp",
+    "crates/xlayer/db",
+    "crates/xlayer/rpc",
+    "crates/xlayer/exex",
 ]
 default-members = ["bin/reth"]
 exclude = ["docs/cli"]
@@ -732,6 +735,11 @@ vergen = "9.0.4"
 visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
+
+# xlayer
+xlayer-db = { path = "crates/xlayer/db" }
+xlayer-rpc = { path = "crates/xlayer/rpc" }
+xlayer-exex = { path = "crates/xlayer/exex" }
 
 # [patch.crates-io]
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }

@@ -6399,7 +6399,11 @@ dependencies = [
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-optimism-rpc",
+ "reth-rpc",
  "tracing",
+ "xlayer-db",
+ "xlayer-exex",
+ "xlayer-rpc",
 ]
 
 [[package]]
@@ -14608,6 +14612,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "xlayer-db"
+version = "1.9.1"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "eyre",
+ "once_cell",
+ "reth-db",
+ "reth-revm",
+ "revm-context-interface",
+ "revm-inspectors",
+ "serde",
+]
+
+[[package]]
 name = "xlayer-e2e-test"
 version = "1.9.1"
 dependencies = [
@@ -14634,6 +14653,54 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "xlayer-exex"
+version = "1.9.1"
+dependencies = [
+ "alloy-consensus",
+ "alloy-evm",
+ "alloy-rlp",
+ "eyre",
+ "futures",
+ "reth-ethereum",
+ "reth-evm",
+ "reth-primitives-traits",
+ "reth-revm",
+ "reth-tracing",
+ "revm-database",
+ "xlayer-db",
+]
+
+[[package]]
+name = "xlayer-rpc"
+version = "1.9.1"
+dependencies = [
+ "alloy-eips",
+ "alloy-network-primitives",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "clap",
+ "futures",
+ "jsonrpsee",
+ "jsonrpsee-types",
+ "reth-errors",
+ "reth-ethereum",
+ "reth-evm",
+ "reth-node-core",
+ "reth-optimism-node",
+ "reth-revm",
+ "reth-rpc",
+ "reth-rpc-convert",
+ "reth-rpc-eth-api",
+ "reth-rpc-server-types",
+ "reth-storage-api",
+ "revm-context-interface",
+ "revm-database",
+ "serde",
+ "tokio",
+ "xlayer-db",
 ]
 
 [[package]]

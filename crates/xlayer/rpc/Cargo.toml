@@ -1,0 +1,42 @@
+[package]
+name = "xlayer-rpc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+reth-rpc-server-types.workspace = true
+reth-node-core.workspace = true
+reth-rpc-eth-api.workspace = true
+reth-ethereum = { workspace = true, features = ["rpc", "network", "node"] }
+reth-rpc.workspace = true
+reth-optimism-node = { workspace = true, features = ["js-tracer"] }
+reth-evm.workspace = true
+reth-errors.workspace = true
+reth-revm.workspace = true
+reth-rpc-convert.workspace = true
+reth-storage-api.workspace = true
+
+revm-context-interface.workspace = true
+revm-database.workspace = true
+
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-network-primitives.workspace = true
+
+clap = { workspace = true, features = ["derive", "env"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+jsonrpsee-types.workspace = true
+serde.workspace = true
+futures.workspace = true
+tokio.workspace = true
+
+xlayer-db.workspace = true
+
+[lints]
+workspace = true
