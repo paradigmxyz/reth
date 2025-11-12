@@ -221,6 +221,13 @@ Networking:
       --network-id <NETWORK_ID>
           Optional network ID to override the chain specification's network ID for P2P connections
 
+      --netrestrict <NETRESTRICT>
+          Restrict network communication to the given IP networks (CIDR masks).
+
+          Comma separated list of CIDR network specifications. Only peers with IP addresses within these ranges will be allowed to connect. Similar to geth's --netrestrict flag.
+
+          Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
+
 Datadir:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
