@@ -1,4 +1,6 @@
-use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, PrefixSetLoader};
+use crate::{
+    load_prefix_sets_with_provider, DatabaseHashedCursorFactory, DatabaseTrieCursorFactory,
+};
 use alloy_primitives::{
     map::{AddressMap, B256Map},
     BlockNumber, B256, U256,
@@ -8,9 +10,10 @@ use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress, BlockNumberAddressRange},
     tables,
     transaction::DbTx,
-    DatabaseError,
 };
 use reth_execution_errors::StateRootError;
+use reth_storage_api::{BlockNumReader, ChangeSetReader};
+use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot,
@@ -18,7 +21,7 @@ use reth_trie::{
 };
 use std::{
     collections::HashMap,
-    ops::{RangeBounds, RangeInclusive},
+    ops::{Bound, RangeBounds, RangeInclusive},
 };
 use tracing::{debug, instrument};
 
@@ -34,6 +37,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// An instance of state root calculator with account and storage prefixes loaded.
     fn incremental_root_calculator(
+        provider: impl ChangeSetReader,
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError>;
@@ -45,6 +49,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The updated state root.
     fn incremental_root(
+        provider: impl ChangeSetReader,
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError>;
@@ -58,6 +63,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The updated state root and the trie updates.
     fn incremental_root_with_updates(
+        provider: impl ChangeSetReader,
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
@@ -69,6 +75,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The intermediate progress of state root computation.
     fn incremental_root_with_progress(
+        provider: impl ChangeSetReader,
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError>;
@@ -129,10 +136,13 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
 pub trait DatabaseHashedPostState<TX>: Sized {
     /// Initializes [`HashedPostState`] from reverts. Iterates over state reverts in the specified
     /// range and aggregates them into hashed state in reverse.
+    ///
+    /// Requires a start bound in the range, otherwise this will return an error.
     fn from_reverts<KH: KeyHasher>(
+        provider: impl ChangeSetReader + BlockNumReader,
         tx: &TX,
         range: impl RangeBounds<BlockNumber>,
-    ) -> Result<Self, DatabaseError>;
+    ) -> Result<Self, ProviderError>;
 }
 
 impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
@@ -143,35 +153,41 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 
     fn incremental_root_calculator(
+        provider: impl ChangeSetReader,
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets = PrefixSetLoader::<_, KeccakKeyHasher>::new(tx).load(range)?;
+        let loaded_prefix_sets =
+            load_prefix_sets_with_provider::<_, KeccakKeyHasher>(&provider, tx, range)?;
+        // let loaded_prefix_sets = PrefixSetLoader::<_, KeccakKeyHasher>::new(tx).load(range)?;
         Ok(Self::from_tx(tx).with_prefix_sets(loaded_prefix_sets))
     }
 
     fn incremental_root(
+        provider: impl ChangeSetReader,
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root");
-        Self::incremental_root_calculator(tx, range)?.root()
+        Self::incremental_root_calculator(provider, tx, range)?.root()
     }
 
     fn incremental_root_with_updates(
+        provider: impl ChangeSetReader,
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root");
-        Self::incremental_root_calculator(tx, range)?.root_with_updates()
+        Self::incremental_root_calculator(provider, tx, range)?.root_with_updates()
     }
 
     fn incremental_root_with_progress(
+        provider: impl ChangeSetReader,
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root with progress");
-        Self::incremental_root_calculator(tx, range)?.root_with_progress()
+        Self::incremental_root_calculator(provider, tx, range)?.root_with_progress()
     }
 
     fn overlay_root(tx: &'a TX, post_state: HashedPostState) -> Result<B256, StateRootError> {
@@ -226,17 +242,37 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
 }
 
 impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
-    #[instrument(target = "trie::db", skip(tx), fields(range))]
+    #[instrument(target = "trie::db", skip(tx, provider), fields(range))]
     fn from_reverts<KH: KeyHasher>(
+        provider: impl ChangeSetReader + BlockNumReader,
         tx: &TX,
         range: impl RangeBounds<BlockNumber>,
-    ) -> Result<Self, DatabaseError> {
+    ) -> Result<Self, ProviderError> {
+        // We have to provide a concrete range to `account_changesets_range`. But the changeset read
+        // operations in the DB take either a `Range` or `RangeFrom`, using `RangeBounds` to create
+        // something iterable. It does this using `RangeWalker` which is not compatible with static
+        // files.
+        //
+        // To make this work with static file changesets, we get the highest block number and
+        // disallow lack of a start bound.
+        //
+        // TODO: resolve the API difference somehow
+        let Bound::Included(start) = range.start_bound() else {
+            return Err(ProviderError::UnboundedStartUnsupported);
+        };
+
+        let end = match range.end_bound() {
+            Bound::Included(n) => *n + 1,
+            Bound::Excluded(n) => *n,
+            Bound::Unbounded => provider.best_block_number()? + 1,
+        };
+
+        tracing::debug!(target: "sync::stages::merkle_changesets", ?start, ?end, "Getting account changesets");
+
         // Iterate over account changesets and record value before first occurring account change.
-        let account_range = (range.start_bound(), range.end_bound()); // to avoid cloning
         let mut accounts = HashMap::new();
-        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
-        for entry in account_changesets_cursor.walk_range(account_range)? {
-            let (_, AccountBeforeTx { address, info }) = entry?;
+        for entry in provider.account_changesets_range(*start..end)? {
+            let (_, AccountBeforeTx { address, info }) = entry;
             accounts.entry(address).or_insert(info);
         }
 

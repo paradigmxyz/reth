@@ -7,8 +7,8 @@ use reth_metrics::Metrics;
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    BlockNumReader, DBProvider, DatabaseProviderFactory, DatabaseProviderROFactory,
-    PruneCheckpointReader, StageCheckpointReader, TrieReader,
+    BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader, TrieReader,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -117,7 +117,11 @@ impl<F> OverlayStateProviderFactory<F> {
 impl<F> OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: TrieReader + StageCheckpointReader + PruneCheckpointReader + BlockNumReader,
+    F::Provider: TrieReader
+        + StageCheckpointReader
+        + PruneCheckpointReader
+        + ChangeSetReader
+        + BlockNumReader,
 {
     /// Returns the block number for [`Self`]'s `block_hash` field, if any.
     fn get_requested_block_number(
@@ -205,6 +209,7 @@ where
         provider: &F::Provider,
         db_tip_block: BlockNumber,
     ) -> ProviderResult<Overlay> {
+    //
         // Set up variables we'll use for recording metrics. There's two different code-paths here,
         // and we want to make sure both record metrics, so we do metrics recording after.
         let retrieve_trie_reverts_duration;
@@ -237,6 +242,7 @@ where
                 // TODO(mediocregopher) make from_reverts return sorted
                 // https://github.com/paradigmxyz/reth/issues/19382
                 let res = HashedPostState::from_reverts::<KeccakKeyHasher>(
+                    &provider,
                     provider.tx_ref(),
                     from_block + 1..,
                 )?

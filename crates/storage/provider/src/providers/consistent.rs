@@ -1439,6 +1439,65 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             self.storage_provider.get_account_before_block(block_number, address)
         }
     }
+
+    fn account_changesets_range(
+        &self,
+        range: core::ops::Range<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        let mut changesets = Vec::new();
+        let database_start = range.start;
+        let mut database_end = range.end;
+
+        // Check which blocks in the range are in memory
+        if let Some(head_block) = &self.head_block {
+            // the anchor is the end of the db range
+            database_end = head_block.anchor().number;
+
+            let chain = head_block.chain().collect::<Vec<_>>();
+            for state in chain {
+                // found block in memory, collect its changesets
+                let block_changesets = state
+                    .block_ref()
+                    .execution_output
+                    .bundle
+                    .reverts
+                    .clone()
+                    .to_plain_state_reverts()
+                    .accounts
+                    .into_iter()
+                    .flatten()
+                    .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) });
+
+                for changeset in block_changesets {
+                    changesets.push((state.number(), changeset));
+                }
+            }
+        }
+
+        // get changesets from database for remaining blocks
+        if database_start < database_end {
+            // check if account history is pruned for these blocks
+            let account_history_exists = self
+                .storage_provider
+                .get_prune_checkpoint(PruneSegment::AccountHistory)?
+                .and_then(|checkpoint| {
+                    checkpoint.block_number.map(|checkpoint| database_start > checkpoint)
+                })
+                .unwrap_or(true);
+
+            if !account_history_exists {
+                return Err(ProviderError::StateAtBlockPruned(database_start))
+            }
+
+            let db_changesets =
+                self.storage_provider.account_changesets_range(database_start..database_end)?;
+            changesets.extend(db_changesets);
+        }
+
+        changesets.sort_by_key(|(block_num, _)| *block_num);
+
+        Ok(changesets)
+    }
 }
 
 impl<N: ProviderNodeTypes> AccountReader for ConsistentProvider<N> {
