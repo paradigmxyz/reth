@@ -82,7 +82,8 @@ impl ExecInput {
     {
         let Some(lowest_transactions_block) = provider
             .static_file_provider()
-            .get_lowest_static_file_block(StaticFileSegment::Transactions)
+            .get_lowest_range(StaticFileSegment::Transactions)
+            .map(|range| range.start())
         else {
             return Ok((0..0, 0..=0, true));
         };
