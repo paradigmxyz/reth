@@ -137,8 +137,10 @@ where
     /// Note: this should be spawned
     pub async fn run(mut self, tx: tokio::sync::watch::Sender<Option<PendingFlashBlock<N>>>) {
         while let Some(block) = self.next().await {
-            if let Ok(block) = block.inspect_err(|e| tracing::error!(target: "flashblocks", "{e}")) {
-                let _ = tx.send(block).inspect_err(|e| tracing::error!(target: "flashblocks", "{e}"));
+            if let Ok(block) = block.inspect_err(|e| tracing::error!(target: "flashblocks", "{e}"))
+            {
+                let _ =
+                    tx.send(block).inspect_err(|e| tracing::error!(target: "flashblocks", "{e}"));
             }
         }
 
@@ -307,7 +309,9 @@ where
                         }
                         match this.blocks.insert(flashblock) {
                             Ok(_) => this.rebuild = true,
-                            Err(err) => debug!(target: "flashblocks", %err, "Failed to prepare flashblock"),
+                            Err(err) => {
+                                debug!(target: "flashblocks", %err, "Failed to prepare flashblock")
+                            }
                         }
                     }
                     Err(err) => return Poll::Ready(Some(Err(err))),
