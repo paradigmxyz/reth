@@ -71,11 +71,11 @@ pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyErro
 pub fn parse_secret_key_from_hex(hex_str: &str) -> Result<SecretKey, SecretKeyError> {
     // Remove "0x" prefix if present
     let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
-    
+
     // Decode the hex string
     let bytes = alloy_primitives::hex::decode(hex_str)
         .map_err(|e| SecretKeyError::InvalidHexString(e.to_string()))?;
-    
+
     // Parse into SecretKey
     SecretKey::from_slice(&bytes).map_err(SecretKeyError::SecretKeyDecodeError)
 }
@@ -90,7 +90,7 @@ mod tests {
         let hex = "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
         let result = parse_secret_key_from_hex(hex);
         assert!(result.is_ok());
-        
+
         let secret_key = result.unwrap();
         assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), hex);
     }
@@ -101,7 +101,7 @@ mod tests {
         let hex = "0x4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
         let result = parse_secret_key_from_hex(hex);
         assert!(result.is_ok());
-        
+
         let secret_key = result.unwrap();
         let expected = "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
         assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), expected);
@@ -121,7 +121,7 @@ mod tests {
         let hex = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
         let result = parse_secret_key_from_hex(hex);
         assert!(result.is_err());
-        
+
         if let Err(SecretKeyError::InvalidHexString(_)) = result {
             // Expected error type
         } else {

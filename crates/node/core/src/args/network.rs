@@ -722,13 +722,9 @@ mod tests {
     #[test]
     fn parse_p2p_secret_key_hex() {
         let hex = "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
-        let args = CommandParser::<NetworkArgs>::parse_from([
-            "reth",
-            "--p2p-secret-key-hex",
-            hex,
-        ])
-        .args;
-        
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
         let expected: B256 = hex.parse().unwrap();
         assert_eq!(args.p2p_secret_key_hex, Some(expected));
         assert_eq!(args.p2p_secret_key, None);
@@ -737,13 +733,9 @@ mod tests {
     #[test]
     fn parse_p2p_secret_key_hex_with_0x_prefix() {
         let hex = "0x4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
-        let args = CommandParser::<NetworkArgs>::parse_from([
-            "reth",
-            "--p2p-secret-key-hex",
-            hex,
-        ])
-        .args;
-        
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
         let expected: B256 = hex.parse().unwrap();
         assert_eq!(args.p2p_secret_key_hex, Some(expected));
         assert_eq!(args.p2p_secret_key, None);
@@ -758,24 +750,20 @@ mod tests {
             "--p2p-secret-key-hex",
             "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f",
         ]);
-        
+
         assert!(result.is_err());
     }
 
     #[test]
     fn test_secret_key_method_with_hex() {
         let hex = "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
-        let args = CommandParser::<NetworkArgs>::parse_from([
-            "reth",
-            "--p2p-secret-key-hex",
-            hex,
-        ])
-        .args;
-        
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
         let temp_dir = std::env::temp_dir();
         let default_path = temp_dir.join("default_key");
         let secret_key = args.secret_key(default_path).unwrap();
-        
+
         // Verify the secret key matches the hex input
         assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), hex);
     }
