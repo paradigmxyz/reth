@@ -126,7 +126,7 @@ pub fn install() {
         libc::sigaltstack(&raw const alt_stack, ptr::null_mut());
 
         let mut sa: libc::sigaction = mem::zeroed();
-        sa.sa_sigaction = print_stack_trace as libc::sighandler_t;
+        sa.sa_sigaction = print_stack_trace as *const () as libc::sighandler_t;
         sa.sa_flags = libc::SA_NODEFER | libc::SA_RESETHAND | libc::SA_ONSTACK;
         libc::sigemptyset(&raw mut sa.sa_mask);
         libc::sigaction(libc::SIGSEGV, &raw const sa, ptr::null_mut());
