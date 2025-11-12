@@ -41,7 +41,7 @@ where
                 Ok(sequence) => sequence,
                 Err(err) => {
                     error!(
-                        target: "optimism::flashblocks::consensus::client",
+                        target: "flashblocks",
                         %err,
                         "error while fetching flashblock completed sequence",
                     );
@@ -53,7 +53,7 @@ where
                 Ok(payload) => payload,
                 Err(err) => {
                     error!(
-                        target: "optimism::flashblocks::consensus::client",
+                        target: "flashblocks",
                         %err,
                         "error while converting to payload from completed sequence",
                     );
@@ -67,7 +67,7 @@ where
             match self.engine_handle.new_payload(payload).await {
                 Ok(result) => {
                     debug!(
-                        target: "optimism::flashblocks::consensus::client",
+                        target: "flashblocks",
                         flashblock_count = sequence.count(),
                         block_number,
                         %block_hash,
@@ -81,7 +81,7 @@ where
                 }
                 Err(err) => {
                     error!(
-                        target: "optimism::flashblocks::consensus::client",
+                        target: "flashblocks",
                         %err,
                         block_number,
                         "Failed to submit new payload",
@@ -104,7 +104,7 @@ where
             {
                 Ok(result) => {
                     debug!(
-                        target: "optimism::flashblocks::consensus::client",
+                        target: "flashblocks",
                         flashblock_count = sequence.count(),
                         block_number,
                         %block_hash,
@@ -114,7 +114,7 @@ where
                 }
                 Err(err) => {
                     error!(
-                        target: "optimism::flashblocks::consensus::client",
+                        target: "flashblocks",
                         %err,
                         block_number,
                         %block_hash,
