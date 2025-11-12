@@ -5,7 +5,7 @@ use alloy_eips::BlockId;
 use alloy_json_rpc::{RpcRecv, RpcSend};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_client::RpcClient;
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{future::Either, stream::FuturesOrdered, StreamExt};
 use jsonrpsee::{types::ErrorCode, BatchResponseBuilder};
 use jsonrpsee_core::{
     middleware::{Batch, BatchEntry, Notification, RpcServiceT},
@@ -157,8 +157,6 @@ where
         &self,
         mut req: Batch<'a>,
     ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
-        use futures::future::{BoxFuture, FutureExt};
-
         let inner_service = self.inner.clone();
         let historical = self.historical.clone();
 
@@ -178,57 +176,20 @@ where
             }
 
             let entries: Vec<_> = req.into_iter().collect();
-            let mut forward_decisions = Vec::with_capacity(entries.len());
-
-            for entry in &entries {
-                if let Ok(BatchEntry::Call(call)) = entry {
-                    forward_decisions.push(historical.should_forward_request(call));
-                } else {
-                    forward_decisions.push(false);
-                }
-            }
-
             let max_response_size = usize::MAX;
             let mut batch_response = BatchResponseBuilder::new_with_limit(max_response_size);
 
-            let mut pending_calls: FuturesOrdered<BoxFuture<'a, MethodResponse>> = entries
+            let mut pending_calls: FuturesOrdered<_> = entries
                 .into_iter()
-                .zip(forward_decisions)
-                .filter_map(|(entry, should_forward)| match entry {
-                    Ok(BatchEntry::Call(call)) => {
-                        if should_forward {
-                            let historical = historical.clone();
-                            Some(
-                                async move {
-                                    historical.forward_to_historical(&call).await.unwrap_or_else(
-                                        || {
-                                            MethodResponse::error(
-                                        call.id.clone(),
-                                        ErrorObject::borrowed(
-                                            ErrorCode::InternalError.code(),
-                                            "Failed to forward request to historical endpoint",
-                                            None,
-                                        ),
-                                    )
-                                        },
-                                    )
-                                }
-                                .boxed(),
-                            )
-                        } else {
-                            Some(inner_service.call(call).boxed())
-                        }
-                    }
+                .filter_map(|entry| match entry {
+                    Ok(BatchEntry::Call(call)) => Some(Either::Right(inner_service.call(call))),
                     Ok(BatchEntry::Notification(_n)) => None,
-                    Err(_err) => Some(
-                        async move {
-                            MethodResponse::error(
-                                Id::Null,
-                                ErrorObject::from(ErrorCode::InvalidRequest),
-                            )
-                        }
-                        .boxed(),
-                    ),
+                    Err(_err) => Some(Either::Left(async move {
+                        MethodResponse::error(
+                            Id::Null,
+                            ErrorObject::from(ErrorCode::InvalidRequest),
+                        )
+                    })),
                 })
                 .collect();
 
@@ -280,18 +241,9 @@ where
     /// Checks if a request should be forwarded to the historical endpoint and returns
     /// the response if it was forwarded.
     async fn maybe_forward_request(&self, req: &Request<'_>) -> Option<MethodResponse> {
-        let should_forward = match req.method_name() {
-            "debug_traceTransaction" |
-            "eth_getTransactionByHash" |
-            "eth_getTransactionReceipt" |
-            "eth_getRawTransactionByHash" => self.should_forward_transaction(req),
-            method => self.should_forward_block_request(method, req),
-        };
-
-        if should_forward {
+        if self.should_forward_request(req) {
             return self.forward_to_historical(req).await
         }
-
         None
     }
 
