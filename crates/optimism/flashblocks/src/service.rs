@@ -1,13 +1,14 @@
 use crate::{
     sequence::FlashBlockPendingSequence,
     worker::{BuildArgs, FlashBlockBuilder},
-    ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
-    InProgressFlashBlockRx, PendingFlashBlock,
+    FlashBlock, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx, InProgressFlashBlockRx,
+    PendingFlashBlock,
 };
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
 use metrics::Histogram;
+use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::{CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions};
 use reth_evm::ConfigureEvm;
 use reth_metrics::Metrics;
@@ -37,7 +38,7 @@ pub(crate) const FB_STATE_ROOT_FROM_INDEX: usize = 9;
 pub struct FlashBlockService<
     N: NodePrimitives,
     S,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: Unpin>,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>,
     Provider,
 > {
     rx: S,
@@ -67,7 +68,7 @@ impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
 where
     N: NodePrimitives,
     S: Stream<Item = eyre::Result<FlashBlock>> + Unpin + 'static,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>
         + Clone
         + 'static,
     Provider: StateProviderFactory
@@ -137,12 +138,14 @@ where
     /// Note: this should be spawned
     pub async fn run(mut self, tx: tokio::sync::watch::Sender<Option<PendingFlashBlock<N>>>) {
         while let Some(block) = self.next().await {
-            if let Ok(block) = block.inspect_err(|e| tracing::error!("{e}")) {
-                let _ = tx.send(block).inspect_err(|e| tracing::error!("{e}"));
+            if let Ok(block) = block.inspect_err(|e| tracing::error!(target: "flashblocks", "{e}"))
+            {
+                let _ =
+                    tx.send(block).inspect_err(|e| tracing::error!(target: "flashblocks", "{e}"));
             }
         }
 
-        warn!("Flashblock service has stopped");
+        warn!(target: "flashblocks", "Flashblock service has stopped");
     }
 
     /// Notifies all subscribers about the received flashblock
@@ -165,6 +168,7 @@ where
     > {
         let Some(base) = self.blocks.payload_base() else {
             trace!(
+                target: "flashblocks",
                 flashblock_number = ?self.blocks.block_number(),
                 count = %self.blocks.count(),
                 "Missing flashblock payload base"
@@ -177,12 +181,12 @@ where
         if let Some(latest) = self.builder.provider().latest_header().ok().flatten() &&
             latest.hash() != base.parent_hash
         {
-            trace!(flashblock_parent=?base.parent_hash, flashblock_number=base.block_number, local_latest=?latest.num_hash(), "Skipping non consecutive build attempt");
+            trace!(target: "flashblocks", flashblock_parent=?base.parent_hash, flashblock_number=base.block_number, local_latest=?latest.num_hash(), "Skipping non consecutive build attempt");
             return None
         }
 
         let Some(last_flashblock) = self.blocks.last_flashblock() else {
-            trace!(flashblock_number = ?self.blocks.block_number(), count = %self.blocks.count(), "Missing last flashblock");
+            trace!(target: "flashblocks", flashblock_number = ?self.blocks.block_number(), count = %self.blocks.count(), "Missing last flashblock");
             return None
         };
 
@@ -228,7 +232,7 @@ impl<N, S, EvmConfig, Provider> Stream for FlashBlockService<N, S, EvmConfig, Pr
 where
     N: NodePrimitives,
     S: Stream<Item = eyre::Result<FlashBlock>> + Unpin + 'static,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>
         + Clone
         + 'static,
     Provider: StateProviderFactory
@@ -276,6 +280,7 @@ where
                         let elapsed = now.elapsed();
                         this.metrics.execution_duration.record(elapsed.as_secs_f64());
                         trace!(
+                            target: "flashblocks",
                             parent_hash = %new_pending.block().parent_hash(),
                             block_number = new_pending.block().number(),
                             flash_blocks = this.blocks.count(),
@@ -290,7 +295,7 @@ where
                     }
                     Err(err) => {
                         // we can ignore this error
-                        debug!(%err, "failed to execute flashblock");
+                        debug!(target: "flashblocks", %err, "failed to execute flashblock");
                     }
                 }
             }
@@ -305,7 +310,9 @@ where
                         }
                         match this.blocks.insert(flashblock) {
                             Ok(_) => this.rebuild = true,
-                            Err(err) => debug!(%err, "Failed to prepare flashblock"),
+                            Err(err) => {
+                                debug!(target: "flashblocks", %err, "Failed to prepare flashblock")
+                            }
                         }
                     }
                     Err(err) => return Poll::Ready(Some(Err(err))),
@@ -320,6 +327,7 @@ where
             } && let Some(current) = this.on_new_tip(state)
             {
                 trace!(
+                    target: "flashblocks",
                     parent_hash = %current.block().parent_hash(),
                     block_number = current.block().number(),
                     "Clearing current flashblock on new canonical block"

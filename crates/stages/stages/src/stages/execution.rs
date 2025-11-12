@@ -660,7 +660,7 @@ where
 mod tests {
     use super::*;
     use crate::{stages::MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD, test_utils::TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, B256, U256};
+    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
@@ -677,7 +677,9 @@ mod tests {
         DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory,
     };
     use reth_prune::PruneModes;
+    use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
     use reth_stages_api::StageUnitCheckpoint;
+    use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthEvmConfig> {
         let evm_config =
@@ -894,10 +896,19 @@ mod tests {
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
         let modes = [None, Some(PruneModes::default())];
+        let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
+            Address::random(),
+            PruneMode::Distance(100000),
+        )]));
 
         // Tests node with database and node with static files
-        for mode in modes {
+        for mut mode in modes {
             let mut provider = factory.database_provider_rw().unwrap();
+
+            if let Some(mode) = &mut mode {
+                // Simulating a full node where we write receipts to database
+                mode.receipts_log_filter = random_filter.clone();
+            }
 
             let mut execution_stage = stage();
             provider.set_prune_modes(mode.clone().unwrap_or_default());
@@ -1022,9 +1033,18 @@ mod tests {
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
         let modes = [None, Some(PruneModes::default())];
+        let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
+            Address::random(),
+            PruneMode::Before(100000),
+        )]));
 
         // Tests node with database and node with static files
-        for mode in modes {
+        for mut mode in modes {
+            if let Some(mode) = &mut mode {
+                // Simulating a full node where we write receipts to database
+                mode.receipts_log_filter = random_filter.clone();
+            }
+
             // Test Execution
             let mut execution_stage = stage();
             provider.set_prune_modes(mode.clone().unwrap_or_default());
