@@ -110,12 +110,9 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         trie_updates: &'a TrieUpdatesSorted,
         hashed_address: B256,
     ) -> (ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>, bool) {
-        const EMPTY_UPDATES: &[(Nibbles, Option<BranchNodeCompact>)] = &[];
-
         let storage_trie_updates = trie_updates.storage_tries_ref().get(&hashed_address);
         let cursor_wiped = storage_trie_updates.is_some_and(|u| u.is_deleted());
-        let storage_nodes =
-            storage_trie_updates.map(|u| u.storage_nodes_ref()).unwrap_or(EMPTY_UPDATES);
+        let storage_nodes = storage_trie_updates.map(|u| u.storage_nodes_ref()).unwrap_or(&[]);
 
         (ForwardInMemoryCursor::new(storage_nodes), cursor_wiped)
     }
