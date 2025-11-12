@@ -582,7 +582,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut deleted_headers = Vec::new();
 
         loop {
-            let Some(block_height) = self.get_lowest_static_file_block(segment) else {
+            let Some(block_height) = self.get_lowest_range_end(segment) else {
                 return Ok(deleted_headers)
             };
 
@@ -1221,29 +1221,29 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.earliest_history_height.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Gets the lowest transaction static file block if it exists.
-    ///
-    /// For example if the transactions static file has blocks 0-499, this will return 499..
-    ///
-    /// If there is nothing on disk for the given segment, this will return [`None`].
-    pub fn get_lowest_transaction_static_file_block(&self) -> Option<BlockNumber> {
-        self.get_lowest_static_file_block(StaticFileSegment::Transactions)
-    }
-
-    /// Gets the lowest static file's block height if it exists for a static file segment.
-    ///
-    /// For example if the static file has blocks 0-499, this will return 499..
-    ///
-    /// If there is nothing on disk for the given segment, this will return [`None`].
-    pub fn get_lowest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
-        self.static_files_min_block.read().get(&segment).map(|range| range.end())
-    }
-
     /// Gets the lowest static file's block range if it exists for a static file segment.
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_lowest_range(&self, segment: StaticFileSegment) -> Option<SegmentRangeInclusive> {
         self.static_files_min_block.read().get(&segment).copied()
+    }
+
+    /// Gets the lowest static file's block range start if it exists for a static file segment.
+    ///
+    /// For example if the lowest static file has blocks 0-499, this will return 0.
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
+    pub fn get_lowest_range_start(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
+        self.get_lowest_range(segment).map(|range| range.start())
+    }
+
+    /// Gets the lowest static file's block range end if it exists for a static file segment.
+    ///
+    /// For example if the static file has blocks 0-499, this will return 499.
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
+    pub fn get_lowest_range_end(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
+        self.get_lowest_range(segment).map(|range| range.end())
     }
 
     /// Gets the highest static file's block height if it exists for a static file segment.

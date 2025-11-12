@@ -80,14 +80,19 @@ impl ExecInput {
     where
         Provider: StaticFileProviderFactory + BlockReader,
     {
-        let Some(lowest_transactions_block) = provider
-            .static_file_provider()
-            .get_lowest_range(StaticFileSegment::Transactions)
-            .map(|range| range.start())
+        // Get lowest available block number for transactions
+        let Some(lowest_transactions_block) =
+            provider.static_file_provider().get_lowest_range_start(StaticFileSegment::Transactions)
         else {
             return Ok((0..0, 0..=0, true));
         };
 
+        // We can only process transactions that have associated static files, so we cap the start
+        // block by lowest available block number.
+        //
+        // Certain transactions may not have associated static files when user deletes them
+        // manually. In that case, we can't process them, and need to adjust the start block
+        // accordingly.
         let start_block = self.next_block().max(lowest_transactions_block);
         let target_block = self.target();
 
