@@ -194,7 +194,9 @@ where
 
         let targets = StaticFileTargets {
             // StaticFile receipts only if they're not pruned according to the user configuration
-            receipts: if self.prune_modes.receipts.is_none() {
+            receipts: if self.prune_modes.receipts.is_none() &&
+                self.prune_modes.receipts_log_filter.is_empty()
+            {
                 finalized_block_numbers.receipts.and_then(|finalized_block_number| {
                     self.get_static_file_target(
                         highest_static_files.receipts,

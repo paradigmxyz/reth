@@ -266,7 +266,7 @@ pub enum ForkSpec {
     FrontierToHomesteadAt5,
     /// Homestead
     Homestead,
-    /// Homestead to Tangerine
+    /// Homestead to DAO
     HomesteadToDaoAt5,
     /// Homestead to Tangerine
     HomesteadToEIP150At5,

@@ -4,8 +4,9 @@
 #[derive(Debug)]
 pub struct ForwardInMemoryCursor<'a, K, V> {
     /// The reference to the pre-sorted collection of entries.
-    entries: std::slice::Iter<'a, (K, V)>,
-    is_empty: bool,
+    entries: &'a [(K, V)],
+    /// Current index in the collection.
+    idx: usize,
 }
 
 impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
@@ -13,25 +14,36 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
     ///
     /// The cursor expects all of the entries to have been sorted in advance.
     #[inline]
-    pub fn new(entries: &'a [(K, V)]) -> Self {
-        Self { entries: entries.iter(), is_empty: entries.is_empty() }
+    pub const fn new(entries: &'a [(K, V)]) -> Self {
+        Self { entries, idx: 0 }
     }
 
     /// Returns `true` if the cursor is empty, regardless of its position.
     #[inline]
     pub const fn is_empty(&self) -> bool {
-        self.is_empty
+        self.entries.is_empty()
+    }
+
+    /// Returns `true` if any entry satisfies the predicate.
+    #[inline]
+    pub fn has_any<F>(&self, predicate: F) -> bool
+    where
+        F: Fn(&(K, V)) -> bool,
+    {
+        self.entries.iter().any(predicate)
     }
 
     /// Returns the current entry pointed to be the cursor, or `None` if no entries are left.
     #[inline]
     pub fn current(&self) -> Option<&(K, V)> {
-        self.entries.clone().next()
+        self.entries.get(self.idx)
     }
 
     #[inline]
     fn next(&mut self) -> Option<&(K, V)> {
-        self.entries.next()
+        let entry = self.entries.get(self.idx)?;
+        self.idx += 1;
+        Some(entry)
     }
 }
 

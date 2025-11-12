@@ -465,6 +465,8 @@ pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     }
 
     let out = hasher.finalize();
+
+    #[allow(deprecated)] // generic-array 0.14 deprecated
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
 }
 

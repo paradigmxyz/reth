@@ -179,10 +179,10 @@ Networking:
           [default: 30303]
 
       --max-outbound-peers <MAX_OUTBOUND_PEERS>
-          Maximum number of outbound requests. default: 100
+          Maximum number of outbound peers. default: 100
 
       --max-inbound-peers <MAX_INBOUND_PEERS>
-          Maximum number of inbound requests. default: 30
+          Maximum number of inbound peers. default: 30
 
       --max-tx-reqs <COUNT>
           Max concurrent `GetPooledTransactions` requests.
@@ -537,6 +537,9 @@ TxPool:
       --txpool.blob-cache-size <BLOB_CACHE_SIZE>
           Max number of entries for the in memory cache of the blob store
 
+      --txpool.disable-blobs-support
+          Disable EIP-4844 blob transaction support
+
       --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
 
@@ -649,6 +652,9 @@ Builder:
 
           [default: 3]
 
+      --builder.max-blobs <COUNT>
+          Maximum number of blobs to include per block
+
 Debug:
       --debug.terminate
           Flag indicating whether the node should be terminated after the pipeline sync
@@ -726,7 +732,11 @@ Database:
           [possible values: true, false]
 
       --db.max-size <MAX_SIZE>
-          Maximum database size (e.g., 4TB, 8MB)
+          Maximum database size (e.g., 4TB, 8TB).
+
+          This sets the "map size" of the database. If the database grows beyond this limit, the node will stop with an "environment map size limit reached" error.
+
+          The default value is 8TB.
 
       --db.growth-step <GROWTH_STEP>
           Database growth step (e.g., 4GB, 4KB)
@@ -800,6 +810,9 @@ Pruning:
 
       --prune.receipts.before <BLOCK_NUMBER>
           Prune receipts before the specified block number. The specified block number is not pruned
+
+      --prune.receiptslogfilter <FILTER_CONFIG>
+          Configure receipts log filter. Format: <`address`>:<`prune_mode`>... where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
 
       --prune.account-history.full
           Prunes all account history

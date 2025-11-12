@@ -7,14 +7,13 @@ use crate::{
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::Bytes;
 use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
-use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum::{
     node::api::{
-        validate_version_specific_fields, AddOnsContext, BuiltPayload, EngineApiMessageVersion,
-        EngineObjectValidationError, ExecutionPayload, FullNodeComponents, NewPayloadError,
-        NodePrimitives, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
-        PayloadTypes, PayloadValidator,
+        validate_version_specific_fields, AddOnsContext, BuiltPayload, BuiltPayloadExecutedBlock,
+        EngineApiMessageVersion, EngineObjectValidationError, ExecutionPayload, FullNodeComponents,
+        NewPayloadError, NodePrimitives, PayloadAttributes, PayloadBuilderAttributes,
+        PayloadOrAttributes, PayloadTypes, PayloadValidator,
     },
     primitives::{RecoveredBlock, SealedBlock},
     storage::StateProviderFactory,
@@ -172,7 +171,7 @@ impl BuiltPayload for CustomBuiltPayload {
         self.0.fees()
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock<Self::Primitives>> {
+    fn executed_block(&self) -> Option<BuiltPayloadExecutedBlock<Self::Primitives>> {
         self.0.executed_block()
     }
 

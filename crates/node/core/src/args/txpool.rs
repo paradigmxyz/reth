@@ -53,6 +53,10 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.blob-cache-size", alias = "txpool.blob_cache_size")]
     pub blob_cache_size: Option<u32>,
 
+    /// Disable EIP-4844 blob transaction support
+    #[arg(long = "txpool.disable-blobs-support", alias = "txpool.disable_blobs_support", default_value_t = false, conflicts_with_all = ["blobpool_max_count", "blobpool_max_size", "blob_cache_size", "blob_transaction_price_bump"])]
+    pub disable_blobs_support: bool,
+
     /// Max number of executable transaction slots guaranteed per account
     #[arg(long = "txpool.max-account-slots", alias = "txpool.max_account_slots", default_value_t = TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER)]
     pub max_account_slots: usize,
@@ -168,6 +172,7 @@ impl Default for TxPoolArgs {
             blobpool_max_count: TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
             blobpool_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
             blob_cache_size: None,
+            disable_blobs_support: false,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bump: DEFAULT_PRICE_BUMP,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,

@@ -45,13 +45,13 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         // if the storage trie has no updates then we use this as the in-memory overlay.
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+        const EMPTY_UPDATES: &[(Nibbles, Option<BranchNodeCompact>)] = &[];
 
         let storage_trie_updates =
             self.trie_updates.as_ref().storage_tries_ref().get(&hashed_address);
         let (storage_nodes, cleared) = storage_trie_updates
             .map(|u| (u.storage_nodes_ref(), u.is_deleted()))
-            .unwrap_or((&EMPTY_UPDATES, false));
+            .unwrap_or((EMPTY_UPDATES, false));
 
         let cursor = if cleared {
             None
@@ -86,6 +86,10 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         cursor: Option<C>,
         trie_updates: &'a [(Nibbles, Option<BranchNodeCompact>)],
     ) -> Self {
+        debug_assert!(
+            trie_updates.is_sorted_by_key(|(k, _)| k),
+            "Overlay values must be sorted by path"
+        );
         let in_memory_cursor = ForwardInMemoryCursor::new(trie_updates);
         Self { cursor, cursor_entry: None, in_memory_cursor, last_key: None, seeked: false }
     }
