@@ -154,6 +154,15 @@ impl DatabaseArguments {
         self
     }
 
+    /// Sets the database page size value.
+    pub const fn with_geometry_page_size(mut self, page_size: Option<usize>) -> Self {
+        if let Some(size) = page_size {
+            self.geometry.page_size = Some(reth_libmdbx::PageSize::Set(size));
+        }
+
+        self
+    }
+
     /// Sets the database sync mode.
     pub const fn with_sync_mode(mut self, sync_mode: Option<SyncMode>) -> Self {
         if let Some(sync_mode) = sync_mode {
