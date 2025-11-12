@@ -3610,7 +3610,6 @@ dependencies = [
  "reth-network-peers",
  "reth-node-builder",
  "reth-op",
- "reth-optimism-flashblocks",
  "reth-optimism-forks",
  "reth-payload-builder",
  "reth-rpc-api",
@@ -6171,9 +6170,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-consensus"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e42e9de945efe3c2fbd207e69720c9c1af2b8caa6872aee0e216450c25a3ca70"
+checksum = "a0d7ec388eb83a3e6c71774131dbbb2ba9c199b6acac7dce172ed8de2f819e91"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6197,9 +6196,9 @@ checksum = "a79f352fc3893dcd670172e615afef993a41798a1d3fc0db88a3e60ef2e70ecc"
 
 [[package]]
 name = "op-alloy-network"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c9da49a2812a0189dd05e81e4418c3ae13fd607a92654107f02ebad8e91ed9e"
+checksum = "979fe768bbb571d1d0bd7f84bc35124243b4db17f944b94698872a4701e743a0"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -6228,9 +6227,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-jsonrpsee"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b62ceb771ab9323647093ea2e58dc7f25289a1b95cbef2faa2620f6ca2dee4d9"
+checksum = "7bdbb3c0453fe2605fb008851ea0b45f3f2ba607722c9f2e4ffd7198958ce501"
 dependencies = [
  "alloy-primitives",
  "jsonrpsee",
@@ -6238,9 +6237,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cd1eb7bddd2232856ba9d259320a094f9edf2b9061acfe5966e7960208393e6"
+checksum = "cc252b5fa74dbd33aa2f9a40e5ff9cfe34ed2af9b9b235781bc7cc8ec7d6aca8"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6258,9 +6257,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types-engine"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5429622150d18d8e6847a701135082622413e2451b64d03f979415d764566bef"
+checksum = "c1abe694cd6718b8932da3f824f46778be0f43289e4103c88abc505c63533a04"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9480,19 +9479,18 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
- "alloy-serde",
  "brotli",
  "derive_more",
  "eyre",
  "futures-util",
  "metrics",
+ "op-alloy-rpc-types-engine",
  "reth-chain-state",
  "reth-engine-primitives",
  "reth-errors",
  "reth-evm",
  "reth-execution-types",
  "reth-metrics",
- "reth-optimism-evm",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-payload-primitives",
@@ -9502,7 +9500,6 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "ringbuffer",
- "serde",
  "serde_json",
  "test-case",
  "tokio",
