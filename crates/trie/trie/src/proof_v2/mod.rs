@@ -13,9 +13,6 @@ use alloy_primitives::{B256, U256};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{Nibbles, SparseTrieNode, TrieMasks, TrieNode};
 
-mod targets;
-pub use targets::*;
-
 mod value;
 pub use value::*;
 
