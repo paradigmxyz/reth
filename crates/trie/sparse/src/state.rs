@@ -1,7 +1,7 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     traits::SparseTrieInterface,
-    RevealedSparseNode, SerialSparseTrie, SparseTrie, TrieMasks,
+    SerialSparseTrie, SparseTrie,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -15,8 +15,9 @@ use reth_primitives_traits::Account;
 use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, RlpNode, StorageMultiProof,
-    TrieAccount, TrieMask, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, RlpNode, SparseTrieNode,
+    StorageMultiProof, TrieAccount, TrieMask, TrieMasks, TrieNode, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use tracing::{instrument, trace};
 
@@ -945,9 +946,9 @@ struct ProofNodesMetricValues {
 #[derive(Debug, PartialEq, Eq)]
 struct FilterMappedProofNodes {
     /// Root node which was pulled out of the original node set to be handled specially.
-    root_node: Option<RevealedSparseNode>,
+    root_node: Option<SparseTrieNode>,
     /// Filtered, decoded and unsorted proof nodes. Root node is removed.
-    nodes: Vec<RevealedSparseNode>,
+    nodes: Vec<SparseTrieNode>,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
     new_nodes: usize,
@@ -955,7 +956,7 @@ struct FilterMappedProofNodes {
     metric_values: ProofNodesMetricValues,
 }
 
-/// Filters the decoded nodes that are already revealed, maps them to `RevealedSparseNodes`,
+/// Filters the decoded nodes that are already revealed, maps them to `SparseTrieNode`s,
 /// separates the root node if present, and returns additional information about the number of
 /// total, skipped, and new nodes.
 fn filter_map_revealed_nodes(
@@ -1006,7 +1007,7 @@ fn filter_map_revealed_nodes(
             _ => TrieMasks::none(),
         };
 
-        let node = RevealedSparseNode { path, node: proof_node, masks };
+        let node = SparseTrieNode { path, node: proof_node, masks };
 
         if is_root {
             // Perform sanity check.
@@ -1382,12 +1383,12 @@ mod tests {
         assert_eq!(
             decoded,
             FilterMappedProofNodes {
-                root_node: Some(RevealedSparseNode {
+                root_node: Some(SparseTrieNode {
                     path: Nibbles::default(),
                     node: branch,
                     masks: TrieMasks::none(),
                 }),
-                nodes: vec![RevealedSparseNode {
+                nodes: vec![SparseTrieNode {
                     path: Nibbles::from_nibbles([0x1]),
                     node: leaf,
                     masks: TrieMasks::none(),

@@ -7,9 +7,9 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     B256,
 };
-use alloy_trie::{BranchNodeCompact, TrieMask};
+use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{Nibbles, TrieNode};
+use reth_trie_common::{Nibbles, SparseTrieNode, TrieMasks, TrieNode};
 
 use crate::provider::TrieNodeProvider;
 
@@ -74,7 +74,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
-        self.reveal_nodes(vec![RevealedSparseNode { path, node, masks }])
+        self.reveal_nodes(vec![SparseTrieNode { path, node, masks }])
     }
 
     /// Reveals one or more trie nodes if they have not been revealed before.
@@ -91,7 +91,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if any of the nodes was not revealed.
-    fn reveal_nodes(&mut self, nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()>;
+    fn reveal_nodes(&mut self, nodes: Vec<SparseTrieNode>) -> SparseTrieResult<()>;
 
     /// Updates the value of a leaf node at the specified path.
     ///
@@ -232,36 +232,6 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     fn shrink_values_to(&mut self, size: usize);
 }
 
-/// Struct for passing around branch node mask information.
-///
-/// Branch nodes can have up to 16 children (one for each nibble).
-/// The masks represent which children are stored in different ways:
-/// - `hash_mask`: Indicates which children are stored as hashes in the database
-/// - `tree_mask`: Indicates which children are complete subtrees stored in the database
-///
-/// These masks are essential for efficient trie traversal and serialization, as they
-/// determine how nodes should be encoded and stored on disk.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct TrieMasks {
-    /// Branch node hash mask, if any.
-    ///
-    /// When a bit is set, the corresponding child node's hash is stored in the trie.
-    ///
-    /// This mask enables selective hashing of child nodes.
-    pub hash_mask: Option<TrieMask>,
-    /// Branch node tree mask, if any.
-    ///
-    /// When a bit is set, the corresponding child subtree is stored in the database.
-    pub tree_mask: Option<TrieMask>,
-}
-
-impl TrieMasks {
-    /// Helper function, returns both fields `hash_mask` and `tree_mask` as [`None`]
-    pub const fn none() -> Self {
-        Self { hash_mask: None, tree_mask: None }
-    }
-}
-
 /// Tracks modifications to the sparse trie structure.
 ///
 /// Maintains references to both modified and pruned/removed branches, enabling
@@ -306,15 +276,4 @@ pub enum LeafLookup {
     Exists,
     /// Leaf does not exist (exclusion proof found).
     NonExistent,
-}
-
-/// Carries all information needed by a sparse trie to reveal a particular node.
-#[derive(Debug, PartialEq, Eq)]
-pub struct RevealedSparseNode {
-    /// Path of the node.
-    pub path: Nibbles,
-    /// The node itself.
-    pub node: TrieNode,
-    /// Tree and hash masks for the node, if known.
-    pub masks: TrieMasks,
 }

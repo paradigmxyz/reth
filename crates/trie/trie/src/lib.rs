@@ -32,6 +32,9 @@ pub mod node_iter;
 /// Merkle proof generation.
 pub mod proof;
 
+/// Merkle proof generation v2 (leaf-only implementation).
+pub mod proof_v2;
+
 /// Trie witness generation.
 pub mod witness;
 
