@@ -160,6 +160,11 @@ Networking:
 
           This will also deterministically set the peer ID. If not specified, it will be set in the data dir for the chain being used.
 
+      --p2p-secret-key-hex <HEX>
+          Hex encoded secret key to use for this node.
+
+          This will also deterministically set the peer ID. Cannot be used together with `--p2p-secret-key`.
+
       --no-persist-peers
           Do not persist peers.
 
