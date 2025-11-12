@@ -537,6 +537,9 @@ TxPool:
       --txpool.blob-cache-size <BLOB_CACHE_SIZE>
           Max number of entries for the in memory cache of the blob store
 
+      --txpool.disable-blobs-support
+          Disable EIP-4844 blob transaction support
+
       --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
 
@@ -648,6 +651,9 @@ Builder:
           Maximum number of tasks to spawn for building a payload
 
           [default: 3]
+
+      --builder.max-blobs <COUNT>
+          Maximum number of blobs to include per block
 
 Debug:
       --debug.terminate
@@ -804,6 +810,9 @@ Pruning:
 
       --prune.receipts.before <BLOCK_NUMBER>
           Prune receipts before the specified block number. The specified block number is not pruned
+
+      --prune.receiptslogfilter <FILTER_CONFIG>
+          Configure receipts log filter. Format: <`address`>:<`prune_mode`>... where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
 
       --prune.account-history.full
           Prunes all account history

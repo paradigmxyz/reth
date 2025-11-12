@@ -198,8 +198,15 @@ where
     let mut block_transactions_rlp_length = 0;
 
     let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp);
-    let max_blob_count =
-        blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_default();
+    let protocol_max_blob_count =
+        blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_else(Default::default);
+
+    // Apply user-configured blob limit (EIP-7872)
+    // Per EIP-7872: if the minimum is zero, set it to one
+    let max_blob_count = builder_config
+        .max_blobs_per_block
+        .map(|user_limit| std::cmp::min(user_limit, protocol_max_blob_count).max(1))
+        .unwrap_or(protocol_max_blob_count);
 
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
 
