@@ -162,7 +162,6 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
-        debug!(target: "trie::loader", ?range, "incremental state root");
         Self::incremental_root_calculator(tx, range)?.root_with_updates()
     }
 
