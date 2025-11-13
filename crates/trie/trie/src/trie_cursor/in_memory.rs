@@ -1,4 +1,4 @@
-use super::{TrieCursor, TrieCursorFactory};
+use super::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
 use crate::{forward_cursor::ForwardInMemoryCursor, updates::TrieUpdatesSorted};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
@@ -37,29 +37,16 @@ where
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.account_trie_cursor()?;
-        Ok(InMemoryTrieCursor::new(Some(cursor), self.trie_updates.as_ref().account_nodes_ref()))
+        Ok(InMemoryTrieCursor::new_account(cursor, self.trie_updates.as_ref()))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        // if the storage trie has no updates then we use this as the in-memory overlay.
-        const EMPTY_UPDATES: &[(Nibbles, Option<BranchNodeCompact>)] = &[];
-
-        let storage_trie_updates =
-            self.trie_updates.as_ref().storage_tries_ref().get(&hashed_address);
-        let (storage_nodes, cleared) = storage_trie_updates
-            .map(|u| (u.storage_nodes_ref(), u.is_deleted()))
-            .unwrap_or((EMPTY_UPDATES, false));
-
-        let cursor = if cleared {
-            None
-        } else {
-            Some(self.cursor_factory.storage_trie_cursor(hashed_address)?)
-        };
-
-        Ok(InMemoryTrieCursor::new(cursor, storage_nodes))
+        let trie_updates = self.trie_updates.as_ref();
+        let cursor = self.cursor_factory.storage_trie_cursor(hashed_address)?;
+        Ok(InMemoryTrieCursor::new_storage(cursor, trie_updates, hashed_address))
     }
 }
 
@@ -67,8 +54,10 @@ where
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
 pub struct InMemoryTrieCursor<'a, C> {
-    /// The underlying cursor. If None then it is assumed there is no DB data.
-    cursor: Option<C>,
+    /// The underlying cursor.
+    cursor: C,
+    /// Whether the underlying cursor should be ignored (when storage trie was wiped).
+    cursor_wiped: bool,
     /// Entry that `cursor` is currently pointing to.
     cursor_entry: Option<(Nibbles, BranchNodeCompact)>,
     /// Forward-only in-memory cursor over storage trie nodes.
@@ -77,21 +66,60 @@ pub struct InMemoryTrieCursor<'a, C> {
     last_key: Option<Nibbles>,
     /// Whether an initial seek was called.
     seeked: bool,
+    /// Reference to the full trie updates.
+    trie_updates: &'a TrieUpdatesSorted,
 }
 
 impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
-    /// Create new trie cursor which combines a DB cursor (None to assume empty DB) and a set of
-    /// in-memory trie nodes.
-    pub fn new(
-        cursor: Option<C>,
-        trie_updates: &'a [(Nibbles, Option<BranchNodeCompact>)],
+    /// Create new account trie cursor which combines a DB cursor and the trie updates.
+    pub fn new_account(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
+        let in_memory_cursor = ForwardInMemoryCursor::new(trie_updates.account_nodes_ref());
+        Self {
+            cursor,
+            cursor_wiped: false,
+            cursor_entry: None,
+            in_memory_cursor,
+            last_key: None,
+            seeked: false,
+            trie_updates,
+        }
+    }
+
+    /// Create new storage trie cursor with full trie updates reference.
+    /// This allows the cursor to switch between storage tries when `set_hashed_address` is called.
+    pub fn new_storage(
+        cursor: C,
+        trie_updates: &'a TrieUpdatesSorted,
+        hashed_address: B256,
     ) -> Self {
-        debug_assert!(
-            trie_updates.is_sorted_by_key(|(k, _)| k),
-            "Overlay values must be sorted by path"
-        );
-        let in_memory_cursor = ForwardInMemoryCursor::new(trie_updates);
-        Self { cursor, cursor_entry: None, in_memory_cursor, last_key: None, seeked: false }
+        let (in_memory_cursor, cursor_wiped) =
+            Self::get_storage_overlay(trie_updates, hashed_address);
+        Self {
+            cursor,
+            cursor_wiped,
+            cursor_entry: None,
+            in_memory_cursor,
+            last_key: None,
+            seeked: false,
+            trie_updates,
+        }
+    }
+
+    /// Returns the storage overlay for `hashed_address` and whether it was deleted.
+    fn get_storage_overlay(
+        trie_updates: &'a TrieUpdatesSorted,
+        hashed_address: B256,
+    ) -> (ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>, bool) {
+        let storage_trie_updates = trie_updates.storage_tries_ref().get(&hashed_address);
+        let cursor_wiped = storage_trie_updates.is_some_and(|u| u.is_deleted());
+        let storage_nodes = storage_trie_updates.map(|u| u.storage_nodes_ref()).unwrap_or(&[]);
+
+        (ForwardInMemoryCursor::new(storage_nodes), cursor_wiped)
+    }
+
+    /// Returns a mutable reference to the underlying cursor if it's not wiped, None otherwise.
+    fn get_cursor_mut(&mut self) -> Option<&mut C> {
+        (!self.cursor_wiped).then_some(&mut self.cursor)
     }
 
     /// Asserts that the next entry to be returned from the cursor is not previous to the last entry
@@ -118,7 +146,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         };
 
         if should_seek {
-            self.cursor_entry = self.cursor.as_mut().map(|c| c.seek(key)).transpose()?.flatten();
+            self.cursor_entry = self.get_cursor_mut().map(|c| c.seek(key)).transpose()?.flatten();
         }
 
         Ok(())
@@ -131,7 +159,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         // If the previous entry is `None`, and we've done a seek previously, then the cursor is
         // exhausted and we shouldn't call `next` again.
         if self.cursor_entry.is_some() {
-            self.cursor_entry = self.cursor.as_mut().map(|c| c.next()).transpose()?.flatten();
+            self.cursor_entry = self.get_cursor_mut().map(|c| c.next()).transpose()?.flatten();
         }
 
         Ok(())
@@ -242,8 +270,37 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         match &self.last_key {
             Some(key) => Ok(Some(*key)),
-            None => Ok(self.cursor.as_mut().map(|c| c.current()).transpose()?.flatten()),
+            None => Ok(self.get_cursor_mut().map(|c| c.current()).transpose()?.flatten()),
         }
+    }
+
+    fn reset(&mut self) {
+        let Self {
+            cursor,
+            cursor_wiped,
+            cursor_entry,
+            in_memory_cursor,
+            last_key,
+            seeked,
+            trie_updates: _,
+        } = self;
+
+        cursor.reset();
+        in_memory_cursor.reset();
+
+        *cursor_wiped = false;
+        *cursor_entry = None;
+        *last_key = None;
+        *seeked = false;
+    }
+}
+
+impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.reset();
+        self.cursor.set_hashed_address(hashed_address);
+        (self.in_memory_cursor, self.cursor_wiped) =
+            Self::get_storage_overlay(self.trie_updates, hashed_address);
     }
 }
 
@@ -268,7 +325,8 @@ mod tests {
         let visited_keys = Arc::new(Mutex::new(Vec::new()));
         let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
 
-        let mut cursor = InMemoryTrieCursor::new(Some(mock_cursor), &test_case.in_memory_nodes);
+        let trie_updates = TrieUpdatesSorted::new(test_case.in_memory_nodes, Default::default());
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
         let mut results = Vec::new();
 
@@ -451,7 +509,8 @@ mod tests {
         let visited_keys = Arc::new(Mutex::new(Vec::new()));
         let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
 
-        let mut cursor = InMemoryTrieCursor::new(Some(mock_cursor), &in_memory_nodes);
+        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
         let result = cursor.seek_exact(Nibbles::from_nibbles([0x2])).unwrap();
         assert_eq!(
@@ -550,7 +609,8 @@ mod tests {
         let visited_keys = Arc::new(Mutex::new(Vec::new()));
         let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
 
-        let mut cursor = InMemoryTrieCursor::new(Some(mock_cursor), &in_memory_nodes);
+        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
         assert_eq!(cursor.current().unwrap(), None);
 
@@ -600,7 +660,8 @@ mod tests {
         let visited_keys = Arc::new(Mutex::new(Vec::new()));
         let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
 
-        let mut cursor = InMemoryTrieCursor::new(Some(mock_cursor), &in_memory_nodes);
+        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
         // Seek to beginning should return None (all nodes are deleted)
         tracing::debug!("seeking to 0x");
@@ -764,7 +825,8 @@ mod tests {
                 let db_nodes_arc = Arc::new(db_nodes_map);
                 let visited_keys = Arc::new(Mutex::new(Vec::new()));
                 let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
-                let mut test_cursor = InMemoryTrieCursor::new(Some(mock_cursor), &in_memory_nodes);
+                let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+                let mut test_cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
                 // Test: seek to the beginning first
                 let control_first = control_cursor.seek(Nibbles::default()).unwrap();

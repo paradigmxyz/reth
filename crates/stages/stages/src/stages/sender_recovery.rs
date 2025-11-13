@@ -82,42 +82,45 @@ where
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let (tx_range, block_range, is_final_range) =
+        let range_output =
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
-        let end_block = *block_range.end();
+        let end_block = *range_output.block_range.end();
 
-        let mut writer = EitherWriter::new_senders(provider, *block_range.start())?;
+        let mut writer = EitherWriter::new_senders(provider, *range_output.block_range.start())?;
 
         // No transactions to walk over
-        if tx_range.is_empty() {
-            info!(target: "sync::stages::sender_recovery", ?tx_range, "Target transaction already reached");
+        if range_output.tx_range.is_empty() {
+            info!(target: "sync::stages::sender_recovery", tx_range = ?range_output.tx_range, "Target transaction already reached");
             // Drain block range to increment the destination block number
-            for block in block_range {
+            for block in range_output.block_range {
                 writer.increment_block(block)?;
             }
 
             return Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(end_block)
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-                done: is_final_range,
+                done: range_output.is_final_range,
             })
         }
 
-        writer.ensure_at_before_block(*block_range.start())?;
+        writer.ensure_at_before_block(*range_output.block_range.start())?;
 
-        info!(target: "sync::stages::sender_recovery", ?tx_range, %writer, "Recovering senders");
+        info!(target: "sync::stages::sender_recovery", tx_range = ?range_output.tx_range, "Recovering senders");
 
         // Iterate over transactions in batches, recover the senders and append them
-        let batch = tx_range
+        let batch = range_output
+            .tx_range
             .clone()
             .step_by(BATCH_SIZE)
-            .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, tx_range.end))
+            .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, range_output.tx_range.end))
             .collect::<Vec<Range<u64>>>();
 
         let tx_batch_sender = setup_range_recovery(provider);
 
-        let block_body_indices = provider.block_body_indices_range(block_range.clone())?;
-        let blocks_with_indices = block_range.zip(block_body_indices).collect::<Vec<_>>();
+        let block_body_indices =
+            provider.block_body_indices_range(range_output.block_range.clone())?;
+        let blocks_with_indices =
+            range_output.block_range.zip(block_body_indices).collect::<Vec<_>>();
 
         for range in batch {
             let block_numbers = range
@@ -135,7 +138,7 @@ where
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-            done: is_final_range,
+            done: range_output.is_final_range,
         })
     }
 

@@ -3,9 +3,9 @@ use super::{
     StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
 };
 use crate::{
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt,
+    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
+    HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt,
 };
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
@@ -536,7 +536,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 &path
                     .file_name()
                     .ok_or_else(|| {
-                        ProviderError::MissingStaticFilePath(segment, path.to_path_buf())
+                        ProviderError::MissingStaticFileSegmentPath(segment, path.to_path_buf())
                     })?
                     .to_string_lossy(),
             )
@@ -555,6 +555,21 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         }
 
         Ok(None)
+    }
+
+    /// Gets the [`StaticFileJarProvider`] of the requested path.
+    pub fn get_segment_provider_for_path(
+        &self,
+        path: &Path,
+    ) -> ProviderResult<Option<StaticFileJarProvider<'_, N>>> {
+        StaticFileSegment::parse_filename(
+            &path
+                .file_name()
+                .ok_or_else(|| ProviderError::MissingStaticFilePath(path.to_path_buf()))?
+                .to_string_lossy(),
+        )
+        .map(|(segment, block_range)| self.get_or_create_jar_provider(segment, &block_range))
+        .transpose()
     }
 
     /// Given a segment and block range it removes the cached provider from the map.
@@ -944,7 +959,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,
-        has_receipt_pruning: bool,
     ) -> ProviderResult<Option<PipelineTarget>>
     where
         Provider: DBProvider
@@ -989,8 +1003,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             match segment {
                 StaticFileSegment::Headers | StaticFileSegment::Transactions => {}
                 StaticFileSegment::Receipts => {
-                    if has_receipt_pruning {
-                        // Pruned nodes (including full node) do not store receipts as static files.
+                    if EitherWriter::receipts_destination(provider).is_database() {
+                        // Old pruned nodes (including full node) do not store receipts as static
+                        // files.
                         continue
                     }
 

@@ -1,5 +1,6 @@
-use super::TrieCursor;
+use super::{TrieCursor, TrieStorageCursor};
 use crate::{BranchNodeCompact, Nibbles};
+use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use std::time::{Duration, Instant};
 
@@ -159,5 +160,15 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         self.cursor.current()
+    }
+
+    fn reset(&mut self) {
+        self.cursor.reset()
+    }
+}
+
+impl<'metrics, C: TrieStorageCursor> TrieStorageCursor for InstrumentedTrieCursor<'metrics, C> {
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.cursor.set_hashed_address(hashed_address)
     }
 }

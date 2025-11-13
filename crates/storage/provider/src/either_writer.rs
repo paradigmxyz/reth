@@ -72,19 +72,27 @@ impl<'a> EitherWriter<'a, (), ()> {
         }
     }
 
-    /// Returns the destination for writing receipts based on storage settings.
-    pub fn receipts_destination<P>(provider: &P) -> EitherWriterDestination
-    where
-        P: DBProvider + StorageSettingsCache,
-    {
-        // Write receipts to static files only if they're explicitly enabled or we don't have
-        // receipts pruning
-        if provider.cached_storage_settings().receipts_in_static_files ||
-            !provider.prune_modes_ref().has_receipts_pruning()
+    /// Returns the destination for writing receipts.
+    ///
+    /// The rules are as follows:
+    /// - If the node should not always write receipts to static files, and any receipt pruning is
+    ///   enabled, write to the database.
+    /// - If the node should always write receipts to static files, but receipt log filter pruning
+    ///   is enabled, write to the database.
+    /// - Otherwise, write to static files.
+    pub fn receipts_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        let receipts_in_static_files = provider.cached_storage_settings().receipts_in_static_files;
+        let prune_modes = provider.prune_modes_ref();
+
+        if !receipts_in_static_files && prune_modes.has_receipts_pruning() ||
+            // TODO: support writing receipts to static files with log filter pruning enabled
+            receipts_in_static_files && !prune_modes.receipts_log_filter.is_empty()
         {
-            EitherWriterDestination::StaticFile
-        } else {
             EitherWriterDestination::Database
+        } else {
+            EitherWriterDestination::StaticFile
         }
     }
 
