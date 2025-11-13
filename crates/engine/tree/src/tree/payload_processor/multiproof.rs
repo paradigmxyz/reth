@@ -1293,7 +1293,7 @@ mod tests {
         TrieReader,
     };
     use reth_trie::MultiProof;
-    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
+    use reth_trie_parallel::proof_task::ProofWorkerHandle;
     use revm_primitives::{B256, U256};
     use std::sync::OnceLock;
     use tokio::runtime::{Handle, Runtime};
@@ -1309,7 +1309,7 @@ mod tests {
             .clone()
     }
 
-    fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
+    fn create_test_state_root_task<F>(factory: F) -> MultiProofTask<OverlayStateProviderFactory<F>>
     where
         F: DatabaseProviderFactory<
                 Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
@@ -1319,11 +1319,11 @@ mod tests {
     {
         let rt_handle = get_test_runtime_handle();
         let overlay_factory = OverlayStateProviderFactory::new(factory);
-        let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
+        let proof_handle = ProofWorkerHandle::new(rt_handle, 1, 1);
+        let proof_dispatcher = proof_handle.into_dispatcher(overlay_factory);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
 
-        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1))
+        MultiProofTask::new(proof_dispatcher, to_sparse_trie, Some(1))
     }
 
     #[test]

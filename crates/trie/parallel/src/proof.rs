@@ -251,7 +251,7 @@ impl<Factory> ParallelProof<Factory> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proof_task::{ProofTaskCtx, ProofWorkerHandle};
+    use crate::proof_task::ProofWorkerHandle;
     use alloy_primitives::{
         keccak256,
         map::{B256Set, DefaultHashBuilder, HashMap},
