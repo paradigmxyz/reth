@@ -233,10 +233,11 @@ where
             Ordering::Less => {
                 // If we are already in the process of unwind, this might be fine because we will
                 // fix the inconsistency right away.
-                if let Some(unwind_to) = unwind_to
-                    && unwind_to <= static_file_block_num {
-                        return Ok(())
-                    }
+                if let Some(unwind_to) = unwind_to &&
+                    unwind_to <= static_file_block_num
+                {
+                    return Ok(())
+                }
 
                 // Otherwise, this is a real inconsistency - database has more blocks than static
                 // files
@@ -1263,9 +1264,7 @@ mod tests {
             1,
             generators::BlockParams { tx_count: Some(2), ..Default::default() },
         );
-        provider_rw
-            .insert_block(block.try_recover().unwrap())
-            .expect("failed to insert block");
+        provider_rw.insert_block(block.try_recover().unwrap()).expect("failed to insert block");
 
         let static_file_provider = provider_rw.static_file_provider();
         static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap().commit().unwrap();
