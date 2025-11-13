@@ -39,7 +39,9 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
-use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use crossbeam_channel::{
+    bounded, unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender,
+};
 use dashmap::DashMap;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
@@ -79,59 +81,49 @@ use crate::proof_task_metrics::{
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
-/// A handle that provides type-safe access to proof worker pools.
+/// A handle managing a long-lived pool of proof workers.
 ///
-/// The handle stores direct senders to both storage and account worker pools,
-/// eliminating the need for a routing thread. All handles share reference-counted
-/// channels, and workers shut down gracefully when all handles are dropped.
+/// # Lifetime
+///
+/// - Handle is created, spawns tasks
+/// - For each new context (e.g. each new block being validated):
+///     - [`Self::into_dispatcher`] is called with provider factory and any other necessary context
+///       to do proof work.
+///         - Context is sent to each task.
+///         - This type is transformed into a [`ProofWorkerDispatcher`], which can be used to
+///           dispatch tasks.
+///     - Once no more work is necessary, [`ProofWorkerDispatcher::into_handle`] is called to obtain
+///       this type again.
+///  - This handle, or the dispatcher, can be dropped at any time to shut down all tasks.
 #[derive(Debug, Clone)]
-pub struct ProofWorkerHandle {
-    /// Direct sender to storage worker pool
-    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
-    /// Direct sender to account worker pool
-    account_work_tx: CrossbeamSender<AccountWorkerJob>,
-    /// Counter tracking available storage workers. Workers decrement when starting work,
-    /// increment when finishing. Used to determine whether to chunk multiproofs.
-    storage_available_workers: Arc<AtomicUsize>,
-    /// Counter tracking available account workers. Workers decrement when starting work,
-    /// increment when finishing. Used to determine whether to chunk multiproofs.
-    account_available_workers: Arc<AtomicUsize>,
-    /// Total number of storage workers spawned
-    storage_worker_count: usize,
-    /// Total number of account workers spawned
-    account_worker_count: usize,
+pub struct ProofWorkerHandle<Factory> {
+    /// Direct senders to storage worker pool, one for each storage proof worker.
+    storage_ctx_txs: Arc<Vec<CrossbeamSender<StorageProofTaskCtx<Factory>>>>,
+    /// Direct senders to account worker pool, one for each account proof worker.
+    account_ctx_txs: Arc<Vec<CrossbeamSender<AccountProofTaskCtx<Factory>>>>,
 }
 
-impl ProofWorkerHandle {
-    /// Spawns storage and account worker pools with dedicated database transactions.
+impl<Factory> ProofWorkerHandle<Factory>
+where
+    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+        + Clone
+        + Send
+        + 'static,
+{
+    /// Spawns storage and account worker pools.
     ///
-    /// Returns a handle for submitting proof tasks to the worker pools.
-    /// Workers run until the last handle is dropped.
+    /// Returns a handle which can be used to initialize a proof context and subsequently submit
+    /// tasks to the worker pools. Workers run until the last handle is dropped.
     ///
     /// # Parameters
     /// - `executor`: Tokio runtime handle for spawning blocking tasks
-    /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `storage_worker_count`: Number of storage workers to spawn
     /// - `account_worker_count`: Number of account workers to spawn
-    pub fn new<Factory>(
-        executor: Handle,
-        task_ctx: ProofTaskCtx<Factory>,
-        storage_worker_count: usize,
-        account_worker_count: usize,
-    ) -> Self
-    where
-        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
-            + Send
-            + 'static,
-    {
-        let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
-        let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
-
-        // Initialize availability counters at zero. Each worker will increment when it
-        // successfully initializes, ensuring only healthy workers are counted.
-        let storage_available_workers = Arc::new(AtomicUsize::new(0));
-        let account_available_workers = Arc::new(AtomicUsize::new(0));
+    pub fn new(executor: Handle, storage_worker_count: usize, account_worker_count: usize) -> Self {
+        #[cfg(feature = "metrics")]
+        let metrics = ProofTaskTrieMetrics::default();
+        #[cfg(feature = "metrics")]
+        let cursor_metrics = ProofTaskCursorMetrics::new();
 
         debug!(
             target: "trie::proof_task",
@@ -143,38 +135,33 @@ impl ProofWorkerHandle {
         let parent_span =
             debug_span!(target: "trie::proof_task", "storage proof workers", ?storage_worker_count)
                 .entered();
+
         // Spawn storage workers
+        let mut storage_ctx_txs = Vec::new();
         for worker_id in 0..storage_worker_count {
             let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
-            let task_ctx_clone = task_ctx.clone();
-            let work_rx_clone = storage_work_rx.clone();
-            let storage_available_workers_clone = storage_available_workers.clone();
+
+            // Create a channel for proof contexts. The Handle will hold onto the tx-side, while the
+            // worker reads off the rx.
+            let (ctx_tx, ctx_rx) = bounded::<StorageProofTaskCtx<Factory>>(1);
+            storage_ctx_txs.push(ctx_tx);
+
+            #[cfg(feature = "metrics")]
+            let metrics = metrics.clone();
+            #[cfg(feature = "metrics")]
+            let cursor_metrics = cursor_metrics.clone();
 
             executor.spawn_blocking(move || {
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-                #[cfg(feature = "metrics")]
-                let cursor_metrics = ProofTaskCursorMetrics::new();
-
                 let _guard = span.enter();
                 let worker = StorageProofWorker::new(
-                    task_ctx_clone,
-                    work_rx_clone,
+                    ctx_rx,
                     worker_id,
-                    storage_available_workers_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
                     cursor_metrics,
                 );
-                if let Err(error) = worker.run() {
-                    error!(
-                        target: "trie::proof_task",
-                        worker_id,
-                        ?error,
-                        "Storage worker failed"
-                    );
-                }
+                worker.run()
             });
         }
         drop(parent_span);
@@ -182,51 +169,134 @@ impl ProofWorkerHandle {
         let parent_span =
             debug_span!(target: "trie::proof_task", "account proof workers", ?account_worker_count)
                 .entered();
+
         // Spawn account workers
+        let mut account_ctx_txs = Vec::new();
         for worker_id in 0..account_worker_count {
             let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
-            let task_ctx_clone = task_ctx.clone();
-            let work_rx_clone = account_work_rx.clone();
-            let storage_work_tx_clone = storage_work_tx.clone();
-            let account_available_workers_clone = account_available_workers.clone();
+
+            // Create a channel for proof contexts. The Handle will hold onto the tx-side, while the
+            // worker reads off the rx.
+            let (ctx_tx, ctx_rx) = bounded::<AccountProofTaskCtx<Factory>>(1);
+            account_ctx_txs.push(ctx_tx);
+
+            #[cfg(feature = "metrics")]
+            let metrics = metrics.clone();
+            #[cfg(feature = "metrics")]
+            let cursor_metrics = cursor_metrics.clone();
 
             executor.spawn_blocking(move || {
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-                #[cfg(feature = "metrics")]
-                let cursor_metrics = ProofTaskCursorMetrics::new();
-
                 let _guard = span.enter();
                 let worker = AccountProofWorker::new(
-                    task_ctx_clone,
-                    work_rx_clone,
+                    ctx_rx,
                     worker_id,
-                    storage_work_tx_clone,
-                    account_available_workers_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
                     cursor_metrics,
                 );
-                if let Err(error) = worker.run() {
-                    error!(
-                        target: "trie::proof_task",
-                        worker_id,
-                        ?error,
-                        "Account worker failed"
-                    );
-                }
+                worker.run()
             });
         }
         drop(parent_span);
 
         Self {
-            storage_work_tx,
-            account_work_tx,
+            storage_ctx_txs: Arc::new(storage_ctx_txs),
+            account_ctx_txs: Arc::new(account_ctx_txs),
+        }
+    }
+
+    /// Send the given `Factory` to each worker to be used for proof calculations, and return a
+    /// corresponding [`ProofWorkerDispatcher`].
+    pub fn into_dispatcher(self, factory: Factory) -> ProofWorkerDispatcher<Factory> {
+        let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
+        let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
+
+        // Initialize availability counters at zero. Each worker will increment when it
+        // successfully initializes, ensuring only healthy workers are counted.
+        let storage_available_workers = Arc::new(AtomicUsize::new(0));
+        let account_available_workers = Arc::new(AtomicUsize::new(0));
+
+        let storage_ctx = StorageProofTaskCtx::new(
+            factory.clone(),
+            storage_work_rx,
+            Arc::clone(&storage_available_workers),
+        );
+
+        // Send the `StorageProofTaskCtx` to each storage worker
+        for tx in self.storage_ctx_txs.as_ref() {
+            if let Err(error) = tx.try_send(storage_ctx.clone()) {
+                error!(
+                    target: "trie::proof_task",
+                    ?error,
+                    "Storage worker is blocked",
+                );
+            }
+        }
+
+        let account_ctx = AccountProofTaskCtx::new(
+            factory,
+            account_work_rx,
+            storage_work_tx.clone(),
+            Arc::clone(&account_available_workers),
+        );
+
+        // Send the `AccountProofTaskCtx` to each account worker
+        for tx in self.account_ctx_txs.as_ref() {
+            if let Err(error) = tx.try_send(account_ctx.clone()) {
+                error!(
+                    target: "trie::proof_task",
+                    ?error,
+                    "Account worker is blocked, removing it from pool",
+                );
+            }
+        }
+
+        ProofWorkerDispatcher {
+            storage_ctx_txs: self.storage_ctx_txs,
+            account_ctx_txs: self.account_ctx_txs,
             storage_available_workers,
             account_available_workers,
-            storage_worker_count,
-            account_worker_count,
+            storage_work_tx,
+            account_work_tx,
+        }
+    }
+}
+
+/// A handle managing a long-lived pool of proof workers, each having the context required to
+/// perform proof tasks.
+///
+/// This type transforms to/from [`ProofWorkerHandle`], see that type's documentation and usage to
+/// understand the relationship between the two.
+#[derive(Debug, Clone)]
+pub struct ProofWorkerDispatcher<Factory> {
+    /// Direct senders to storage worker pool, one for each storage proof worker.
+    storage_ctx_txs: Arc<Vec<CrossbeamSender<StorageProofTaskCtx<Factory>>>>,
+    /// Direct senders to account worker pool, one for each account proof worker.
+    account_ctx_txs: Arc<Vec<CrossbeamSender<AccountProofTaskCtx<Factory>>>>,
+    /// Counter tracking available storage workers. Workers decrement when starting work,
+    /// increment when finishing. Used to determine whether to chunk multiproofs.
+    storage_available_workers: Arc<AtomicUsize>,
+    /// Counter tracking available account workers. Workers decrement when starting work,
+    /// increment when finishing. Used to determine whether to chunk multiproofs.
+    account_available_workers: Arc<AtomicUsize>,
+    /// Direct task sender to storage worker pool
+    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    /// Direct task sender to account worker pool
+    account_work_tx: CrossbeamSender<AccountWorkerJob>,
+}
+
+impl<Factory> ProofWorkerDispatcher<Factory> {
+    /// Signal all proof workers that the current proof context is done and they should wait for a
+    /// new context before completing any new work. Returns a [`ProofWorkerHandle`] which can be
+    /// used to provide that new context and obtain a new dispatcher via
+    /// [`ProofWorkerHandle::into_dispatcher`].
+    pub fn into_handle(self) -> ProofWorkerHandle<Factory> {
+        // The `storage_work_tx` and `account_work_tx` channels get dropped here, signaling to the
+        // workers that the context is finished and they should wait for a new context.
+        ProofWorkerHandle {
+            storage_ctx_txs: self.storage_ctx_txs,
+            account_ctx_txs: self.account_ctx_txs,
         }
     }
 
@@ -251,27 +321,27 @@ impl ProofWorkerHandle {
     }
 
     /// Returns the total number of storage workers in the pool.
-    pub const fn total_storage_workers(&self) -> usize {
-        self.storage_worker_count
+    pub fn total_storage_workers(&self) -> usize {
+        self.storage_ctx_txs.len()
     }
 
     /// Returns the total number of account workers in the pool.
-    pub const fn total_account_workers(&self) -> usize {
-        self.account_worker_count
+    pub fn total_account_workers(&self) -> usize {
+        self.account_ctx_txs.len()
     }
 
     /// Returns the number of storage workers currently processing tasks.
     ///
     /// This is calculated as total workers minus available workers.
     pub fn active_storage_workers(&self) -> usize {
-        self.storage_worker_count.saturating_sub(self.available_storage_workers())
+        self.total_storage_workers().saturating_sub(self.available_storage_workers())
     }
 
     /// Returns the number of account workers currently processing tasks.
     ///
     /// This is calculated as total workers minus available workers.
     pub fn active_account_workers(&self) -> usize {
-        self.account_worker_count.saturating_sub(self.available_account_workers())
+        self.total_account_workers().saturating_sub(self.available_account_workers())
     }
 
     /// Dispatch a storage proof computation to storage worker pool
@@ -374,20 +444,6 @@ impl ProofWorkerHandle {
             })?;
 
         Ok(rx)
-    }
-}
-
-/// Data used for initializing cursor factories that is shared across all storage proof instances.
-#[derive(Clone, Debug)]
-pub struct ProofTaskCtx<Factory> {
-    /// The factory for creating state providers.
-    factory: Factory,
-}
-
-impl<Factory> ProofTaskCtx<Factory> {
-    /// Creates a new [`ProofTaskCtx`] with the given factory.
-    pub const fn new(factory: Factory) -> Self {
-        Self { factory }
     }
 }
 
@@ -501,47 +557,47 @@ where
         account_node_provider.trie_node(path)
     }
 }
-impl TrieNodeProviderFactory for ProofWorkerHandle {
-    type AccountNodeProvider = ProofTaskTrieNodeProvider;
-    type StorageNodeProvider = ProofTaskTrieNodeProvider;
+impl<Factory: Clone> TrieNodeProviderFactory for ProofWorkerDispatcher<Factory> {
+    type AccountNodeProvider = ProofTaskTrieNodeProvider<Factory>;
+    type StorageNodeProvider = ProofTaskTrieNodeProvider<Factory>;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
-        ProofTaskTrieNodeProvider::AccountNode { handle: self.clone() }
+        ProofTaskTrieNodeProvider::AccountNode { dispatcher: self.clone() }
     }
 
     fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
-        ProofTaskTrieNodeProvider::StorageNode { account, handle: self.clone() }
+        ProofTaskTrieNodeProvider::StorageNode { account, dispatcher: self.clone() }
     }
 }
 
 /// Trie node provider for retrieving trie nodes by path.
 #[derive(Debug)]
-pub enum ProofTaskTrieNodeProvider {
+pub enum ProofTaskTrieNodeProvider<Factory> {
     /// Blinded account trie node provider.
     AccountNode {
         /// Handle to the proof worker pools.
-        handle: ProofWorkerHandle,
+        dispatcher: ProofWorkerDispatcher<Factory>,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
         /// Handle to the proof worker pools.
-        handle: ProofWorkerHandle,
+        dispatcher: ProofWorkerDispatcher<Factory>,
     },
 }
 
-impl TrieNodeProvider for ProofTaskTrieNodeProvider {
+impl<Factory> TrieNodeProvider for ProofTaskTrieNodeProvider<Factory> {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         match self {
-            Self::AccountNode { handle } => {
-                let rx = handle
+            Self::AccountNode { dispatcher } => {
+                let rx = dispatcher
                     .dispatch_blinded_account_node(*path)
                     .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
                 rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
-            Self::StorageNode { handle, account } => {
-                let rx = handle
+            Self::StorageNode { dispatcher, account } => {
+                let rx = dispatcher
                     .dispatch_blinded_storage_node(*account, *path)
                     .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
                 rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
@@ -652,19 +708,40 @@ enum StorageWorkerJob {
     },
 }
 
-/// Worker for storage trie operations.
-///
-/// Each worker maintains a dedicated database transaction and processes
-/// storage proof requests and blinded node lookups.
-struct StorageProofWorker<Factory> {
-    /// Shared task context with database factory and prefix sets
-    task_ctx: ProofTaskCtx<Factory>,
+/// Data used for storage proof tasks throughout the validation of a single block. Once the
+/// `work_rx` channel is closed the work for the block is complete and a new context will be
+/// obtained by the worker for the next block.
+#[derive(Clone, Debug)]
+struct StorageProofTaskCtx<Factory> {
+    /// The factory for creating state providers.
+    factory: Factory,
     /// Channel for receiving work
     work_rx: CrossbeamReceiver<StorageWorkerJob>,
+    /// Counter tracking available storage workers. Workers decrement when starting work,
+    /// increment when finishing. Used to determine whether to chunk multiproofs.
+    available_workers: Arc<AtomicUsize>,
+}
+
+impl<Factory> StorageProofTaskCtx<Factory> {
+    /// Creates a new [`ProofTaskCtx`] with the given factory and work channel.
+    const fn new(
+        factory: Factory,
+        work_rx: CrossbeamReceiver<StorageWorkerJob>,
+        available_workers: Arc<AtomicUsize>,
+    ) -> Self {
+        Self { factory, work_rx, available_workers }
+    }
+}
+
+/// Worker for storage trie operations.
+///
+/// Each worker maintains a dedicated database transaction for each block being validated, and
+/// processes storage proof requests and blinded node lookups.
+struct StorageProofWorker<Factory> {
+    /// Channel for receiving the context required to process a new payload.
+    ctx_rx: CrossbeamReceiver<StorageProofTaskCtx<Factory>>,
     /// Unique identifier for this worker (used for tracing)
     worker_id: usize,
-    /// Counter tracking worker availability
-    available_workers: Arc<AtomicUsize>,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -679,18 +756,14 @@ where
 {
     /// Creates a new storage proof worker.
     const fn new(
-        task_ctx: ProofTaskCtx<Factory>,
-        work_rx: CrossbeamReceiver<StorageWorkerJob>,
+        ctx_rx: CrossbeamReceiver<StorageProofTaskCtx<Factory>>,
         worker_id: usize,
-        available_workers: Arc<AtomicUsize>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
         #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
         Self {
-            task_ctx,
-            work_rx,
+            ctx_rx,
             worker_id,
-            available_workers,
             #[cfg(feature = "metrics")]
             metrics,
             #[cfg(feature = "metrics")]
@@ -698,7 +771,31 @@ where
         }
     }
 
-    /// Runs the worker loop, processing jobs until the channel closes.
+    /// Runs the worker loop for the full lifetime of the worker.
+    ///
+    /// # Lifecycle
+    ///
+    /// 1. Processes [`StorageProofTaskCtx`]s in a loop (one per block being validated)
+    ///     - Calls [`Self::run_ctx`]
+    ///     - Logs error if `run_ctx` returns an error
+    /// 2. Exits when `ctx_rx` closes.
+    fn run(mut self) {
+        loop {
+            while let Ok(task_ctx) = self.ctx_rx.recv() {
+                if let Err(error) = self.run_ctx(task_ctx) {
+                    error!(
+                        target: "trie::proof_task",
+                        worker_id = ?self.worker_id,
+                        ?error,
+                        "Storage worker failed"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Runs the worker loop for a single block validation, processing jobs until the channel
+    /// closes.
     ///
     /// # Lifecycle
     ///
@@ -709,31 +806,15 @@ where
     ///    - Marks worker as busy
     ///    - Processes the job
     ///    - Marks worker as available
-    /// 4. Shuts down when channel closes
-    ///
-    /// # Panic Safety
-    ///
-    /// If this function panics, the worker thread terminates but other workers
-    /// continue operating and the system degrades gracefully.
-    fn run(mut self) -> ProviderResult<()> {
-        let Self {
-            task_ctx,
-            work_rx,
-            worker_id,
-            available_workers,
-            #[cfg(feature = "metrics")]
-            metrics,
-            #[cfg(feature = "metrics")]
-            ref mut cursor_metrics,
-        } = self;
-
+    /// 4. Returns when channel closes
+    fn run_ctx(&mut self, task_ctx: StorageProofTaskCtx<Factory>) -> ProviderResult<()> {
         // Create provider from factory
         let provider = task_ctx.factory.database_provider_ro()?;
-        let proof_tx = ProofTaskTx::new(provider, worker_id);
+        let proof_tx = ProofTaskTx::new(provider, self.worker_id);
 
         trace!(
             target: "trie::proof_task",
-            worker_id,
+            worker_id = ?self.worker_id,
             "Storage worker started"
         );
 
@@ -742,16 +823,16 @@ where
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
         // Initially mark this worker as available.
-        available_workers.fetch_add(1, Ordering::Relaxed);
+        task_ctx.available_workers.fetch_add(1, Ordering::Relaxed);
 
-        while let Ok(job) = work_rx.recv() {
+        while let Ok(job) = task_ctx.work_rx.recv() {
             // Mark worker as busy.
-            available_workers.fetch_sub(1, Ordering::Relaxed);
+            task_ctx.available_workers.fetch_sub(1, Ordering::Relaxed);
 
             match job {
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
                     Self::process_storage_proof(
-                        worker_id,
+                        self.worker_id,
                         &proof_tx,
                         input,
                         proof_result_sender,
@@ -762,7 +843,7 @@ where
 
                 StorageWorkerJob::BlindedStorageNode { account, path, result_sender } => {
                     Self::process_blinded_node(
-                        worker_id,
+                        self.worker_id,
                         &proof_tx,
                         account,
                         path,
@@ -773,12 +854,12 @@ where
             }
 
             // Mark worker as available again.
-            available_workers.fetch_add(1, Ordering::Relaxed);
+            task_ctx.available_workers.fetch_add(1, Ordering::Relaxed);
         }
 
         trace!(
             target: "trie::proof_task",
-            worker_id,
+            worker_id = ?self.worker_id,
             storage_proofs_processed,
             storage_nodes_processed,
             "Storage worker shutting down"
@@ -786,8 +867,8 @@ where
 
         #[cfg(feature = "metrics")]
         {
-            metrics.record_storage_nodes(storage_nodes_processed as usize);
-            cursor_metrics.record(&mut cursor_metrics_cache);
+            self.metrics.record_storage_nodes(storage_nodes_processed as usize);
+            self.cursor_metrics.record(&mut cursor_metrics_cache);
         }
 
         Ok(())
@@ -927,21 +1008,43 @@ where
     }
 }
 
-/// Worker for account trie operations.
-///
-/// Each worker maintains a dedicated database transaction and processes
-/// account multiproof requests and blinded node lookups.
-struct AccountProofWorker<Factory> {
-    /// Shared task context with database factory and prefix sets
-    task_ctx: ProofTaskCtx<Factory>,
+/// Data used for account proof tasks throughout the validation of a single block. Once the
+/// `work_rx` channel is closed the work for the block is complete and a new context will be
+/// obtained by the worker for the next block.
+#[derive(Clone, Debug)]
+struct AccountProofTaskCtx<Factory> {
+    /// The factory for creating state providers.
+    factory: Factory,
     /// Channel for receiving work
     work_rx: CrossbeamReceiver<AccountWorkerJob>,
-    /// Unique identifier for this worker (used for tracing)
-    worker_id: usize,
     /// Channel for dispatching storage proof work
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
-    /// Counter tracking worker availability
+    /// Counter tracking available account workers. Workers decrement when starting work,
+    /// increment when finishing. Used to determine whether to chunk multiproofs.
     available_workers: Arc<AtomicUsize>,
+}
+
+impl<Factory> AccountProofTaskCtx<Factory> {
+    /// Creates a new [`ProofTaskCtx`] with the given factory and work channel.
+    const fn new(
+        factory: Factory,
+        work_rx: CrossbeamReceiver<AccountWorkerJob>,
+        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+        available_workers: Arc<AtomicUsize>,
+    ) -> Self {
+        Self { factory, work_rx, storage_work_tx, available_workers }
+    }
+}
+
+/// Worker for account trie operations.
+///
+/// Each worker maintains a dedicated database transaction for each block being validated, and
+/// processes account multiproof requests and blinded node lookups.
+struct AccountProofWorker<Factory> {
+    /// Channel for receiving the context required to process a new payload.
+    ctx_rx: CrossbeamReceiver<AccountProofTaskCtx<Factory>>,
+    /// Unique identifier for this worker (used for tracing)
+    worker_id: usize,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -956,20 +1059,14 @@ where
 {
     /// Creates a new account proof worker.
     const fn new(
-        task_ctx: ProofTaskCtx<Factory>,
-        work_rx: CrossbeamReceiver<AccountWorkerJob>,
+        ctx_rx: CrossbeamReceiver<AccountProofTaskCtx<Factory>>,
         worker_id: usize,
-        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
-        available_workers: Arc<AtomicUsize>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
         #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
         Self {
-            task_ctx,
-            work_rx,
+            ctx_rx,
             worker_id,
-            storage_work_tx,
-            available_workers,
             #[cfg(feature = "metrics")]
             metrics,
             #[cfg(feature = "metrics")]
@@ -977,7 +1074,31 @@ where
         }
     }
 
-    /// Runs the worker loop, processing jobs until the channel closes.
+    /// Runs the worker loop for the full lifetime of the worker.
+    ///
+    /// # Lifecycle
+    ///
+    /// 1. Processes [`AccountProofTaskCtx`]s in a loop (one per block being validated)
+    ///     - Calls [`Self::run_ctx`]
+    ///     - Logs error if `run_ctx` returns an error
+    /// 2. Exits when `ctx_rx` closes.
+    fn run(mut self) {
+        loop {
+            while let Ok(task_ctx) = self.ctx_rx.recv() {
+                if let Err(error) = self.run_ctx(task_ctx) {
+                    error!(
+                        target: "trie::proof_task",
+                        worker_id = ?self.worker_id,
+                        ?error,
+                        "Account worker failed"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Runs the worker loop for a single block validation, processing jobs until the channel
+    /// closes.
     ///
     /// # Lifecycle
     ///
@@ -988,32 +1109,15 @@ where
     ///    - Marks worker as busy
     ///    - Processes the job
     ///    - Marks worker as available
-    /// 4. Shuts down when channel closes
-    ///
-    /// # Panic Safety
-    ///
-    /// If this function panics, the worker thread terminates but other workers
-    /// continue operating and the system degrades gracefully.
-    fn run(mut self) -> ProviderResult<()> {
-        let Self {
-            task_ctx,
-            work_rx,
-            worker_id,
-            storage_work_tx,
-            available_workers,
-            #[cfg(feature = "metrics")]
-            metrics,
-            #[cfg(feature = "metrics")]
-            ref mut cursor_metrics,
-        } = self;
-
+    /// 4. Returns when channel closes
+    fn run_ctx(&mut self, task_ctx: AccountProofTaskCtx<Factory>) -> ProviderResult<()> {
         // Create provider from factory
         let provider = task_ctx.factory.database_provider_ro()?;
-        let proof_tx = ProofTaskTx::new(provider, worker_id);
+        let proof_tx = ProofTaskTx::new(provider, self.worker_id);
 
         trace!(
             target: "trie::proof_task",
-            worker_id,
+            worker_id = ?self.worker_id,
             "Account worker started"
         );
 
@@ -1022,18 +1126,18 @@ where
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
         // Count this worker as available only after successful initialization.
-        available_workers.fetch_add(1, Ordering::Relaxed);
+        task_ctx.available_workers.fetch_add(1, Ordering::Relaxed);
 
-        while let Ok(job) = work_rx.recv() {
+        while let Ok(job) = task_ctx.work_rx.recv() {
             // Mark worker as busy.
-            available_workers.fetch_sub(1, Ordering::Relaxed);
+            task_ctx.available_workers.fetch_sub(1, Ordering::Relaxed);
 
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
                     Self::process_account_multiproof(
-                        worker_id,
+                        self.worker_id,
                         &proof_tx,
-                        storage_work_tx.clone(),
+                        task_ctx.storage_work_tx.clone(),
                         *input,
                         &mut account_proofs_processed,
                         &mut cursor_metrics_cache,
@@ -1042,7 +1146,7 @@ where
 
                 AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
                     Self::process_blinded_node(
-                        worker_id,
+                        self.worker_id,
                         &proof_tx,
                         path,
                         result_sender,
@@ -1052,12 +1156,12 @@ where
             }
 
             // Mark worker as available again.
-            available_workers.fetch_add(1, Ordering::Relaxed);
+            task_ctx.available_workers.fetch_add(1, Ordering::Relaxed);
         }
 
         trace!(
             target: "trie::proof_task",
-            worker_id,
+            worker_id = ?self.worker_id,
             account_proofs_processed,
             account_nodes_processed,
             "Account worker shutting down"
@@ -1065,8 +1169,8 @@ where
 
         #[cfg(feature = "metrics")]
         {
-            metrics.record_account_nodes(account_nodes_processed as usize);
-            cursor_metrics.record(&mut cursor_metrics_cache);
+            self.metrics.record_account_nodes(account_nodes_processed as usize);
+            self.cursor_metrics.record(&mut cursor_metrics_cache);
         }
 
         Ok(())
@@ -1572,37 +1676,4 @@ enum AccountWorkerJob {
         /// Channel to send result back to original caller
         result_sender: Sender<TrieNodeProviderResult>,
     },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_provider::test_utils::create_test_provider_factory;
-    use tokio::{runtime::Builder, task};
-
-    fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
-        ProofTaskCtx::new(factory)
-    }
-
-    /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
-    #[test]
-    fn spawn_proof_workers_creates_handle() {
-        let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
-        runtime.block_on(async {
-            let handle = tokio::runtime::Handle::current();
-            let provider_factory = create_test_provider_factory();
-            let factory =
-                reth_provider::providers::OverlayStateProviderFactory::new(provider_factory);
-            let ctx = test_ctx(factory);
-
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3);
-
-            // Verify handle can be cloned
-            let _cloned_handle = proof_handle.clone();
-
-            // Workers shut down automatically when handle is dropped
-            drop(proof_handle);
-            task::yield_now().await;
-        });
-    }
 }

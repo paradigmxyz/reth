@@ -1,7 +1,7 @@
 use crate::{
     metrics::ParallelTrieMetrics,
     proof_task::{
-        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerDispatcher,
         StorageProofInput,
     },
     root::ParallelStateRootError,
@@ -25,7 +25,7 @@ use tracing::trace;
 /// This can collect proof for many targets in parallel, spawning a task for each hashed address
 /// that has proof targets.
 #[derive(Debug)]
-pub struct ParallelProof {
+pub struct ParallelProof<Factory> {
     /// The collection of prefix sets for the computation.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
     /// Flag indicating whether to include branch node masks in the proof.
@@ -33,7 +33,7 @@ pub struct ParallelProof {
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the proof worker pools.
-    proof_worker_handle: ProofWorkerHandle,
+    proof_worker_dispatcher: ProofWorkerDispatcher<Factory>,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
@@ -41,19 +41,19 @@ pub struct ParallelProof {
     metrics: ParallelTrieMetrics,
 }
 
-impl ParallelProof {
+impl<Factory> ParallelProof<Factory> {
     /// Create new state proof generator.
     pub fn new(
         prefix_sets: Arc<TriePrefixSetsMut>,
         missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-        proof_worker_handle: ProofWorkerHandle,
+        proof_worker_dispatcher: ProofWorkerDispatcher<Factory>,
     ) -> Self {
         Self {
             prefix_sets,
             missed_leaves_storage_roots,
             collect_branch_node_masks: false,
             multi_added_removed_keys: None,
-            proof_worker_handle,
+            proof_worker_dispatcher,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
@@ -92,7 +92,7 @@ impl ParallelProof {
             self.multi_added_removed_keys.clone(),
         );
 
-        self.proof_worker_handle
+        self.proof_worker_dispatcher
             .dispatch_storage_proof(
                 input,
                 ProofResultContext::new(result_tx, 0, HashedPostState::default(), start),
@@ -212,7 +212,7 @@ impl ParallelProof {
             ),
         };
 
-        self.proof_worker_handle
+        self.proof_worker_dispatcher
             .dispatch_account_multiproof(input)
             .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
 
@@ -329,13 +329,16 @@ mod tests {
         let rt = Runtime::new().unwrap();
 
         let factory = reth_provider::providers::OverlayStateProviderFactory::new(factory);
-        let task_ctx = ProofTaskCtx::new(factory);
-        let proof_worker_handle = ProofWorkerHandle::new(rt.handle().clone(), task_ctx, 1, 1);
+        let proof_worker_dispatcher =
+            ProofWorkerHandle::new(rt.handle().clone(), 1, 1).into_dispatcher(factory);
 
-        let parallel_result =
-            ParallelProof::new(Default::default(), Default::default(), proof_worker_handle.clone())
-                .decoded_multiproof(targets.clone())
-                .unwrap();
+        let parallel_result = ParallelProof::new(
+            Default::default(),
+            Default::default(),
+            proof_worker_dispatcher.clone(),
+        )
+        .decoded_multiproof(targets.clone())
+        .unwrap();
 
         let sequential_result_raw = Proof::new(trie_cursor_factory, hashed_cursor_factory)
             .multiproof(targets.clone())
@@ -361,6 +364,6 @@ mod tests {
         assert_eq!(parallel_result, sequential_result_decoded);
 
         // Workers shut down automatically when handle is dropped
-        drop(proof_worker_handle);
+        drop(proof_worker_dispatcher);
     }
 }
