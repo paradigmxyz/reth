@@ -3,13 +3,16 @@ use crate::{
     primitives::{CustomHeader, CustomTransaction},
 };
 use alloy_consensus::error::ValueError;
-use alloy_evm::rpc::{EthTxEnvError, TryIntoSimTx, TryIntoTxEnv};
+use alloy_evm::{
+    rpc::{EthTxEnvError, TryIntoTxEnv},
+    EvmEnv,
+};
 use alloy_network::TxSigner;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::{OpTransactionReceipt, OpTransactionRequest};
 use reth_op::rpc::RpcTypes;
-use reth_rpc_api::eth::{SignTxRequestError, SignableTxRequest};
-use revm::context::{BlockEnv, CfgEnv};
+use reth_rpc_api::eth::{SignTxRequestError, SignableTxRequest, TryIntoSimTx};
+use revm::context::BlockEnv;
 
 #[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
@@ -33,10 +36,9 @@ impl TryIntoTxEnv<CustomTxEnv> for OpTransactionRequest {
 
     fn try_into_tx_env<Spec>(
         self,
-        cfg_env: &CfgEnv<Spec>,
-        block_env: &BlockEnv,
+        evm_env: &EvmEnv<Spec, BlockEnv>,
     ) -> Result<CustomTxEnv, Self::Err> {
-        Ok(CustomTxEnv::Op(self.try_into_tx_env(cfg_env, block_env)?))
+        Ok(CustomTxEnv::Op(self.try_into_tx_env(evm_env)?))
     }
 }
 

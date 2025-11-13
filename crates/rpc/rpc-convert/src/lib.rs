@@ -19,7 +19,8 @@ pub use block::TryFromBlockResponse;
 pub use receipt::TryFromReceiptResponse;
 pub use rpc::*;
 pub use transaction::{
-    RpcConvert, RpcConverter, TransactionConversionError, TryFromTransactionResponse,
+    RpcConvert, RpcConverter, TransactionConversionError, TryFromTransactionResponse, TryIntoSimTx,
+    TxInfoMapper,
 };
 
 #[cfg(feature = "op")]
