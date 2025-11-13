@@ -106,7 +106,7 @@ where
     init_genesis_with_settings(factory, StorageSettings::legacy())
 }
 
-/// Write the genesis block if it has not already been written, with static files configuration.
+/// Write the genesis block if it has not already been written with [`StorageSettings`].
 pub fn init_genesis_with_settings<PF>(
     factory: &PF,
     storage_settings: StorageSettings,
