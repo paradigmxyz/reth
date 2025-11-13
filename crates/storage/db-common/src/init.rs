@@ -103,6 +103,32 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
+    init_genesis_with_settings(factory, StorageSettings::legacy())
+}
+
+/// Write the genesis block if it has not already been written with [`StorageSettings`].
+pub fn init_genesis_with_settings<PF>(
+    factory: &PF,
+    storage_settings: StorageSettings,
+) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + ChainSpecProvider
+        + StageCheckpointReader
+        + BlockHashReader
+        + StorageSettingsCache,
+    PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
+        + StageCheckpointWriter
+        + HistoryWriter
+        + HeaderProvider
+        + HashingWriter
+        + StateWriter
+        + TrieWriter
+        + MetadataWriter
+        + AsRef<PF::ProviderRW>,
+    PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
+{
     let chain = factory.chain_spec();
 
     let genesis = chain.genesis();
@@ -164,7 +190,6 @@ where
     static_file_provider.latest_writer(StaticFileSegment::Transactions)?.increment_block(0)?;
 
     // Behaviour reserved only for new nodes should be set here.
-    let storage_settings = StorageSettings::new().with_receipts_in_static_files();
     provider_rw.write_storage_settings(storage_settings)?;
 
     // `commit_unwind`` will first commit the DB and then the static file provider, which is

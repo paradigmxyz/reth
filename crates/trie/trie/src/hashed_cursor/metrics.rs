@@ -151,6 +151,10 @@ where
         self.metrics.total_duration += start.elapsed();
         result
     }
+
+    fn reset(&mut self) {
+        self.cursor.reset()
+    }
 }
 
 impl<'metrics, C> HashedStorageCursor for InstrumentedHashedCursor<'metrics, C>
@@ -163,5 +167,9 @@ where
         let result = self.cursor.is_storage_empty();
         self.metrics.total_duration += start.elapsed();
         result
+    }
+
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.cursor.set_hashed_address(hashed_address)
     }
 }
