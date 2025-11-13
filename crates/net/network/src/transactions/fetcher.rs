@@ -197,26 +197,22 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         None
     }
 
-    /// Returns any idle peer for any hash pending fetch. If one is found, the corresponding
-    /// hash is written to the request buffer that is passed as parameter.
+    /// Returns any idle peer for any hash pending fetch. If one is found, the corresponding hash
+    /// is returned alongside the peer id so the caller can decide how to build the request buffer.
     ///
     /// Loops through the hashes pending fetch in lru order until one is found with an idle
     /// fallback peer, or the budget passed as parameter is depleted, whatever happens first.
     pub fn find_any_idle_fallback_peer_for_any_pending_hash(
         &mut self,
-        hashes_to_request: &mut RequestTxHashes,
         mut budget: Option<usize>, // search fallback peers for max `budget` lru pending hashes
-    ) -> Option<PeerId> {
+    ) -> Option<(PeerId, TxHash)> {
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
         let idle_peer = loop {
             let &hash = hashes_pending_fetch_iter.next()?;
 
-            let idle_peer = self.get_idle_peer_for(hash);
-
-            if idle_peer.is_some() {
-                hashes_to_request.insert(hash);
-                break idle_peer.copied()
+            if let Some(idle_peer) = self.get_idle_peer_for(hash) {
+                break Some((*idle_peer, hash))
             }
 
             if let Some(ref mut bud) = budget {
@@ -225,14 +221,14 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     return None
                 }
             }
-        };
-        let hash = hashes_to_request.iter().next()?;
+        }?;
+        let (peer_id, hash) = idle_peer;
 
         // pop hash that is loaded in request buffer from cache of hashes pending fetch
         drop(hashes_pending_fetch_iter);
         _ = self.hashes_pending_fetch.remove(hash);
 
-        idle_peer
+        Some((peer_id, hash))
     }
 
     /// Packages hashes for a [`GetPooledTxRequest`] up to limit. Returns left over hashes. Takes
@@ -424,29 +420,30 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         peers: &HashMap<PeerId, PeerMetadata<N>>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
     ) {
-        let mut hashes_to_request = RequestTxHashes::with_capacity(
-            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
-        );
         let mut search_durations = TxFetcherSearchDurations::default();
 
         // budget to look for an idle peer before giving up
         let budget_find_idle_fallback_peer = self
             .search_breadth_budget_find_idle_fallback_peer(&has_capacity_wrt_pending_pool_imports);
 
-        let peer_id = duration_metered_exec!(
+        let idle_peer_and_hash = duration_metered_exec!(
             {
-                let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
-                    &mut hashes_to_request,
+                self.find_any_idle_fallback_peer_for_any_pending_hash(
                     budget_find_idle_fallback_peer,
-                ) else {
-                    // no peers are idle or budget is depleted
-                    return
-                };
-
-                peer_id
+                )
             },
             search_durations.find_idle_peer
         );
+
+        let Some((peer_id, first_hash)) = idle_peer_and_hash else {
+            // no peers are idle or budget is depleted
+            return
+        };
+
+        let mut hashes_to_request = RequestTxHashes::with_capacity(
+            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
+        );
+        hashes_to_request.insert(first_hash);
 
         // peer should always exist since `is_session_active` already checked
         let Some(peer) = peers.get(&peer_id) else { return };
