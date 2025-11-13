@@ -118,15 +118,12 @@ impl StaticFileSegment {
     /// Any changes in the filename format in `filename` should be reflected here.
     pub fn parse_filename(name: &str) -> Option<(Self, SegmentRangeInclusive)> {
         let mut parts = name.split('_');
-        println!("parts: {:?}", parts.clone().collect::<Vec<_>>());
         if !(parts.next() == Some("static") && parts.next() == Some("file")) {
             return None
         }
 
-        println!("segment: {:?}", Self::from_str(parts.clone().next()?));
         let segment = Self::from_str(parts.next()?).ok()?;
         let (block_start, block_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
-        println!("{block_start} {block_end}");
 
         if block_start > block_end {
             return None
