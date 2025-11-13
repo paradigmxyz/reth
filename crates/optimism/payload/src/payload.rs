@@ -387,6 +387,9 @@ pub fn payload_id_optimism(
     if let Some(eip_1559_params) = attributes.eip_1559_params {
         hasher.update(eip_1559_params.as_slice());
     }
+    if let Some(min_base_fee) = attributes.min_base_fee {
+        hasher.update(min_base_fee.as_slice());
+    }
 
     let mut out = hasher.finalize();
     out[0] = payload_version;
