@@ -3,9 +3,9 @@ use super::{
     StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
 };
 use crate::{
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt,
+    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
+    HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -40,7 +40,7 @@ use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
     DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
-use reth_storage_api::{BlockBodyIndicesProvider, DBProvider};
+use reth_storage_api::{BlockBodyIndicesProvider, DBProvider, StorageSettingsCache};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -947,10 +947,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,
-        has_receipt_pruning: bool,
     ) -> ProviderResult<Option<PipelineTarget>>
     where
-        Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
+        Provider: DBProvider
+            + BlockReader
+            + StageCheckpointReader
+            + ChainSpecProvider
+            + StorageSettingsCache,
         N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
     {
         // OVM historical import is broken and does not work with this check. It's importing
@@ -988,8 +991,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             match segment {
                 StaticFileSegment::Headers | StaticFileSegment::Transactions => {}
                 StaticFileSegment::Receipts => {
-                    if has_receipt_pruning {
-                        // Pruned nodes (including full node) do not store receipts as static files.
+                    if EitherWriter::receipts_destination(provider).is_database() {
+                        // Old pruned nodes (including full node) do not store receipts as static
+                        // files.
                         continue
                     }
 

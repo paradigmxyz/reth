@@ -7,7 +7,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::noop::NoopConsensus;
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
-use reth_db_common::init::init_genesis;
+use reth_db_common::init::init_genesis_with_settings;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_eth_wire::NetPrimitivesFor;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
@@ -17,7 +17,7 @@ use reth_node_builder::{
     Node, NodeComponents, NodeComponentsBuilder, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
-    args::{DatabaseArgs, DatadirArgs},
+    args::{DatabaseArgs, DatadirArgs, StaticFilesArgs},
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
@@ -57,6 +57,10 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     /// All database related arguments
     #[command(flatten)]
     pub db: DatabaseArgs,
+
+    /// All static files related arguments
+    #[command(flatten)]
+    pub static_files: StaticFilesArgs,
 }
 
 impl<C: ChainSpecParser> EnvironmentArgs<C> {
@@ -106,7 +110,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let provider_factory = self.create_provider_factory(&config, db, sfp)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
-            init_genesis(&provider_factory)?;
+            init_genesis_with_settings(&provider_factory, self.static_files.to_settings())?;
         }
 
         Ok(Environment { config, provider_factory, data_dir })
@@ -126,7 +130,6 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let has_receipt_pruning = config.prune.has_receipts_pruning();
         let prune_modes = config.prune.segments.clone();
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
             db,
@@ -136,9 +139,8 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         .with_prune_modes(prune_modes.clone());
 
         // Check for consistency between database and static files.
-        if let Some(unwind_target) = factory
-            .static_file_provider()
-            .check_consistency(&factory.provider()?, has_receipt_pruning)?
+        if let Some(unwind_target) =
+            factory.static_file_provider().check_consistency(&factory.provider()?)?
         {
             if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");

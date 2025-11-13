@@ -954,6 +954,13 @@ Static Files:
       --static-files.blocks-per-file.receipts <BLOCKS_PER_FILE_RECEIPTS>
           Number of blocks per file for the receipts segment
 
+      --static-files.receipts
+          Store receipts in static files instead of the database.
+
+          When enabled, receipts will be written to static files on disk instead of the database.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
 Ress:
       --ress.enable
           Enable support for `ress` subprotocol
