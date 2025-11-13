@@ -192,11 +192,16 @@ fn receipts_provider_example<
     // bloom filter stored in the header to avoid having to query the receipts table when there
     // is no instance of any event that matches the filter in the header.
     if filter.matches_bloom(bloom) {
-        let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
-        for log in &receipts.logs {
-            if filter.matches(log) {
-                // Do something with the log e.g. decode it.
-                println!("Matching log found! {log:?}")
+        let receipts = provider
+            .receipts_by_block(header_num.into())?
+            .ok_or(eyre::eyre!("receipts not found for block"))?;
+
+        for receipt in &receipts {
+            for log in &receipt.logs {
+                if filter.matches(log) {
+                    // Do something with the log e.g. decode it.
+                    println!("Matching log found! {log:?}")
+                }
             }
         }
     }
