@@ -46,7 +46,7 @@ impl StaticFilesArgs {
     }
 
     /// Converts the static files arguments into [`StorageSettings`].
-    pub fn to_settings(&self) -> StorageSettings {
+    pub const fn to_settings(&self) -> StorageSettings {
         if self.receipts {
             StorageSettings::new().with_receipts_in_static_files()
         } else {
