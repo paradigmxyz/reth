@@ -64,8 +64,6 @@ impl Command {
 
         let header = provider.user_header();
 
-        println!("Static File Segment Header");
-        println!("==========================");
         println!("Segment: {}", header.segment());
         println!("Expected Block Range: {}", header.expected_block_range());
         println!("Block Range: {:?}", header.block_range());
