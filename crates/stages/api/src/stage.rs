@@ -115,6 +115,15 @@ impl ExecInput {
         let start_block = self.next_block().max(lowest_transactions_block);
         let target_block = self.target();
 
+        if start_block > target_block {
+            return Ok(TransactionRangeOutput {
+                tx_range: 0..0,
+                block_range: self.checkpoint.map_or(0, |checkpoint| checkpoint.block_number + 1)..=
+                    start_block,
+                is_final_range: false,
+            })
+        }
+
         let start_block_body = provider
             .block_body_indices(start_block)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(start_block))?;
