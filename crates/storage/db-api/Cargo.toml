@@ -51,6 +51,7 @@ proptest = { workspace = true, optional = true }
 # reth libs with arbitrary
 reth-codecs = { workspace = true, features = ["test-utils"] }
 
+alloy-primitives = { workspace = true, features = ["rand"] }
 rand.workspace = true
 
 test-fuzz.workspace = true
