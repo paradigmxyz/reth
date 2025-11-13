@@ -97,13 +97,13 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 Arc::new(init_db(db_path, self.db.database_args())?),
                 StaticFileProvider::read_write(sf_path)?,
             ),
-            AccessRights::RO => (
+            AccessRights::RO | AccessRights::RoInconsistent => (
                 Arc::new(open_db_read_only(&db_path, self.db.database_args())?),
                 StaticFileProvider::read_only(sf_path, false)?,
             ),
         };
 
-        let provider_factory = self.create_provider_factory(&config, db, sfp)?;
+        let provider_factory = self.create_provider_factory(&config, db, sfp, access)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis(&provider_factory)?;
@@ -122,6 +122,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         config: &Config,
         db: Arc<DatabaseEnv>,
         static_file_provider: StaticFileProvider<N::Primitives>,
+        access: AccessRights,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
@@ -136,9 +137,10 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         .with_prune_modes(prune_modes.clone());
 
         // Check for consistency between database and static files.
-        if let Some(unwind_target) = factory
-            .static_file_provider()
-            .check_consistency(&factory.provider()?, has_receipt_pruning)?
+        if !access.is_read_only_inconsistent() &&
+            let Some(unwind_target) = factory
+                .static_file_provider()
+                .check_consistency(&factory.provider()?, has_receipt_pruning)?
         {
             if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
@@ -199,12 +201,20 @@ pub enum AccessRights {
     RW,
     /// Read-only access
     RO,
+    /// Read-only access with possibly inconsistent data
+    RoInconsistent,
 }
 
 impl AccessRights {
     /// Returns `true` if it requires read-write access to the environment.
     pub const fn is_read_write(&self) -> bool {
         matches!(self, Self::RW)
+    }
+
+    /// Returns `true` if it requires read-only access to the environment with possibly inconsistent
+    /// data.
+    pub const fn is_read_only_inconsistent(&self) -> bool {
+        matches!(self, Self::RoInconsistent)
     }
 }
 

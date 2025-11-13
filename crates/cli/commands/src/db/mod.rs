@@ -14,6 +14,7 @@ mod diff;
 mod get;
 mod list;
 mod repair_trie;
+mod static_file_header;
 mod stats;
 /// DB List TUI
 mod tui;
@@ -51,6 +52,8 @@ pub enum Subcommands {
     Clear(clear::Command),
     /// Verifies trie consistency and outputs any inconsistencies
     RepairTrie(repair_trie::Command),
+    /// Reads and displays the static file segment header for a given segment and block number
+    StaticFileHeader(static_file_header::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -144,6 +147,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 let Environment { provider_factory, .. } = self.env.init::<N>(access_rights)?;
                 command.execute(provider_factory)?;
             }
+            Subcommands::StaticFileHeader(command) => command.execute::<N, _>(self.env)?,
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {
                     Ok(version) => Some(version),
