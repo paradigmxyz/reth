@@ -3,6 +3,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_provider::StaticFileProviderFactory;
 use reth_static_file_types::StaticFileSegment;
 use std::path::PathBuf;
+use tracing::warn;
 
 use crate::common::{AccessRights, CliNodeTypes, EnvironmentArgs};
 
@@ -37,7 +38,16 @@ impl Command {
         self,
         env: EnvironmentArgs<C>,
     ) -> eyre::Result<()> {
-        let provider_factory = env.init::<N>(AccessRights::RoInconsistent)?.provider_factory;
+        // Try to initialize the environment as read-only. If it fails, try to initialize it as
+        // read-only without consistency checks.
+        let provider_factory = match env.init::<N>(AccessRights::RO) {
+            Ok(env) => env,
+            Err(err) => {
+                warn!(?err, "Failed to initialize environment");
+                env.init::<N>(AccessRights::RoInconsistent)?
+            }
+        }
+        .provider_factory;
         let static_file_provider = provider_factory.static_file_provider();
 
         // Get the provider based on the source
