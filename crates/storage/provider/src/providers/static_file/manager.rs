@@ -1216,7 +1216,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .block_number;
 
         // If the checkpoint is ahead, then we lost static file data. May be data corruption.
-        if checkpoint_block_number > highest_static_file_block {
+        if highest_static_file_block > 0 && checkpoint_block_number > highest_static_file_block {
             info!(
                 target: "reth::providers::static_file",
                 checkpoint_block_number,
