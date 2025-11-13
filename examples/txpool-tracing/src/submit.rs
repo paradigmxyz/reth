@@ -1,5 +1,4 @@
 //! Transaction submission functionality for the txpool tracing example
-#![allow(unused)]
 #![allow(clippy::too_many_arguments)]
 
 use alloy_network::{Ethereum, EthereumWallet, NetworkWallet, TransactionBuilder};
@@ -8,10 +7,8 @@ use futures_util::StreamExt;
 use reth_ethereum::{
     node::api::{FullNodeComponents, NodeTypes},
     pool::{
-        AddedTransactionOutcome, PoolTransaction, TransactionEvent, TransactionOrigin,
-        TransactionPool,
+        AddedTransactionOutcome, TransactionEvent, TransactionOrigin, TransactionPool,
     },
-    primitives::SignerRecoverable,
     rpc::eth::primitives::TransactionRequest,
     EthPrimitives, TransactionSigned,
 };
