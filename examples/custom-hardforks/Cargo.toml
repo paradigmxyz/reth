@@ -1,0 +1,16 @@
+[package]
+name = "custom-hardforks"
+license.workspace = true
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Core Reth dependencies for chain specs and hardforks
+reth-chainspec.workspace = true
+reth-network-peers.workspace = true
+alloy-genesis.workspace = true
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+serde = { version = "1.0", features = ["derive"] }

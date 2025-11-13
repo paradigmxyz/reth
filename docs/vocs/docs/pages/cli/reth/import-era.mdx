@@ -59,7 +59,20 @@ Database:
           [possible values: true, false]
 
       --db.max-size <MAX_SIZE>
-          Maximum database size (e.g., 4TB, 8MB)
+          Maximum database size (e.g., 4TB, 8TB).
+
+          This sets the "map size" of the database. If the database grows beyond this limit, the node will stop with an "environment map size limit reached" error.
+
+          The default value is 8TB.
+
+      --db.page-size <PAGE_SIZE>
+          Database page size (e.g., 4KB, 8KB, 16KB).
+
+          Specifies the page size used by the MDBX database.
+
+          The page size determines the maximum database size. MDBX supports up to 2^31 pages, so with the default 4KB page size, the maximum database size is 8TB. To allow larger databases, increase this value to 8KB or higher.
+
+          WARNING: This setting is only configurable at database creation; changing it later requires re-syncing.
 
       --db.growth-step <GROWTH_STEP>
           Database growth step (e.g., 4GB, 4KB)
@@ -69,6 +82,9 @@ Database:
 
       --db.max-readers <MAX_READERS>
           Maximum number of readers allowed to access the database concurrently
+
+      --db.sync-mode <SYNC_MODE>
+          Controls how aggressively the database synchronizes data to disk
 
       --path <IMPORT_ERA_PATH>
           The path to a directory for import.
@@ -165,13 +181,27 @@ Display:
 
 Tracing:
       --tracing-otlp[=<URL>]
-          Enable `Opentelemetry` tracing export to an OTLP endpoint. Currently only http exporting is supported.
+          Enable `Opentelemetry` tracing export to an OTLP endpoint.
 
-          If no value provided, defaults to `http://localhost:4318/v1/traces`.
+          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
 
           [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
+
+      --tracing-otlp-protocol <PROTOCOL>
+          OTLP transport protocol to use for exporting traces.
+
+          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
+
+          Defaults to HTTP if not specified.
+
+          Possible values:
+          - http: HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
+          - grpc: gRPC transport, port 4317
+
+          [env: OTEL_EXPORTER_OTLP_PROTOCOL=]
+          [default: http]
 
       --tracing-otlp.filter <FILTER>
           Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.

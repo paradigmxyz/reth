@@ -60,7 +60,7 @@ impl HttpClient for FailingClient {
     ) -> eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin> {
         let url = url.into_url().unwrap();
 
-        Ok(futures::stream::iter(vec![Ok(match url.to_string().as_str() {
+        Ok(futures::stream::iter(vec![Ok(match url.as_str() {
             "https://mainnet.era1.nimbus.team/" => Bytes::from_static(crate::NIMBUS),
             "https://era1.ethportal.net/" => Bytes::from_static(crate::ETH_PORTAL),
             "https://era.ithaca.xyz/era1/index.html" => Bytes::from_static(crate::ITHACA),

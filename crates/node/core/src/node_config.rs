@@ -3,7 +3,7 @@
 use crate::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
+        PruningArgs, RpcServerArgs, StaticFilesArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
     utils::get_single_header,
@@ -147,6 +147,9 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All ERA import related arguments with --era prefix
     pub era: EraArgs,
+
+    /// All static files related arguments
+    pub static_files: StaticFilesArgs,
 }
 
 impl NodeConfig<ChainSpec> {
@@ -177,6 +180,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             datadir: DatadirArgs::default(),
             engine: EngineArgs::default(),
             era: EraArgs::default(),
+            static_files: StaticFilesArgs::default(),
         }
     }
 
@@ -234,7 +238,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Set the metrics address for the node
-    pub const fn with_metrics(mut self, metrics: MetricArgs) -> Self {
+    pub fn with_metrics(mut self, metrics: MetricArgs) -> Self {
         self.metrics = metrics;
         self
     }
@@ -427,6 +431,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Disables all discovery services for the node.
+    pub const fn with_disabled_discovery(mut self) -> Self {
+        self.network.discovery.disable_discovery = true;
+        self
+    }
+
     /// Effectively disables the RPC state cache by setting the cache sizes to `0`.
     ///
     /// By setting the cache sizes to 0, caching of newly executed or fetched blocks will be
@@ -493,6 +503,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             pruning: self.pruning,
             engine: self.engine,
             era: self.era,
+            static_files: self.static_files,
         }
     }
 
@@ -533,6 +544,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             datadir: self.datadir.clone(),
             engine: self.engine.clone(),
             era: self.era.clone(),
+            static_files: self.static_files,
         }
     }
 }

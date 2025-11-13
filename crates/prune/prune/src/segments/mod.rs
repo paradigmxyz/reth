@@ -1,6 +1,5 @@
 mod receipts;
 mod set;
-mod static_file;
 mod user;
 
 use crate::{PruneLimiter, PrunerError};
@@ -8,15 +7,11 @@ use alloy_primitives::{BlockNumber, TxNumber};
 use reth_provider::{errors::provider::ProviderResult, BlockReader, PruneCheckpointWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 pub use set::SegmentSet;
-pub use static_file::{
-    Headers as StaticFileHeaders, Receipts as StaticFileReceipts,
-    Transactions as StaticFileTransactions,
-};
 use std::{fmt::Debug, ops::RangeInclusive};
 use tracing::error;
 pub use user::{
-    AccountHistory, MerkleChangeSets, Receipts as UserReceipts, SenderRecovery, StorageHistory,
-    TransactionLookup,
+    AccountHistory, Bodies, MerkleChangeSets, Receipts as UserReceipts, ReceiptsByLogs,
+    SenderRecovery, StorageHistory, TransactionLookup,
 };
 
 /// A segment represents a pruning of some portion of the data.

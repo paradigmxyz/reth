@@ -188,6 +188,16 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
+    /// Maximum memory the EVM can allocate per RPC request.
+    #[arg(
+        long = "rpc.evm-memory-limit",
+        alias = "rpc-evm-memory-limit",
+        value_name = "MEMORY_LIMIT",
+        value_parser = MaxOr::new(RangedU64ValueParser::<u64>::new().range(1..)),
+        default_value_t = (1 << 32) - 1
+    )]
+    pub rpc_evm_memory_limit: u64,
+
     /// Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
     #[arg(
         long = "rpc.txfeecap",
@@ -408,6 +418,7 @@ impl Default for RpcServerArgs {
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
+            rpc_evm_memory_limit: (1 << 32) - 1,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,

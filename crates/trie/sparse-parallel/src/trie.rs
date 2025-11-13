@@ -688,6 +688,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         Ok(())
     }
 
+    #[instrument(level = "trace", target = "trie::sparse::parallel", skip(self))]
     fn root(&mut self) -> B256 {
         trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
 
@@ -703,6 +704,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         root_rlp.as_hash().unwrap_or(EMPTY_ROOT_HASH)
     }
 
+    #[instrument(level = "trace", target = "trie::sparse::parallel", skip(self))]
     fn update_subtrie_hashes(&mut self) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
@@ -874,14 +876,40 @@ impl SparseTrieInterface for ParallelSparseTrie {
         }
     }
 
-    fn node_capacity(&self) -> usize {
-        self.upper_subtrie.node_capacity() +
-            self.lower_subtries.iter().map(|trie| trie.node_capacity()).sum::<usize>()
+    fn shrink_nodes_to(&mut self, size: usize) {
+        // Distribute the capacity across upper and lower subtries
+        //
+        // Always include upper subtrie, plus any lower subtries
+        let total_subtries = 1 + NUM_LOWER_SUBTRIES;
+        let size_per_subtrie = size / total_subtries;
+
+        // Shrink the upper subtrie
+        self.upper_subtrie.shrink_nodes_to(size_per_subtrie);
+
+        // Shrink lower subtries (works for both revealed and blind with allocation)
+        for subtrie in &mut self.lower_subtries {
+            subtrie.shrink_nodes_to(size_per_subtrie);
+        }
+
+        // shrink masks maps
+        self.branch_node_hash_masks.shrink_to(size);
+        self.branch_node_tree_masks.shrink_to(size);
     }
 
-    fn value_capacity(&self) -> usize {
-        self.upper_subtrie.value_capacity() +
-            self.lower_subtries.iter().map(|trie| trie.value_capacity()).sum::<usize>()
+    fn shrink_values_to(&mut self, size: usize) {
+        // Distribute the capacity across upper and lower subtries
+        //
+        // Always include upper subtrie, plus any lower subtries
+        let total_subtries = 1 + NUM_LOWER_SUBTRIES;
+        let size_per_subtrie = size / total_subtries;
+
+        // Shrink the upper subtrie
+        self.upper_subtrie.shrink_values_to(size_per_subtrie);
+
+        // Shrink lower subtries (works for both revealed and blind with allocation)
+        for subtrie in &mut self.lower_subtries {
+            subtrie.shrink_values_to(size_per_subtrie);
+        }
     }
 }
 
@@ -1303,7 +1331,7 @@ impl ParallelSparseTrie {
 
     /// Drains any [`SparseTrieUpdatesAction`]s from the given subtrie, and applies each action to
     /// the given `updates` set. If the given set is None then this is a no-op.
-    #[instrument(target = "trie::parallel_sparse", skip_all)]
+    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all)]
     fn apply_subtrie_update_actions(
         &mut self,
         update_actions: impl Iterator<Item = SparseTrieUpdatesAction>,
@@ -1327,7 +1355,7 @@ impl ParallelSparseTrie {
     }
 
     /// Updates hashes for the upper subtrie, using nodes from both upper and lower subtries.
-    #[instrument(target = "trie::parallel_sparse", skip_all, ret(level = "trace"))]
+    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, ret)]
     fn update_upper_subtrie_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
         trace!(target: "trie::parallel_sparse", "Updating upper subtrie hashes");
 
@@ -1405,7 +1433,7 @@ impl ParallelSparseTrie {
     ///
     /// IMPORTANT: The method removes the subtries from `lower_subtries`, and the caller is
     /// responsible for returning them back into the array.
-    #[instrument(target = "trie::parallel_sparse", skip_all, fields(prefix_set_len = prefix_set.len()))]
+    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, fields(prefix_set_len = prefix_set.len()))]
     fn take_changed_lower_subtries(
         &mut self,
         prefix_set: &mut PrefixSet,
@@ -1562,7 +1590,7 @@ impl ParallelSparseTrie {
 
     /// Return updated subtries back to the trie after executing any actions required on the
     /// top-level `SparseTrieUpdates`.
-    #[instrument(target = "trie::parallel_sparse", skip_all)]
+    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all)]
     fn insert_changed_subtries(
         &mut self,
         changed_subtries: impl IntoIterator<Item = ChangedSubtrie>,
@@ -2050,7 +2078,7 @@ impl SparseSubtrie {
     /// # Panics
     ///
     /// If the node at the root path does not exist.
-    #[instrument(target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret(level = "trace"))]
+    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret)]
     fn update_hashes(
         &mut self,
         prefix_set: &mut PrefixSet,
@@ -2102,14 +2130,14 @@ impl SparseSubtrie {
         self.inner.clear();
     }
 
-    /// Returns the capacity of the map containing trie nodes.
-    pub(crate) fn node_capacity(&self) -> usize {
-        self.nodes.capacity()
+    /// Shrinks the capacity of the subtrie's node storage.
+    pub(crate) fn shrink_nodes_to(&mut self, size: usize) {
+        self.nodes.shrink_to(size);
     }
 
-    /// Returns the capacity of the map containing trie values.
-    pub(crate) fn value_capacity(&self) -> usize {
-        self.inner.value_capacity()
+    /// Shrinks the capacity of the subtrie's value storage.
+    pub(crate) fn shrink_values_to(&mut self, size: usize) {
+        self.inner.values.shrink_to(size);
     }
 }
 
@@ -2444,11 +2472,6 @@ impl SparseSubtrieInner {
         self.values.clear();
         self.buffers.clear();
     }
-
-    /// Returns the capacity of the map storing leaf values
-    fn value_capacity(&self) -> usize {
-        self.values.capacity()
-    }
 }
 
 /// Represents the outcome of processing a node during leaf insertion
@@ -2571,10 +2594,19 @@ impl SparseSubtrieBuffers {
     /// Clears all buffers.
     fn clear(&mut self) {
         self.path_stack.clear();
+        self.path_stack.shrink_to_fit();
+
         self.rlp_node_stack.clear();
+        self.rlp_node_stack.shrink_to_fit();
+
         self.branch_child_buf.clear();
+        self.branch_child_buf.shrink_to_fit();
+
         self.branch_value_stack_buf.clear();
+        self.branch_value_stack_buf.shrink_to_fit();
+
         self.rlp_buf.clear();
+        self.rlp_buf.shrink_to_fit();
     }
 }
 
@@ -2646,7 +2678,7 @@ mod tests {
     use reth_primitives_traits::Account;
     use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
     use reth_trie::{
-        hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
+        hashed_cursor::{noop::NoopHashedCursor, HashedPostStateCursor},
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
@@ -2958,9 +2990,9 @@ mod tests {
             .into_sorted();
         let mut node_iter = TrieNodeIter::state_trie(
             walker,
-            HashedPostStateAccountCursor::new(
-                NoopHashedAccountCursor::default(),
-                hashed_post_state.accounts(),
+            HashedPostStateCursor::new_account(
+                NoopHashedCursor::<Account>::default(),
+                &hashed_post_state,
             ),
         );
 
