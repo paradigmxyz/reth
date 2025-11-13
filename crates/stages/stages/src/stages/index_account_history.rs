@@ -147,7 +147,6 @@ mod tests {
         TestStageDB, UnwindStageTestRunner,
     };
     use alloy_primitives::{address, BlockNumber, B256};
-    use itertools::Itertools;
     use reth_db_api::{
         cursor::DbCursorRO,
         models::{
