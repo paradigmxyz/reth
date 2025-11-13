@@ -915,6 +915,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 .store(lowest_range.start(), std::sync::atomic::Ordering::Relaxed);
         }
 
+        debug!(
+            target: "provider::static_file",
+            ?min_block,
+            ?max_block,
+            ?expected_block_index,
+            "Initialized indices"
+        );
+
         Ok(())
     }
 
