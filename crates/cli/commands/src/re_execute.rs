@@ -61,11 +61,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
     {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
 
-        let provider = provider_factory.database_provider_ro()?;
         let components = components(provider_factory.chain_spec());
 
         let min_block = self.from;
-        let best_block = provider.best_block_number()?;
+        let best_block = DatabaseProviderFactory::database_provider_ro(&provider_factory)?.best_block_number()?;
         let mut max_block = best_block;
         if let Some(to) = self.to {
             if to > best_block {
