@@ -9648,7 +9648,6 @@ version = "1.9.2"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm",
  "alloy-json-rpc",
  "alloy-op-hardforks",
  "alloy-primitives",

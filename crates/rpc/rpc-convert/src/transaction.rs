@@ -1,5 +1,7 @@
 //! Compatibility functions for rpc `Transaction` type.
-use crate::{RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest};
+use crate::{
+    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest, TryIntoTxEnv,
+};
 use alloy_consensus::{
     error::ValueError, transaction::Recovered, EthereumTxEnvelope, Sealable, TxEip4844,
 };
@@ -15,8 +17,6 @@ use reth_primitives_traits::{
 };
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
-
-use alloy_evm::rpc::TryIntoTxEnv;
 
 /// Input for [`RpcConvert::convert_receipts`].
 #[derive(Debug, Clone)]

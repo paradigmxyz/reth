@@ -23,5 +23,7 @@ pub use transaction::{
     TxInfoMapper,
 };
 
+pub use alloy_evm::rpc::{CallFees, CallFeesError, EthTxEnvError, TryIntoTxEnv};
+
 #[cfg(feature = "op")]
 pub use transaction::op::*;

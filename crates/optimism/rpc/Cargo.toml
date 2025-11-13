@@ -40,7 +40,6 @@ reth-optimism-forks.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
-alloy-evm = { workspace = true, features = ["rpc"] }
 alloy-json-rpc.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-client.workspace = true
