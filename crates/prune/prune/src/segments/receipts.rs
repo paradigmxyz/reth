@@ -17,7 +17,7 @@ use reth_provider::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment, SegmentOutput, SegmentOutputCheckpoint};
 use reth_static_file_types::StaticFileSegment;
-use tracing::trace;
+use tracing::{debug, trace};
 
 pub(crate) fn prune<Provider>(
     provider: &Provider,
