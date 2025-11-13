@@ -70,6 +70,15 @@ Database:
 
           The default value is 8TB.
 
+      --db.page-size <PAGE_SIZE>
+          Database page size (e.g., 4KB, 8KB, 16KB).
+
+          Specifies the page size used by the MDBX database.
+
+          The page size determines the maximum database size. MDBX supports up to 2^31 pages, so with the default 4KB page size, the maximum database size is 8TB. To allow larger databases, increase this value to 8KB or higher.
+
+          WARNING: This setting is only configurable at database creation; changing it later requires re-syncing.
+
       --db.growth-step <GROWTH_STEP>
           Database growth step (e.g., 4GB, 4KB)
 
