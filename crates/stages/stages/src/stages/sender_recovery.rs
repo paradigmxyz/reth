@@ -92,6 +92,11 @@ where
         if range_output.tx_range.is_empty() {
             info!(target: "sync::stages::sender_recovery", tx_range = ?range_output.tx_range, "Target transaction already reached");
             // Drain block range to increment the destination block number
+
+            if input.checkpoint.is_some_and(|checkpoint| checkpoint.block_number == 0) {
+                writer.increment_block(0)?;
+            }
+
             for block in range_output.block_range {
                 writer.increment_block(block)?;
             }
