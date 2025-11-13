@@ -1623,9 +1623,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // [`PruneSegment::ContractLogs`].
         //
         // Receipts can only be skipped if we're dealing with legacy nodes that write them to
-        // Database. On newer nodes pruning will occur separately either by the PruneStage or the
-        // Pruner.
-        let prunable_receipts = !self.cached_storage_settings().receipts_in_static_files &&
+        // Database, OR if receipts_in_static_files is enabled but no receipts exist in static
+        // files yet. Once receipts exist in static files, we must continue writing to maintain
+        // continuity and have no gaps.
+        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database() ||
+            self.static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none()) &&
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
 
         // Prepare set of addresses which logs should not be pruned.
