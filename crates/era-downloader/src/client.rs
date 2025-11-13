@@ -9,6 +9,7 @@ use std::{future::Future, path::Path, str::FromStr};
 use tokio::{
     fs::{self, File},
     io::{self, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt},
+    try_join,
 };
 
 const INDEX_HTML_FILE: &str = "index.html";
@@ -172,13 +173,16 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let index_path = self.folder.to_path_buf().join(INDEX_HTML_FILE);
         let checksums_path = self.folder.to_path_buf().join(Self::CHECKSUMS);
 
-        // Download index file
-        self.download_file_to_path(self.url.clone(), &index_path).await?;
-
         // Only for era1, we download checksums file
         if self.era_type == EraFileType::Era1 {
             let checksums_url = self.url.join(Self::CHECKSUMS)?;
-            self.download_file_to_path(checksums_url, &checksums_path).await?;
+            try_join!(
+                self.download_file_to_path(self.url.clone(), &index_path),
+                self.download_file_to_path(checksums_url, &checksums_path)
+            )?;
+        } else {
+            // Download only index file
+            self.download_file_to_path(self.url.clone(), &index_path).await?;
         }
 
         // Parse and extract era filenames from index.html
