@@ -340,8 +340,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
     }
 
-    pub fn ensure_at_before_block(&mut self, block_number: BlockNumber) -> ProviderResult<()> {
-        let advance_to = block_number.saturating_sub(1);
+    pub fn ensure_at_block(&mut self, advance_to: BlockNumber) -> ProviderResult<()> {
         let highest_block = self
             .reader()
             .get_highest_static_file_block(self.writer.user_header().segment())

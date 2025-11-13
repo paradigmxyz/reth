@@ -149,10 +149,10 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         }
     }
 
-    pub fn ensure_at_before_block(&mut self, block_number: BlockNumber) -> ProviderResult<()> {
+    pub fn ensure_at_block(&mut self, block_number: BlockNumber) -> ProviderResult<()> {
         match self {
             Self::Database(_) => Ok(()),
-            Self::StaticFile(writer) => writer.ensure_at_before_block(block_number),
+            Self::StaticFile(writer) => writer.ensure_at_block(block_number),
         }
     }
 }
