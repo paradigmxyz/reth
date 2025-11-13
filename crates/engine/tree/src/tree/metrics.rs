@@ -82,9 +82,12 @@ impl EngineApiMetrics {
                 let tx = tx?;
                 let span =
                     debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
-                let _enter = span.enter();
+                let enter = span.entered();
                 trace!(target: "engine::tree", "Executing transaction");
-                executor.execute_transaction(tx)?;
+                let gas_used = executor.execute_transaction(tx)?;
+
+                // record the tx gas used
+                enter.record("gas_used", gas_used);
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
