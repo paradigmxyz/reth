@@ -315,43 +315,7 @@ macro_rules! add_wrapper_struct {
 
 add_wrapper_struct!((U256, CompactU256));
 add_wrapper_struct!((u64, CompactU64));
-
-/// Wrapper struct for `ClientVersion` so it can use `StructFlags` from Compact, when used as pure
-/// table values.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
-#[add_arbitrary_tests(compact)]
-pub struct CompactClientVersion(pub ClientVersion);
-
-impl From<ClientVersion> for CompactClientVersion {
-    fn from(value: ClientVersion) -> Self {
-        Self(value)
-    }
-}
-
-impl From<CompactClientVersion> for ClientVersion {
-    fn from(value: CompactClientVersion) -> Self {
-        value.0
-    }
-}
-
-impl std::ops::Deref for CompactClientVersion {
-    type Target = ClientVersion;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for CompactClientVersion {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self(ClientVersion {
-            version: String::arbitrary(u)?,
-            git_sha: String::arbitrary(u)?,
-            build_timestamp: String::arbitrary(u)?,
-        }))
-    }
-}
+add_wrapper_struct!((ClientVersion, CompactClientVersion));
 
 #[cfg(test)]
 mod tests {
