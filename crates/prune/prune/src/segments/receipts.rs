@@ -11,8 +11,7 @@ use crate::{
 use reth_db_api::{table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,
-    PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache, TransactionsProvider,
+    BlockReader, DBProvider, EitherWriter, NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache, TransactionsProvider, errors::provider::ProviderResult
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment, SegmentOutput, SegmentOutputCheckpoint};
 use reth_static_file_types::StaticFileSegment;
@@ -30,10 +29,11 @@ where
         + StaticFileProviderFactory
         + NodePrimitivesProvider<Primitives: NodePrimitives<Receipt: Value>>,
 {
-    // Check if receipts are stored on static files
-    if provider.cached_storage_settings().receipts_in_static_files {
+    if EitherWriter::receipts_destination(provider).is_static_file() {
+        debug!(target: "pruner", "Pruning receipts from static files.");
         return segments::prune_static_files(provider, input, StaticFileSegment::Receipts)
     }
+    debug!(target: "pruner", "Pruning receipts from database.");
 
     // Original database implementation for when receipts are not on static files (old nodes)
     let tx_range = match input.get_next_tx_num_range(provider)? {
