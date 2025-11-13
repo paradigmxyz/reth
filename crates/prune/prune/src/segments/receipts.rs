@@ -113,8 +113,14 @@ mod tests {
     use std::ops::Sub;
 
     #[test]
-    fn prune() {
-        let db = TestStageDB::default();
+    fn prune_legacy() {
+        let mut db = TestStageDB::default();
+        // Configure the factory to use database for receipts by enabling receipt pruning.
+        // This ensures EitherWriter::receipts_destination returns Database instead of StaticFile.
+        db.factory = db.factory.with_prune_modes(reth_prune_types::PruneModes {
+            receipts: Some(PruneMode::Full),
+            ..Default::default()
+        });
         let mut rng = generators::rng();
 
         let blocks = random_block_range(
