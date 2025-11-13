@@ -318,9 +318,9 @@ impl MultiproofInput {
 /// 4. `MultiProofTask` consumes the message from the same channel and sequences it with
 ///    `ProofSequencer`.
 #[derive(Debug)]
-pub struct MultiproofManager<Factory> {
+pub struct MultiproofManager {
     /// Handle to the proof worker pools (storage and account).
-    proof_worker_dispatcher: ProofWorkerDispatcher<Factory>,
+    proof_worker_dispatcher: ProofWorkerDispatcher,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     ///
@@ -340,11 +340,11 @@ pub struct MultiproofManager<Factory> {
     metrics: MultiProofTaskMetrics,
 }
 
-impl<Factory> MultiproofManager<Factory> {
+impl MultiproofManager {
     /// Creates a new [`MultiproofManager`].
     fn new(
         metrics: MultiProofTaskMetrics,
-        proof_worker_dispatcher: ProofWorkerDispatcher<Factory>,
+        proof_worker_dispatcher: ProofWorkerDispatcher,
         proof_result_tx: CrossbeamSender<ProofResultMessage>,
     ) -> Self {
         // Initialize the max worker gauges with the worker pool sizes
@@ -491,10 +491,8 @@ impl<Factory> MultiproofManager<Factory> {
         let start = Instant::now();
 
         // Extend prefix sets with targets
-        let frozen_prefix_sets = ParallelProof::<Factory>::extend_prefix_sets_with_targets(
-            &Default::default(),
-            &proof_targets,
-        );
+        let frozen_prefix_sets =
+            ParallelProof::extend_prefix_sets_with_targets(&Default::default(), &proof_targets);
 
         // Dispatch account multiproof to worker pool with result sender
         let input = AccountMultiproofInput {
@@ -684,7 +682,7 @@ pub(crate) struct MultiProofTaskMetrics {
 ///
 /// See the `run()` method documentation for detailed lifecycle flow.
 #[derive(Debug)]
-pub(super) struct MultiProofTask<Factory> {
+pub(super) struct MultiProofTask {
     /// The size of proof targets chunk to spawn in one calculation.
     /// If None, chunking is disabled and all targets are processed in a single proof.
     chunk_size: Option<usize>,
@@ -703,15 +701,15 @@ pub(super) struct MultiProofTask<Factory> {
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
-    multiproof_manager: MultiproofManager<Factory>,
+    multiproof_manager: MultiproofManager,
     /// multi proof task metrics
     metrics: MultiProofTaskMetrics,
 }
 
-impl<Factory> MultiProofTask<Factory> {
+impl MultiProofTask {
     /// Creates a new multi proof task with the unified message channel
     pub(super) fn new(
-        proof_worker_dispatcher: ProofWorkerDispatcher<Factory>,
+        proof_worker_dispatcher: ProofWorkerDispatcher,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
         chunk_size: Option<usize>,
     ) -> Self {
@@ -1289,8 +1287,7 @@ mod tests {
     use alloy_primitives::map::B256Set;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        BlockReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
-        TrieReader,
+        BlockReader, PruneCheckpointReader, StageCheckpointReader, TrieReader,
     };
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::ProofWorkerHandle;
@@ -1309,14 +1306,7 @@ mod tests {
             .clone()
     }
 
-    fn create_test_state_root_task<F>(factory: F) -> MultiProofTask<OverlayStateProviderFactory<F>>
-    where
-        F: DatabaseProviderFactory<
-                Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
-            > + Clone
-            + Send
-            + 'static,
-    {
+    fn create_test_state_root_task<F>(factory: F) -> MultiProofTask {
         let rt_handle = get_test_runtime_handle();
         let overlay_factory = OverlayStateProviderFactory::new(factory);
         let proof_handle = ProofWorkerHandle::new(rt_handle, 1, 1);

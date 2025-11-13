@@ -87,20 +87,22 @@ type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 ///
 /// - Handle is created, spawns tasks
 /// - For each new context (e.g. each new block being validated):
-///     - [`Self::into_dispatcher`] is called with provider factory and any other necessary context
+///     - [`Self::new_dispatcher`] is called with provider factory and any other necessary context
 ///       to do proof work.
 ///         - Context is sent to each task.
-///         - This type is transformed into a [`ProofWorkerDispatcher`], which can be used to
-///           dispatch tasks.
-///     - Once no more work is necessary, [`ProofWorkerDispatcher::into_handle`] is called to obtain
-///       this type again.
-///  - This handle, or the dispatcher, can be dropped at any time to shut down all tasks.
-#[derive(Debug, Clone)]
+///         - [`ProofWorkerDispatcher`] is returned, which can be used to dispatch tasks.
+///         - Once no more work is necessary, [`ProofWorkerDispatcher`] is dropped.
+///  - Once this handle and all dispatchers are dropped then all tasks will shut down.
+///
+///  In the event that `new_dispatcher` is called while a previous [`ProofWorkerDispatcher`] is
+/// still  active, the previous dispatcher must be dropped before any tasks dispatched by the new
+/// one will  be executed.
+#[derive(Debug)]
 pub struct ProofWorkerHandle<Factory> {
     /// Direct senders to storage worker pool, one for each storage proof worker.
-    storage_ctx_txs: Arc<Vec<CrossbeamSender<StorageProofTaskCtx<Factory>>>>,
+    storage_ctx_txs: Vec<CrossbeamSender<StorageProofTaskCtx<Factory>>>,
     /// Direct senders to account worker pool, one for each account proof worker.
-    account_ctx_txs: Arc<Vec<CrossbeamSender<AccountProofTaskCtx<Factory>>>>,
+    account_ctx_txs: Vec<CrossbeamSender<AccountProofTaskCtx<Factory>>>,
 }
 
 impl<Factory> ProofWorkerHandle<Factory>
@@ -200,10 +202,7 @@ where
         }
         drop(parent_span);
 
-        Self {
-            storage_ctx_txs: Arc::new(storage_ctx_txs),
-            account_ctx_txs: Arc::new(account_ctx_txs),
-        }
+        Self { storage_ctx_txs, account_ctx_txs }
     }
 }
 
@@ -213,7 +212,7 @@ where
 {
     /// Send the given `Factory` to each worker to be used for proof calculations, and return a
     /// corresponding [`ProofWorkerDispatcher`].
-    pub fn into_dispatcher(self, factory: Factory) -> ProofWorkerDispatcher<Factory> {
+    pub fn new_dispatcher(&self, factory: Factory) -> ProofWorkerDispatcher {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
@@ -222,14 +221,14 @@ where
         let storage_available_workers = Arc::new(AtomicUsize::new(0));
         let account_available_workers = Arc::new(AtomicUsize::new(0));
 
-        let storage_ctx = StorageProofTaskCtx::new(
+        let storage_ctx = StorageProofTaskCtx::<Factory>::new(
             factory.clone(),
             storage_work_rx,
             Arc::clone(&storage_available_workers),
         );
 
         // Send the `StorageProofTaskCtx` to each storage worker
-        for tx in self.storage_ctx_txs.as_ref() {
+        for tx in &self.storage_ctx_txs {
             if let Err(error) = tx.try_send(storage_ctx.clone()) {
                 error!(
                     target: "trie::proof_task",
@@ -247,23 +246,23 @@ where
         );
 
         // Send the `AccountProofTaskCtx` to each account worker
-        for tx in self.account_ctx_txs.as_ref() {
+        for tx in &self.account_ctx_txs {
             if let Err(error) = tx.try_send(account_ctx.clone()) {
                 error!(
                     target: "trie::proof_task",
                     ?error,
-                    "Account worker is blocked, removing it from pool",
+                    "Account worker is blocked",
                 );
             }
         }
 
         ProofWorkerDispatcher {
-            storage_ctx_txs: self.storage_ctx_txs,
-            account_ctx_txs: self.account_ctx_txs,
             storage_available_workers,
             account_available_workers,
             storage_work_tx,
             account_work_tx,
+            total_storage_workers: self.storage_ctx_txs.len(),
+            total_account_workers: self.account_ctx_txs.len(),
         }
     }
 }
@@ -271,40 +270,27 @@ where
 /// A handle managing a long-lived pool of proof workers, each having the context required to
 /// perform proof tasks.
 ///
-/// This type transforms to/from [`ProofWorkerHandle`], see that type's documentation and usage to
+/// This type is returned from [`ProofWorkerHandle`], see that type's documentation and usage to
 /// understand the relationship between the two.
 #[derive(Debug, Clone)]
-pub struct ProofWorkerDispatcher<Factory> {
-    /// Direct senders to storage worker pool, one for each storage proof worker.
-    storage_ctx_txs: Arc<Vec<CrossbeamSender<StorageProofTaskCtx<Factory>>>>,
-    /// Direct senders to account worker pool, one for each account proof worker.
-    account_ctx_txs: Arc<Vec<CrossbeamSender<AccountProofTaskCtx<Factory>>>>,
+pub struct ProofWorkerDispatcher {
     /// Counter tracking available storage workers. Workers decrement when starting work,
     /// increment when finishing. Used to determine whether to chunk multiproofs.
     storage_available_workers: Arc<AtomicUsize>,
     /// Counter tracking available account workers. Workers decrement when starting work,
     /// increment when finishing. Used to determine whether to chunk multiproofs.
     account_available_workers: Arc<AtomicUsize>,
-    /// Direct task sender to storage worker pool
+    /// Direct task sender to storage worker pool.
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
-    /// Direct task sender to account worker pool
+    /// Direct task sender to account worker pool.
     account_work_tx: CrossbeamSender<AccountWorkerJob>,
+    /// Total number of spawned storage workers.
+    total_storage_workers: usize,
+    /// Total number of spawned account workers.
+    total_account_workers: usize,
 }
 
-impl<Factory> ProofWorkerDispatcher<Factory> {
-    /// Signal all proof workers that the current proof context is done and they should wait for a
-    /// new context before completing any new work. Returns a [`ProofWorkerHandle`] which can be
-    /// used to provide that new context and obtain a new dispatcher via
-    /// [`ProofWorkerHandle::into_dispatcher`].
-    pub fn into_handle(self) -> ProofWorkerHandle<Factory> {
-        // The `storage_work_tx` and `account_work_tx` channels get dropped here, signaling to the
-        // workers that the context is finished and they should wait for a new context.
-        ProofWorkerHandle {
-            storage_ctx_txs: self.storage_ctx_txs,
-            account_ctx_txs: self.account_ctx_txs,
-        }
-    }
-
+impl ProofWorkerDispatcher {
     /// Returns how many storage workers are currently available/idle.
     pub fn available_storage_workers(&self) -> usize {
         self.storage_available_workers.load(Ordering::Relaxed)
@@ -326,13 +312,13 @@ impl<Factory> ProofWorkerDispatcher<Factory> {
     }
 
     /// Returns the total number of storage workers in the pool.
-    pub fn total_storage_workers(&self) -> usize {
-        self.storage_ctx_txs.len()
+    pub const fn total_storage_workers(&self) -> usize {
+        self.total_storage_workers
     }
 
     /// Returns the total number of account workers in the pool.
-    pub fn total_account_workers(&self) -> usize {
-        self.account_ctx_txs.len()
+    pub const fn total_account_workers(&self) -> usize {
+        self.total_account_workers
     }
 
     /// Returns the number of storage workers currently processing tasks.
@@ -562,9 +548,9 @@ where
         account_node_provider.trie_node(path)
     }
 }
-impl<Factory: Clone> TrieNodeProviderFactory for ProofWorkerDispatcher<Factory> {
-    type AccountNodeProvider = ProofTaskTrieNodeProvider<Factory>;
-    type StorageNodeProvider = ProofTaskTrieNodeProvider<Factory>;
+impl TrieNodeProviderFactory for ProofWorkerDispatcher {
+    type AccountNodeProvider = ProofTaskTrieNodeProvider;
+    type StorageNodeProvider = ProofTaskTrieNodeProvider;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
         ProofTaskTrieNodeProvider::AccountNode { dispatcher: self.clone() }
@@ -577,22 +563,22 @@ impl<Factory: Clone> TrieNodeProviderFactory for ProofWorkerDispatcher<Factory> 
 
 /// Trie node provider for retrieving trie nodes by path.
 #[derive(Debug)]
-pub enum ProofTaskTrieNodeProvider<Factory> {
+pub enum ProofTaskTrieNodeProvider {
     /// Blinded account trie node provider.
     AccountNode {
         /// Handle to the proof worker pools.
-        dispatcher: ProofWorkerDispatcher<Factory>,
+        dispatcher: ProofWorkerDispatcher,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
         /// Handle to the proof worker pools.
-        dispatcher: ProofWorkerDispatcher<Factory>,
+        dispatcher: ProofWorkerDispatcher,
     },
 }
 
-impl<Factory> TrieNodeProvider for ProofTaskTrieNodeProvider<Factory> {
+impl TrieNodeProvider for ProofTaskTrieNodeProvider {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         match self {
             Self::AccountNode { dispatcher } => {

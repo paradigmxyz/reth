@@ -16,7 +16,6 @@ use crate::tree::{
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
 use crossbeam_channel::Sender as CrossbeamSender;
-use either::Either;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
@@ -27,13 +26,9 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor, TxEnvFor,
 };
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
+use reth_provider::{BlockReader, StateProviderFactory, StateReader};
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
-use reth_trie_parallel::{
-    proof_task::{ProofWorkerDispatcher, ProofWorkerHandle},
-    root::ParallelStateRootError,
-};
+use reth_trie_parallel::{proof_task::ProofWorkerHandle, root::ParallelStateRootError};
 use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
@@ -98,13 +93,8 @@ where
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
     execution_cache: ExecutionCache,
-    /// Handle to long-lived proof task workers. The handle is turned into a dispatcher during
-    /// payload validation, and turned back into a handle once validation is complete. This allows
-    /// us to statically track the state of the proof workers at compile-time.
-    proof_worker_handle: Either<
-        ProofWorkerHandle<ProofProviderFactory>,
-        ProofWorkerDispatcher<ProofProviderFactory>,
-    >,
+    /// Handle to long-lived proof task workers.
+    proof_worker_handle: ProofWorkerHandle<ProofProviderFactory>,
     /// Metrics for trie operations
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
@@ -134,28 +124,20 @@ impl<N, Evm, ProofProviderFactory> PayloadProcessor<Evm, ProofProviderFactory>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N> + 'static,
-    ProofProviderFactory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
-        + Send
-        + 'static,
+    ProofProviderFactory: Clone + Send,
 {
     /// Creates a new payload processor.
     pub fn new(
         executor: WorkloadExecutor,
+        proof_worker_handle: ProofWorkerHandle<ProofProviderFactory>,
         evm_config: Evm,
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     ) -> Self {
-        let proof_worker_handle = ProofWorkerHandle::new(
-            executor.handle().clone(),
-            config.storage_worker_count(),
-            config.account_worker_count(),
-        );
-
         Self {
             executor,
             execution_cache: Default::default(),
-            proof_worker_handle: Either::Left(proof_worker_handle),
+            proof_worker_handle,
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
@@ -199,7 +181,7 @@ where
     ///
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
-    /// canceling). Once the state root has been obtained `Self::cleanup` should be called.
+    /// canceling).
     #[allow(clippy::type_complexity)]
     #[instrument(
         level = "debug",
@@ -221,26 +203,10 @@ where
         let span = tracing::Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
 
-        // Provide the factory to the `ProofWorkerHandle` in order to turn it into a
+        // Provide the factory to the `ProofWorkerHandle` in order to obtain a
         // `ProofWorkerDispatcher`, which can then be used for proof tasks.
-        self.proof_worker_handle = either::Right(
-            self.proof_worker_handle
-                .clone()
-                .left_or_else(|dispatcher| {
-                    // This would only happen if the previous block failed to call `cleanup`. We
-                    // convert back to a handle to end the previous block's processing, and into a
-                    // new dispatcher with the new provider.
-                    warn!("ProofWorkerDispatcher was never cleaned up from previous block");
-                    dispatcher.into_handle()
-                })
-                .into_dispatcher(multiproof_provider_factory),
-        );
-
-        let proof_worker_dispatcher = self
-            .proof_worker_handle
-            .clone()
-            .right()
-            .expect("was converted to Right immediately previously");
+        let proof_worker_dispatcher =
+            self.proof_worker_handle.new_dispatcher(multiproof_provider_factory);
 
         let multi_proof_task = MultiProofTask::new(
             proof_worker_dispatcher.clone(),
@@ -280,18 +246,6 @@ where
             state_root: Some(state_root_rx),
             transactions: execution_rx,
         }
-    }
-
-    /// Called once payload processing has been completed, specifically once the state root has been
-    /// obtained from the [`PayloadHandle`].
-    pub(super) fn cleanup(&mut self) {
-        // Convert the `ProofWorkerDispatcher` back into a handle, signaling to the proof workers
-        // that the computation is complete for now. If the field is already a handle then this is a
-        // no-op.
-        self.proof_worker_handle = self
-            .proof_worker_handle
-            .clone()
-            .right_and_then(|dispatcher| either::Left(dispatcher.into_handle()));
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.

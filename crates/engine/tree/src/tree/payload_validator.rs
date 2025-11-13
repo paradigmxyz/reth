@@ -39,7 +39,10 @@ use reth_provider::{
 };
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use reth_trie_parallel::{
+    proof_task::ProofWorkerHandle,
+    root::{ParallelStateRoot, ParallelStateRootError},
+};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
@@ -149,12 +152,25 @@ where
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
-        let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
-            evm_config.clone(),
-            &config,
-            precompile_cache_map.clone(),
-        );
+
+        let payload_processor = {
+            let executor = WorkloadExecutor::default();
+
+            let proof_worker_handle = ProofWorkerHandle::new(
+                executor.handle().clone(),
+                config.storage_worker_count(),
+                config.account_worker_count(),
+            );
+
+            PayloadProcessor::new(
+                executor,
+                proof_worker_handle,
+                evm_config.clone(),
+                &config,
+                precompile_cache_map.clone(),
+            )
+        };
+
         Self {
             provider,
             consensus,
@@ -409,10 +425,7 @@ where
             self.execute_block(&state_provider, env, &input, &mut handle)
         } {
             Ok(output) => output,
-            Err(err) => {
-                self.payload_processor.cleanup();
-                return self.handle_execution_error(input, err, &parent_block)
-            }
+            Err(err) => return self.handle_execution_error(input, err, &parent_block),
         };
 
         // after executing the block we can stop executing transactions
@@ -505,9 +518,6 @@ where
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
-
-        // Once the state root is validated we can tell the payload processor to cleanup.
-        self.payload_processor.cleanup();
 
         // ensure state root matches
         if state_root != block.header().state_root() {

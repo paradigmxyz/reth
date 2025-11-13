@@ -25,7 +25,7 @@ use tracing::trace;
 /// This can collect proof for many targets in parallel, spawning a task for each hashed address
 /// that has proof targets.
 #[derive(Debug)]
-pub struct ParallelProof<Factory> {
+pub struct ParallelProof {
     /// The collection of prefix sets for the computation.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
     /// Flag indicating whether to include branch node masks in the proof.
@@ -33,7 +33,7 @@ pub struct ParallelProof<Factory> {
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the proof worker pools.
-    proof_worker_dispatcher: ProofWorkerDispatcher<Factory>,
+    proof_worker_dispatcher: ProofWorkerDispatcher,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
@@ -41,12 +41,12 @@ pub struct ParallelProof<Factory> {
     metrics: ParallelTrieMetrics,
 }
 
-impl<Factory> ParallelProof<Factory> {
+impl ParallelProof {
     /// Create new state proof generator.
     pub fn new(
         prefix_sets: Arc<TriePrefixSetsMut>,
         missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-        proof_worker_dispatcher: ProofWorkerDispatcher<Factory>,
+        proof_worker_dispatcher: ProofWorkerDispatcher,
     ) -> Self {
         Self {
             prefix_sets,
