@@ -10780,7 +10780,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-tracing",
- "revm-interpreter 29.0.1",
+ "revm-interpreter",
  "revm-primitives",
  "rustc-hash",
  "schnellru",
@@ -10992,12 +10992,12 @@ checksum = "151be0bca9fd5ebfbbbc02af9f75f1e1610f71c750eea71b4d91fe7b65362c61"
 dependencies = [
  "revm-bytecode",
  "revm-context",
- "revm-context-interface 13.0.0",
+ "revm-context-interface",
  "revm-database",
  "revm-database-interface",
  "revm-handler",
  "revm-inspector",
- "revm-interpreter 31.0.0",
+ "revm-interpreter",
  "revm-precompile",
  "revm-primitives",
  "revm-state",
@@ -11025,23 +11025,7 @@ dependencies = [
  "cfg-if",
  "derive-where",
  "revm-bytecode",
- "revm-context-interface 13.0.0",
- "revm-database-interface",
- "revm-primitives",
- "revm-state",
- "serde",
-]
-
-[[package]]
-name = "revm-context-interface"
-version = "12.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6d701e2c2347d65216b066489ab22a0a8e1f7b2568256110d73a7d5eff3385c"
-dependencies = [
- "alloy-eip2930",
- "alloy-eip7702",
- "auto_impl",
- "either",
+ "revm-context-interface",
  "revm-database-interface",
  "revm-primitives",
  "revm-state",
@@ -11101,9 +11085,9 @@ dependencies = [
  "derive-where",
  "revm-bytecode",
  "revm-context",
- "revm-context-interface 13.0.0",
+ "revm-context-interface",
  "revm-database-interface",
- "revm-interpreter 31.0.0",
+ "revm-interpreter",
  "revm-precompile",
  "revm-primitives",
  "revm-state",
@@ -11121,7 +11105,7 @@ dependencies = [
  "revm-context",
  "revm-database-interface",
  "revm-handler",
- "revm-interpreter 31.0.0",
+ "revm-interpreter",
  "revm-primitives",
  "revm-state",
  "serde",
@@ -11150,25 +11134,12 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "29.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22789ce92c5808c70185e3bc49732f987dc6fd907f77828c8d3470b2299c9c65"
-dependencies = [
- "revm-bytecode",
- "revm-context-interface 12.0.1",
- "revm-primitives",
- "revm-state",
- "serde",
-]
-
-[[package]]
-name = "revm-interpreter"
 version = "31.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8201c0fbd91334a8d4d0aae955f8d4534a118d55855ed9b03aec8f83fb62561e"
 dependencies = [
  "revm-bytecode",
- "revm-context-interface 13.0.0",
+ "revm-context-interface",
  "revm-primitives",
  "revm-state",
  "serde",
