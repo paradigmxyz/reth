@@ -65,6 +65,7 @@ tracing.workspace = true
 derive_more.workspace = true
 parking_lot.workspace = true
 crossbeam-channel.workspace = true
+either.workspace = true
 
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }

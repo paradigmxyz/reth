@@ -205,7 +205,12 @@ where
             account_ctx_txs: Arc::new(account_ctx_txs),
         }
     }
+}
 
+impl<Factory> ProofWorkerHandle<Factory>
+where
+    Factory: Clone + Send,
+{
     /// Send the given `Factory` to each worker to be used for proof calculations, and return a
     /// corresponding [`ProofWorkerDispatcher`].
     pub fn into_dispatcher(self, factory: Factory) -> ProofWorkerDispatcher<Factory> {

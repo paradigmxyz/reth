@@ -8172,6 +8172,7 @@ dependencies = [
  "crossbeam-channel",
  "dashmap 6.1.0",
  "derive_more",
+ "either",
  "eyre",
  "futures",
  "metrics",

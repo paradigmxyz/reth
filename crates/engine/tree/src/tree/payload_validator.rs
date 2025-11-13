@@ -109,7 +109,7 @@ where
     /// Configuration for the tree.
     config: TreeConfig,
     /// Payload processor for state root computation.
-    payload_processor: PayloadProcessor<Evm>,
+    payload_processor: PayloadProcessor<Evm, OverlayStateProviderFactory<P>>,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Precompile cache metrics.
@@ -409,7 +409,10 @@ where
             self.execute_block(&state_provider, env, &input, &mut handle)
         } {
             Ok(output) => output,
-            Err(err) => return self.handle_execution_error(input, err, &parent_block),
+            Err(err) => {
+                self.payload_processor.cleanup();
+                return self.handle_execution_error(input, err, &parent_block)
+            }
         };
 
         // after executing the block we can stop executing transactions
@@ -502,6 +505,9 @@ where
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
+
+        // Once the state root is validated we can tell the payload processor to cleanup.
+        self.payload_processor.cleanup();
 
         // ensure state root matches
         if state_root != block.header().state_root() {

@@ -16,6 +16,7 @@ use crate::tree::{
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
 use crossbeam_channel::Sender as CrossbeamSender;
+use either::Either;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
@@ -30,7 +31,7 @@ use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofWorkerHandle},
+    proof_task::{ProofWorkerDispatcher, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
@@ -89,7 +90,7 @@ pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
-pub struct PayloadProcessor<Evm>
+pub struct PayloadProcessor<Evm, ProofProviderFactory>
 where
     Evm: ConfigureEvm,
 {
@@ -97,6 +98,13 @@ where
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
     execution_cache: ExecutionCache,
+    /// Handle to long-lived proof task workers. The handle is turned into a dispatcher during
+    /// payload validation, and turned back into a handle once validation is complete. This allows
+    /// us to statically track the state of the proof workers at compile-time.
+    proof_worker_handle: Either<
+        ProofWorkerHandle<ProofProviderFactory>,
+        ProofWorkerDispatcher<ProofProviderFactory>,
+    >,
     /// Metrics for trie operations
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
@@ -122,10 +130,14 @@ where
     prewarm_max_concurrency: usize,
 }
 
-impl<N, Evm> PayloadProcessor<Evm>
+impl<N, Evm, ProofProviderFactory> PayloadProcessor<Evm, ProofProviderFactory>
 where
     N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N>,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
+    ProofProviderFactory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+        + Clone
+        + Send
+        + 'static,
 {
     /// Creates a new payload processor.
     pub fn new(
@@ -134,9 +146,16 @@ where
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     ) -> Self {
+        let proof_worker_handle = ProofWorkerHandle::new(
+            executor.handle().clone(),
+            config.storage_worker_count(),
+            config.account_worker_count(),
+        );
+
         Self {
             executor,
             execution_cache: Default::default(),
+            proof_worker_handle: Either::Left(proof_worker_handle),
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
@@ -148,13 +167,7 @@ where
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
         }
     }
-}
 
-impl<N, Evm> PayloadProcessor<Evm>
-where
-    N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
-{
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
     /// - Transaction prewarming task
@@ -186,7 +199,7 @@ where
     ///
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
-    /// canceling)
+    /// canceling). Once the state root has been obtained [`Self::cleanup`] should be called.
     #[allow(clippy::type_complexity)]
     #[instrument(
         level = "debug",
@@ -194,42 +207,43 @@ where
         name = "payload processor",
         skip_all
     )]
-    pub fn spawn<P, F, I: ExecutableTxIterator<Evm>>(
+    pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-        multiproof_provider_factory: F,
+        multiproof_provider_factory: ProofProviderFactory,
         config: &TreeConfig,
     ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
-            + Send
-            + 'static,
     {
         let span = tracing::Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
 
-        // We rely on the cursor factory to provide whatever DB overlay is necessary to see a
-        // consistent view of the database, including the trie tables. Because of this there is no
-        // need for an overarching prefix set to invalidate any section of the trie tables, and so
-        // we use an empty prefix set.
-
-        // Create and spawn the storage proof task
-        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        let storage_worker_count = config.storage_worker_count();
-        let account_worker_count = config.account_worker_count();
-        let proof_handle = ProofWorkerHandle::new(
-            self.executor.handle().clone(),
-            task_ctx,
-            storage_worker_count,
-            account_worker_count,
+        // Provide the factory to the `ProofWorkerHandle` in order to turn it into a
+        // `ProofWorkerDispatcher`, which can then be used for proof tasks.
+        self.proof_worker_handle = either::Right(
+            self.proof_worker_handle
+                .clone()
+                .left_or_else(|dispatcher| {
+                    // This would only happen if the previous block failed to call `cleanup`. We
+                    // convert back to a handle to end the previous block's processing, and into a
+                    // new dispatcher with the new provider.
+                    warn!("ProofWorkerDispatcher was never cleaned up from previous block");
+                    dispatcher.into_handle()
+                })
+                .into_dispatcher(multiproof_provider_factory),
         );
 
+        let proof_worker_dispatcher = self
+            .proof_worker_handle
+            .clone()
+            .right()
+            .expect("was converted to Right immediately previously");
+
         let multi_proof_task = MultiProofTask::new(
-            proof_handle.clone(),
+            proof_worker_dispatcher.clone(),
             to_sparse_trie,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );
@@ -258,7 +272,7 @@ where
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        self.spawn_sparse_trie_task(sparse_trie_rx, proof_handle, state_root_tx);
+        self.spawn_sparse_trie_task(sparse_trie_rx, proof_worker_dispatcher, state_root_tx);
 
         PayloadHandle {
             to_multi_proof,
@@ -266,6 +280,18 @@ where
             state_root: Some(state_root_rx),
             transactions: execution_rx,
         }
+    }
+
+    /// Called once payload processing has been completed, specifically once the state root has been
+    /// obtained from the [`PayloadHandle`].
+    pub(super) fn cleanup(&mut self) {
+        // Convert the `ProofWorkerDispatcher` back into a handle, signaling to the proof workers
+        // that the computation is complete for now. If the field is already a handle then this is a
+        // no-op.
+        self.proof_worker_handle = self
+            .proof_worker_handle
+            .clone()
+            .right_and_then(|dispatcher| either::Left(dispatcher.into_handle()));
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
@@ -399,7 +425,7 @@ where
     fn spawn_sparse_trie_task<BPF>(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
-        proof_worker_handle: BPF,
+        proof_worker_dispatcher: BPF,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
     ) where
         BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
@@ -429,7 +455,7 @@ where
         let task =
             SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
                 sparse_trie_rx,
-                proof_worker_handle,
+                proof_worker_dispatcher,
                 self.trie_metrics.clone(),
                 sparse_state_trie,
             );
