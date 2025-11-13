@@ -23,7 +23,7 @@ use crate::{
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
-    BlockHeader,
+    BlockHeader, TxReceipt,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
@@ -70,8 +70,7 @@ use reth_trie::{
         TrieCursorIter,
     },
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    BranchNodeCompact, HashedPostStateSorted, Nibbles, StoredNibbles, StoredNibblesSubKey,
-    TrieChangeSetsEntry,
+    HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
 };
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
@@ -219,7 +218,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
     #[cfg(feature = "test-utils")]
     /// Sets the prune modes for provider.
-    pub const fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+    pub fn set_prune_modes(&mut self, prune_modes: PruneModes) {
         self.prune_modes = prune_modes;
     }
 }
@@ -232,6 +231,14 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     /// Returns a static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
+    }
+
+    fn get_static_file_writer(
+        &self,
+        block: BlockNumber,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<crate::providers::StaticFileProviderRWRefMut<'_, Self::Primitives>> {
+        self.static_file_provider.get_writer(block, segment)
     }
 }
 
@@ -1642,22 +1649,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
-        // Write receipts to static files only if they're explicitly enabled or we don't have
-        // receipts pruning
-        let mut receipts_writer = if self.storage_settings.read().receipts_in_static_files ||
-            !self.prune_modes.has_receipts_pruning()
-        {
-            EitherWriter::StaticFile(
-                self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?,
-            )
-        } else {
-            EitherWriter::Database(self.tx.cursor_write::<tables::Receipts<Self::Receipt>>()?)
-        };
+        let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
+
+        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
+        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
         // [`PruneSegment::ContractLogs`].
         let prunable_receipts =
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
+
+        // Prepare set of addresses which logs should not be pruned.
+        let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+        for (_, addresses) in contract_log_pruner.range(..first_block) {
+            allowed_addresses.extend(addresses.iter().copied());
+        }
 
         for (idx, (receipts, first_tx_index)) in
             execution_outcome.receipts.iter().zip(block_indices).enumerate()
@@ -1676,8 +1682,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 continue
             }
 
+            // If there are new addresses to retain after this block number, track them
+            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+                allowed_addresses.extend(new_addresses.iter().copied());
+            }
+
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
+                // Skip writing receipt if log filter is active and it does not have any logs to
+                // retain
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                {
+                    continue
+                }
 
                 receipts_writer.append_receipt(receipt_idx, receipt)?;
             }
@@ -2151,17 +2170,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         // Wrap the cursor in DatabaseAccountTrieCursor
         let mut db_account_cursor = DatabaseAccountTrieCursor::new(curr_values_cursor);
 
-        // Static empty array for when updates_overlay is None
-        static EMPTY_ACCOUNT_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
-
-        // Get the overlay updates for account trie, or use an empty array
-        let account_overlay_updates = updates_overlay
-            .map(|overlay| overlay.account_nodes_ref())
-            .unwrap_or(&EMPTY_ACCOUNT_UPDATES);
+        // Create empty TrieUpdatesSorted for when updates_overlay is None
+        let empty_updates = TrieUpdatesSorted::default();
+        let overlay = updates_overlay.unwrap_or(&empty_updates);
 
         // Wrap the cursor in InMemoryTrieCursor with the overlay
         let mut in_memory_account_cursor =
-            InMemoryTrieCursor::new(Some(&mut db_account_cursor), account_overlay_updates);
+            InMemoryTrieCursor::new_account(&mut db_account_cursor, overlay);
 
         for (path, _) in trie_updates.account_nodes_ref() {
             num_entries += 1;
@@ -2399,8 +2414,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
             B256::default(), // Will be set per iteration
         );
 
-        // Static empty array for when updates_overlay is None
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+        // Create empty TrieUpdatesSorted for when updates_overlay is None
+        let empty_updates = TrieUpdatesSorted::default();
 
         for (hashed_address, storage_trie_updates) in storage_tries {
             let changeset_key = BlockNumberHashedAddress((block_number, *hashed_address));
@@ -2409,15 +2424,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
             changed_curr_values_cursor =
                 DatabaseStorageTrieCursor::new(changed_curr_values_cursor.cursor, *hashed_address);
 
-            // Get the overlay updates for this storage trie, or use an empty array
-            let overlay_updates = updates_overlay
-                .and_then(|overlay| overlay.storage_tries_ref().get(hashed_address))
-                .map(|updates| updates.storage_nodes_ref())
-                .unwrap_or(&EMPTY_UPDATES);
+            // Get the overlay updates, or use empty updates
+            let overlay = updates_overlay.unwrap_or(&empty_updates);
 
             // Wrap the cursor in InMemoryTrieCursor with the overlay
-            let mut in_memory_changed_cursor =
-                InMemoryTrieCursor::new(Some(&mut changed_curr_values_cursor), overlay_updates);
+            let mut in_memory_changed_cursor = InMemoryTrieCursor::new_storage(
+                &mut changed_curr_values_cursor,
+                overlay,
+                *hashed_address,
+            );
 
             // Create an iterator which produces the current values of all updated paths, or None if
             // they are currently unset.
@@ -2433,8 +2448,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
                     DatabaseStorageTrieCursor::new(wiped_nodes_cursor.cursor, *hashed_address);
 
                 // Wrap the wiped nodes cursor in InMemoryTrieCursor with the overlay
-                let mut in_memory_wiped_cursor =
-                    InMemoryTrieCursor::new(Some(&mut wiped_nodes_cursor), overlay_updates);
+                let mut in_memory_wiped_cursor = InMemoryTrieCursor::new_storage(
+                    &mut wiped_nodes_cursor,
+                    overlay,
+                    *hashed_address,
+                );
 
                 let all_nodes = TrieCursorIter::new(&mut in_memory_wiped_cursor);
 
@@ -3191,6 +3209,7 @@ mod tests {
         BlockWriter,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
+    use reth_trie::Nibbles;
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {

@@ -56,10 +56,18 @@ where
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         Ok(None)
     }
+
+    fn reset(&mut self) {
+        // Noop
+    }
 }
 
 impl HashedStorageCursor for NoopHashedCursor<U256> {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         Ok(true)
+    }
+
+    fn set_hashed_address(&mut self, _hashed_address: B256) {
+        // Noop
     }
 }

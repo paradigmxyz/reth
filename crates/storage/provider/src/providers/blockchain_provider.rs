@@ -1,5 +1,7 @@
 use crate::{
-    providers::{ConsistentProvider, ProviderNodeTypes, StaticFileProvider},
+    providers::{
+        ConsistentProvider, ProviderNodeTypes, StaticFileProvider, StaticFileProviderRWRefMut,
+    },
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
     ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProviderFactory,
@@ -27,6 +29,8 @@ use reth_storage_api::{
     BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader,
     StorageRangeProviderBox,
 };
+use reth_static_file_types::StaticFileSegment;
+use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, KeccakKeyHasher};
 use revm_database::BundleState;
@@ -165,6 +169,14 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.database.static_file_provider()
+    }
+
+    fn get_static_file_writer(
+        &self,
+        block: BlockNumber,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
+        self.database.get_static_file_writer(block, segment)
     }
 }
 
