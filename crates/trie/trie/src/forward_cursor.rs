@@ -39,6 +39,12 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
         self.entries.get(self.idx)
     }
 
+    /// Resets the cursor to the beginning of the collection.
+    #[inline]
+    pub const fn reset(&mut self) {
+        self.idx = 0;
+    }
+
     #[inline]
     fn next(&mut self) -> Option<&(K, V)> {
         let entry = self.entries.get(self.idx)?;

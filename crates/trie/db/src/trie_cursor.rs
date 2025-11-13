@@ -6,7 +6,7 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_trie::{
-    trie_cursor::{TrieCursor, TrieCursorFactory},
+    trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::StorageTrieUpdatesSorted,
     BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
@@ -90,6 +90,10 @@ where
     /// Retrieves the current key in the cursor.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.0.current()?.map(|(k, _)| k.0))
+    }
+
+    fn reset(&mut self) {
+        // No-op for database cursors
     }
 }
 
@@ -189,6 +193,19 @@ where
     /// Retrieves the current value in the storage trie cursor.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.cursor.current()?.map(|(_, v)| v.nibbles.0))
+    }
+
+    fn reset(&mut self) {
+        // No-op for database cursors
+    }
+}
+
+impl<C> TrieStorageCursor for DatabaseStorageTrieCursor<C>
+where
+    C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send + Sync,
+{
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.hashed_address = hashed_address;
     }
 }
 

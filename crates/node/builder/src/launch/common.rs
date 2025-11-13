@@ -165,6 +165,9 @@ impl LaunchContext {
         // Update the config with the command line arguments
         toml_config.peers.trusted_nodes_only = config.network.trusted_only;
 
+        // Merge static file CLI arguments with config file, giving priority to CLI
+        toml_config.static_files = config.static_files.merge_with_config(toml_config.static_files);
+
         Ok(toml_config)
     }
 
@@ -405,14 +408,13 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     where
         ChainSpec: reth_chainspec::EthereumHardforks,
     {
-        let toml_config = self.toml_config().prune.clone();
         let Some(mut node_prune_config) = self.node_config().prune_config() else {
             // No CLI config is set, use the toml config.
-            return toml_config;
+            return self.toml_config().prune.clone();
         };
 
         // Otherwise, use the CLI configuration and merge with toml config.
-        node_prune_config.merge(toml_config);
+        node_prune_config.merge(self.toml_config().prune.clone());
         node_prune_config
     }
 
@@ -465,9 +467,15 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
+        // Validate static files configuration
+        let static_files_config = &self.toml_config().static_files;
+        static_files_config.validate()?;
+
+        // Apply per-segment blocks_per_file configuration
         let static_file_provider =
             StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
                 .with_metrics()
+                .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
                 .build()?;
 
         let factory =
@@ -1172,7 +1180,6 @@ mod tests {
                     storage_history_before: None,
                     bodies_pre_merge: false,
                     bodies_distance: None,
-                    #[expect(deprecated)]
                     receipts_log_filter: None,
                     bodies_before: None,
                 },

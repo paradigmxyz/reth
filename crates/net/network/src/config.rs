@@ -6,7 +6,7 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
-use alloy_primitives::B256;
+use alloy_eips::BlockNumHash;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
@@ -94,9 +94,9 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// This can be overridden to support custom handshake logic via the
     /// [`NetworkConfigBuilder`].
     pub handshake: Arc<dyn EthRlpxHandshake>,
-    /// List of block hashes to check for required blocks.
+    /// List of block number-hash pairs to check for required blocks.
     /// If non-empty, peers that don't have these blocks will be filtered out.
-    pub required_block_hashes: Vec<B256>,
+    pub required_block_hashes: Vec<BlockNumHash>,
 }
 
 // === impl NetworkConfig ===
@@ -225,7 +225,7 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
     handshake: Arc<dyn EthRlpxHandshake>,
     /// List of block hashes to check for required blocks.
-    required_block_hashes: Vec<B256>,
+    required_block_hashes: Vec<BlockNumHash>,
     /// Optional network id
     network_id: Option<u64>,
 }
@@ -555,7 +555,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     }
 
     /// Sets the required block hashes for peer filtering.
-    pub fn required_block_hashes(mut self, hashes: Vec<B256>) -> Self {
+    pub fn required_block_hashes(mut self, hashes: Vec<BlockNumHash>) -> Self {
         self.required_block_hashes = hashes;
         self
     }
