@@ -12,6 +12,7 @@ use tokio::{
     try_join,
 };
 
+/// Downloaded index page filename
 const INDEX_HTML_FILE: &str = "index.html";
 
 /// Accesses the network over HTTP.
@@ -173,7 +174,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let index_path = self.folder.to_path_buf().join(INDEX_HTML_FILE);
         let checksums_path = self.folder.to_path_buf().join(Self::CHECKSUMS);
 
-        // Only for era1, we download checksums file
+        // Only for era1, we download also checksums file
         if self.era_type == EraFileType::Era1 {
             let checksums_url = self.url.join(Self::CHECKSUMS)?;
             try_join!(
