@@ -8287,6 +8287,7 @@ dependencies = [
  "futures",
  "futures-util",
  "reqwest",
+ "reth-era",
  "reth-fs-util",
  "sha2",
  "tempfile",
