@@ -128,7 +128,7 @@ mod tests {
 
         let static_provider = factory.static_file_provider();
         assert_eq!(
-            static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+            static_provider.get_lowest_range_end(StaticFileSegment::Transactions),
             test_case.expected_lowest_block
         );
         assert_eq!(
@@ -270,7 +270,7 @@ mod tests {
 
             // Verify initial state
             assert_eq!(
-                static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+                static_provider.get_lowest_range_end(StaticFileSegment::Transactions),
                 expected_before_update,
                 "Test case {}: Initial min_block mismatch",
                 idx
@@ -288,7 +288,7 @@ mod tests {
 
             // Verify min_block was updated (not stuck at stale value)
             assert_eq!(
-                static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+                static_provider.get_lowest_range_end(StaticFileSegment::Transactions),
                 Some(expected_after_update),
                 "Test case {}: min_block should be updated to {} (not stuck at stale value)",
                 idx,

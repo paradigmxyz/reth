@@ -22,7 +22,7 @@ use crate::{
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
-    BlockHeader,
+    BlockHeader, TxReceipt,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
@@ -131,6 +131,13 @@ impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
     pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
     }
+
+    /// Override the minimum pruning distance for testing purposes.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
+        self.0.minimum_pruning_distance = distance;
+        self
+    }
 }
 
 impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
@@ -157,6 +164,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage: Arc<N::Storage>,
     /// Storage configuration settings for this node
     storage_settings: Arc<RwLock<StorageSettings>>,
+    /// Minimum distance from tip required for pruning
+    minimum_pruning_distance: u64,
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -218,7 +227,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
     #[cfg(feature = "test-utils")]
     /// Sets the prune modes for provider.
-    pub const fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+    pub fn set_prune_modes(&mut self, prune_modes: PruneModes) {
         self.prune_modes = prune_modes;
     }
 }
@@ -231,6 +240,14 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     /// Returns a static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
+    }
+
+    fn get_static_file_writer(
+        &self,
+        block: BlockNumber,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<crate::providers::StaticFileProviderRWRefMut<'_, Self::Primitives>> {
+        self.static_file_provider.get_writer(block, segment)
     }
 }
 
@@ -254,7 +271,15 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage, storage_settings }
+        Self {
+            tx,
+            chain_spec,
+            static_file_provider,
+            prune_modes,
+            storage,
+            storage_settings,
+            minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+        }
     }
 }
 
@@ -369,9 +394,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // iterate over block body and remove receipts
         self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
 
-        if !self.prune_modes.has_receipts_pruning() ||
-            self.cached_storage_settings().receipts_in_static_files
-        {
+        if EitherWriter::receipts_destination(self).is_static_file() {
             let static_file_receipt_num =
                 self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
 
@@ -503,7 +526,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage, storage_settings }
+        Self {
+            tx,
+            chain_spec,
+            static_file_provider,
+            prune_modes,
+            storage,
+            storage_settings,
+            minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+        }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -1267,11 +1298,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         Ok(None)
     }
 
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let mut cursor = self.tx.cursor_read::<tables::TransactionBlocks>()?;
-        Ok(cursor.seek(id)?.map(|(_, bn)| bn))
-    }
-
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -1613,26 +1639,29 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
-        // Write receipts to static files only if they're explicitly enabled or we don't have
-        // receipts pruning
-        let mut receipts_writer = if self.storage_settings.read().receipts_in_static_files ||
-            !self.prune_modes.has_receipts_pruning()
-        {
-            EitherWriter::StaticFile(
-                self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?,
-            )
-        } else {
-            EitherWriter::Database(self.tx.cursor_write::<tables::Receipts<Self::Receipt>>()?)
-        };
+        let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
+
+        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
+        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
         // [`PruneSegment::ContractLogs`].
         //
         // Receipts can only be skipped if we're dealing with legacy nodes that write them to
-        // Database. On newer nodes pruning will occur separately either by the PruneStage or the
-        // Pruner.
-        let prunable_receipts = !self.cached_storage_settings().receipts_in_static_files &&
-            PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
+        // Database, OR if receipts_in_static_files is enabled but no receipts exist in static
+        // files yet. Once receipts exist in static files, we must continue writing to maintain
+        // continuity and have no gaps.
+        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database() ||
+            self.static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none()) &&
+            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
+
+        // Prepare set of addresses which logs should not be pruned.
+        let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+        for (_, addresses) in contract_log_pruner.range(..first_block) {
+            allowed_addresses.extend(addresses.iter().copied());
+        }
 
         for (idx, (receipts, first_tx_index)) in
             execution_outcome.receipts.iter().zip(block_indices).enumerate()
@@ -1651,8 +1680,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 continue
             }
 
+            // If there are new addresses to retain after this block number, track them
+            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+                allowed_addresses.extend(new_addresses.iter().copied());
+            }
+
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
+                // Skip writing receipt if log filter is active and it does not have any logs to
+                // retain
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                {
+                    continue
+                }
 
                 receipts_writer.append_receipt(receipt_idx, receipt)?;
             }
@@ -1797,10 +1839,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
+        for (hashed_address, account) in hashed_state.accounts() {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(hashed_address, &account)?;
-            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts_cursor.upsert(*hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
         }
@@ -1814,8 +1856,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage.storage_slots_sorted() {
-                let entry = StorageEntry { key: hashed_slot, value };
+            for (hashed_slot, value) in storage.storage_slots_ref() {
+                let entry = StorageEntry { key: *hashed_slot, value: *value };
+
                 if let Some(db_entry) =
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
                     db_entry.key == entry.key
@@ -3164,6 +3207,7 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         BlockWriter,
     };
+    use reth_ethereum_primitives::Receipt;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
 
     #[test]
@@ -4639,5 +4683,143 @@ mod tests {
             storage_node2.state_mask,
             "storage_nibbles2 should have the value that was created and will be deleted"
         );
+    }
+
+    #[test]
+    fn test_prunable_receipts_logic() {
+        let insert_blocks =
+            |provider_rw: &DatabaseProviderRW<_, _>, tip_block: u64, tx_count: u8| {
+                let mut rng = generators::rng();
+                for block_num in 0..=tip_block {
+                    let block = random_block(
+                        &mut rng,
+                        block_num,
+                        BlockParams { tx_count: Some(tx_count), ..Default::default() },
+                    );
+                    provider_rw.insert_block(block.try_recover().unwrap()).unwrap();
+                }
+            };
+
+        let write_receipts = |provider_rw: DatabaseProviderRW<_, _>, block: u64| {
+            let outcome = ExecutionOutcome {
+                first_block: block,
+                receipts: vec![vec![Receipt {
+                    tx_type: Default::default(),
+                    success: true,
+                    cumulative_gas_used: block, // identifier to assert against
+                    logs: vec![],
+                }]],
+                ..Default::default()
+            };
+            provider_rw.write_state(&outcome, crate::OriginalValuesKnown::No).unwrap();
+            provider_rw.commit().unwrap();
+        };
+
+        // Legacy mode (receipts in DB) - should be prunable
+        {
+            let factory = create_test_provider_factory();
+            let storage_settings = StorageSettings::legacy();
+            factory.set_storage_settings_cache(storage_settings);
+            let factory = factory.with_prune_modes(PruneModes {
+                receipts: Some(PruneMode::Before(100)),
+                ..Default::default()
+            });
+
+            let tip_block = 200u64;
+            let first_block = 1u64;
+
+            // create chain
+            let provider_rw = factory.provider_rw().unwrap();
+            insert_blocks(&provider_rw, tip_block, 1);
+            provider_rw.commit().unwrap();
+
+            write_receipts(
+                factory.provider_rw().unwrap().with_minimum_pruning_distance(100),
+                first_block,
+            );
+            write_receipts(
+                factory.provider_rw().unwrap().with_minimum_pruning_distance(100),
+                tip_block - 1,
+            );
+
+            let provider = factory.provider().unwrap();
+
+            for (block, num_receipts) in [(0, 0), (tip_block - 1, 1)] {
+                assert!(provider
+                    .receipts_by_block(block.into())
+                    .unwrap()
+                    .is_some_and(|r| r.len() == num_receipts));
+            }
+        }
+
+        // Static files mode
+        {
+            let factory = create_test_provider_factory();
+            let storage_settings = StorageSettings::new().with_receipts_in_static_files();
+            factory.set_storage_settings_cache(storage_settings);
+            let factory = factory.with_prune_modes(PruneModes {
+                receipts: Some(PruneMode::Before(2)),
+                ..Default::default()
+            });
+
+            let tip_block = 200u64;
+
+            // create chain
+            let provider_rw = factory.provider_rw().unwrap();
+            insert_blocks(&provider_rw, tip_block, 1);
+            provider_rw.commit().unwrap();
+
+            // Attempt to write receipts for block 0 and 1 (should be skipped)
+            write_receipts(factory.provider_rw().unwrap().with_minimum_pruning_distance(100), 0);
+            write_receipts(factory.provider_rw().unwrap().with_minimum_pruning_distance(100), 1);
+
+            assert!(factory
+                .static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none(),);
+            assert!(factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Receipts)
+                .is_some_and(|b| b == 1),);
+
+            // Since we have prune mode Before(2), the next receipt (block 2) should be written to
+            // static files.
+            write_receipts(factory.provider_rw().unwrap().with_minimum_pruning_distance(100), 2);
+            assert!(factory
+                .static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_some_and(|num| num == 2),);
+
+            // After having a receipt already in static files, attempt to skip the next receipt by
+            // changing the prune mode. It should NOT skip it and should still write the receipt,
+            // since static files do not support gaps.
+            let factory = factory.with_prune_modes(PruneModes {
+                receipts: Some(PruneMode::Before(100)),
+                ..Default::default()
+            });
+            let provider_rw = factory.provider_rw().unwrap().with_minimum_pruning_distance(1);
+            assert!(PruneMode::Distance(1).should_prune(3, tip_block));
+            write_receipts(provider_rw, 3);
+
+            // Ensure we can only fetch the 2 last receipts.
+            //
+            // Test setup only has 1 tx per block and each receipt has its cumulative_gas_used set
+            // to the block number it belongs to easily identify and assert.
+            let provider = factory.provider().unwrap();
+            assert!(EitherWriter::receipts_destination(&provider).is_static_file());
+            for (num, num_receipts) in [(0, 0), (1, 0), (2, 1), (3, 1)] {
+                assert!(provider
+                    .receipts_by_block(num.into())
+                    .unwrap()
+                    .is_some_and(|r| r.len() == num_receipts));
+
+                let receipt = provider.receipt(num).unwrap();
+                if num_receipts > 0 {
+                    assert!(receipt.is_some_and(|r| r.cumulative_gas_used == num));
+                } else {
+                    assert!(receipt.is_none());
+                }
+            }
+        }
     }
 }

@@ -43,7 +43,7 @@ impl PrunerBuilder {
     }
 
     /// Sets the configuration for every part of the data that can be pruned.
-    pub const fn segments(mut self, segments: PruneModes) -> Self {
+    pub fn segments(mut self, segments: PruneModes) -> Self {
         self.segments = segments;
         self
     }
