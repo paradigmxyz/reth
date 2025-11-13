@@ -11,7 +11,9 @@ use crate::{
 use reth_db_api::{table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockReader, DBProvider, EitherWriter, NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache, TransactionsProvider, errors::provider::ProviderResult
+    errors::provider::ProviderResult, BlockReader, DBProvider, EitherWriter,
+    NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
+    TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment, SegmentOutput, SegmentOutputCheckpoint};
 use reth_static_file_types::StaticFileSegment;
