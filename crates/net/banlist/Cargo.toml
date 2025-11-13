@@ -16,4 +16,4 @@ workspace = true
 alloy-primitives.workspace = true
 
 # networking
-ipnet = "2.11"
+ipnet.workspace = true
