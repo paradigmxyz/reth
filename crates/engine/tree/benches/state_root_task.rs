@@ -24,9 +24,11 @@ use reth_provider::{
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
     AccountReader, ChainSpecProvider, HashingWriter, ProviderFactory,
 };
+use reth_trie_parallel::proof_task::ProofWorkerHandle;
 use revm_primitives::{HashMap, U256};
 use revm_state::{Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
 use std::{hint::black_box, sync::Arc};
+use tokio::runtime::Runtime;
 
 #[derive(Debug, Clone)]
 struct BenchParams {
@@ -215,8 +217,12 @@ fn bench_state_root(c: &mut Criterion) {
                         let state_updates = create_bench_state_updates(params);
                         setup_provider(&factory, &state_updates).expect("failed to setup provider");
 
+                        let rt = Runtime::new().unwrap();
+                        let proof_worker_handle = ProofWorkerHandle::new(rt.handle().clone(), 1, 1);
+
                         let payload_processor = PayloadProcessor::new(
                             WorkloadExecutor::default(),
+                            proof_worker_handle,
                             EthEvmConfig::new(factory.chain_spec()),
                             &TreeConfig::default(),
                             PrecompileCacheMap::default(),

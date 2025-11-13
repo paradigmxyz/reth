@@ -123,8 +123,7 @@ where
 impl<N, Evm, ProofProviderFactory> PayloadProcessor<Evm, ProofProviderFactory>
 where
     N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
-    ProofProviderFactory: Clone + Send,
+    Evm: ConfigureEvm<Primitives = N>,
 {
     /// Creates a new payload processor.
     pub fn new(
@@ -149,7 +148,13 @@ where
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
         }
     }
+}
 
+impl<N, Evm, ProofProviderFactory> PayloadProcessor<Evm, ProofProviderFactory>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
+{
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
     /// - Transaction prewarming task
@@ -181,7 +186,7 @@ where
     ///
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
-    /// canceling).
+    /// canceling)
     #[allow(clippy::type_complexity)]
     #[instrument(
         level = "debug",
@@ -199,6 +204,7 @@ where
     ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        ProofProviderFactory: Clone + Send,
     {
         let span = tracing::Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
@@ -684,9 +690,11 @@ mod tests {
     };
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState};
+    use reth_trie_parallel::proof_task::ProofWorkerHandle;
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
+    use tokio::runtime::Runtime;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCacheBuilder::default().build_caches(1_000);
@@ -859,8 +867,13 @@ mod tests {
             }
         }
 
+        // Create proof worker handle for the test
+        let rt = Runtime::new().unwrap();
+        let proof_worker_handle = ProofWorkerHandle::new(rt.handle().clone(), 1, 1);
+
         let mut payload_processor = PayloadProcessor::new(
             WorkloadExecutor::default(),
+            proof_worker_handle,
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),

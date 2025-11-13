@@ -1287,7 +1287,8 @@ mod tests {
     use alloy_primitives::map::B256Set;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        BlockReader, PruneCheckpointReader, StageCheckpointReader, TrieReader,
+        BlockReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
+        TrieReader,
     };
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::ProofWorkerHandle;
@@ -1306,11 +1307,19 @@ mod tests {
             .clone()
     }
 
-    fn create_test_state_root_task<F>(factory: F) -> MultiProofTask {
+    fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
+    where
+        F: DatabaseProviderFactory<
+                Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            > + Clone
+            + Send
+            + 'static,
+    {
         let rt_handle = get_test_runtime_handle();
         let overlay_factory = OverlayStateProviderFactory::new(factory);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, 1, 1);
-        let proof_dispatcher = proof_handle.into_dispatcher(overlay_factory);
+        let proof_handle: ProofWorkerHandle<OverlayStateProviderFactory<F>> =
+            ProofWorkerHandle::new(rt_handle, 1, 1);
+        let proof_dispatcher = proof_handle.new_dispatcher(overlay_factory);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
 
         MultiProofTask::new(proof_dispatcher, to_sparse_trie, Some(1))

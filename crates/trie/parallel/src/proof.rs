@@ -329,8 +329,8 @@ mod tests {
         let rt = Runtime::new().unwrap();
 
         let factory = reth_provider::providers::OverlayStateProviderFactory::new(factory);
-        let proof_worker_dispatcher =
-            ProofWorkerHandle::new(rt.handle().clone(), 1, 1).into_dispatcher(factory);
+        let proof_worker_handle = ProofWorkerHandle::new(rt.handle().clone(), 1, 1);
+        let proof_worker_dispatcher = proof_worker_handle.new_dispatcher(factory);
 
         let parallel_result = ParallelProof::new(
             Default::default(),
