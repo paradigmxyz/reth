@@ -12,6 +12,7 @@ use reth_primitives_traits::ReceiptTy;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
+use strum::EnumIs;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
@@ -80,4 +81,37 @@ where
             Self::StaticFile(writer) => writer.append_receipt(tx_num, receipt),
         }
     }
+}
+
+impl EitherWriter<'_, (), ()> {
+    /// Returns the destination for writing receipts.
+    ///
+    /// The rules are as follows:
+    /// - If the node should not always write receipts to static files, and any receipt pruning is
+    ///   enabled, write to the database.
+    /// - If the node should always write receipts to static files, but receipt log filter pruning
+    ///   is enabled, write to the database.
+    /// - Otherwise, write to static files.
+    pub fn receipts_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        let receipts_in_static_files = provider.cached_storage_settings().receipts_in_static_files;
+        let prune_modes = provider.prune_modes_ref();
+
+        if !receipts_in_static_files && prune_modes.has_receipts_pruning() ||
+            // TODO: support writing receipts to static files with log filter pruning enabled
+            receipts_in_static_files && !prune_modes.receipts_log_filter.is_empty()
+        {
+            EitherWriterDestination::Database
+        } else {
+            EitherWriterDestination::StaticFile
+        }
+    }
+}
+
+#[derive(Debug, EnumIs)]
+#[allow(missing_docs)]
+pub enum EitherWriterDestination {
+    Database,
+    StaticFile,
 }

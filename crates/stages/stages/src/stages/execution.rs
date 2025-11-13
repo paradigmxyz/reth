@@ -11,7 +11,7 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
 };
@@ -193,9 +193,7 @@ where
     {
         // On old nodes, if there's any receipts pruning configured, receipts are written directly
         // to database and inconsistencies are expected.
-        if provider.prune_modes_ref().has_receipts_pruning() &&
-            !provider.cached_storage_settings().receipts_in_static_files
-        {
+        if EitherWriter::receipts_destination(provider).is_database() {
             return Ok(())
         }
 

@@ -3,9 +3,9 @@ use super::{
     StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
 };
 use crate::{
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt,
+    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
+    HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -947,7 +947,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,
-        has_receipt_pruning: bool,
     ) -> ProviderResult<Option<PipelineTarget>>
     where
         Provider: DBProvider
@@ -992,9 +991,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             match segment {
                 StaticFileSegment::Headers | StaticFileSegment::Transactions => {}
                 StaticFileSegment::Receipts => {
-                    if has_receipt_pruning &&
-                        !provider.cached_storage_settings().receipts_in_static_files
-                    {
+                    if EitherWriter::receipts_destination(provider).is_database() {
                         // Old pruned nodes (including full node) do not store receipts as static
                         // files.
                         continue

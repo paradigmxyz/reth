@@ -482,13 +482,10 @@ where
             ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
                 .with_prune_modes(self.prune_modes());
 
-        let has_receipt_pruning = self.toml_config().prune.has_receipts_pruning();
-
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
-        if let Some(unwind_target) = factory
-            .static_file_provider()
-            .check_consistency(&factory.provider()?, has_receipt_pruning)?
+        if let Some(unwind_target) =
+            factory.static_file_provider().check_consistency(&factory.provider()?)?
         {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
