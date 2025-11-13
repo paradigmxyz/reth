@@ -414,6 +414,8 @@ where
             target_slots,
             with_branch_node_masks,
             multi_added_removed_keys,
+            available_storage_workers,
+            pending_storage_tasks,
         } = input;
 
         // Get or create added/removed keys context
@@ -427,6 +429,8 @@ where
             ?hashed_address,
             target_slots = ?target_slots.len(),
             worker_id = self.id,
+            available_storage_workers,
+            pending_storage_tasks,
         );
         let _span_guard = span.enter();
 
@@ -1023,6 +1027,8 @@ where
             missed_leaves_storage_roots,
             proof_result_sender:
                 ProofResultContext { sender: result_tx, sequence_number: seq, state, start_time: start },
+            available_account_workers,
+            pending_account_tasks,
         } = input;
 
         let span = debug_span!(
@@ -1030,6 +1036,8 @@ where
             "Account multiproof calculation",
             targets = targets.len(),
             worker_id,
+            available_account_workers,
+            pending_account_tasks,
         );
         let _span_guard = span.enter();
 
@@ -1346,6 +1354,9 @@ fn dispatch_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
 
+    // Capture queue depth for tracing
+    let pending_storage_tasks = storage_work_tx.len();
+
     // Dispatch all storage proofs to worker pool
     for (hashed_address, target_slots) in targets.iter() {
         let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
@@ -1355,12 +1366,16 @@ fn dispatch_storage_proofs(
         let start = Instant::now();
 
         // Create computation input (data only, no communication channel)
+        // Note: available_storage_workers=0 indicates metrics not available at this call site
+        // (called from account workers which don't have access to storage worker handle)
         let input = StorageProofInput::new(
             *hashed_address,
             prefix_set,
             target_slots.clone(),
             with_branch_node_masks,
             multi_added_removed_keys.cloned(),
+            0, // available_storage_workers not available from account workers
+            pending_storage_tasks,
         );
 
         // Always dispatch a storage proof so we obtain the storage root even when no slots are
@@ -1400,17 +1415,23 @@ pub struct StorageProofInput {
     with_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    /// Number of available storage workers at dispatch time (0 if not available)
+    available_storage_workers: usize,
+    /// Number of pending storage tasks in queue at dispatch time
+    pending_storage_tasks: usize,
 }
 
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address, prefix set, and target
     /// slots.
-    pub const fn new(
+    pub fn new(
         hashed_address: B256,
         prefix_set: PrefixSet,
         target_slots: B256Set,
         with_branch_node_masks: bool,
         multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+        available_storage_workers: usize,
+        pending_storage_tasks: usize,
     ) -> Self {
         Self {
             hashed_address,
@@ -1418,6 +1439,8 @@ impl StorageProofInput {
             target_slots,
             with_branch_node_masks,
             multi_added_removed_keys,
+            available_storage_workers,
+            pending_storage_tasks,
         }
     }
 }
@@ -1436,6 +1459,10 @@ pub struct AccountMultiproofInput {
     pub missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     /// Context for sending the proof result.
     pub proof_result_sender: ProofResultContext,
+    /// Number of available account workers at dispatch time
+    pub available_account_workers: usize,
+    /// Number of pending account tasks in queue at dispatch time
+    pub pending_account_tasks: usize,
 }
 
 /// Parameters for building an account multiproof with pre-computed storage roots.

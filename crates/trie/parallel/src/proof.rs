@@ -90,6 +90,8 @@ impl ParallelProof {
             target_slots,
             self.collect_branch_node_masks,
             self.multi_added_removed_keys.clone(),
+            self.proof_worker_handle.available_storage_workers(),
+            self.proof_worker_handle.pending_storage_tasks(),
         );
 
         self.proof_worker_handle
@@ -210,6 +212,8 @@ impl ParallelProof {
                 HashedPostState::default(),
                 account_multiproof_start_time,
             ),
+            available_account_workers: self.proof_worker_handle.available_account_workers(),
+            pending_account_tasks: self.proof_worker_handle.pending_account_tasks(),
         };
 
         self.proof_worker_handle

@@ -417,6 +417,8 @@ impl MultiproofManager {
             proof_targets,
             true, // with_branch_node_masks
             Some(multi_added_removed_keys),
+            self.proof_worker_handle.available_storage_workers(),
+            self.proof_worker_handle.pending_storage_tasks(),
         );
 
         // Dispatch to storage worker
@@ -508,6 +510,8 @@ impl MultiproofManager {
                 hashed_state_update,
                 start,
             ),
+            available_account_workers: self.proof_worker_handle.available_account_workers(),
+            pending_account_tasks: self.proof_worker_handle.pending_account_tasks(),
         };
 
         if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(input) {
