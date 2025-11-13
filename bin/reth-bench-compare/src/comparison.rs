@@ -38,6 +38,8 @@ pub(crate) struct CombinedLatencyRow {
     pub block_number: u64,
     pub gas_used: u64,
     pub new_payload_latency: u128,
+    pub block_gas_used: u64,
+    pub transaction_count: u64,
 }
 
 /// Total gas CSV row structure
@@ -92,6 +94,8 @@ pub(crate) struct ComparisonSummary {
 #[derive(Debug, Serialize)]
 pub(crate) struct BlockComparison {
     pub block_number: u64,
+    pub block_gas_used: u64,
+    pub block_transaction_count: u64,
     pub baseline_new_payload_latency: u128,
     pub feature_new_payload_latency: u128,
     pub new_payload_latency_change_percent: f64,
@@ -377,6 +381,8 @@ impl ComparisonGenerator {
                 };
 
                 let comparison = BlockComparison {
+                    block_gas_used: feature_row.block_gas_used,
+                    block_transaction_count: feature_row.transaction_count,
                     block_number: feature_row.block_number,
                     baseline_new_payload_latency: baseline_row.new_payload_latency,
                     feature_new_payload_latency: feature_row.new_payload_latency,
