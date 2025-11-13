@@ -12,7 +12,6 @@ use reth_nippy_jar::{NippyJar, NippyJarError};
 mod masks;
 pub use masks::*;
 use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
-use reth_tracing::tracing::debug;
 
 /// Alias type for a map of [`StaticFileSegment`] and sorted lists of existing static file ranges.
 type SortedStaticFiles = HashMap<StaticFileSegment, Vec<(SegmentRangeInclusive, SegmentHeader)>>;
@@ -35,8 +34,6 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
                 StaticFileSegment::parse_filename(&entry.file_name().to_string_lossy())
         {
             let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
-
-            debug!(target: "db::static_file", ?segment, header = ?jar.user_header(), "Iterating over static file");
 
             if let Some(block_range) = jar.user_header().block_range() {
                 static_files
