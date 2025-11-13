@@ -312,7 +312,7 @@ impl MultiproofInput {
 /// # Flow
 /// 1. `MultiProofTask` asks the manager to dispatch either storage or account proof work.
 /// 2. The manager builds the request, clones `proof_result_tx`, and hands everything to
-///    [`ProofWorkerHandle`].
+///    [`ProofWorkerDispatcher`].
 /// 3. A worker finishes the proof and sends a [`ProofResultMessage`] through the channel included
 ///    in the job.
 /// 4. `MultiProofTask` consumes the message from the same channel and sequences it with

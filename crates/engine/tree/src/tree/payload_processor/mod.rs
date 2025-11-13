@@ -199,7 +199,7 @@ where
     ///
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
-    /// canceling). Once the state root has been obtained [`Self::cleanup`] should be called.
+    /// canceling). Once the state root has been obtained `Self::cleanup` should be called.
     #[allow(clippy::type_complexity)]
     #[instrument(
         level = "debug",
