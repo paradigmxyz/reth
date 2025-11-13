@@ -1124,6 +1124,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 .directory()
                 .join(segment.filename(&self.find_fixed_range(segment, latest_block)));
 
+            debug!(
+                target: "provider::static_file",
+                %segment,
+                latest_block,
+                ?file_path,
+                "Checking consistency of last segment"
+            );
+
             let jar = NippyJar::<SegmentHeader>::load(&file_path).map_err(ProviderError::other)?;
 
             NippyJarChecker::new(jar).check_consistency().map_err(ProviderError::other)?;
