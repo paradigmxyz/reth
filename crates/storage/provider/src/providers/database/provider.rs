@@ -134,7 +134,7 @@ impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
 
     /// Override the minimum pruning distance for testing purposes.
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
+    pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
         self.0.minimum_pruning_distance = distance;
         self
     }
