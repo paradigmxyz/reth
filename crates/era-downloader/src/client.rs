@@ -11,6 +11,8 @@ use tokio::{
     io::{self, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt},
 };
 
+const INDEX_HTML_FILE: &str = "index.html";
+
 /// Accesses the network over HTTP.
 pub trait HttpClient {
     /// Makes an HTTP GET request to `url`. Returns a stream of response body bytes.
@@ -167,28 +169,27 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     /// For era files, checksum.txt file does not exist, so the checksum verification is
     /// skipped.
     pub async fn fetch_file_list(&self) -> eyre::Result<()> {
-        let index_path = self.folder.to_path_buf().join("index.html");
+        let index_path = self.folder.to_path_buf().join(INDEX_HTML_FILE);
         let checksums_path = self.folder.to_path_buf().join(Self::CHECKSUMS);
 
-        let mut index_stream = self.client.get(self.url.clone()).await?;
-        let mut index_file = File::create(&index_path).await?;
+        // Download index file
+        self.download_file_to_path(self.url.clone(), &index_path).await?;
 
-        while let Some(item) = index_stream.next().await.transpose()? {
-            io::copy(&mut item.as_ref(), &mut index_file).await?;
-        }
-
-        // only do checksum operations for era1 files
+        // Only for era1, we download checksums file
         if self.era_type == EraFileType::Era1 {
-            let mut checksums_stream =
-                self.client.get(self.url.clone().join(Self::CHECKSUMS)?).await?;
-            let mut checksums_file = File::create(&checksums_path).await?;
-
-            while let Some(item) = checksums_stream.next().await.transpose()? {
-                io::copy(&mut item.as_ref(), &mut checksums_file).await?;
-            }
+            let checksums_url = self.url.join(Self::CHECKSUMS)?;
+            self.download_file_to_path(checksums_url, &checksums_path).await?;
         }
 
-        let file = File::open(&index_path).await?;
+        // Parse and extract era filenames from index.html
+        self.extract_era_filenames(&index_path).await?;
+
+        Ok(())
+    }
+
+    /// Extracts ERA filenames from `index.html` and writes them to the index file
+    async fn extract_era_filenames(&self, index_path: &Path) -> eyre::Result<()> {
+        let file = File::open(index_path).await?;
         let reader = io::BufReader::new(file);
         let mut lines = reader.lines();
 
@@ -208,7 +209,19 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 writer.write_all(b"\n").await?;
             }
         }
+
         writer.flush().await?;
+        Ok(())
+    }
+
+    // Helper to download a file to a specified path
+    async fn download_file_to_path(&self, url: Url, path: &Path) -> eyre::Result<()> {
+        let mut stream = self.client.get(url).await?;
+        let mut file = File::create(path).await?;
+
+        while let Some(item) = stream.next().await.transpose()? {
+            io::copy(&mut item.as_ref(), &mut file).await?;
+        }
 
         Ok(())
     }
