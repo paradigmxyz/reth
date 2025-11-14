@@ -47,7 +47,7 @@ pub struct OpPooledTransaction<
     _pd: core::marker::PhantomData<Pooled>,
 
     /// Optional conditional attached to this transaction.
-    conditional: Option<Box<TransactionConditional>>,
+    conditional: Option<TransactionConditional>,
 
     /// Optional interop deadline attached to this transaction.
     interop: Arc<AtomicU64>,
@@ -86,18 +86,18 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
 
     /// Conditional setter.
     pub fn with_conditional(mut self, conditional: TransactionConditional) -> Self {
-        self.conditional = Some(Box::new(conditional));
+        self.conditional = Some(conditional);
         self
     }
 }
 
 impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Pooled> {
     fn set_conditional(&mut self, conditional: TransactionConditional) {
-        self.conditional = Some(Box::new(conditional))
+        self.conditional = Some(conditional)
     }
 
     fn conditional(&self) -> Option<&TransactionConditional> {
-        self.conditional.as_deref()
+        self.conditional.as_ref()
     }
 }
 
