@@ -14,7 +14,7 @@ use reth_primitives_traits::ReceiptTy;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
-use strum::EnumIs;
+use strum::{Display, EnumIs};
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
@@ -24,30 +24,12 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
 >;
 
 /// Represents a destination for writing data, either to database or static files.
-#[derive(Debug)]
+#[derive(Debug, Display)]
 pub enum EitherWriter<'a, CURSOR, N> {
     /// Write to database table via cursor
     Database(CURSOR),
     /// Write to static file
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
-}
-
-impl<'a, CURSOR, N> Display for EitherWriter<'a, CURSOR, N> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EitherWriter::Database(_) => write!(f, "Database"),
-            EitherWriter::StaticFile(_) => write!(f, "StaticFile"),
-        }
-    }
-}
-
-/// Destination for writing data.
-#[derive(Debug, EnumIs)]
-pub enum EitherWriterDestination {
-    /// Write to database table
-    Database,
-    /// Write to static file
-    StaticFile,
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
@@ -182,4 +164,13 @@ where
             Self::StaticFile(writer) => writer.append_transaction_sender(tx_num, sender),
         }
     }
+}
+
+/// Destination for writing data.
+#[derive(Debug, EnumIs)]
+pub enum EitherWriterDestination {
+    /// Write to database table
+    Database,
+    /// Write to static file
+    StaticFile,
 }
