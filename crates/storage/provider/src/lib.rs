@@ -24,6 +24,7 @@ pub use providers::{
     StaticFileAccess, StaticFileProviderBuilder, StaticFileWriter,
 };
 
+pub mod changeset_walker;
 pub mod changesets_utils;
 
 #[cfg(any(test, feature = "test-utils"))]

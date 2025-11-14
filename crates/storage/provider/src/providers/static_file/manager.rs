@@ -3,9 +3,9 @@ use super::{
     StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
 };
 use crate::{
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
-    HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt,
+    changeset_walker::StaticFileAccountChangesetWalker, to_range, BlockHashReader, BlockNumReader,
+    BlockReader, BlockSource, EitherWriter, HeaderProvider, ReceiptProvider, StageCheckpointReader,
+    StatsReader, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -1933,6 +1933,19 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         }
 
         Ok(count)
+    }
+}
+
+impl<N: NodePrimitives> StaticFileProvider<N> {
+    /// Creates an iterator for walking through account changesets in the specified block range.
+    ///
+    /// This returns a lazy iterator that fetches changesets block by block to avoid loading
+    /// everything into memory at once.
+    pub fn walk_account_changeset_range(
+        &self,
+        range: Range<BlockNumber>,
+    ) -> StaticFileAccountChangesetWalker<Self> {
+        StaticFileAccountChangesetWalker::new(self.clone(), range)
     }
 }
 
