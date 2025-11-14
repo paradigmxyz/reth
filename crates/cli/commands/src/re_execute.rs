@@ -45,7 +45,7 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(long, default_value = "10")]
     num_tasks: u64,
 
-    /// Continues with execution when an invalid block is encounterd and collects these blocks.
+    /// Continues with execution when an invalid block is encountered and collects these blocks.
     #[arg(long)]
     skip_invalid_blocks: bool,
 }
