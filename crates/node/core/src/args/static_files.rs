@@ -22,7 +22,10 @@ pub struct StaticFilesArgs {
 
     /// Store receipts in static files instead of the database.
     ///
-    /// When enabled, receipts will be written to static files on disk instead of the database.
+    /// When enabled, receipts are written to static files instead of the database.
+    ///
+    /// Note: changing this setting on an existing node with non-empty receipts can result in
+    /// unexpected behavior.
     #[arg(long = "static-files.receipts")]
     pub receipts: Option<bool>,
 }
