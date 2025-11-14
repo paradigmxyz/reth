@@ -19,12 +19,12 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> Result<(usize, bool), DatabaseError> {
         let mut cursor = self.cursor_write::<T>()?;
-        let mut keys = keys.into_iter();
+        let mut keys = keys.into_iter().peekable();
 
         let mut deleted_entries = 0;
 
-        let done;
-        loop {
+        let mut done = true;
+        while keys.peek().is_some() {
             if limiter.is_limit_reached() {
                 debug!(
                     target: "providers::db",
@@ -38,20 +38,13 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
                 break
             }
 
-            match keys.next() {
-                None => {
-                    done = true;
-                    break
-                }
-                Some(key) => {
-                    let row = cursor.seek_exact(key)?;
-                    if let Some(row) = row {
-                        cursor.delete_current()?;
-                        limiter.increment_deleted_entries_count();
-                        deleted_entries += 1;
-                        delete_callback(row);
-                    }
-                }
+            let key = keys.next().expect("peek() said Some");
+            let row = cursor.seek_exact(key)?;
+            if let Some(row) = row {
+                cursor.delete_current()?;
+                limiter.increment_deleted_entries_count();
+                deleted_entries += 1;
+                delete_callback(row);
             }
         }
 
@@ -282,7 +275,7 @@ mod tests {
 
         assert_eq!(pruned, total);
         assert!(done);
-        assert_eq!(calls.load(Ordering::SeqCst), total + 1);
+        assert_eq!(calls.load(Ordering::SeqCst), total);
 
         provider.commit().expect("commit");
         assert_eq!(db.table::<tables::TransactionSenders>().unwrap().len(), 0);
