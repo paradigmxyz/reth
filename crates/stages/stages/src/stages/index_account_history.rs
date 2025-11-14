@@ -47,7 +47,8 @@ where
         + HistoryWriter
         + PruneCheckpointReader
         + PruneCheckpointWriter
-        + reth_storage_api::ChangeSetReader,
+        + reth_storage_api::ChangeSetReader
+        + reth_provider::StaticFileProviderFactory,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {

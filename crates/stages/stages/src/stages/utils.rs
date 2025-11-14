@@ -106,7 +106,7 @@ pub(crate) fn collect_account_history_indices<Provider>(
     etl_config: &EtlConfig,
 ) -> Result<Collector<ShardedKey<Address>, BlockNumberList>, StageError>
 where
-    Provider: DBProvider + ChangeSetReader,
+    Provider: DBProvider + ChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
     let mut cache: HashMap<Address, Vec<u64>> = HashMap::default();
@@ -135,17 +135,20 @@ where
         std::ops::Bound::Unbounded => BlockNumber::MAX,
     };
 
-    // Get account changesets using the provider (handles static files + database)
-    let account_changesets = provider.account_changesets_range(start..end)?;
-    let total_changesets = account_changesets.len();
+    // Use the new walker for lazy iteration over static file changesets
+    let static_file_provider = provider.static_file_provider();
+
+    // Get total count for progress reporting
+    let total_changesets = static_file_provider.account_changeset_count()?;
     let interval = (total_changesets / 1000).max(1);
+
+    let walker = static_file_provider.walk_account_changeset_range(start..end);
 
     let mut flush_counter = 0;
     let mut current_block_number = u64::MAX;
 
-    for (idx, (block_number, AccountBeforeTx { address, .. })) in
-        account_changesets.into_iter().enumerate()
-    {
+    for (idx, changeset_result) in walker.enumerate() {
+        let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
         cache.entry(address).or_default().push(block_number);
 
         if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
