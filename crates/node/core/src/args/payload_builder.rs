@@ -1,11 +1,13 @@
 use crate::{cli::config::PayloadBuilderConfig, version::default_extra_data};
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
-use alloy_eips::merge::SLOT_DURATION;
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
-use reth_cli_util::{parse_duration_from_secs, parse_duration_from_secs_or_ms};
+use reth_cli_util::{
+    parse_duration_from_secs, parse_duration_from_secs_or_ms,
+    parsers::format_duration_as_secs_or_ms,
+};
 use std::{borrow::Cow, ffi::OsStr, sync::OnceLock, time::Duration};
 
 /// Global static payload builder defaults
@@ -17,13 +19,13 @@ static PAYLOAD_BUILDER_DEFAULTS: OnceLock<DefaultPayloadBuilderValues> = OnceLoc
 #[derive(Debug, Clone)]
 pub struct DefaultPayloadBuilderValues {
     /// Default extra data for blocks
-    pub extra_data: String,
+    extra_data: String,
     /// Default interval between payload builds in seconds
-    pub interval_secs: u64,
+    interval: String,
     /// Default deadline for payload builds in seconds
-    pub deadline_secs: u64,
+    deadline: String,
     /// Default maximum number of concurrent payload building tasks
-    pub max_payload_tasks: usize,
+    max_payload_tasks: usize,
 }
 
 impl DefaultPayloadBuilderValues {
@@ -34,17 +36,7 @@ impl DefaultPayloadBuilderValues {
 
     /// Get a reference to the global payload builder defaults
     pub fn get_global() -> &'static Self {
-        PAYLOAD_BUILDER_DEFAULTS.get_or_init(Self::default_payload_builder_defaults)
-    }
-
-    /// Default payload builder configuration
-    pub fn default_payload_builder_defaults() -> Self {
-        Self {
-            extra_data: default_extra_data(),
-            interval_secs: 1,
-            deadline_secs: SLOT_DURATION.as_secs(),
-            max_payload_tasks: 3,
-        }
+        PAYLOAD_BUILDER_DEFAULTS.get_or_init(Self::default)
     }
 
     /// Set the default extra data
@@ -54,19 +46,19 @@ impl DefaultPayloadBuilderValues {
     }
 
     /// Set the default interval in seconds
-    pub fn with_interval_secs(mut self, v: u64) -> Self {
-        self.interval_secs = v;
+    pub fn with_interval(mut self, v: Duration) -> Self {
+        self.interval = format_duration_as_secs_or_ms(v);
         self
     }
 
     /// Set the default deadline in seconds
-    pub fn with_deadline_secs(mut self, v: u64) -> Self {
-        self.deadline_secs = v;
+    pub fn with_deadline(mut self, v: u64) -> Self {
+        self.deadline = format!("{}", v);
         self
     }
 
     /// Set the default maximum payload tasks
-    pub fn with_max_payload_tasks(mut self, v: usize) -> Self {
+    pub const fn with_max_payload_tasks(mut self, v: usize) -> Self {
         self.max_payload_tasks = v;
         self
     }
@@ -74,7 +66,12 @@ impl DefaultPayloadBuilderValues {
 
 impl Default for DefaultPayloadBuilderValues {
     fn default() -> Self {
-        Self::default_payload_builder_defaults()
+        Self {
+            extra_data: default_extra_data(),
+            interval: "1".to_string(),
+            deadline: "12".to_string(),
+            max_payload_tasks: 3,
+        }
     }
 }
 
@@ -99,11 +96,21 @@ pub struct PayloadBuilderArgs {
     /// Interval is specified in seconds or in milliseconds if the value ends with `ms`:
     ///   * `50ms` -> 50 milliseconds
     ///   * `1` -> 1 second
-    #[arg(long = "builder.interval", value_parser = parse_duration_from_secs_or_ms, default_value = "1", value_name = "DURATION")]
+    #[arg(
+        long = "builder.interval",
+        value_parser = parse_duration_from_secs_or_ms,
+        default_value = DefaultPayloadBuilderValues::get_global().interval.as_str(),
+        value_name = "DURATION"
+    )]
     pub interval: Duration,
 
     /// The deadline for when the payload builder job should resolve.
-    #[arg(long = "builder.deadline", value_parser = parse_duration_from_secs, default_value = "12", value_name = "SECONDS")]
+    #[arg(
+        long = "builder.deadline",
+        value_parser = parse_duration_from_secs,
+        default_value = DefaultPayloadBuilderValues::get_global().deadline.as_str(),
+        value_name = "SECONDS"
+    )]
     pub deadline: Duration,
 
     /// Maximum number of tasks to spawn for building a payload.
@@ -124,9 +131,9 @@ impl Default for PayloadBuilderArgs {
         let defaults = DefaultPayloadBuilderValues::get_global();
         Self {
             extra_data: defaults.extra_data.clone(),
-            interval: Duration::from_secs(defaults.interval_secs),
+            interval: parse_duration_from_secs_or_ms(defaults.interval.as_str()).unwrap(),
             gas_limit: None,
-            deadline: Duration::from_secs(defaults.deadline_secs),
+            deadline: Duration::from_secs(defaults.deadline.parse().unwrap()),
             max_payload_tasks: defaults.max_payload_tasks,
             max_blobs_per_block: None,
         }
