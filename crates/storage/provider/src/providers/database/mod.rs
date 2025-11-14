@@ -39,7 +39,7 @@ use std::{
     sync::Arc,
 };
 
-use tracing::trace;
+use tracing::{instrument, trace};
 
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
@@ -169,6 +169,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// This sets the [`PruneModes`] to [`None`], because they should only be relevant for writing
     /// data.
     #[track_caller]
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
         Ok(DatabaseProvider::new(
             self.db.tx()?,
@@ -185,6 +186,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
     #[track_caller]
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
         Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
             self.db.tx_mut()?,
