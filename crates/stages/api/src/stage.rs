@@ -86,6 +86,8 @@ impl ExecInput {
     /// Return the next block range determined the number of transactions within it.
     /// This function walks the block indices until either the end of the range is reached or
     /// the number of transactions exceeds the threshold.
+    ///
+    /// Returns [`None`] if no transactions are found for the current execution input.
     #[instrument(level = "debug", target = "sync::stages", skip(provider), ret)]
     pub fn next_block_range_with_transaction_threshold<Provider>(
         &self,
