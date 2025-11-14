@@ -130,6 +130,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         Ok(result) => result,
                         Err(err) => {
                             if skip_invalid_blocks {
+                                executor = evm_config.batch_executor(db_at(block.number()));
                                 let _ = info_tx.send((block, eyre::Report::new(err)));
                                 continue
                             }
@@ -178,6 +179,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                                     error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                     if skip_invalid_blocks {
+                                        executor = evm_config.batch_executor(db_at(block.number()));
                                         let _ = info_tx.send((block, err));
                                         continue 'blocks;
                                     }
