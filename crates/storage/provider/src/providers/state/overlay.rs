@@ -1,6 +1,8 @@
 use alloy_primitives::{BlockNumber, B256};
+use metrics::Histogram;
 use reth_db_api::DatabaseError;
 use reth_errors::{ProviderError, ProviderResult};
+use reth_metrics::Metrics;
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
@@ -16,8 +18,27 @@ use reth_trie::{
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
-use std::sync::Arc;
-use tracing::debug;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tracing::{debug, debug_span, instrument};
+
+/// Metrics for overlay state provider operations.
+#[derive(Clone, Metrics)]
+#[metrics(scope = "storage.providers.overlay")]
+pub(crate) struct OverlayStateProviderMetrics {
+    /// Duration of creating the database provider transaction
+    create_provider_duration: Histogram,
+    /// Duration of retrieving trie updates from the database
+    retrieve_trie_reverts_duration: Histogram,
+    /// Duration of retrieving hashed state from the database
+    retrieve_hashed_state_reverts_duration: Histogram,
+    /// Size of trie updates (number of entries)
+    trie_updates_size: Histogram,
+    /// Size of hashed state (number of entries)
+    hashed_state_size: Histogram,
+}
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
@@ -33,12 +54,20 @@ pub struct OverlayStateProviderFactory<F> {
     trie_overlay: Option<Arc<TrieUpdatesSorted>>,
     /// Optional hashed state overlay
     hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
+    /// Metrics for tracking provider operations
+    metrics: OverlayStateProviderMetrics,
 }
 
 impl<F> OverlayStateProviderFactory<F> {
     /// Create a new overlay state provider factory
-    pub const fn new(factory: F) -> Self {
-        Self { factory, block_hash: None, trie_overlay: None, hashed_state_overlay: None }
+    pub fn new(factory: F) -> Self {
+        Self {
+            factory,
+            block_hash: None,
+            trie_overlay: None,
+            hashed_state_overlay: None,
+            metrics: OverlayStateProviderMetrics::default(),
+        }
     }
 
     /// Set the block hash for collecting reverts. All state will be reverted to the point
@@ -151,9 +180,25 @@ where
     type Provider = OverlayStateProvider<F::Provider>;
 
     /// Create a read-only [`OverlayStateProvider`].
+    #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
         // Get a read-only provider
-        let provider = self.factory.database_provider_ro()?;
+        let provider = {
+            let _guard =
+                debug_span!(target: "providers::state::overlay", "Creating db provider").entered();
+
+            let start = Instant::now();
+            let res = self.factory.database_provider_ro()?;
+            self.metrics.create_provider_duration.record(start.elapsed());
+            res
+        };
+
+        // Set up variables we'll use for recording metrics. There's two different code-paths here,
+        // and we want to make sure both record metrics, so we do metrics recording after.
+        let retrieve_trie_reverts_duration;
+        let retrieve_hashed_state_reverts_duration;
+        let trie_updates_total_len;
+        let hashed_state_updates_total_len;
 
         // If block_hash is provided, collect reverts
         let (trie_updates, hashed_state) = if let Some(from_block) =
@@ -161,17 +206,32 @@ where
             self.reverts_required(&provider, from_block)?
         {
             // Collect trie reverts
-            let mut trie_reverts = provider.trie_reverts(from_block + 1)?;
+            let mut trie_reverts = {
+                let _guard =
+                    debug_span!(target: "providers::state::overlay", "Retrieving trie reverts")
+                        .entered();
+
+                let start = Instant::now();
+                let res = provider.trie_reverts(from_block + 1)?;
+                retrieve_trie_reverts_duration = start.elapsed();
+                res
+            };
 
             // Collect state reverts
-            //
-            // TODO(mediocregopher) make from_reverts return sorted
-            // https://github.com/paradigmxyz/reth/issues/19382
-            let mut hashed_state_reverts = HashedPostState::from_reverts::<KeccakKeyHasher>(
-                provider.tx_ref(),
-                from_block + 1..,
-            )?
-            .into_sorted();
+            let mut hashed_state_reverts = {
+                let _guard = debug_span!(target: "providers::state::overlay", "Retrieving hashed state reverts").entered();
+
+                let start = Instant::now();
+                // TODO(mediocregopher) make from_reverts return sorted
+                // https://github.com/paradigmxyz/reth/issues/19382
+                let res = HashedPostState::from_reverts::<KeccakKeyHasher>(
+                    provider.tx_ref(),
+                    from_block + 1..,
+                )?
+                .into_sorted();
+                retrieve_hashed_state_reverts_duration = start.elapsed();
+                res
+            };
 
             // Extend with overlays if provided. If the reverts are empty we should just use the
             // overlays directly, because `extend_ref` will actually clone the overlay.
@@ -195,12 +255,15 @@ where
                 None => Arc::new(hashed_state_reverts),
             };
 
+            trie_updates_total_len = trie_updates.total_len();
+            hashed_state_updates_total_len = hashed_state_updates.total_len();
+
             debug!(
                 target: "providers::state::overlay",
                 block_hash = ?self.block_hash,
                 ?from_block,
-                num_trie_updates = ?trie_updates.total_len(),
-                num_state_updates = ?hashed_state_updates.total_len(),
+                num_trie_updates = ?trie_updates_total_len,
+                num_state_updates = ?hashed_state_updates_total_len,
                 "Reverted to target block",
             );
 
@@ -214,8 +277,23 @@ where
                 .clone()
                 .unwrap_or_else(|| Arc::new(HashedPostStateSorted::default()));
 
+            retrieve_trie_reverts_duration = Duration::ZERO;
+            retrieve_hashed_state_reverts_duration = Duration::ZERO;
+            trie_updates_total_len = trie_updates.total_len();
+            hashed_state_updates_total_len = hashed_state.total_len();
+
             (trie_updates, hashed_state)
         };
+
+        // Record metrics
+        self.metrics
+            .retrieve_trie_reverts_duration
+            .record(retrieve_trie_reverts_duration.as_secs_f64());
+        self.metrics
+            .retrieve_hashed_state_reverts_duration
+            .record(retrieve_hashed_state_reverts_duration.as_secs_f64());
+        self.metrics.trie_updates_size.record(trie_updates_total_len as f64);
+        self.metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
         Ok(OverlayStateProvider::new(provider, trie_updates, hashed_state))
     }
