@@ -72,7 +72,7 @@ impl<F> OverlayStateProviderFactory<F> {
 
     /// Set the block hash for collecting reverts. All state will be reverted to the point
     /// _after_ this block has been processed.
-    pub fn with_block_hash(mut self, block_hash: Option<B256>) -> Self {
+    pub const fn with_block_hash(mut self, block_hash: Option<B256>) -> Self {
         self.block_hash = block_hash;
         self
     }
@@ -201,8 +201,9 @@ where
         {
             // Collect trie reverts
             let mut trie_reverts = {
-                let span = debug_span!("Retrieving trie reverts");
-                let _guard = span.enter();
+                let _guard =
+                    debug_span!(target: "providers::state::overlay", "Retrieving trie reverts")
+                        .entered();
 
                 let start = Instant::now();
                 let res = provider.trie_reverts(from_block + 1)?;
@@ -212,8 +213,7 @@ where
 
             // Collect state reverts
             let mut hashed_state_reverts = {
-                let span = debug_span!("Retrieving hashed state reverts");
-                let _guard = span.enter();
+                let _guard = debug_span!(target: "providers::state::overlay", "Retrieving hashed state reverts").entered();
 
                 let start = Instant::now();
                 // TODO(mediocregopher) make from_reverts return sorted
