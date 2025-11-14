@@ -25,7 +25,7 @@ pub struct Peer {
     /// The state of the connection, if any.
     pub state: PeerConnectionState,
     /// The [`ForkId`] that the peer announced via discovery.
-    pub fork_id: Option<ForkId>,
+    pub fork_id: Option<Box<ForkId>>,
     /// Whether the entry should be removed after an existing session was terminated.
     pub remove_after_disconnect: bool,
     /// The kind of peer

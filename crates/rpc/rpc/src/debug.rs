@@ -3,8 +3,9 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
+use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{uint, Address, Bytes, B256};
+use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
@@ -21,11 +22,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock};
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{CacheDB, State},
-    witness::ExecutionWitnessRecord,
-};
+use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
@@ -40,7 +37,7 @@ use reth_storage_api::{
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{context_interface::Transaction, state::EvmState, DatabaseCommit};
+use revm::{context::Block, context_interface::Transaction, state::EvmState, DatabaseCommit};
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
@@ -99,7 +96,8 @@ where
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
@@ -168,8 +166,6 @@ where
                     .iter()
                     .map(|tx| tx.recover_signer().map_err(Eth::Error::from_eth_err))
                     .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .collect()
             } else {
                 block
                     .body()
@@ -177,8 +173,6 @@ where
                     .iter()
                     .map(|tx| tx.recover_signer_unchecked().map_err(Eth::Error::from_eth_err))
                     .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .collect()
             };
 
         self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
@@ -233,7 +227,8 @@ where
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
@@ -267,6 +262,10 @@ where
     /// The `debug_traceCall` method lets you run an `eth_call` within the context of the given
     /// block execution using the final state of parent block as the base.
     ///
+    /// If `tx_index` is provided in opts, the call will be traced at the state after executing
+    /// transactions up to the specified index within the block (0-indexed).
+    /// If not provided, then uses the post-state (default behavior).
+    ///
     /// Differences compare to `eth_call`:
     ///  - `debug_traceCall` executes with __enabled__ basefee check, `eth_call` does not: <https://github.com/paradigmxyz/reth/issues/6240>
     pub async fn debug_trace_call(
@@ -277,9 +276,20 @@ where
     ) -> Result<GethTrace, Eth::Error> {
         let at = block_id.unwrap_or_default();
         let GethDebugTracingCallOptions {
-            tracing_options, state_overrides, block_overrides, ..
+            tracing_options,
+            state_overrides,
+            block_overrides,
+            tx_index,
         } = opts;
         let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
+
+        // Check if we need to replay transactions for a specific tx_index
+        if let Some(tx_idx) = tx_index {
+            return self
+                .debug_trace_call_at_tx_index(call, at, tx_idx as usize, tracing_options, overrides)
+                .await;
+        }
+
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
 
         let this = self.clone();
@@ -372,8 +382,8 @@ where
                                 let db = db.0;
 
                                 let tx_info = TransactionInfo {
-                                    block_number: Some(evm_env.block_env.number.saturating_to()),
-                                    base_fee: Some(evm_env.block_env.basefee),
+                                    block_number: Some(evm_env.block_env.number().saturating_to()),
+                                    base_fee: Some(evm_env.block_env.basefee()),
                                     hash: None,
                                     block_hash: None,
                                     index: None,
@@ -418,6 +428,11 @@ where
                             .await?;
 
                         Ok(frame.into())
+                    }
+                    _ => {
+                        // Note: this match is non-exhaustive in case we need to add support for
+                        // additional tracers
+                        Err(EthApiError::Unsupported("unsupported tracer").into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -485,6 +500,74 @@ where
         Ok(frame.into())
     }
 
+    /// Helper method to execute `debug_trace_call` at a specific transaction index within a block.
+    /// This replays transactions up to the specified index, then executes the trace call in that
+    /// state.
+    async fn debug_trace_call_at_tx_index(
+        &self,
+        call: RpcTxReq<Eth::NetworkTypes>,
+        block_id: BlockId,
+        tx_index: usize,
+        tracing_options: GethDebugTracingOptions,
+        overrides: EvmOverrides,
+    ) -> Result<GethTrace, Eth::Error> {
+        // Get the target block to check transaction count
+        let block = self
+            .eth_api()
+            .recovered_block(block_id)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        if tx_index >= block.transaction_count() {
+            // tx_index out of bounds
+            return Err(EthApiError::InvalidParams(format!(
+                "tx_index {} out of bounds for block with {} transactions",
+                tx_index,
+                block.transaction_count()
+            ))
+            .into())
+        }
+
+        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+
+        // execute after the parent block, replaying `tx_index` transactions
+        let state_at = block.parent_hash().into();
+
+        let this = self.clone();
+        self.eth_api()
+            .spawn_with_state_at_block(state_at, move |state| {
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
+
+                // 1. apply pre-execution changes
+                this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+
+                // 2. replay the required number of transactions
+                for tx in block.transactions_recovered().take(tx_index) {
+                    let tx_env = this.eth_api().evm_config().tx_env(tx);
+                    let res = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
+                    db.commit(res.state);
+                }
+
+                // 3. now execute the trace call on this state
+                let (call_evm_env, call_tx_env) =
+                    this.eth_api().prepare_call_env(evm_env, call, &mut db, overrides)?;
+
+                // Execute the trace call using trace_transaction
+                let (trace, _) = this.trace_transaction(
+                    &tracing_options,
+                    call_evm_env,
+                    call_tx_env,
+                    &mut db,
+                    None, // No transaction context for call tracing
+                    &mut None,
+                )?;
+
+                Ok(trace)
+            })
+            .await
+    }
+
     /// The `debug_traceCallMany` method lets you run an `eth_callMany` within the context of the
     /// given block execution using the first n transactions in the given block as base.
     /// Each following bundle increments block number by 1 and block timestamp by 12 seconds
@@ -533,7 +616,8 @@ where
             .spawn_with_state_at_block(at.into(), move |state| {
                 // the outer vec for the bundles
                 let mut all_bundles = Vec::with_capacity(bundles.len());
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -589,8 +673,8 @@ where
                         results.push(trace);
                     }
                     // Increment block_env number and timestamp for the next bundle
-                    evm_env.block_env.number += uint!(1_U256);
-                    evm_env.block_env.timestamp += uint!(12_U256);
+                    evm_env.block_env.inner_mut().number += uint!(1_U256);
+                    evm_env.block_env.inner_mut().timestamp += uint!(12_U256);
 
                     all_bundles.push(results);
                 }
@@ -741,8 +825,8 @@ where
                 .map(|c| c.tx_index.map(|i| i as u64))
                 .unwrap_or_default(),
             block_hash: transaction_context.as_ref().map(|c| c.block_hash).unwrap_or_default(),
-            block_number: Some(evm_env.block_env.number.saturating_to()),
-            base_fee: Some(evm_env.block_env.basefee),
+            block_number: Some(evm_env.block_env.number().saturating_to()),
+            base_fee: Some(evm_env.block_env.basefee()),
         };
 
         if let Some(tracer) = tracer {
@@ -837,6 +921,11 @@ where
                             .into_localized_transaction_traces(tx_info);
 
                         return Ok((frame.into(), res.state));
+                    }
+                    _ => {
+                        // Note: this match is non-exhaustive in case we need to add support for
+                        // additional tracers
+                        Err(EthApiError::Unsupported("unsupported tracer").into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -1137,8 +1226,38 @@ where
         Ok(())
     }
 
-    async fn debug_db_get(&self, _key: String) -> RpcResult<()> {
-        Ok(())
+    /// `debug_db_get` - database key lookup
+    ///
+    /// Currently supported:
+    /// * Contract bytecode associated with a code hash. The key format is: `<0x63><code_hash>`
+    ///     * Prefix byte: 0x63 (required)
+    ///     * Code hash: 32 bytes
+    ///   Must be provided as either:
+    ///     * Hex string: "0x63..." (66 hex characters after 0x)
+    ///     * Raw byte string: raw byte string (33 bytes)
+    ///   See Geth impl: <https://github.com/ethereum/go-ethereum/blob/737ffd1bf0cbee378d0111a5b17ae4724fb2216c/core/rawdb/schema.go#L120>
+    async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>> {
+        let key_bytes = if key.starts_with("0x") {
+            decode(&key).map_err(|_| EthApiError::InvalidParams("Invalid hex key".to_string()))?
+        } else {
+            key.into_bytes()
+        };
+
+        if key_bytes.len() != 33 {
+            return Err(EthApiError::InvalidParams(format!(
+                "Key must be 33 bytes, got {}",
+                key_bytes.len()
+            ))
+            .into());
+        }
+        if key_bytes[0] != 0x63 {
+            return Err(EthApiError::InvalidParams("Key prefix must be 0x63".to_string()).into());
+        }
+
+        let code_hash = B256::from_slice(&key_bytes[1..33]);
+
+        // No block ID is provided, so it defaults to the latest block
+        self.debug_code_by_hash(code_hash, None).await.map_err(Into::into)
     }
 
     async fn debug_dump_block(&self, _number: BlockId) -> RpcResult<()> {

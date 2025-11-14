@@ -3,13 +3,17 @@ use bytes::Bytes;
 use eyre::{eyre, OptionExt};
 use futures_util::{stream::StreamExt, Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl, Url};
+use reth_era::common::file_ops::EraFileType;
 use sha2::{Digest, Sha256};
 use std::{future::Future, path::Path, str::FromStr};
 use tokio::{
     fs::{self, File},
     io::{self, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt},
-    join, try_join,
+    try_join,
 };
+
+/// Downloaded index page filename
+const INDEX_HTML_FILE: &str = "index.html";
 
 /// Accesses the network over HTTP.
 pub trait HttpClient {
@@ -41,6 +45,7 @@ pub struct EraClient<Http> {
     client: Http,
     url: Url,
     folder: Box<Path>,
+    era_type: EraFileType,
 }
 
 impl<Http: HttpClient + Clone> EraClient<Http> {
@@ -48,7 +53,8 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
     pub fn new(client: Http, url: Url, folder: impl Into<Box<Path>>) -> Self {
-        Self { client, url, folder: folder.into() }
+        let era_type = EraFileType::from_url(url.as_str());
+        Self { client, url, folder: folder.into(), era_type }
     }
 
     /// Performs a GET request on `url` and stores the response body into a file located within
@@ -92,9 +98,11 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 }
             }
 
-            self.assert_checksum(number, actual_checksum?)
-                .await
-                .map_err(|e| eyre!("{e} for {file_name} at {}", path.display()))?;
+            if self.era_type == EraFileType::Era1 {
+                self.assert_checksum(number, actual_checksum?)
+                    .await
+                    .map_err(|e| eyre!("{e} for {file_name} at {}", path.display()))?;
+            }
         }
 
         Ok(path.into_boxed_path())
@@ -128,8 +136,6 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                     let Some(number) = self.file_name_to_number(name) &&
                     (number < index || number >= last)
                 {
-                    eprintln!("Deleting file {}", entry.path().display());
-                    eprintln!("{number} < {index} || {number} >= {last}");
                     reth_fs_util::remove_file(entry.path())?;
                 }
             }
@@ -147,9 +153,11 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     pub async fn files_count(&self) -> usize {
         let mut count = 0usize;
 
+        let file_extension = self.era_type.extension().trim_start_matches('.');
+
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
-                if entry.path().extension() == Some("era1".as_ref()) {
+                if entry.path().extension() == Some(file_extension.as_ref()) {
                     count += 1;
                 }
             }
@@ -158,46 +166,35 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         count
     }
 
-    /// Fetches the list of ERA1 files from `url` and stores it in a file located within `folder`.
+    /// Fetches the list of ERA1/ERA files from `url` and stores it in a file located within
+    /// `folder`.
+    /// For era files, checksum.txt file does not exist, so the checksum verification is
+    /// skipped.
     pub async fn fetch_file_list(&self) -> eyre::Result<()> {
-        let (mut index, mut checksums) = try_join!(
-            self.client.get(self.url.clone()),
-            self.client.get(self.url.clone().join(Self::CHECKSUMS)?),
-        )?;
-
-        let index_path = self.folder.to_path_buf().join("index.html");
+        let index_path = self.folder.to_path_buf().join(INDEX_HTML_FILE);
         let checksums_path = self.folder.to_path_buf().join(Self::CHECKSUMS);
 
-        let (mut index_file, mut checksums_file) =
-            try_join!(File::create(&index_path), File::create(&checksums_path))?;
-
-        loop {
-            let (index, checksums) = join!(index.next(), checksums.next());
-            let (index, checksums) = (index.transpose()?, checksums.transpose()?);
-
-            if index.is_none() && checksums.is_none() {
-                break;
-            }
-            let index_file = &mut index_file;
-            let checksums_file = &mut checksums_file;
-
+        // Only for era1, we download also checksums file
+        if self.era_type == EraFileType::Era1 {
+            let checksums_url = self.url.join(Self::CHECKSUMS)?;
             try_join!(
-                async move {
-                    if let Some(index) = index {
-                        io::copy(&mut index.as_ref(), index_file).await?;
-                    }
-                    Ok::<(), eyre::Error>(())
-                },
-                async move {
-                    if let Some(checksums) = checksums {
-                        io::copy(&mut checksums.as_ref(), checksums_file).await?;
-                    }
-                    Ok::<(), eyre::Error>(())
-                },
+                self.download_file_to_path(self.url.clone(), &index_path),
+                self.download_file_to_path(checksums_url, &checksums_path)
             )?;
+        } else {
+            // Download only index file
+            self.download_file_to_path(self.url.clone(), &index_path).await?;
         }
 
-        let file = File::open(&index_path).await?;
+        // Parse and extract era filenames from index.html
+        self.extract_era_filenames(&index_path).await?;
+
+        Ok(())
+    }
+
+    /// Extracts ERA filenames from `index.html` and writes them to the index file
+    async fn extract_era_filenames(&self, index_path: &Path) -> eyre::Result<()> {
+        let file = File::open(index_path).await?;
         let reader = io::BufReader::new(file);
         let mut lines = reader.lines();
 
@@ -205,21 +202,36 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let file = File::create(&path).await?;
         let mut writer = io::BufWriter::new(file);
 
+        let ext = self.era_type.extension();
+        let ext_len = ext.len();
+
         while let Some(line) = lines.next_line().await? {
-            if let Some(j) = line.find(".era1") &&
+            if let Some(j) = line.find(ext) &&
                 let Some(i) = line[..j].rfind(|c: char| !c.is_alphanumeric() && c != '-')
             {
-                let era = &line[i + 1..j + 5];
+                let era = &line[i + 1..j + ext_len];
                 writer.write_all(era.as_bytes()).await?;
                 writer.write_all(b"\n").await?;
             }
         }
+
         writer.flush().await?;
+        Ok(())
+    }
+
+    // Helper to download a file to a specified path
+    async fn download_file_to_path(&self, url: Url, path: &Path) -> eyre::Result<()> {
+        let mut stream = self.client.get(url).await?;
+        let mut file = File::create(path).await?;
+
+        while let Some(item) = stream.next().await.transpose()? {
+            io::copy(&mut item.as_ref(), &mut file).await?;
+        }
 
         Ok(())
     }
 
-    /// Returns ERA1 file name that is ordered at `number`.
+    /// Returns ERA1/ERA file name that is ordered at `number`.
     pub async fn number_to_file_name(&self, number: usize) -> eyre::Result<Option<String>> {
         let path = self.folder.to_path_buf().join("index");
         let file = File::open(&path).await?;
@@ -237,18 +249,23 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
         match File::open(path).await {
             Ok(file) => {
-                let number = self
-                    .file_name_to_number(name)
-                    .ok_or_else(|| eyre!("Cannot parse ERA number from {name}"))?;
+                if self.era_type == EraFileType::Era1 {
+                    let number = self
+                        .file_name_to_number(name)
+                        .ok_or_else(|| eyre!("Cannot parse ERA number from {name}"))?;
 
-                let actual_checksum = checksum(file).await?;
-                let is_verified = self.verify_checksum(number, actual_checksum).await?;
+                    let actual_checksum = checksum(file).await?;
+                    let is_verified = self.verify_checksum(number, actual_checksum).await?;
 
-                if !is_verified {
-                    fs::remove_file(path).await?;
+                    if !is_verified {
+                        fs::remove_file(path).await?;
+                    }
+
+                    Ok(is_verified)
+                } else {
+                    // For era files, we skip checksum verification, as checksum.txt does not exist
+                    Ok(true)
                 }
-
-                Ok(is_verified)
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(e)?,

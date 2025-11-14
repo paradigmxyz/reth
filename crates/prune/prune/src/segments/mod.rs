@@ -1,23 +1,57 @@
 mod receipts;
 mod set;
-mod static_file;
 mod user;
 
 use crate::{PruneLimiter, PrunerError};
 use alloy_primitives::{BlockNumber, TxNumber};
-use reth_provider::{errors::provider::ProviderResult, BlockReader, PruneCheckpointWriter};
-use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
-pub use set::SegmentSet;
-pub use static_file::{
-    Headers as StaticFileHeaders, Receipts as StaticFileReceipts,
-    Transactions as StaticFileTransactions,
+use reth_provider::{
+    errors::provider::ProviderResult, BlockReader, PruneCheckpointWriter, StaticFileProviderFactory,
 };
+use reth_prune_types::{
+    PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
+    SegmentOutputCheckpoint,
+};
+use reth_static_file_types::StaticFileSegment;
+pub use set::SegmentSet;
 use std::{fmt::Debug, ops::RangeInclusive};
 use tracing::error;
 pub use user::{
-    AccountHistory, Receipts as UserReceipts, ReceiptsByLogs, SenderRecovery, StorageHistory,
-    TransactionLookup,
+    AccountHistory, Bodies, MerkleChangeSets, Receipts as UserReceipts, ReceiptsByLogs,
+    SenderRecovery, StorageHistory, TransactionLookup,
 };
+
+/// Prunes data from static files for a given segment.
+///
+/// This is a generic helper function used by both receipts and bodies pruning
+/// when data is stored in static files.
+pub(crate) fn prune_static_files<Provider>(
+    provider: &Provider,
+    input: PruneInput,
+    segment: StaticFileSegment,
+) -> Result<SegmentOutput, PrunerError>
+where
+    Provider: StaticFileProviderFactory,
+{
+    let deleted_headers =
+        provider.static_file_provider().delete_segment_below_block(segment, input.to_block + 1)?;
+
+    if deleted_headers.is_empty() {
+        return Ok(SegmentOutput::done())
+    }
+
+    let tx_ranges = deleted_headers.iter().filter_map(|header| header.tx_range());
+
+    let pruned = tx_ranges.clone().map(|range| range.len()).sum::<u64>() as usize;
+
+    Ok(SegmentOutput {
+        progress: PruneProgress::Finished,
+        pruned,
+        checkpoint: Some(SegmentOutputCheckpoint {
+            block_number: Some(input.to_block),
+            tx_number: tx_ranges.map(|range| range.end()).max(),
+        }),
+    })
+}
 
 /// A segment represents a pruning of some portion of the data.
 ///

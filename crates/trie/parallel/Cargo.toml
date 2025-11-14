@@ -13,12 +13,10 @@ workspace = true
 
 [dependencies]
 # reth
-reth-db-api.workspace = true
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
-reth-trie-db.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std"] }
 reth-trie.workspace = true
 
@@ -36,6 +34,7 @@ derive_more.workspace = true
 rayon.workspace = true
 itertools.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+crossbeam-channel.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -45,6 +44,7 @@ metrics = { workspace = true, optional = true }
 # reth
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-trie-db.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 
 # misc
@@ -58,7 +58,6 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 default = ["metrics"]
 metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics", "reth-trie-sparse/metrics"]
 test-utils = [
-    "reth-db-api/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-trie-common/test-utils",

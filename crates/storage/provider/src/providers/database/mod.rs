@@ -1,29 +1,34 @@
 use crate::{
-    providers::{state::latest::LatestStateProvider, StaticFileProvider},
+    providers::{
+        state::latest::LatestStateProvider, NodeTypesForProvider, StaticFileProvider,
+        StaticFileProviderRWRefMut,
+    },
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider,
+    HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, MetadataProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+    StaticFileProviderFactory, StaticFileWriter, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
+use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_node_types::{
-    BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
+    BlockTy, HeaderTy, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -64,37 +69,52 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     prune_modes: PruneModes,
     /// The node storage handler.
     storage: Arc<N::Storage>,
+    /// Storage configuration settings for this node
+    storage_settings: Arc<RwLock<StorageSettings>>,
 }
 
-impl<N: NodeTypes> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
+impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
     /// Instantiates the builder for this type
     pub fn builder() -> ProviderFactoryBuilder<N> {
         ProviderFactoryBuilder::default()
     }
 }
 
-impl<N: NodeTypesWithDB> ProviderFactory<N> {
+impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Create new database provider factory.
     pub fn new(
         db: N::DB,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
-    ) -> Self {
-        Self {
+    ) -> ProviderResult<Self> {
+        // Load storage settings from database at init time. Creates a temporary provider
+        // to read persisted settings, falling back to legacy defaults if none exist.
+        //
+        // Both factory and all providers it creates should share these cached settings.
+        let legacy_settings = StorageSettings::legacy();
+        let storage_settings = DatabaseProvider::<_, N>::new(
+            db.tx()?,
+            chain_spec.clone(),
+            static_file_provider.clone(),
+            Default::default(),
+            Default::default(),
+            Arc::new(RwLock::new(legacy_settings)),
+        )
+        .storage_settings()?
+        .unwrap_or(legacy_settings);
+
+        Ok(Self {
             db,
             chain_spec,
             static_file_provider,
-            prune_modes: PruneModes::none(),
+            prune_modes: PruneModes::default(),
             storage: Default::default(),
-        }
+            storage_settings: Arc::new(RwLock::new(storage_settings)),
+        })
     }
+}
 
-    /// Enables metrics on the static file provider.
-    pub fn with_static_files_metrics(mut self) -> Self {
-        self.static_file_provider = self.static_file_provider.with_metrics();
-        self
-    }
-
+impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Sets the pruning configuration for an existing [`ProviderFactory`].
     pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
         self.prune_modes = prune_modes;
@@ -113,7 +133,17 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
+impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
+    fn cached_storage_settings(&self) -> StorageSettings {
+        *self.storage_settings.read()
+    }
+
+    fn set_storage_settings_cache(&self, settings: StorageSettings) {
+        *self.storage_settings.write() = settings;
+    }
+}
+
+impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
     pub fn new_with_database_path<P: AsRef<Path>>(
@@ -122,13 +152,12 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> RethResult<Self> {
-        Ok(Self {
-            db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
+        Self::new(
+            Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
-            prune_modes: PruneModes::none(),
-            storage: Default::default(),
-        })
+        )
+        .map_err(RethError::Provider)
     }
 }
 
@@ -147,6 +176,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.static_file_provider.clone(),
             self.prune_modes.clone(),
             self.storage.clone(),
+            self.storage_settings.clone(),
         ))
     }
 
@@ -162,6 +192,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.static_file_provider.clone(),
             self.prune_modes.clone(),
             self.storage.clone(),
+            self.storage_settings.clone(),
         )))
     }
 
@@ -219,6 +250,14 @@ impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
     }
+
+    fn get_static_file_writer(
+        &self,
+        block: BlockNumber,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
+        self.static_file_provider.get_writer(block, segment)
+    }
 }
 
 impl<N: ProviderNodeTypes> HeaderSyncGapProvider for ProviderFactory<N> {
@@ -240,14 +279,6 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
         self.static_file_provider.header_by_number(num)
-    }
-
-    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
-        self.provider()?.header_td(hash)
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.static_file_provider.header_td_by_number(number)
     }
 
     fn headers_range(
@@ -411,10 +442,6 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         self.provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        self.provider()?.transaction_block(id)
-    }
-
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -553,13 +580,15 @@ where
     N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug, Storage: fmt::Debug>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { db, chain_spec, static_file_provider, prune_modes, storage } = self;
+        let Self { db, chain_spec, static_file_provider, prune_modes, storage, storage_settings } =
+            self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
             .field("chain_spec", &chain_spec)
             .field("static_file_provider", &static_file_provider)
             .field("prune_modes", &prune_modes)
             .field("storage", &storage)
+            .field("storage_settings", &*storage_settings.read())
             .finish()
     }
 }
@@ -572,6 +601,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             static_file_provider: self.static_file_provider.clone(),
             prune_modes: self.prune_modes.clone(),
             storage: self.storage.clone(),
+            storage_settings: self.storage_settings.clone(),
         }
     }
 }
@@ -585,7 +615,7 @@ mod tests {
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
         TransactionsProvider,
     };
-    use alloy_primitives::{TxNumber, B256, U256};
+    use alloy_primitives::{TxNumber, B256};
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
@@ -665,7 +695,7 @@ mod tests {
             let prune_modes = PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: Some(PruneMode::Full),
-                ..PruneModes::none()
+                ..PruneModes::default()
             };
             let factory = create_test_provider_factory();
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
@@ -730,7 +760,7 @@ mod tests {
         let static_file_provider = provider.static_file_provider();
         let mut static_file_writer =
             static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-        static_file_writer.append_header(head.header(), U256::ZERO, &head.hash()).unwrap();
+        static_file_writer.append_header(head.header(), &head.hash()).unwrap();
         static_file_writer.commit().unwrap();
         drop(static_file_writer);
 

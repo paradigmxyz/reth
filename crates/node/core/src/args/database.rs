@@ -6,9 +6,12 @@ use crate::version::default_client_version;
 use clap::{
     builder::{PossibleValue, TypedValueParser},
     error::ErrorKind,
-    Arg, Args, Command, Error,
+    value_parser, Arg, Args, Command, Error,
 };
-use reth_db::{mdbx::MaxReadTransactionDuration, ClientVersion};
+use reth_db::{
+    mdbx::{MaxReadTransactionDuration, SyncMode},
+    ClientVersion,
+};
 use reth_storage_errors::db::LogLevel;
 
 /// Parameters for database configuration
@@ -22,9 +25,26 @@ pub struct DatabaseArgs {
     /// NFS volume.
     #[arg(long = "db.exclusive")]
     pub exclusive: Option<bool>,
-    /// Maximum database size (e.g., 4TB, 8MB)
+    /// Maximum database size (e.g., 4TB, 8TB).
+    ///
+    /// This sets the "map size" of the database. If the database grows beyond this
+    /// limit, the node will stop with an "environment map size limit reached" error.
+    ///
+    /// The default value is 8TB.
     #[arg(long = "db.max-size", value_parser = parse_byte_size)]
     pub max_size: Option<usize>,
+    /// Database page size (e.g., 4KB, 8KB, 16KB).
+    ///
+    /// Specifies the page size used by the MDBX database.
+    ///
+    /// The page size determines the maximum database size.
+    /// MDBX supports up to 2^31 pages, so with the default 4KB page size, the maximum
+    /// database size is 8TB. To allow larger databases, increase this value to 8KB or higher.
+    ///
+    /// WARNING: This setting is only configurable at database creation; changing
+    /// it later requires re-syncing.
+    #[arg(long = "db.page-size", value_parser = parse_byte_size)]
+    pub page_size: Option<usize>,
     /// Database growth step (e.g., 4GB, 4KB)
     #[arg(long = "db.growth-step", value_parser = parse_byte_size)]
     pub growth_step: Option<usize>,
@@ -34,6 +54,12 @@ pub struct DatabaseArgs {
     /// Maximum number of readers allowed to access the database concurrently.
     #[arg(long = "db.max-readers")]
     pub max_readers: Option<u64>,
+    /// Controls how aggressively the database synchronizes data to disk.
+    #[arg(
+        long = "db.sync-mode",
+        value_parser = value_parser!(SyncMode),
+    )]
+    pub sync_mode: Option<SyncMode>,
 }
 
 impl DatabaseArgs {
@@ -59,8 +85,10 @@ impl DatabaseArgs {
             .with_exclusive(self.exclusive)
             .with_max_read_transaction_duration(max_read_transaction_duration)
             .with_geometry_max_size(self.max_size)
+            .with_geometry_page_size(self.page_size)
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
+            .with_sync_mode(self.sync_mode)
     }
 }
 
@@ -291,6 +319,41 @@ mod tests {
     }
 
     #[test]
+    fn test_command_parser_with_valid_page_size_from_str() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "8KB"])
+            .unwrap();
+        assert_eq!(cmd.args.page_size, Some(KILOBYTE * 8));
+
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "1MB"])
+            .unwrap();
+        assert_eq!(cmd.args.page_size, Some(MEGABYTE));
+
+        // Test with spaces
+        let cmd =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "16 KB"])
+                .unwrap();
+        assert_eq!(cmd.args.page_size, Some(KILOBYTE * 16));
+
+        // Test with just a number (bytes)
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "4096"])
+            .unwrap();
+        assert_eq!(cmd.args.page_size, Some(KILOBYTE * 4));
+    }
+
+    #[test]
+    fn test_command_parser_with_invalid_page_size() {
+        // Invalid text
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "invalid"]);
+        assert!(result.is_err());
+
+        // Invalid unit
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "7 ZB"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_possible_values() {
         // Initialize the LogLevelValueParser
         let parser = LogLevelValueParser;
@@ -339,5 +402,37 @@ mod tests {
     fn test_command_parser_without_log_level() {
         let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth"]).unwrap();
         assert_eq!(cmd.args.log_level, None);
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_default_sync_mode() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth"]).unwrap();
+        assert!(cmd.args.sync_mode.is_none());
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_sync_mode_durable() {
+        let cmd =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "durable"])
+                .unwrap();
+        assert!(matches!(cmd.args.sync_mode, Some(SyncMode::Durable)));
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_sync_mode_safe_no_sync() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.sync-mode",
+            "safe-no-sync",
+        ])
+        .unwrap();
+        assert!(matches!(cmd.args.sync_mode, Some(SyncMode::SafeNoSync)));
+    }
+
+    #[test]
+    fn test_command_parser_with_invalid_sync_mode() {
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "ultra-fast"]);
+        assert!(result.is_err());
     }
 }

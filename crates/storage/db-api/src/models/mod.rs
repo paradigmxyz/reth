@@ -12,18 +12,22 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
-use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
+use reth_trie_common::{
+    StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry, *,
+};
 use serde::{Deserialize, Serialize};
 
 pub mod accounts;
 pub mod blocks;
 pub mod integer_list;
+pub mod metadata;
 pub mod sharded_key;
 pub mod storage_sharded_key;
 
 pub use accounts::*;
 pub use blocks::*;
 pub use integer_list::IntegerList;
+pub use metadata::*;
 pub use reth_db_models::{
     AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StoredBlockBodyIndices,
     StoredBlockWithdrawals,
@@ -219,6 +223,7 @@ impl_compression_for_compact!(
     TxType,
     StorageEntry,
     BranchNodeCompact,
+    TrieChangeSetsEntry,
     StoredNibbles,
     StoredNibblesSubKey,
     StorageTrieEntry,

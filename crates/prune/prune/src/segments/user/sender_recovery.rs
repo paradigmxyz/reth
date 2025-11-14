@@ -37,7 +37,7 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
+    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
@@ -61,7 +61,7 @@ where
         trace!(target: "pruner", %pruned, %done, "Pruned transaction senders");
 
         let last_pruned_block = provider
-            .transaction_block(last_pruned_transaction)?
+            .block_by_transaction_id(last_pruned_transaction)?
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
             // If there's more transaction senders to prune, set the checkpoint block number to
             // previous, so we could finish pruning its transaction senders on the next run.

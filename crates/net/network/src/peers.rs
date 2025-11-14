@@ -90,6 +90,8 @@ pub struct PeersManager {
     net_connection_state: NetworkConnectionState,
     /// How long to temporarily ban ip on an incoming connection attempt.
     incoming_ip_throttle_duration: Duration,
+    /// IP address filter for restricting network connections to specific IP ranges.
+    ip_filter: reth_net_banlist::IpFilter,
 }
 
 impl PeersManager {
@@ -108,6 +110,7 @@ impl PeersManager {
             basic_nodes,
             max_backoff_count,
             incoming_ip_throttle_duration,
+            ip_filter,
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
         let now = Instant::now();
@@ -161,6 +164,7 @@ impl PeersManager {
             max_backoff_count,
             net_connection_state: NetworkConnectionState::default(),
             incoming_ip_throttle_duration,
+            ip_filter,
         }
     }
 
@@ -243,6 +247,12 @@ impl PeersManager {
         &mut self,
         addr: IpAddr,
     ) -> Result<(), InboundConnectionError> {
+        // Check if the IP is in the allowed ranges (netrestrict)
+        if !self.ip_filter.is_allowed(&addr) {
+            trace!(target: "net", ?addr, "Rejecting connection from IP not in allowed ranges");
+            return Err(InboundConnectionError::IpBanned)
+        }
+
         if self.ban_list.is_banned_ip(&addr) {
             return Err(InboundConnectionError::IpBanned)
         }
@@ -715,7 +725,7 @@ impl PeersManager {
     pub(crate) fn set_discovered_fork_id(&mut self, peer_id: PeerId, fork_id: ForkId) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             trace!(target: "net::peers", ?peer_id, ?fork_id, "set discovered fork id");
-            peer.fork_id = Some(fork_id);
+            peer.fork_id = Some(Box::new(fork_id));
         }
     }
 
@@ -749,7 +759,15 @@ impl PeersManager {
         addr: PeerAddr,
         fork_id: Option<ForkId>,
     ) {
-        if self.ban_list.is_banned(&peer_id, &addr.tcp().ip()) {
+        let ip_addr = addr.tcp().ip();
+
+        // Check if the IP is in the allowed ranges (netrestrict)
+        if !self.ip_filter.is_allowed(&ip_addr) {
+            trace!(target: "net", ?peer_id, ?ip_addr, "Skipping peer from IP not in allowed ranges");
+            return
+        }
+
+        if self.ban_list.is_banned(&peer_id, &ip_addr) {
             return
         }
 
@@ -757,7 +775,7 @@ impl PeersManager {
             Entry::Occupied(mut entry) => {
                 let peer = entry.get_mut();
                 peer.kind = kind;
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
 
                 if peer.state.is_incoming() {
@@ -770,7 +788,7 @@ impl PeersManager {
             Entry::Vacant(entry) => {
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "discovered new node");
                 let mut peer = Peer::with_kind(addr, kind);
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
@@ -830,7 +848,15 @@ impl PeersManager {
         addr: PeerAddr,
         fork_id: Option<ForkId>,
     ) {
-        if self.ban_list.is_banned(&peer_id, &addr.tcp().ip()) {
+        let ip_addr = addr.tcp().ip();
+
+        // Check if the IP is in the allowed ranges (netrestrict)
+        if !self.ip_filter.is_allowed(&ip_addr) {
+            trace!(target: "net", ?peer_id, ?ip_addr, "Skipping outbound connection to IP not in allowed ranges");
+            return
+        }
+
+        if self.ban_list.is_banned(&peer_id, &ip_addr) {
             return
         }
 
@@ -838,7 +864,7 @@ impl PeersManager {
             Entry::Occupied(mut entry) => {
                 let peer = entry.get_mut();
                 peer.kind = kind;
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
 
                 if peer.state == PeerConnectionState::Idle {
@@ -853,7 +879,7 @@ impl PeersManager {
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "connects new node");
                 let mut peer = Peer::with_kind(addr, kind);
                 peer.state = PeerConnectionState::PendingOut;
-                peer.fork_id = fork_id;
+                peer.fork_id = fork_id.map(Box::new);
                 entry.insert(peer);
                 self.connection_info.inc_pending_out();
                 self.queued_actions
@@ -2898,5 +2924,107 @@ mod tests {
 
         let updated_peer = manager.peers.get(&peer_id).unwrap();
         assert_eq!(updated_peer.addr.tcp().ip(), updated_ip);
+    }
+
+    #[tokio::test]
+    async fn test_ip_filter_blocks_inbound_connection() {
+        use reth_net_banlist::IpFilter;
+        use std::net::IpAddr;
+
+        // Create a filter that only allows 192.168.0.0/16
+        let ip_filter = IpFilter::from_cidr_string("192.168.0.0/16").unwrap();
+        let config = PeersConfig::test().with_ip_filter(ip_filter);
+        let mut peers = PeersManager::new(config);
+
+        // Try to connect from an allowed IP
+        let allowed_ip: IpAddr = "192.168.1.100".parse().unwrap();
+        assert!(peers.on_incoming_pending_session(allowed_ip).is_ok());
+
+        // Try to connect from a disallowed IP
+        let disallowed_ip: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(peers.on_incoming_pending_session(disallowed_ip).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_ip_filter_blocks_outbound_connection() {
+        use reth_net_banlist::IpFilter;
+        use std::net::SocketAddr;
+
+        // Create a filter that only allows 192.168.0.0/16
+        let ip_filter = IpFilter::from_cidr_string("192.168.0.0/16").unwrap();
+        let config = PeersConfig::test().with_ip_filter(ip_filter);
+        let mut peers = PeersManager::new(config);
+
+        let peer_id = PeerId::new([1; 64]);
+
+        // Try to add a peer with an allowed IP
+        let allowed_addr: SocketAddr = "192.168.1.100:30303".parse().unwrap();
+        peers.add_peer(peer_id, PeerAddr::from_tcp(allowed_addr), None);
+        assert!(peers.peers.contains_key(&peer_id));
+
+        // Try to add a peer with a disallowed IP
+        let peer_id2 = PeerId::new([2; 64]);
+        let disallowed_addr: SocketAddr = "10.0.0.1:30303".parse().unwrap();
+        peers.add_peer(peer_id2, PeerAddr::from_tcp(disallowed_addr), None);
+        assert!(!peers.peers.contains_key(&peer_id2));
+    }
+
+    #[tokio::test]
+    async fn test_ip_filter_ipv6() {
+        use reth_net_banlist::IpFilter;
+        use std::net::IpAddr;
+
+        // Create a filter that only allows IPv6 range 2001:db8::/32
+        let ip_filter = IpFilter::from_cidr_string("2001:db8::/32").unwrap();
+        let config = PeersConfig::test().with_ip_filter(ip_filter);
+        let mut peers = PeersManager::new(config);
+
+        // Try to connect from an allowed IPv6 address
+        let allowed_ip: IpAddr = "2001:db8::1".parse().unwrap();
+        assert!(peers.on_incoming_pending_session(allowed_ip).is_ok());
+
+        // Try to connect from a disallowed IPv6 address
+        let disallowed_ip: IpAddr = "2001:db9::1".parse().unwrap();
+        assert!(peers.on_incoming_pending_session(disallowed_ip).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_ip_filter_multiple_ranges() {
+        use reth_net_banlist::IpFilter;
+        use std::net::IpAddr;
+
+        // Create a filter that allows multiple ranges
+        let ip_filter = IpFilter::from_cidr_string("192.168.0.0/16,10.0.0.0/8").unwrap();
+        let config = PeersConfig::test().with_ip_filter(ip_filter);
+        let mut peers = PeersManager::new(config);
+
+        // Try IPs from both allowed ranges
+        let ip1: IpAddr = "192.168.1.1".parse().unwrap();
+        let ip2: IpAddr = "10.5.10.20".parse().unwrap();
+        assert!(peers.on_incoming_pending_session(ip1).is_ok());
+        assert!(peers.on_incoming_pending_session(ip2).is_ok());
+
+        // Try IP from disallowed range
+        let disallowed_ip: IpAddr = "172.16.0.1".parse().unwrap();
+        assert!(peers.on_incoming_pending_session(disallowed_ip).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_ip_filter_no_restriction() {
+        use reth_net_banlist::IpFilter;
+        use std::net::IpAddr;
+
+        // Create a filter with no restrictions (allow all)
+        let ip_filter = IpFilter::allow_all();
+        let config = PeersConfig::test().with_ip_filter(ip_filter);
+        let mut peers = PeersManager::new(config);
+
+        // All IPs should be allowed
+        let ip1: IpAddr = "192.168.1.1".parse().unwrap();
+        let ip2: IpAddr = "10.0.0.1".parse().unwrap();
+        let ip3: IpAddr = "8.8.8.8".parse().unwrap();
+        assert!(peers.on_incoming_pending_session(ip1).is_ok());
+        assert!(peers.on_incoming_pending_session(ip2).is_ok());
+        assert!(peers.on_incoming_pending_session(ip3).is_ok());
     }
 }

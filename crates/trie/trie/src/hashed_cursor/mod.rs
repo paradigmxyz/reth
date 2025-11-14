@@ -13,24 +13,36 @@ pub mod noop;
 #[cfg(test)]
 pub mod mock;
 
+/// Metrics tracking hashed cursor implementations.
+pub mod metrics;
+#[cfg(feature = "metrics")]
+pub use metrics::HashedCursorMetrics;
+pub use metrics::{HashedCursorMetricsCache, InstrumentedHashedCursor};
+
 /// The factory trait for creating cursors over the hashed state.
+#[auto_impl::auto_impl(&)]
 pub trait HashedCursorFactory {
     /// The hashed account cursor type.
-    type AccountCursor: HashedCursor<Value = Account>;
+    type AccountCursor<'a>: HashedCursor<Value = Account>
+    where
+        Self: 'a;
     /// The hashed storage cursor type.
-    type StorageCursor: HashedStorageCursor<Value = U256>;
+    type StorageCursor<'a>: HashedStorageCursor<Value = U256>
+    where
+        Self: 'a;
 
     /// Returns a cursor for iterating over all hashed accounts in the state.
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError>;
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError>;
 
     /// Returns a cursor for iterating over all hashed storage entries in the state.
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor, DatabaseError>;
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError>;
 }
 
 /// The cursor for iterating over hashed entries.
+#[auto_impl::auto_impl(&mut)]
 pub trait HashedCursor {
     /// Value returned by the cursor.
     type Value: std::fmt::Debug;
@@ -41,10 +53,25 @@ pub trait HashedCursor {
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError>;
+
+    /// Reset the cursor to its initial state.
+    ///
+    /// # Important
+    ///
+    /// After calling this method, the subsequent operation MUST be a [`HashedCursor::seek`] call.
+    fn reset(&mut self);
 }
 
 /// The cursor for iterating over hashed storage entries.
+#[auto_impl::auto_impl(&mut)]
 pub trait HashedStorageCursor: HashedCursor {
     /// Returns `true` if there are no entries for a given key.
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError>;
+
+    /// Set the hashed address for the storage cursor.
+    ///
+    /// # Important
+    ///
+    /// After calling this method, the subsequent operation MUST be a [`HashedCursor::seek`] call.
+    fn set_hashed_address(&mut self, hashed_address: B256);
 }

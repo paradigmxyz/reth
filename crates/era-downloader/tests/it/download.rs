@@ -10,7 +10,7 @@ use test_case::test_case;
 #[test_case("https://era1.ethportal.net/"; "ethportal")]
 #[test_case("https://era.ithaca.xyz/era1/index.html"; "ithaca")]
 #[tokio::test]
-async fn test_getting_file_url_after_fetching_file_list(url: &str) {
+async fn test_getting_era1_file_url_after_fetching_file_list(url: &str) {
     let base_url = Url::from_str(url).unwrap();
     let folder = tempdir().unwrap();
     let folder = folder.path();
@@ -47,4 +47,20 @@ async fn test_getting_file_after_fetching_file_list(url: &str) {
     let expected_count = 1;
     let actual_count = client.files_count().await;
     assert_eq!(actual_count, expected_count);
+}
+
+#[test_case("https://mainnet.era.nimbus.team/"; "nimbus")]
+#[tokio::test]
+async fn test_getting_era_file_url_after_fetching_file_list(url: &str) {
+    let base_url = Url::from_str(url).unwrap();
+    let folder = tempdir().unwrap();
+    let folder = folder.path();
+    let client = EraClient::new(StubClient, base_url.clone(), folder);
+
+    client.fetch_file_list().await.unwrap();
+
+    let expected_url = Some(base_url.join("mainnet-00000-4b363db9.era").unwrap());
+    let actual_url = client.url(0).await.unwrap();
+
+    assert_eq!(actual_url, expected_url);
 }

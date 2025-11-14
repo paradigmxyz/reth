@@ -6,8 +6,11 @@ use crate::{
 use alloy_eips::eip2718::Encodable2718;
 use rayon::prelude::*;
 use reth_db_api::{tables, transaction::DbTxMut};
-use reth_provider::{BlockReader, DBProvider, PruneCheckpointReader};
-use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint};
+use reth_provider::{BlockReader, DBProvider, PruneCheckpointReader, StaticFileProviderFactory};
+use reth_prune_types::{
+    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
+};
+use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, instrument, trace};
 
 #[derive(Debug)]
@@ -23,8 +26,10 @@ impl TransactionLookup {
 
 impl<Provider> Segment<Provider> for TransactionLookup
 where
-    Provider:
-        DBProvider<Tx: DbTxMut> + BlockReader<Transaction: Encodable2718> + PruneCheckpointReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + BlockReader<Transaction: Encodable2718>
+        + PruneCheckpointReader
+        + StaticFileProviderFactory,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::TransactionLookup
@@ -38,7 +43,7 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
+    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
     fn prune(
         &self,
         provider: &Provider,
@@ -47,18 +52,26 @@ where
         // It is not possible to prune TransactionLookup data for which we don't have transaction
         // data. If the TransactionLookup checkpoint is lagging behind (which can happen e.g. when
         // pre-merge history is dropped and then later tx lookup pruning is enabled) then we can
-        // only prune from the tx checkpoint and onwards.
-        if let Some(txs_checkpoint) = provider.get_prune_checkpoint(PruneSegment::Transactions)? &&
+        // only prune from the lowest static file.
+        if let Some(lowest_range) =
+            provider.static_file_provider().get_lowest_range(StaticFileSegment::Transactions) &&
             input
                 .previous_checkpoint
-                .is_none_or(|checkpoint| checkpoint.block_number < txs_checkpoint.block_number)
+                .is_none_or(|checkpoint| checkpoint.block_number < Some(lowest_range.start()))
         {
-            input.previous_checkpoint = Some(txs_checkpoint);
-            debug!(
-                target: "pruner",
-                transactions_checkpoint = ?input.previous_checkpoint,
-                "No TransactionLookup checkpoint found, using Transactions checkpoint as fallback"
-            );
+            let new_checkpoint = lowest_range.start().saturating_sub(1);
+            if let Some(body_indices) = provider.block_body_indices(new_checkpoint)? {
+                input.previous_checkpoint = Some(PruneCheckpoint {
+                    block_number: Some(new_checkpoint),
+                    tx_number: Some(body_indices.last_tx_num()),
+                    prune_mode: self.mode,
+                });
+                debug!(
+                    target: "pruner",
+                    static_file_checkpoint = ?input.previous_checkpoint,
+                    "Using static file transaction checkpoint as TransactionLookup starting point"
+                );
+            }
         }
 
         let (start, end) = match input.get_next_tx_num_range(provider)? {
@@ -109,7 +122,7 @@ where
         let last_pruned_transaction = last_pruned_transaction.unwrap_or(tx_range_end);
 
         let last_pruned_block = provider
-            .transaction_block(last_pruned_transaction)?
+            .block_by_transaction_id(last_pruned_transaction)?
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
             // If there's more transaction lookup entries to prune, set the checkpoint block number
             // to previous, so we could finish pruning its transaction lookup entries on the next

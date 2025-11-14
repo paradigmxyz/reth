@@ -1,7 +1,7 @@
 //! Core traits for working with execution payloads.
 
 use crate::PayloadBuilderError;
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     eip7685::Requests,
@@ -9,8 +9,60 @@ use alloy_eips::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
+use either::Either;
+use reth_execution_types::ExecutionOutcome;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_trie_common::{
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, HashedPostStateSorted,
+};
+
+/// Represents an executed block for payload building purposes.
+///
+/// This type captures the complete execution state of a built block,
+/// including the recovered block, execution outcome, hashed state, and trie updates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
+    /// Recovered Block
+    pub recovered_block: Arc<RecoveredBlock<N::Block>>,
+    /// Block's execution outcome.
+    pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+    /// Block's hashed state.
+    ///
+    /// Supports both unsorted and sorted variants so payload builders can avoid cloning in order
+    /// to convert from one to the other when it's not necessary.
+    pub hashed_state: Either<Arc<HashedPostState>, Arc<HashedPostStateSorted>>,
+    /// Trie updates that result from calculating the state root for the block.
+    ///
+    /// Supports both unsorted and sorted variants so payload builders can avoid cloning in order
+    /// to convert from one to the other when it's not necessary.
+    pub trie_updates: Either<Arc<TrieUpdates>, Arc<TrieUpdatesSorted>>,
+}
+
+impl<N: NodePrimitives> BuiltPayloadExecutedBlock<N> {
+    /// Converts this into an [`reth_chain_state::ExecutedBlock`].
+    ///
+    /// If the hashed state or trie updates are in sorted form, they will be converted
+    /// back to their unsorted representations.
+    pub fn into_executed_payload(self) -> reth_chain_state::ExecutedBlock<N> {
+        let hashed_state = match self.hashed_state {
+            Either::Left(unsorted) => unsorted,
+            Either::Right(sorted) => Arc::new(Arc::unwrap_or_clone(sorted).into()),
+        };
+
+        let trie_updates = match self.trie_updates {
+            Either::Left(unsorted) => unsorted,
+            Either::Right(sorted) => Arc::new(Arc::unwrap_or_clone(sorted).into()),
+        };
+
+        reth_chain_state::ExecutedBlock {
+            recovered_block: self.recovered_block,
+            execution_output: self.execution_output,
+            hashed_state,
+            trie_updates,
+        }
+    }
+}
 
 /// Represents a successfully built execution payload (block).
 ///
@@ -30,7 +82,7 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
     /// Returns the complete execution result including state updates.
     ///
     /// Returns `None` if execution data is not available or not tracked.
-    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<Self::Primitives>> {
+    fn executed_block(&self) -> Option<BuiltPayloadExecutedBlock<Self::Primitives>> {
         None
     }
 
@@ -155,7 +207,7 @@ where
     }
 }
 
-impl<Attributes, L, R> PayloadAttributesBuilder<Attributes> for either::Either<L, R>
+impl<Attributes, L, R> PayloadAttributesBuilder<Attributes> for Either<L, R>
 where
     L: PayloadAttributesBuilder<Attributes>,
     R: PayloadAttributesBuilder<Attributes>,

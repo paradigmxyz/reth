@@ -52,7 +52,7 @@ fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre
     // Create the verifier
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
-    let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
 
     let mut inconsistent_nodes = 0;
     let start_time = Instant::now();
@@ -136,7 +136,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(
     let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
 
     // Create the verifier
-    let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
 
     let mut inconsistent_nodes = 0;
     let start_time = Instant::now();
@@ -179,8 +179,17 @@ fn verify_and_repair<N: ProviderNodeTypes>(
             Output::StorageWrong { account, path, expected: node, .. } |
             Output::StorageMissing(account, path, node) => {
                 // Wrong/missing storage node value, upsert it
+                // (We can't just use `upsert` method with a dup cursor, it's not properly
+                // supported)
                 let nibbles = StoredNibblesSubKey(path);
-                let entry = StorageTrieEntry { nibbles, node };
+                let entry = StorageTrieEntry { nibbles: nibbles.clone(), node };
+                if storage_trie_cursor
+                    .seek_by_key_subkey(account, nibbles.clone())?
+                    .filter(|v| v.nibbles == nibbles)
+                    .is_some()
+                {
+                    storage_trie_cursor.delete_current()?;
+                }
                 storage_trie_cursor.upsert(account, &entry)?;
             }
             Output::Progress(path) => {
