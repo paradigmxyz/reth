@@ -340,7 +340,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     provider_rw.save_stage_checkpoint(unwind_stage.id(), checkpoint)?;
                 }
 
-                if self.commit {
+                // NOTE: headers must be committed because headers cannot be written to if static
+                // file pruning is already queued.
+                //
+                // This also means that all `stage run header` commands commit for unwinding. This
+                // is because static files do not have transactions and we cannot change the view of
+                // headers without writing.
+                if self.commit || self.stage == StageEnum::Headers {
                     provider_rw.commit()?;
                     provider_rw = provider_factory.database_provider_rw()?;
                 }
