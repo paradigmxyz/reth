@@ -2083,6 +2083,10 @@ impl<N: NodePrimitives> StatsReader for StaticFileProvider<N> {
                 .map(|txs| txs + 1)
                 .unwrap_or_default()
                 as usize),
+            tables::TransactionSenders::NAME => Ok(self
+                .get_highest_static_file_tx(StaticFileSegment::TransactionSenders)
+                .map(|txs| txs + 1)
+                .unwrap_or_default() as usize),
             _ => Err(ProviderError::UnsupportedProvider),
         }
     }
