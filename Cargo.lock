@@ -7920,6 +7920,7 @@ dependencies = [
  "rand 0.8.5",
  "rand 0.9.2",
  "reth-chainspec",
+ "reth-discv5-metrics-derive",
  "reth-ethereum-forks",
  "reth-metrics",
  "reth-network-peers",
@@ -7928,6 +7929,15 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-discv5-metrics-derive"
+version = "1.9.2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.109",
 ]
 
 [[package]]
