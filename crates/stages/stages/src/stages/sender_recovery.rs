@@ -175,6 +175,12 @@ where
     Provider: DBProvider + HeaderProvider + TransactionsProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
+    assert_eq!(
+        tx_range.clone().count(),
+        block_numbers.len(),
+        "Transaction range and block numbers count mismatch"
+    );
+
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
 
     // Preallocate channels for each chunks in the batch
