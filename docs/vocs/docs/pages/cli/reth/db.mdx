@@ -9,17 +9,18 @@ $ reth db --help
 Usage: reth db [OPTIONS] <COMMAND>
 
 Commands:
-  stats        Lists all the tables, their entry count and their size
-  list         Lists the contents of a table
-  checksum     Calculates the content checksum of a table
-  diff         Create a diff between two database tables or two entire databases
-  get          Gets the content of a table for the given key
-  drop         Deletes all database entries
-  clear        Deletes all table entries
-  repair-trie  Verifies trie consistency and outputs any inconsistencies
-  version      Lists current and local database versions
-  path         Returns the full database path
-  help         Print this message or the help of the given subcommand(s)
+  stats               Lists all the tables, their entry count and their size
+  list                Lists the contents of a table
+  checksum            Calculates the content checksum of a table
+  diff                Create a diff between two database tables or two entire databases
+  get                 Gets the content of a table for the given key
+  drop                Deletes all database entries
+  clear               Deletes all table entries
+  repair-trie         Verifies trie consistency and outputs any inconsistencies
+  static-file-header  Reads and displays the static file segment header
+  version             Lists current and local database versions
+  path                Returns the full database path
+  help                Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
@@ -78,6 +79,15 @@ Database:
 
           The default value is 8TB.
 
+      --db.page-size <PAGE_SIZE>
+          Database page size (e.g., 4KB, 8KB, 16KB).
+
+          Specifies the page size used by the MDBX database.
+
+          The page size determines the maximum database size. MDBX supports up to 2^31 pages, so with the default 4KB page size, the maximum database size is 8TB. To allow larger databases, increase this value to 8KB or higher.
+
+          WARNING: This setting is only configurable at database creation; changing it later requires re-syncing.
+
       --db.growth-step <GROWTH_STEP>
           Database growth step (e.g., 4GB, 4KB)
 
@@ -89,6 +99,23 @@ Database:
 
       --db.sync-mode <SYNC_MODE>
           Controls how aggressively the database synchronizes data to disk
+
+Static Files:
+      --static-files.blocks-per-file.headers <BLOCKS_PER_FILE_HEADERS>
+          Number of blocks per file for the headers segment
+
+      --static-files.blocks-per-file.transactions <BLOCKS_PER_FILE_TRANSACTIONS>
+          Number of blocks per file for the transactions segment
+
+      --static-files.blocks-per-file.receipts <BLOCKS_PER_FILE_RECEIPTS>
+          Number of blocks per file for the receipts segment
+
+      --static-files.receipts
+          Store receipts in static files instead of the database.
+
+          When enabled, receipts will be written to static files on disk instead of the database.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
 Logging:
       --log.stdout.format <FORMAT>

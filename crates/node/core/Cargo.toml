@@ -19,6 +19,7 @@ reth-cli-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-storage-errors.workspace = true
 reth-storage-api = { workspace = true, features = ["std", "db-api"] }
+reth-provider.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-rpc-eth-types.workspace = true
@@ -52,6 +53,7 @@ derive_more.workspace = true
 toml.workspace = true
 serde.workspace = true
 strum = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
 url.workspace = true
 
 # io

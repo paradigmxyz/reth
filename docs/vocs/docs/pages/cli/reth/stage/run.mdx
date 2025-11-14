@@ -65,6 +65,15 @@ Database:
 
           The default value is 8TB.
 
+      --db.page-size <PAGE_SIZE>
+          Database page size (e.g., 4KB, 8KB, 16KB).
+
+          Specifies the page size used by the MDBX database.
+
+          The page size determines the maximum database size. MDBX supports up to 2^31 pages, so with the default 4KB page size, the maximum database size is 8TB. To allow larger databases, increase this value to 8KB or higher.
+
+          WARNING: This setting is only configurable at database creation; changing it later requires re-syncing.
+
       --db.growth-step <GROWTH_STEP>
           Database growth step (e.g., 4GB, 4KB)
 
@@ -76,6 +85,23 @@ Database:
 
       --db.sync-mode <SYNC_MODE>
           Controls how aggressively the database synchronizes data to disk
+
+Static Files:
+      --static-files.blocks-per-file.headers <BLOCKS_PER_FILE_HEADERS>
+          Number of blocks per file for the headers segment
+
+      --static-files.blocks-per-file.transactions <BLOCKS_PER_FILE_TRANSACTIONS>
+          Number of blocks per file for the transactions segment
+
+      --static-files.blocks-per-file.receipts <BLOCKS_PER_FILE_RECEIPTS>
+          Number of blocks per file for the receipts segment
+
+      --static-files.receipts
+          Store receipts in static files instead of the database.
+
+          When enabled, receipts will be written to static files on disk instead of the database.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
       --metrics <SOCKET>
           Enable Prometheus metrics.
@@ -210,6 +236,11 @@ Networking:
 
           This will also deterministically set the peer ID. If not specified, it will be set in the data dir for the chain being used.
 
+      --p2p-secret-key-hex <HEX>
+          Hex encoded secret key to use for this node.
+
+          This will also deterministically set the peer ID. Cannot be used together with `--p2p-secret-key`.
+
       --no-persist-peers
           Do not persist peers.
 
@@ -295,6 +326,13 @@ Networking:
 
           [default: All]
 
+      --tx-ingress-policy <TX_INGRESS_POLICY>
+          Transaction ingress policy
+
+          Determines which peers' transactions are accepted over P2P.
+
+          [default: All]
+
       --disable-tx-gossip
           Disable transaction pool gossip
 
@@ -308,7 +346,7 @@ Networking:
           [default: sqrt]
 
       --required-block-hashes <REQUIRED_BLOCK_HASHES>
-          Comma separated list of required block hashes. Peers that don't have these blocks will be filtered out
+          Comma separated list of required block hashes or block number=hash pairs. Peers that don't have these blocks will be filtered out. Format: hash or `block_number=hash` (e.g., 23115201=0x1234...)
 
       --network-id <NETWORK_ID>
           Optional network ID to override the chain specification's network ID for P2P connections

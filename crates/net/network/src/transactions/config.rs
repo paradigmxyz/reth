@@ -14,6 +14,7 @@ use derive_more::{Constructor, Display};
 
 use reth_eth_wire::NetworkPrimitives;
 use reth_ethereum_primitives::TxType;
+use reth_network_types::peers::kind::PeerKind;
 
 /// Configuration for managing transactions within the network.
 #[derive(Debug, Clone)]
@@ -26,6 +27,9 @@ pub struct TransactionsManagerConfig {
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
+    /// Which peers we accept incoming transactions or announcements from.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub ingress_policy: TransactionIngressPolicy,
 }
 
 impl Default for TransactionsManagerConfig {
@@ -34,6 +38,7 @@ impl Default for TransactionsManagerConfig {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             propagation_mode: TransactionPropagationMode::default(),
+            ingress_policy: TransactionIngressPolicy::default(),
         }
     }
 }
@@ -173,6 +178,48 @@ impl FromStr for TransactionPropagationKind {
             "Trusted" | "trusted" => Ok(Self::Trusted),
             "None" | "none" => Ok(Self::None),
             _ => Err(format!("Invalid transaction propagation policy: {s}")),
+        }
+    }
+}
+
+/// Determines which peers we will accept incoming transactions or announcements from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TransactionIngressPolicy {
+    /// Accept transactions from any peer.
+    #[default]
+    All,
+    /// Accept transactions only from trusted peers.
+    Trusted,
+    /// Drop all incoming transactions.
+    None,
+}
+
+impl TransactionIngressPolicy {
+    /// Returns true if the ingress policy allows the provided peer kind.
+    pub const fn allows(&self, peer_kind: PeerKind) -> bool {
+        match self {
+            Self::All => true,
+            Self::Trusted => peer_kind.is_trusted(),
+            Self::None => false,
+        }
+    }
+
+    /// Returns true if the ingress policy accepts transactions from any peer.
+    pub const fn allows_all(&self) -> bool {
+        matches!(self, Self::All)
+    }
+}
+
+impl FromStr for TransactionIngressPolicy {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "All" | "all" => Ok(Self::All),
+            "Trusted" | "trusted" => Ok(Self::Trusted),
+            "None" | "none" => Ok(Self::None),
+            _ => Err(format!("Invalid transaction ingress policy: {s}")),
         }
     }
 }

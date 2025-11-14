@@ -61,11 +61,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
     {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
 
-        let provider = provider_factory.database_provider_ro()?;
         let components = components(provider_factory.chain_spec());
 
         let min_block = self.from;
-        let max_block = self.to.unwrap_or(provider.best_block_number()?);
+        let best_block = DatabaseProviderFactory::database_provider_ro(&provider_factory)?
+            .best_block_number()?;
+        let mut max_block = best_block;
+        if let Some(to) = self.to {
+            if to > best_block {
+                warn!(
+                    requested = to,
+                    best_block,
+                    "Requested --to is beyond available chain head; clamping to best block"
+                );
+            } else {
+                max_block = to;
+            }
+        };
 
         let total_blocks = max_block - min_block;
         let total_gas = calculate_gas_used_from_headers(
@@ -99,6 +111,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let stats_tx = stats_tx.clone();
             tasks.spawn_blocking(move || {
                 let mut executor = evm_config.batch_executor(db_at(start_block - 1));
+                let mut executor_created = Instant::now();
+                let executor_lifetime = Duration::from_secs(120);
+
                 for block in start_block..end_block {
                     let block = provider_factory
                         .recovered_block(block.into(), TransactionVariant::NoHash)?
@@ -154,9 +169,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let _ = stats_tx.send(block.gas_used());
 
-                    // Reset DB once in a while to avoid OOM
-                    if executor.size_hint() > 1_000_000 {
+                    // Reset DB once in a while to avoid OOM or read tx timeouts
+                    if executor.size_hint() > 1_000_000 ||
+                        executor_created.elapsed() > executor_lifetime
+                    {
                         executor = evm_config.batch_executor(db_at(block.number()));
+                        executor_created = Instant::now();
                     }
                 }
 
