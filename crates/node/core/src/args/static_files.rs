@@ -20,6 +20,10 @@ pub struct StaticFilesArgs {
     #[arg(long = "static-files.blocks-per-file.receipts")]
     pub blocks_per_file_receipts: Option<u64>,
 
+    /// Number of blocks per file for the account changesets segment.
+    #[arg(long = "static-files.blocks-per-file.account-change-sets")]
+    pub blocks_per_file_account_change_sets: Option<u64>,
+
     /// Store receipts in static files instead of the database.
     ///
     /// When enabled, receipts will be written to static files on disk instead of the database.
@@ -29,9 +33,9 @@ pub struct StaticFilesArgs {
     #[arg(long = "static-files.receipts")]
     pub receipts: bool,
 
-    /// Number of blocks per file for the account changesets segment.
-    #[arg(long = "static-files.blocks-per-file.account-change-sets")]
-    pub blocks_per_file_account_change_sets: Option<u64>,
+    /// Storage account changesets in static files
+    #[arg(long = "static-files.account-change-sets")]
+    pub account_change_sets: bool,
 }
 
 impl StaticFilesArgs {
@@ -54,10 +58,15 @@ impl StaticFilesArgs {
 
     /// Converts the static files arguments into [`StorageSettings`].
     pub const fn to_settings(&self) -> StorageSettings {
+        let mut settings = StorageSettings::legacy();
         if self.receipts {
-            StorageSettings::new().with_receipts_in_static_files()
-        } else {
-            StorageSettings::legacy()
+            settings = settings.with_receipts_in_static_files();
         }
+
+        if self.account_change_sets {
+            settings = settings.with_account_changesets_in_static_files();
+        }
+
+        settings
     }
 }

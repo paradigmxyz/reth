@@ -58,7 +58,7 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     ProviderFactory::new(
         db,
         chain_spec,
-        StaticFileProvider::read_write(static_dir.keep(), false).expect("static file provider"),
+        StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
     )
     .expect("failed to create test provider factory")
 }
