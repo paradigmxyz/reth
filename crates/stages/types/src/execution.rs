@@ -2,8 +2,8 @@ use core::time::Duration;
 
 /// The thresholds at which the execution stage writes state changes to the database.
 ///
-/// If any of the thresholds are hit, then the execution stage commits all pending changes
-/// to the database.
+/// If any of the thresholds (`max_blocks`, `max_changes`, `max_cumulative_gas`, or `max_duration`)
+/// are hit, then the execution stage commits all pending changes to the database.
 #[derive(Debug, Clone)]
 pub struct ExecutionStageThresholds {
     /// The maximum number of blocks to execute before the execution stage commits.
