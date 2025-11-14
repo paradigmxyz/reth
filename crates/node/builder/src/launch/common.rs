@@ -39,7 +39,10 @@ use alloy_primitives::{BlockNumber, B256};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
-use reth_config::{config::EtlConfig, PruneConfig};
+use reth_config::{
+    config::{EtlConfig, StaticFilesConfig},
+    PruneConfig,
+};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis_with_settings, InitStorageError};
@@ -483,10 +486,13 @@ where
             ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
                 .with_prune_modes(self.prune_modes());
 
+        // Update provider storage settings with CLI arguments
         let provider_rw = factory.provider_rw()?;
         let old_settings = provider_rw.cached_storage_settings();
-        let new_settings =
-            old_settings.with_receipts_in_static_files_opt(static_files_config.receipts);
+        // Destruct the config struct to not forget to update the settings with new segments
+        let StaticFilesConfig { blocks_per_file: _, receipts: receipts_in_static_files } =
+            *static_files_config;
+        let new_settings = old_settings.with_receipts_in_static_files_opt(receipts_in_static_files);
 
         if new_settings == old_settings {
             debug!(target: "reth::cli", settings = ?new_settings, "Storage settings are already up to date");
