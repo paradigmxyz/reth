@@ -263,6 +263,7 @@ impl NodeManager {
         if self.tracing_endpoint.is_some() {
             cmd.env("OTEL_BSP_MAX_QUEUE_SIZE", self.otlp_max_queue_size.to_string()); // Traces
             cmd.env("OTEL_BLRP_MAX_QUEUE_SIZE", "10000"); // Logs
+
             // Set service name to differentiate baseline vs feature runs in Jaeger
             cmd.env("OTEL_SERVICE_NAME", format!("reth-{}", ref_type));
         }
