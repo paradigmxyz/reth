@@ -10,14 +10,26 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 pub const MIN_WORKER_COUNT: usize = 32;
 
 /// Returns the default number of storage worker threads based on available parallelism.
+///
+/// Uses the higher of:
+/// - 2x CPU thread count
+/// - 32 workers (minimum)
+///
+/// The minimum of 32 workers is based on performance testing showing that lower counts
+/// are insufficient for chains like Base, which require higher parallelism for proof
+/// computation during state root calculations.
+///
+/// TODO: We should dynamically adjust this based on the number of available workers.
 fn default_storage_worker_count() -> usize {
     #[cfg(feature = "std")]
     {
-        std::thread::available_parallelism().map_or(8, |n| n.get() * 2).min(MIN_WORKER_COUNT)
+        std::thread::available_parallelism()
+            .map_or(MIN_WORKER_COUNT, |n| n.get() * 2)
+            .max(MIN_WORKER_COUNT)
     }
     #[cfg(not(feature = "std"))]
     {
-        8
+        MIN_WORKER_COUNT
     }
 }
 
