@@ -863,15 +863,41 @@ impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
 impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
     fn changed_accounts_with_range(
         &self,
-        range: impl RangeBounds<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeSet<Address>> {
-        self.tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range)?
-            .map(|entry| {
-                entry.map(|(_, account_before)| account_before.address).map_err(Into::into)
-            })
-            .collect()
+        // TODO: changeset metadata
+        let highest_static_block = self
+            .static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+
+        tracing::trace!(target: "provider::static_file", ?range, ?highest_static_block, "Getting changed accounts with range");
+
+        if let Some(highest) = highest_static_block {
+            let start = *range.start();
+            let static_end = (*range.end()).min(highest + 1);
+
+            let mut changed_accounts = BTreeSet::default();
+            if start <= static_end {
+                for block in start..=static_end {
+                    let block_changesets = self.account_block_changeset(block)?;
+                    tracing::trace!(target: "provider::static_file", ?block, ?block_changesets, ?highest, "Got some changesets");
+                    for changeset in block_changesets {
+                        changed_accounts.insert(changeset.address);
+                    }
+                }
+            }
+
+            tracing::trace!(target: "provider::static_file", ?range, ?highest_static_block, ?changed_accounts, "Got changed accounts with range");
+            Ok(changed_accounts)
+        } else {
+            self.tx
+                .cursor_read::<tables::AccountChangeSets>()?
+                .walk_range(range)?
+                .map(|entry| {
+                    entry.map(|(_, account_before)| account_before.address).map_err(Into::into)
+                })
+                .collect()
+        }
     }
 
     fn basic_accounts(
@@ -889,18 +915,45 @@ impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<Address, Vec<u64>>> {
-        let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+        tracing::trace!(target: "provider::static_file", ?range, "Getting changesets for range");
+        // TODO: changeset metadata
+        let highest_static_block = self
+            .static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
-        let account_transitions = changeset_cursor.walk_range(range)?.try_fold(
-            BTreeMap::new(),
-            |mut accounts: BTreeMap<Address, Vec<u64>>, entry| -> ProviderResult<_> {
-                let (index, account) = entry?;
-                accounts.entry(account.address).or_default().push(index);
-                Ok(accounts)
-            },
-        )?;
+        if let Some(highest) = highest_static_block {
+            let start = *range.start();
+            let static_end = (*range.end()).min(highest + 1);
 
-        Ok(account_transitions)
+            let mut changed_accounts_and_blocks: BTreeMap<_, Vec<u64>> = BTreeMap::default();
+            if start <= static_end {
+                for block in start..=static_end {
+                    let block_changesets = self.account_block_changeset(block)?;
+                    for changeset in block_changesets {
+                        changed_accounts_and_blocks
+                            .entry(changeset.address)
+                            .or_default()
+                            .push(block);
+                    }
+                }
+            }
+
+            tracing::trace!(target: "provider::static_file", ?range, ?changed_accounts_and_blocks, "Got changesets for range");
+            Ok(changed_accounts_and_blocks)
+        } else {
+            let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+
+            let account_transitions = changeset_cursor.walk_range(range)?.try_fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<Address, Vec<u64>>, entry| -> ProviderResult<_> {
+                    let (index, account) = entry?;
+                    accounts.entry(account.address).or_default().push(index);
+                    Ok(accounts)
+                },
+            )?;
+
+            Ok(account_transitions)
+        }
     }
 }
 
@@ -924,6 +977,13 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
+        // Try static files first
+        let static_changesets = self.static_file_provider.account_block_changeset(block_number)?;
+        if !static_changesets.is_empty() {
+            return Ok(static_changesets);
+        }
+
+        // Fall back to database
         let range = block_number..=block_number;
         self.tx
             .cursor_read::<tables::AccountChangeSets>()?
@@ -940,12 +1000,47 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
+        // Try static files first
+        if let Some(account) =
+            self.static_file_provider.get_account_before_block(block_number, address)?
+        {
+            return Ok(Some(account));
+        }
+
+        // Fall back to database
         self.tx
             .cursor_dup_read::<tables::AccountChangeSets>()?
             .seek_by_key_subkey(block_number, address)?
             .filter(|acc| acc.address == address)
             .map(Ok)
             .transpose()
+    }
+
+    fn account_changesets_range(
+        &self,
+        range: core::ops::Range<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        // Use the static file provider's helper method that handles both sources
+        self.static_file_provider.get_account_changesets_range(range, |db_range| {
+            // Fetch from database for blocks not in static files
+            let mut result = Vec::new();
+            let mut cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+            for entry in cursor.walk_range(db_range)? {
+                let (block_num, account_before) = entry?;
+                result.push((block_num, account_before));
+            }
+            Ok(result)
+        })
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        // check if account changesets are in static files, otherwise just count the changeset
+        // entries in the DB
+        if self.cached_storage_settings().account_changesets_in_static_files {
+            self.static_file_provider.account_changeset_count()
+        } else {
+            Ok(self.tx.entries::<tables::AccountChangeSets>()?)
+        }
     }
 }
 
@@ -1753,21 +1848,51 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
-        // Write account changes
-        tracing::trace!("Writing account changes");
-        let mut account_changeset_cursor =
-            self.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?;
+        // Write account changes to static files
+        tracing::debug!(target: "sync::stages::merkle_changesets", ?first_block, "Writing account changes to static files");
 
-        for (block_index, mut account_block_reverts) in reverts.accounts.into_iter().enumerate() {
-            let block_number = first_block + block_index as BlockNumber;
-            // Sort accounts by address.
-            account_block_reverts.par_sort_by_key(|a| a.0);
+        // Try to get a writer for AccountChangeSets static file
+        if let Ok(mut writer) =
+            self.static_file_provider.get_writer(first_block, StaticFileSegment::AccountChangeSets)
+        {
+            // Write to static files
+            tracing::trace!("Writing storage changes to static file");
+            for (block_index, mut account_block_reverts) in reverts.accounts.into_iter().enumerate()
+            {
+                let block_number = first_block + block_index as BlockNumber;
+                // Sort accounts by address.
+                account_block_reverts.par_sort_by_key(|a| a.0);
 
-            for (address, info) in account_block_reverts {
-                account_changeset_cursor.append_dup(
-                    block_number,
-                    AccountBeforeTx { address, info: info.map(Into::into) },
-                )?;
+                // Convert to AccountBeforeTx format
+                let changesets: Vec<AccountBeforeTx> = account_block_reverts
+                    .into_iter()
+                    .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                    .collect();
+
+                // Increment block and append changesets
+                writer.append_account_changeset(changesets, block_number)?;
+            }
+
+            // Commit the static file changes
+            writer.commit()?;
+        } else {
+            // Fallback to database if static file writer is not available
+            tracing::trace!("Static file writer not available, falling back to database");
+            let mut account_changeset_cursor =
+                self.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?;
+
+            for (block_index, mut account_block_reverts) in reverts.accounts.into_iter().enumerate()
+            {
+                let block_number = first_block + block_index as BlockNumber;
+                // Sort accounts by address.
+                account_block_reverts.par_sort_by_key(|a| a.0);
+
+                for (address, info) in account_block_reverts {
+                    account_changeset_cursor.append_dup(
+                        block_number,
+                        AccountBeforeTx { address, info: info.map(Into::into) },
+                    )?;
+                }
             }
         }
 
@@ -2008,7 +2133,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let storage_range = BlockNumberAddress::range(range.clone());
 
         let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
-        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
@@ -2016,6 +2140,26 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // anything.
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        // if there are static files for this segment, prune them.
+        // TODO: changeset metadata
+        let highest_changeset_block = self
+            .static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+        let account_changeset = if let Some(highest_block) = highest_changeset_block {
+            // TODO: add a `take` method that removes and returns the items instead of doing this
+            let changesets = self.account_changesets_range(block + 1..highest_block + 1)?;
+            let mut changeset_writer =
+                self.static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
+            changeset_writer.prune_account_changesets(block)?;
+            tracing::trace!(target: "provider::static_file", ?changesets, ?block, ?range, ?highest_block, "Removing and returning changesets for unwind");
+
+            changesets
+        } else {
+            // Have to remove from static files if they exist, otherwise remove using `take` for the
+            // changeset tables
+            self.take::<tables::AccountChangeSets>(range)?
+        };
 
         // populate bundle state and reverts from changesets / state cursors, to iterate over,
         // remove, and return later

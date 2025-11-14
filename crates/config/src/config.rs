@@ -436,6 +436,8 @@ pub struct BlocksPerFileConfig {
     pub transactions: Option<u64>,
     /// Number of blocks per file for the receipts segment.
     pub receipts: Option<u64>,
+    /// Number of blocks per file for the account changesets segment.
+    pub account_change_sets: Option<u64>,
 }
 
 impl StaticFilesConfig {
@@ -443,7 +445,8 @@ impl StaticFilesConfig {
     ///
     /// Returns an error if any blocks per file value is zero.
     pub fn validate(&self) -> eyre::Result<()> {
-        let BlocksPerFileConfig { headers, transactions, receipts } = self.blocks_per_file;
+        let BlocksPerFileConfig { headers, transactions, receipts, account_change_sets: _ } =
+            self.blocks_per_file;
         eyre::ensure!(headers != Some(0), "Headers segment blocks per file must be greater than 0");
         eyre::ensure!(
             transactions != Some(0),
@@ -458,7 +461,8 @@ impl StaticFilesConfig {
 
     /// Converts the blocks per file configuration into a [`HashMap`] per segment.
     pub fn as_blocks_per_file_map(&self) -> HashMap<StaticFileSegment, u64> {
-        let BlocksPerFileConfig { headers, transactions, receipts } = self.blocks_per_file;
+        let BlocksPerFileConfig { headers, transactions, receipts, account_change_sets } =
+            self.blocks_per_file;
 
         let mut map = HashMap::new();
         // Iterating over all possible segments allows us to do an exhaustive match here,
@@ -468,6 +472,7 @@ impl StaticFilesConfig {
                 StaticFileSegment::Headers => headers,
                 StaticFileSegment::Transactions => transactions,
                 StaticFileSegment::Receipts => receipts,
+                StaticFileSegment::AccountChangeSets => account_change_sets,
             };
 
             if let Some(blocks_per_file) = blocks_per_file {

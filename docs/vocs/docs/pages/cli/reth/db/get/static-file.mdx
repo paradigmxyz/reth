@@ -6,17 +6,21 @@ Gets the content of a static file segment for the given key
 $ reth db get static-file --help
 ```
 ```txt
-Usage: reth db get static-file [OPTIONS] <SEGMENT> <KEY>
+Usage: reth db get static-file [OPTIONS] <SEGMENT> <KEY> [SUBKEY]
 
 Arguments:
   <SEGMENT>
           Possible values:
-          - headers:      Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
-          - transactions: Static File segment responsible for the `Transactions` table
-          - receipts:     Static File segment responsible for the `Receipts` table
+          - headers:             Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
+          - transactions:        Static File segment responsible for the `Transactions` table
+          - receipts:            Static File segment responsible for the `Receipts` table
+          - account-change-sets: Static File segment responsible for the `AccountChangeSets` table
 
   <KEY>
           The key to get content for
+
+  [SUBKEY]
+          The subkey to get content for, for example address in changeset
 
 Options:
       --raw

@@ -212,7 +212,9 @@ where
             // Iterate over plain state and get newest value.
             // Assumption we are okay to make is that plainstate represent
             // `previous_stage_progress` state.
+            tracing::trace!(target: "provider::static_file", ?lists, "Getting accounts from plain state for hashing");
             let accounts = provider.basic_accounts(lists)?;
+            tracing::trace!(target: "provider::static_file", ?accounts, "Got accounts from plain state for hashing");
             // Insert and hash accounts to hashing table
             provider.insert_account_for_hashing(accounts)?;
         }
