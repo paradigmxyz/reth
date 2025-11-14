@@ -18,11 +18,6 @@ pub struct StorageSettings {
 }
 
 impl StorageSettings {
-    /// Creates a new `StorageSettings` with default values.
-    pub const fn new() -> Self {
-        Self { receipts_in_static_files: false }
-    }
-
     /// Creates `StorageSettings` for legacy nodes.
     ///
     /// This explicitly sets `receipts_in_static_files` to `false`, ensuring older nodes
@@ -31,9 +26,11 @@ impl StorageSettings {
         Self { receipts_in_static_files: false }
     }
 
-    /// Sets the `receipts_static_files` flag to true.
-    pub const fn with_receipts_in_static_files(mut self) -> Self {
-        self.receipts_in_static_files = true;
+    /// Sets the `receipts_static_files` flag to specified value, if any.
+    pub const fn with_receipts_in_static_files_opt(mut self, value: Option<bool>) -> Self {
+        if let Some(value) = value {
+            self.receipts_in_static_files = value;
+        }
         self
     }
 }

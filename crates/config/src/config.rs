@@ -423,6 +423,8 @@ impl EtlConfig {
 pub struct StaticFilesConfig {
     /// Number of blocks per file for each segment.
     pub blocks_per_file: BlocksPerFileConfig,
+    /// Whether to store receipts in static files.
+    pub receipts: Option<bool>,
 }
 
 /// Configuration for the number of blocks per file for each segment.

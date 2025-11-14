@@ -66,8 +66,9 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
+    BlockHashReader, BlockNumReader, MetadataWriter, ProviderError, ProviderFactory,
+    ProviderResult, StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
+    StorageSettingsCache,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -481,6 +482,20 @@ where
         let factory =
             ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
                 .with_prune_modes(self.prune_modes());
+
+        let provider_rw = factory.provider_rw()?;
+        let old_settings = provider_rw.cached_storage_settings();
+        let new_settings =
+            old_settings.with_receipts_in_static_files_opt(static_files_config.receipts);
+
+        if new_settings == old_settings {
+            debug!(target: "reth::cli", settings = ?new_settings, "Storage settings are already up to date");
+        } else {
+            debug!(target: "reth::cli", ?old_settings, ?new_settings, "Updating storage settings");
+            provider_rw.write_storage_settings(new_settings)?;
+            provider_rw.set_storage_settings_cache(new_settings);
+            provider_rw.commit()?;
+        }
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
