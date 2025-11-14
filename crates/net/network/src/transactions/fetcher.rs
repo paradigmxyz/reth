@@ -830,8 +830,8 @@ impl PeerPendingQueues {
     }
 
     fn remove_hash(&mut self, hash: &TxHash) {
-        if let Some(peer) = self.owner_by_hash.remove(hash)
-            && let Some(queue) = self.by_peer.get_mut(&peer)
+        if let Some(peer) = self.owner_by_hash.remove(hash) &&
+            let Some(queue) = self.by_peer.get_mut(&peer)
         {
             if let Some(pos) = queue.iter().position(|h| h == hash) {
                 queue.remove(pos);
