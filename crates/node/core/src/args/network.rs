@@ -211,7 +211,6 @@ pub struct NetworkArgs {
     ///
     /// Comma separated list of CIDR network specifications.
     /// Only peers with IP addresses within these ranges will be allowed to connect.
-    /// Similar to geth's --netrestrict flag.
     ///
     /// Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
     #[arg(long, value_name = "NETRESTRICT")]
