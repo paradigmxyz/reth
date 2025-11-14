@@ -150,39 +150,41 @@ where
             );
 
             if range_output.is_final_range {
+                let append_only =
+                    provider.count_entries::<tables::TransactionHashNumbers>()?.is_zero();
+                let mut txhash_cursor = provider
+                    .tx_ref()
+                    .cursor_write::<tables::RawTable<tables::TransactionHashNumbers>>()?;
+
+                let total_hashes = hash_collector.len();
+                let interval = (total_hashes / 10).max(1);
+                for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
+                    let (hash, number) = hash_to_number?;
+                    if index > 0 && index.is_multiple_of(interval) {
+                        info!(
+                            target: "sync::stages::transaction_lookup",
+                            ?append_only,
+                            progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                            "Inserting hashes"
+                        );
+                    }
+
+                    let key = RawKey::<TxHash>::from_vec(hash);
+                    if append_only {
+                        txhash_cursor.append(key, &RawValue::<TxNumber>::from_vec(number))?
+                    } else {
+                        txhash_cursor.insert(key, &RawValue::<TxNumber>::from_vec(number))?
+                    }
+                }
+
+                trace!(target: "sync::stages::transaction_lookup",
+                    total_hashes,
+                    "Transaction hashes inserted"
+                );
+
                 break;
             }
         }
-
-        let append_only = provider.count_entries::<tables::TransactionHashNumbers>()?.is_zero();
-        let mut txhash_cursor =
-            provider.tx_ref().cursor_write::<tables::RawTable<tables::TransactionHashNumbers>>()?;
-
-        let total_hashes = hash_collector.len();
-        let interval = (total_hashes / 10).max(1);
-        for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
-            let (hash, number) = hash_to_number?;
-            if index > 0 && index.is_multiple_of(interval) {
-                info!(
-                    target: "sync::stages::transaction_lookup",
-                    ?append_only,
-                    progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
-                    "Inserting hashes"
-                );
-            }
-
-            let key = RawKey::<TxHash>::from_vec(hash);
-            if append_only {
-                txhash_cursor.append(key, &RawValue::<TxNumber>::from_vec(number))?
-            } else {
-                txhash_cursor.insert(key, &RawValue::<TxNumber>::from_vec(number))?
-            }
-        }
-
-        trace!(target: "sync::stages::transaction_lookup",
-            total_hashes,
-            "Transaction hashes inserted"
-        );
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(input.target())
