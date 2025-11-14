@@ -95,6 +95,7 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
 impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// Returns a helper capable of constructing transaction requests from announcements or
     /// pending caches.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn request_builder(&mut self) -> RequestBuilder<'_, N> {
         RequestBuilder { fetcher: self }
     }
@@ -827,20 +828,20 @@ struct PeerPendingQueues {
 impl PeerPendingQueues {
     fn assign(&mut self, peer: PeerId, hash: TxHash) {
         self.remove_hash(&hash);
-        let entry = self.by_peer.entry(peer.clone()).or_insert_with(VecDeque::new);
+        let entry = self.by_peer.entry(peer).or_default();
         entry.push_back(hash);
         self.owner_by_hash.insert(hash, peer);
     }
 
     fn remove_hash(&mut self, hash: &TxHash) {
-        if let Some(peer) = self.owner_by_hash.remove(hash) {
-            if let Some(queue) = self.by_peer.get_mut(&peer) {
-                if let Some(pos) = queue.iter().position(|h| h == hash) {
-                    queue.remove(pos);
-                }
-                if queue.is_empty() {
-                    self.by_peer.remove(&peer);
-                }
+        if let Some(peer) = self.owner_by_hash.remove(hash)
+            && let Some(queue) = self.by_peer.get_mut(&peer)
+        {
+            if let Some(pos) = queue.iter().position(|h| h == hash) {
+                queue.remove(pos);
+            }
+            if queue.is_empty() {
+                self.by_peer.remove(&peer);
             }
         }
     }
@@ -857,11 +858,7 @@ impl PeerPendingQueues {
     {
         self.by_peer.iter().find_map(|(peer, queue)| {
             let hash = queue.front()?;
-            if is_idle(peer) {
-                Some((peer.clone(), *hash))
-            } else {
-                None
-            }
+            is_idle(peer).then_some((*peer, *hash))
         })
     }
 
@@ -882,7 +879,7 @@ pub struct RequestBuilder<'a, N: NetworkPrimitives> {
 }
 
 impl<'a, N: NetworkPrimitives> RequestBuilder<'a, N> {
-    fn info(&self) -> &TransactionFetcherInfo {
+    const fn info(&self) -> &TransactionFetcherInfo {
         &self.fetcher.info
     }
 
