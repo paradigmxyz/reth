@@ -126,8 +126,15 @@ where
         );
 
         loop {
-            let range_output =
-                input.next_block_range_with_transaction_threshold(provider, self.chunk_size)?;
+            let Some(range_output) =
+                input.next_block_range_with_transaction_threshold(provider, self.chunk_size)?
+            else {
+                input.checkpoint = Some(
+                    StageCheckpoint::new(input.target())
+                        .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+                );
+                break;
+            };
 
             let end_block = *range_output.block_range.end();
 
