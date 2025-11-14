@@ -346,11 +346,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     ///
     /// Finds the first buffered hash with a fallback peer that is idle, if any. Fills the rest of
     /// the request by checking the transactions seen by the peer against the buffer.
-    pub fn on_fetch_pending_hashes(
-        &mut self,
-        peers: &HashMap<PeerId, PeerMetadata<N>>,
-        _has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
-    ) {
+    pub fn on_fetch_pending_hashes(&mut self, peers: &HashMap<PeerId, PeerMetadata<N>>) {
         let mut search_durations = TxFetcherSearchDurations::default();
 
         if self.use_peer_queue_scheduler &&

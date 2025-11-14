@@ -509,13 +509,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
     /// Runs an operation to fetch hashes that are cached in [`TransactionFetcher`].
     fn on_fetch_hashes_pending_fetch(&mut self) {
         // try drain transaction hashes pending fetch
-        let info = &self.pending_pool_imports_info;
-        let max_pending_pool_imports = info.max_pending_pool_imports;
-        let has_capacity_wrt_pending_pool_imports =
-            |divisor| info.has_capacity(max_pending_pool_imports / divisor);
-
-        self.transaction_fetcher
-            .on_fetch_pending_hashes(&self.peers, has_capacity_wrt_pending_pool_imports);
+        self.transaction_fetcher.on_fetch_pending_hashes(&self.peers);
     }
 
     /// Attempts to immediately schedule fetching of pending hashes if both the transaction fetcher
