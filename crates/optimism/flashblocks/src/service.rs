@@ -279,7 +279,7 @@ where
 
                         let elapsed = now.elapsed();
                         this.metrics.execution_duration.record(elapsed.as_secs_f64());
-                        this.metrics.execution_duration_by_index.record(elapsed.as_secs_f64());
+
                         trace!(
                             target: "flashblocks",
                             parent_hash = %new_pending.block().parent_hash(),
@@ -397,6 +397,4 @@ struct FlashBlockServiceMetrics {
     current_block_height: Gauge,
     /// Current flashblock index.
     current_index: Gauge,
-    /// Execution duration by flashblock index.
-    execution_duration_by_index: Histogram,
 }
