@@ -44,6 +44,10 @@ pub struct Command<C: ChainSpecParser> {
     /// Number of tasks to run in parallel
     #[arg(long, default_value = "10")]
     num_tasks: u64,
+
+    /// Continues with execution when an invalid block is encounterd and collects these blocks.
+    #[arg(long)]
+    skip_invalid_blocks: bool,
 }
 
 impl<C: ChainSpecParser> Command<C> {
@@ -95,7 +99,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             }
         };
 
+        let skip_invalid_blocks = self.skip_invalid_blocks;
         let (stats_tx, mut stats_rx) = mpsc::unbounded_channel();
+        let (info_tx, mut info_rx) = mpsc::unbounded_channel();
 
         let mut tasks = JoinSet::new();
         for i in 0..self.num_tasks {
@@ -109,20 +115,33 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let consensus = components.consensus().clone();
             let db_at = db_at.clone();
             let stats_tx = stats_tx.clone();
+            let info_tx = info_tx.clone();
             tasks.spawn_blocking(move || {
                 let mut executor = evm_config.batch_executor(db_at(start_block - 1));
                 let mut executor_created = Instant::now();
                 let executor_lifetime = Duration::from_secs(120);
 
-                for block in start_block..end_block {
+                'blocks: for block in start_block..end_block {
                     let block = provider_factory
                         .recovered_block(block.into(), TransactionVariant::NoHash)?
                         .unwrap();
-                    let result = executor.execute_one(&block)?;
+
+                    let result = match executor.execute_one(&block) {
+                        Ok(result) => result,
+                        Err(err) => {
+                            if skip_invalid_blocks {
+                                let _ = info_tx.send((block, eyre::Report::new(err)));
+                                continue
+                            }
+                            return Err(err.into())
+                        }
+                    };
 
                     if let Err(err) = consensus
                         .validate_block_post_execution(&block, &result)
-                        .wrap_err_with(|| format!("Failed to validate block {}", block.number()))
+                        .wrap_err_with(|| {
+                            format!("Failed to validate block {} {}", block.number(), block.hash())
+                        })
                     {
                         let correct_receipts =
                             provider_factory.receipts_by_block(block.number().into())?.unwrap();
@@ -158,6 +177,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                     };
 
                                     error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
+                                    if skip_invalid_blocks {
+                                        let _ = info_tx.send((block, err));
+                                        continue 'blocks;
+                                    }
                                     return Err(err);
                                 }
                             } else {
@@ -189,6 +212,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let mut last_logged_gas = 0;
         let mut last_logged_blocks = 0;
         let mut last_logged_time = Instant::now();
+        let mut invalid_blocks = Vec::new();
 
         let mut interval = tokio::time::interval(Duration::from_secs(10));
 
@@ -197,6 +221,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 Some(gas_used) = stats_rx.recv() => {
                     total_executed_blocks += 1;
                     total_executed_gas += gas_used;
+                }
+                Some((block, err)) = info_rx.recv() => {
+                    error!(?err, block=?block.num_hash(), "Invalid block");
+                    invalid_blocks.push(block.num_hash());
                 }
                 result = tasks.join_next() => {
                     if let Some(result) = result {
@@ -228,12 +256,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             }
         }
 
-        info!(
-            start_block = min_block,
-            end_block = max_block,
-            throughput=?format_gas_throughput(total_executed_gas, instant.elapsed()),
-            "Re-executed successfully"
-        );
+        if invalid_blocks.is_empty() {
+            info!(
+                start_block = min_block,
+                end_block = max_block,
+                throughput=?format_gas_throughput(total_executed_gas, instant.elapsed()),
+                "Re-executed successfully"
+            );
+        } else {
+            info!(
+                start_block = min_block,
+                end_block = max_block,
+                invalid_block_count = invalid_blocks.len(),
+                ?invalid_blocks,
+                throughput=?format_gas_throughput(total_executed_gas, instant.elapsed()),
+                "Re-executed with invalid blocks"
+            );
+        }
 
         Ok(())
     }
