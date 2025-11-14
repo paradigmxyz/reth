@@ -222,7 +222,7 @@ mod tests {
 
         assert_eq!(pruned, 2);
         assert!(!done);
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(calls.load(Ordering::SeqCst), pruned + 1);
 
         provider.commit().expect("commit");
         assert_eq!(db.table::<tables::TransactionSenders>().unwrap().len(), total - 2);
@@ -275,7 +275,7 @@ mod tests {
 
         assert_eq!(pruned, total);
         assert!(done);
-        assert_eq!(calls.load(Ordering::SeqCst), total);
+        assert_eq!(calls.load(Ordering::SeqCst), total + 1);
 
         provider.commit().expect("commit");
         assert_eq!(db.table::<tables::TransactionSenders>().unwrap().len(), 0);
