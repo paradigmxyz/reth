@@ -217,8 +217,6 @@ mod tests {
 }
 
 /// IP filter for restricting network communication to specific IP ranges using CIDR notation.
-///
-/// This is similar to geth's `--netrestrict` flag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpFilter {
     /// List of allowed IP networks in CIDR notation.
