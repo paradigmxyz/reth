@@ -398,7 +398,7 @@ impl NetworkArgs {
     ///
     /// Returns an error if the CIDR format is invalid.
     pub fn ip_filter(&self) -> Result<IpFilter, ipnet::AddrParseError> {
-        if let Some(ref netrestrict) = self.netrestrict {
+        if let Some(netrestrict) = &self.netrestrict {
             IpFilter::from_cidr_string(netrestrict)
         } else {
             Ok(IpFilter::allow_all())
