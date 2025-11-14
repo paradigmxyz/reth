@@ -28,7 +28,6 @@ impl TrustedPeersResolver {
     }
 
     /// Update the resolution interval (useful for testing purposes)
-    #[allow(dead_code)]
     pub fn set_interval(&mut self, interval: Interval) {
         self.interval = interval;
     }
