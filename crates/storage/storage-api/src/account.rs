@@ -71,4 +71,9 @@ pub trait ChangeSetReader {
         &self,
         range: Range<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>>;
+
+    /// Get the total count of all account changes.
+    ///
+    /// Returns the total number of account changes across all blocks.
+    fn account_changeset_count(&self) -> ProviderResult<usize>;
 }

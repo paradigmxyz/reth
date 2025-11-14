@@ -1032,6 +1032,16 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
             Ok(result)
         })
     }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        // check if account changesets are in static files, otherwise just count the changeset
+        // entries in the DB
+        if self.cached_storage_settings().account_changesets_in_static_files {
+            self.static_file_provider.account_changeset_count()
+        } else {
+            Ok(self.tx.entries::<tables::AccountChangeSets>()?)
+        }
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider

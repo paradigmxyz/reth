@@ -984,6 +984,10 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
     }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
+    }
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<T, ChainSpec> {

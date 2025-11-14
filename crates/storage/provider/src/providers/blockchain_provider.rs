@@ -716,6 +716,10 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         self.consistent_provider()?.account_changesets_range(range)
     }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        self.consistent_provider()?.account_changeset_count()
+    }
 }
 
 impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
