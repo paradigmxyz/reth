@@ -236,8 +236,6 @@ where
                     // need to apply the state changes of this call before executing the
                     // next call
                     if transactions.peek().is_some() {
-                        // need to apply the state changes of this call before executing
-                        // the next call
                         evm.db_mut().commit(state)
                     }
                 }
