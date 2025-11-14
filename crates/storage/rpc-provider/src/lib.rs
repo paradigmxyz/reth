@@ -1751,6 +1751,10 @@ where
     ) -> ProviderResult<Vec<(BlockNumber, reth_db_api::models::AccountBeforeTx)>> {
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl<P, Node, N> StateProviderFactory for RpcBlockchainStateProvider<P, Node, N>

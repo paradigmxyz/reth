@@ -1916,6 +1916,24 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
 
         Ok(changesets)
     }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        let mut count = 0;
+
+        // iterate through static files and sum changeset metadata via each static file header
+        let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
+        if let Some(changeset_segments) = static_files.get(&StaticFileSegment::AccountChangeSets) {
+            for (_, header) in changeset_segments {
+                if let Some(changeset_offsets) = header.changeset_offsets() {
+                    for offset in changeset_offsets {
+                        count += offset.num_changes() as usize;
+                    }
+                }
+            }
+        }
+
+        Ok(count)
+    }
 }
 
 impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvider<N> {
