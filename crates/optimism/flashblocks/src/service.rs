@@ -61,6 +61,8 @@ pub struct FlashBlockService<
     in_progress_tx: watch::Sender<Option<FlashBlockBuildInfo>>,
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
+    /// Enable state root calculation
+    compute_state_root: bool,
 }
 
 impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
@@ -98,7 +100,14 @@ where
             cached_state: None,
             in_progress_tx,
             metrics: FlashBlockServiceMetrics::default(),
+            compute_state_root: false,
         }
+    }
+
+    /// Enable state root calculation from flashblock
+    pub const fn compute_state_root(mut self, enable_state_root: bool) -> Self {
+        self.compute_state_root = enable_state_root;
+        self
     }
 
     /// Returns the sender half to the received flashblocks.
@@ -215,7 +224,8 @@ where
         // chain progression.
         let block_time_ms = (base.timestamp - latest.timestamp()) * 1000;
         let expected_final_flashblock = block_time_ms / FLASHBLOCK_BLOCK_TIME;
-        let compute_state_root = last_flashblock.diff.state_root.is_zero() &&
+        let compute_state_root = self.compute_state_root &&
+            last_flashblock.diff.state_root.is_zero() &&
             self.blocks.index() >= Some(expected_final_flashblock.saturating_sub(1));
 
         Some(BuildArgs {
