@@ -183,9 +183,15 @@ where
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
         // Get a read-only provider
-        let start = Instant::now();
-        let provider = self.factory.database_provider_ro()?;
-        self.metrics.create_provider_duration.record(start.elapsed());
+        let provider = {
+            let _guard =
+                debug_span!(target: "providers::state::overlay", "Creating db provider").entered();
+
+            let start = Instant::now();
+            let res = self.factory.database_provider_ro()?;
+            self.metrics.create_provider_duration.record(start.elapsed());
+            res
+        };
 
         // Set up variables we'll use for recording metrics. There's two different code-paths here,
         // and we want to make sure both record metrics, so we do metrics recording after.
