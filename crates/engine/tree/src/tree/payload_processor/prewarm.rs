@@ -20,7 +20,7 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
-use alloy_consensus::transaction::TxHashRef;
+use alloy_consensus::{transaction::TxHashRef, Transaction};
 use alloy_eips::Typed2718;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
@@ -192,8 +192,9 @@ where
                         //  the terminate_execution check above.
                         let _ = handle.send(indexed_tx.clone());
                     }
-                } else {
-                    // Round-robin distribution for all other transactions
+                } else if indexed_tx.tx.tx().gas_limit() < 20_000_000 {
+                    // Round-robin distribution for all transactions with a gas limit under the 99th
+                    // percentile.
                     let worker_idx = tx_index % workers_needed;
                     // Ignore send errors: workers listen to terminate_execution and may
                     // exit early when signaled. Sending to a disconnected worker is
