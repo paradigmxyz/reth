@@ -21,7 +21,7 @@ use crate::{
     TransactionsProvider, TransactionsProviderExt, TrieReader, TrieWriter,
 };
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
+    transaction::{SignerRecoverable, TransactionMeta},
     BlockHeader, TxReceipt,
 };
 use alloy_eips::BlockHashOrNumber;
@@ -36,7 +36,7 @@ use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
