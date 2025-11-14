@@ -96,12 +96,14 @@ Static Files:
       --static-files.blocks-per-file.receipts <BLOCKS_PER_FILE_RECEIPTS>
           Number of blocks per file for the receipts segment
 
-      --static-files.receipts
+      --static-files.receipts <RECEIPTS>
           Store receipts in static files instead of the database.
 
-          When enabled, receipts will be written to static files on disk instead of the database.
+          When enabled, receipts are written to static files instead of the database.
 
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+          Note: changing this setting on an existing node with non-empty receipts can result in unexpected behavior.
+
+          [possible values: true, false]
 
       --metrics <SOCKET>
           Enable Prometheus metrics.
