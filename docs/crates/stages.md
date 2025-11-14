@@ -7,10 +7,10 @@ The `stages` lib plays a central role in syncing the node, maintaining state, up
 - SenderRecoveryStage
 - ExecutionStage
 - PruneSenderRecoveryStage (if pruning for sender recovery is enabled)
-- MerkleStage (Unwind)
+- MerkleUnwindStage
 - AccountHashingStage
 - StorageHashingStage
-- MerkleStage (Execution)
+- MerkleExecuteStage
 - MerkleChangeSets
 - TransactionLookupStage
 - IndexStorageHistoryStage
@@ -78,14 +78,13 @@ At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOu
 
 <br>
 
-## MerkleStage
+## MerkleUnwindStage
 
-The `MerkleStage` handles the construction and updates of the Merkle Patricia trie, which is Ethereum's core data structure for storing state. This stage has two modes:
+The `MerkleUnwindStage` is responsible for unwinding the Merkle Patricia trie when reorgs occur or when there's a need to roll back state changes. This ensures the trie remains consistent with the chain's canonical history by reverting changes beyond the unwind point. It typically runs before the hashing stages to unwind trie state during reorgs or rollbacks.
 
-- Unwind (StageId::MerkleUnwind): runs before the hashing stages to unwind trie state during reorgs or rollbacks.
-- Execution (StageId::MerkleExecute): runs after `AccountHashingStage` and `StorageHashingStage` to build/update the state root.
+## MerkleExecuteStage
 
-It processes state changes from executed transactions and maintains the state root included in block headers.
+The `MerkleExecuteStage` runs after `AccountHashingStage` and `StorageHashingStage` and is responsible for constructing or updating the state root based on the latest hashed account and storage data. It processes state changes from executed transactions and maintains the state root included in block headers.
 
 <br>
 
