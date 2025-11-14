@@ -116,25 +116,20 @@ where
 
         let block_body_indices =
             provider.block_body_indices_range(range_output.block_range.clone())?;
-        let blocks_with_indices =
-            range_output.block_range.zip(block_body_indices).collect::<Vec<_>>();
+        let mut blocks_with_indices = range_output.block_range.zip(block_body_indices).peekable();
 
         for range in batch {
             let start = Instant::now();
-            let mut block_numbers = Vec::with_capacity((range.end - range.start) as usize);
-            let mut current_block_idx = 0;
-
-            for tx in range.clone() {
-                // Move to the next block that contains this transaction
-                while current_block_idx < blocks_with_indices.len() {
-                    let (block, index) = &blocks_with_indices[current_block_idx];
+            let block_numbers = range.clone().fold(Vec::new(), |mut block_numbers, tx| {
+                while let Some((block, index)) = blocks_with_indices.peek() {
                     if index.contains_tx(tx) {
                         block_numbers.push(*block);
-                        break;
+                        return block_numbers
                     }
-                    current_block_idx += 1;
+                    blocks_with_indices.next();
                 }
-            }
+                block_numbers
+            });
             let elapsed = start.elapsed();
             debug!(target: "sync::stages::sender_recovery", ?elapsed, len = block_numbers.len(), "Calculated block numbers");
             recover_range(range, block_numbers, provider, tx_batch_sender.clone(), &mut writer)?;
