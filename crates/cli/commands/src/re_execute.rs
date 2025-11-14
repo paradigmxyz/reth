@@ -195,6 +195,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         loop {
             tokio::select! {
                 Some(gas_used) = stats_rx.recv() => {
+                    interval.reset();
                     total_executed_blocks += 1;
                     total_executed_gas += gas_used;
                 }
