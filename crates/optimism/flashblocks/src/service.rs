@@ -1,5 +1,5 @@
 use crate::{
-    sequence::FlashBlockPendingSequence,
+    sequence::{FlashBlockPendingSequence, SequenceExecutionOutcome},
     worker::{BuildArgs, FlashBlockBuilder},
     FlashBlock, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx, InProgressFlashBlockRx,
     PendingFlashBlock,
@@ -60,8 +60,6 @@ pub struct FlashBlockService<
     in_progress_tx: watch::Sender<Option<FlashBlockBuildInfo>>,
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
-    /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
-    compute_state_root: bool,
 }
 
 impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
@@ -99,14 +97,7 @@ where
             cached_state: None,
             in_progress_tx,
             metrics: FlashBlockServiceMetrics::default(),
-            compute_state_root: false,
         }
-    }
-
-    /// Enable state root calculation from flashblock
-    pub const fn compute_state_root(mut self, enable_state_root: bool) -> Self {
-        self.compute_state_root = enable_state_root;
-        self
     }
 
     /// Returns the sender half to the received flashblocks.
@@ -190,9 +181,10 @@ where
             return None
         };
 
-        // Check if state root must be computed
-        let compute_state_root =
-            self.compute_state_root && self.blocks.index() >= Some(FB_STATE_ROOT_FROM_INDEX as u64);
+        // Auto-detect: compute state root only if builder didn't provide it (sent B256::ZERO)
+        // and we're past the minimum flashblock index for state root calculation
+        let compute_state_root = self.blocks.index() >= Some(FB_STATE_ROOT_FROM_INDEX as u64) &&
+            last_flashblock.diff.state_root.is_zero();
 
         Some(BuildArgs {
             base,
@@ -268,8 +260,15 @@ where
             if let Some((now, result)) = result {
                 match result {
                     Ok(Some((new_pending, cached_reads))) => {
-                        // update state root of the current sequence
-                        this.blocks.set_state_root(new_pending.computed_state_root());
+                        // update execution outcome of the current sequence
+                        let execution_outcome =
+                            new_pending.computed_state_root().map(|state_root| {
+                                SequenceExecutionOutcome {
+                                    block_hash: new_pending.block().hash(),
+                                    state_root,
+                                }
+                            });
+                        this.blocks.set_execution_outcome(execution_outcome);
 
                         // built a new pending block
                         this.current = Some(new_pending.clone());
