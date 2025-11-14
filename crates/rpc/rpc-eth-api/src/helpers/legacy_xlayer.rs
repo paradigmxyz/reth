@@ -10,15 +10,6 @@ use std::{future::Future, sync::Arc};
 pub trait LegacyRpc {
     /// Returns the legacy RPC client if configured.
     fn legacy_rpc_client(&self) -> Option<&Arc<reth_rpc_eth_types::LegacyRpcClient>>;
-
-    /// Check if a block number should be routed to legacy RPC.
-    fn should_route_to_legacy(&self, block_number: u64) -> bool {
-        if let Some(client) = self.legacy_rpc_client() {
-            block_number < client.cutoff_block()
-        } else {
-            false
-        }
-    }
 }
 
 /// Check if a block number should be routed to legacy RPC
@@ -37,16 +28,23 @@ pub fn should_route_to_legacy(
 
 /// Check if a BlockId should be routed to legacy RPC based on cutoff_block
 #[inline]
-pub fn should_route_block_id_to_legacy(
+pub fn should_route_block_id_to_legacy<Provider>(
     legacy_client: Option<&std::sync::Arc<reth_rpc_eth_types::LegacyRpcClient>>,
-    block_id: Option<BlockId>,
-) -> bool {
-    if let Some(client) = legacy_client {
-        if let Some(BlockId::Number(number)) = block_id {
-            return should_route_to_legacy(Some(client), number);
-        }
+    provider: &Provider,
+    block_id: Option<&BlockId>,
+) -> Result<bool, ErrorObjectOwned>
+where
+    Provider: reth_storage_api::BlockNumReader,
+{
+    if legacy_client.is_none() {
+        return Ok(false);
     }
-    false
+
+    Ok(match block_id {
+        Some(BlockId::Number(number)) => should_route_to_legacy(legacy_client, *number),
+        Some(BlockId::Hash(hash)) => !provider.block_number(hash.block_hash).map_err(internal_rpc_err)?.is_some(),
+        None => false,
+    })
 }
 
 /// Convert any value through serde JSON (for type system compatibility)
@@ -127,13 +125,13 @@ macro_rules! route_by_number {
 #[macro_export]
 macro_rules! route_by_block_id {
     ($method:literal, $self:ident, $block_id:ident, $legacy_call:expr, $local_expr:expr) => {{
-        if $crate::helpers::should_route_block_id_to_legacy($self.legacy_rpc_client(), Some($block_id)) {
+        if $crate::helpers::should_route_block_id_to_legacy($self.legacy_rpc_client(), $self.provider(), Some(&$block_id))? {
             tracing::info!(target: "rpc::eth::legacy", method = $method, block = ?$block_id, "→ legacy");
             let result = $crate::helpers::exec_legacy($method, $legacy_call).await.map_err($crate::helpers::boxed_err_to_rpc)?;
-            $crate::helpers::convert_option_via_serde(result)
-        } else {
-            $local_expr
+            return $crate::helpers::convert_option_via_serde(result);
         }
+
+        $local_expr
     }};
 }
 
@@ -141,12 +139,12 @@ macro_rules! route_by_block_id {
 #[macro_export]
 macro_rules! route_by_block_id_opt {
     ($method:literal, $self:ident, $block_id:ident, $legacy_call:expr, $local_expr:expr) => {{
-        if $crate::helpers::should_route_block_id_to_legacy($self.legacy_rpc_client(), $block_id) {
+        if $crate::helpers::should_route_block_id_to_legacy($self.legacy_rpc_client(), $self.provider(), $block_id.as_ref())? {
             tracing::info!(target: "rpc::eth::legacy", method = $method, block = ?$block_id, "→ legacy");
-            $crate::helpers::exec_legacy($method, $legacy_call).await.map_err($crate::helpers::boxed_err_to_rpc)
-        } else {
-            $local_expr
+            return $crate::helpers::exec_legacy($method, $legacy_call).await.map_err($crate::helpers::boxed_err_to_rpc);
         }
+
+        $local_expr
     }};
 }
 
@@ -166,31 +164,23 @@ macro_rules! try_local_then_legacy {
     }};
 }
 
-/// Route to legacy if configured, otherwise use local (for stateless queries)
+/// Route to legacy RPC with JSON deserialization if condition is met
 #[macro_export]
-macro_rules! route_if_legacy_configured {
-    ($self:ident, $legacy_call:expr, $local_expr:expr) => {{
-        if let Some(_legacy_client) = $self.legacy_rpc_client() {
-            tracing::info!(target: "rpc::eth::legacy", "→ legacy");
-            return $crate::helpers::exec_legacy("", $legacy_call).await.map_err($crate::helpers::boxed_err_to_rpc);
-        }
-        $local_expr
-    }};
-}
-
-/// Conditional route by block_id with type conversion (for eth_call, eth_estimateGas, etc.)
-#[macro_export]
-macro_rules! route_conditional_with_convert {
-    ($self:ident, $condition:expr, $block_id:ident, $request:ident, $legacy_method:ident, $local_expr:expr) => {{
+macro_rules! route_by_condition {
+    ($method:literal, $condition:expr, $key:expr, $legacy_call:expr) => {{
         if $condition {
-            if $crate::helpers::should_route_block_id_to_legacy($self.legacy_rpc_client(), $block_id) {
-                tracing::info!(target: "rpc::eth::legacy", block = ?$block_id, "→ legacy");
-                let tx_req = $crate::helpers::convert_via_serde($request)?;
-                let legacy_fut = $self.legacy_rpc_client().unwrap().$legacy_method(tx_req, $block_id);
-                return $crate::helpers::exec_legacy("", legacy_fut).await.map_err($crate::helpers::boxed_err_to_rpc);
-            }
+            tracing::info!(target: "rpc::eth::legacy", method = $method, key = ?$key, "→ legacy");
+            let result = $crate::helpers::exec_legacy($method, $legacy_call)
+                .await
+                .map_err($crate::helpers::boxed_err_to_rpc)?;
+            return serde_json::from_value(result).map_err(|e| {
+                jsonrpsee::types::ErrorObjectOwned::owned(
+                    -32603,
+                    format!("Failed to deserialize legacy response: {}", e),
+                    None::<()>,
+                )
+            });
         }
-        $local_expr
     }};
 }
 
@@ -198,7 +188,9 @@ macro_rules! route_conditional_with_convert {
 mod tests {
     use super::*;
     use alloy_primitives::{Address, B256, U256};
-    use std::{sync::Arc, time::Duration};
+    use reth_storage_api::BlockNumReader;
+    use reth_storage_errors::provider::{ProviderError, ProviderResult};
+    use std::{collections::HashMap, sync::Arc, time::Duration};
 
     /// Helper to create a test legacy client
     fn create_test_client(cutoff_block: u64) -> Arc<reth_rpc_eth_types::LegacyRpcClient> {
@@ -366,21 +358,29 @@ mod tests {
     #[test]
     fn test_should_route_block_id_to_legacy() {
         let client = create_test_client(1000000);
+        let provider_missing = MockBlockProvider::default();
 
         // BlockId::Number below cutoff
-        let block_id = Some(BlockId::Number(BlockNumberOrTag::Number(100)));
-        assert!(should_route_block_id_to_legacy(Some(&client), block_id));
+        let block_id = BlockId::Number(BlockNumberOrTag::Number(100));
+        assert!(should_route_block_id_to_legacy(Some(&client), &provider_missing, Some(&block_id)).unwrap());
 
         // BlockId::Number above cutoff
-        let block_id = Some(BlockId::Number(BlockNumberOrTag::Number(1000001)));
-        assert!(!should_route_block_id_to_legacy(Some(&client), block_id));
+        let block_id = BlockId::Number(BlockNumberOrTag::Number(1000001));
+        assert!(!should_route_block_id_to_legacy(Some(&client), &provider_missing, Some(&block_id)).unwrap());
 
-        // BlockId::Hash - should NOT route (can't determine block number from hash)
-        let block_id = Some(BlockId::Hash(B256::from([1u8; 32]).into()));
-        assert!(!should_route_block_id_to_legacy(Some(&client), block_id));
+        // BlockId::Hash - routes if missing locally
+        let missing_hash = BlockId::Hash(B256::from([1u8; 32]).into());
+        assert!(should_route_block_id_to_legacy(Some(&client), &provider_missing, Some(&missing_hash)).unwrap());
+
+        // BlockId::Hash - stays local if present
+        let present_hash_value = B256::from([2u8; 32]);
+        let mut provider_present = MockBlockProvider::default();
+        provider_present.insert_hash(present_hash_value, 0);
+        let present_hash = BlockId::Hash(present_hash_value.into());
+        assert!(!should_route_block_id_to_legacy(Some(&client), &provider_present, Some(&present_hash)).unwrap());
 
         // None - should NOT route
-        assert!(!should_route_block_id_to_legacy(Some(&client), None));
+        assert!(!should_route_block_id_to_legacy(Some(&client), &provider_missing, None).unwrap());
     }
 
     #[test]
@@ -391,6 +391,50 @@ mod tests {
         assert!(!should_route_to_legacy(Some(&client), BlockNumberOrTag::Number(0)));
         assert!(!should_route_to_legacy(Some(&client), BlockNumberOrTag::Number(1)));
         assert!(!should_route_to_legacy(Some(&client), BlockNumberOrTag::Number(1000)));
+    }
+
+    #[derive(Default)]
+    struct MockBlockProvider {
+        hashes: HashMap<B256, u64>,
+    }
+
+    impl MockBlockProvider {
+        fn insert_hash(&mut self, hash: B256, number: u64) {
+            self.hashes.insert(hash, number);
+        }
+    }
+
+    impl reth_storage_api::BlockHashReader for MockBlockProvider {
+        fn block_hash(&self, _number: u64) -> ProviderResult<Option<B256>> {
+            Ok(None)
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            _start: u64,
+            _end: u64,
+        ) -> ProviderResult<Vec<B256>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl BlockNumReader for MockBlockProvider {
+        fn chain_info(&self) -> ProviderResult<reth_chainspec::ChainInfo> {
+            Err(ProviderError::UnsupportedProvider)
+        }
+
+        fn best_block_number(&self) -> ProviderResult<u64> {
+            Ok(0)
+        }
+
+        fn last_block_number(&self) -> ProviderResult<u64> {
+            Ok(0)
+        }
+
+        fn block_number(&self, hash: B256) -> ProviderResult<Option<u64>> {
+            Ok(self.hashes.get(&hash).copied())
+        }
+
     }
 
     #[test]

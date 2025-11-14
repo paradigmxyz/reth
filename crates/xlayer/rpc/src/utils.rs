@@ -2,7 +2,10 @@ use reth_rpc::RpcTypes;
 
 use std::{collections::HashMap, sync::Arc};
 
-use reth_rpc_eth_api::{helpers::EthCall, EthApiTypes};
+use reth_rpc_eth_api::{
+    helpers::{should_route_to_legacy, EthCall, LegacyRpc},
+    route_by_condition, EthApiTypes,
+};
 
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{
@@ -66,7 +69,7 @@ pub struct XlayerExt<T> {
 #[async_trait]
 impl<T, Net> XlayerExtApiServer<Net> for XlayerExt<T>
 where
-    T: EthCall + EthApiTypes<NetworkTypes = Net> + Send + Sync + 'static,
+    T: EthCall + LegacyRpc + EthApiTypes<NetworkTypes = Net> + Send + Sync + 'static,
     Net: RpcTypes + Send + Sync + 'static,
 {
     async fn get_internal_transactions(
@@ -81,14 +84,19 @@ where
             ));
         }
 
-        let hash = string_to_b256(tx_hash).map_err(|_| {
+        let hash = string_to_b256(tx_hash.clone()).map_err(|_| {
             ErrorObjectOwned::owned(INVALID_PARAMS_CODE, "Invalid transaction hash", None::<()>)
         })?;
 
         match self.backend.provider().transaction_by_hash(hash) {
             Ok(Some(_)) => {}
             Ok(None) => {
-                return Err(ErrorObjectOwned::owned(-32000, "Transaction not found", None::<()>))
+                route_by_condition!(
+                    "eth_getInternalTransactions",
+                    self.backend.legacy_rpc_client().is_some(), tx_hash,
+                    self.backend.legacy_rpc_client().unwrap().get_internal_transactions(tx_hash)
+                );
+                return Err(ErrorObjectOwned::owned(-32000, "Transaction not found", None::<()>));
             }
             Err(_) => return Err(ErrorObjectOwned::owned(-32603, "Internal error", None::<()>)),
         }
@@ -132,7 +140,14 @@ where
         &self,
         block_number: BlockNumberOrTag,
     ) -> RpcResult<HashMap<String, Vec<InternalTransaction>>> {
-        let hash = match self.backend.provider().block_hash_for_id(block_number.into()) {
+        // XLayer: Route to legacy RPC if block number is below cutoff
+        route_by_condition!(
+            "eth_getBlockInternalTransactions",
+            should_route_to_legacy(self.backend.legacy_rpc_client(), block_number), block_number,
+            self.backend.legacy_rpc_client().unwrap().get_block_internal_transactions(block_number)
+        );
+
+        let hash: FixedBytes<32> = match self.backend.provider().block_hash_for_id(block_number.into()) {
             Ok(Some(hash)) => hash,
             Ok(None) => return Err(ErrorObjectOwned::owned(-32000, "Block not found", None::<()>)),
             Err(_) => return Err(ErrorObjectOwned::owned(-32603, "Internal error", None::<()>)),
