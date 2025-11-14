@@ -1,7 +1,16 @@
 use alloy_primitives::bytes::{Buf, BufMut};
 use alloy_rlp::{Decodable, Encodable};
 
-/// Node type variant.
+/// Represents the type of node in the RESS protocol.
+///
+/// This enum is used during the handshake phase to identify whether a peer is a stateless
+/// or stateful node. The node type determines which connections are valid:
+/// - Stateless ↔ Stateless: valid
+/// - Stateless ↔ Stateful: valid
+/// - Stateful ↔ Stateful: invalid
+///
+/// Use [`is_valid_connection`](Self::is_valid_connection) to check if a connection between
+/// two node types is allowed.
 #[repr(u8)]
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
