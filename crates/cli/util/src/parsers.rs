@@ -31,6 +31,16 @@ pub fn parse_duration_from_secs_or_ms(
     }
 }
 
+/// Helper to format a [Duration] to the format that can be parsed by
+/// [`parse_duration_from_secs_or_ms`].
+pub fn format_duration_as_secs_or_ms(duration: Duration) -> String {
+    if duration.as_millis().is_multiple_of(1000) {
+        format!("{}", duration.as_secs())
+    } else {
+        format!("{}ms", duration.as_millis())
+    }
+}
+
 /// Parse [`BlockHashOrNumber`]
 pub fn hash_or_num_value_parser(value: &str) -> eyre::Result<BlockHashOrNumber, eyre::Error> {
     match B256::from_str(value) {
