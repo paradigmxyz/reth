@@ -313,6 +313,18 @@ where
     /// cached value then this calculates the [`Overlay`] and populates the cache.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn get_overlay(&self, provider: &F::Provider) -> ProviderResult<Overlay> {
+        // If we have no anchor block configured then we will never need to get trie reverts, just
+        // return the in-memory overlay.
+        if self.block_hash.is_none() {
+            let trie_updates =
+                self.trie_overlay.clone().unwrap_or_else(|| Arc::new(TrieUpdatesSorted::default()));
+            let hashed_post_state = self
+                .hashed_state_overlay
+                .clone()
+                .unwrap_or_else(|| Arc::new(HashedPostStateSorted::default()));
+            return Ok(Overlay { trie_updates, hashed_post_state })
+        }
+
         let db_tip_block = self.get_db_tip_block_number(provider)?;
 
         // If the overlay is present in the cache then return it directly.
