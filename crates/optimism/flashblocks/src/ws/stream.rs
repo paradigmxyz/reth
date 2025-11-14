@@ -98,12 +98,45 @@ where
 
             while let State::Stream(msg) = &mut this.state {
                 if msg.is_some() {
-                    let mut sink = Pin::new(this.sink.as_mut().unwrap());
-                    let _ = ready!(sink.as_mut().poll_ready(cx));
-                    if let Some(pong) = msg.take() {
-                        let _ = sink.as_mut().start_send(pong);
+                    // poll_ready
+                    let poll_ready_res = {
+                        let mut sink = Pin::new(this.sink.as_mut().unwrap());
+                        ready!(sink.as_mut().poll_ready(cx))
+                    };
+                    if poll_ready_res.is_err() {
+                        this.state = State::Initial;
+                        this.sink = None;
+                        this.stream = None;
+                        continue 'start;
                     }
-                    let _ = ready!(sink.as_mut().poll_flush(cx));
+
+                    // start_send (only if message present)
+                    let start_send_res = {
+                        let mut sink = Pin::new(this.sink.as_mut().unwrap());
+                        if let Some(pong) = msg.take() {
+                            sink.as_mut().start_send(pong)
+                        } else {
+                            Ok(())
+                        }
+                    };
+                    if start_send_res.is_err() {
+                        this.state = State::Initial;
+                        this.sink = None;
+                        this.stream = None;
+                        continue 'start;
+                    }
+
+                    // flush
+                    let poll_flush_res = {
+                        let mut sink = Pin::new(this.sink.as_mut().unwrap());
+                        ready!(sink.as_mut().poll_flush(cx))
+                    };
+                    if poll_flush_res.is_err() {
+                        this.state = State::Initial;
+                        this.sink = None;
+                        this.stream = None;
+                        continue 'start;
+                    }
                 }
 
                 let Some(msg) = ready!(this
