@@ -483,12 +483,6 @@ where
             ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
                 .with_prune_modes(self.prune_modes());
 
-        let mut provider_rw = factory.provider_rw()?;
-        let storage_settings = provider_rw.cached_storage_settings().with_senders_in_static_files();
-        provider_rw.write_storage_settings(storage_settings)?;
-        provider_rw.set_storage_settings_cache(storage_settings);
-        provider_rw.commit()?;
-
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
         if let Some(unwind_target) =
