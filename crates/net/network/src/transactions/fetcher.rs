@@ -1536,7 +1536,7 @@ mod test {
 
         // TEST
 
-        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true);
+        tx_fetcher.on_fetch_pending_hashes(&peers);
 
         // mock session of peer_1 receives request
         let req = peer_1_mock_session_rx

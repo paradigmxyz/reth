@@ -2627,7 +2627,7 @@ mod tests {
         assert_eq!(tx_fetcher.active_peers.len(), 0);
 
         // sends requests for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers);
 
         assert_eq!(tx_fetcher.num_pending_hashes(), 0);
         // as long as request is in flight peer_1 is not idle
@@ -2694,7 +2694,7 @@ mod tests {
         assert_eq!(tx_fetcher.active_peers.len(), 0);
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
