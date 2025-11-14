@@ -269,11 +269,15 @@ pub fn random_block_range<R: Rng>(
     let mut blocks =
         Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
     for idx in block_numbers {
-        let tx_count = block_range_params.tx_count.clone().sample_single(rng).unwrap();
-        let requests_count =
-            block_range_params.requests_count.clone().map(|r| r.sample_single(rng).unwrap());
-        let withdrawals_count =
-            block_range_params.withdrawals_count.clone().map(|r| r.sample_single(rng).unwrap());
+        let tx_count = block_range_params.tx_count.sample_single(rng).unwrap();
+        let requests_count = block_range_params
+            .requests_count
+            .as_ref()
+            .map(|r| r.sample_single(rng).unwrap());
+        let withdrawals_count = block_range_params
+            .withdrawals_count
+            .as_ref()
+            .map(|r| r.sample_single(rng).unwrap());
         let parent = block_range_params.parent.unwrap_or_default();
         blocks.push(random_block(
             rng,
