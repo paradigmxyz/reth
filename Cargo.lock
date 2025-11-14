@@ -9780,6 +9780,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
+ "serde",
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
