@@ -355,11 +355,8 @@ mod tests {
 
             let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
-                .unwrap()
                 .unwrap();
-            assert_eq!(range_output.tx_range, 0..0);
-            assert_eq!(range_output.block_range, 0..=0);
-            assert!(range_output.is_final_range);
+            assert!(range_output.is_none());
         }
 
         // With checkpoint at block 10, without transactions in static files
@@ -369,11 +366,8 @@ mod tests {
 
             let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
-                .unwrap()
                 .unwrap();
-            assert_eq!(range_output.tx_range, 0..0);
-            assert_eq!(range_output.block_range, 0..=0);
-            assert!(range_output.is_final_range);
+            assert!(range_output.is_none());
         }
 
         // Without checkpoint, with transactions in static files starting from block 1
