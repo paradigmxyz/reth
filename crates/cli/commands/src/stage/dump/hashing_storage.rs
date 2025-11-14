@@ -28,7 +28,7 @@ pub(crate) async fn dump_hashing_storage_stage<N: ProviderNodeTypes<DB = Arc<Dat
             ProviderFactory::<N>::new(
                 Arc::new(output_db),
                 db_tool.chain(),
-                StaticFileProvider::read_write(output_datadir.static_files(), false)?,
+                StaticFileProvider::read_write(output_datadir.static_files())?,
             )?,
             to,
             from,

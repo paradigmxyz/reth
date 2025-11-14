@@ -44,7 +44,7 @@ impl Default for TestStageDB {
             factory: ProviderFactory::new(
                 create_test_rw_db(),
                 MAINNET.clone(),
-                StaticFileProvider::read_write(static_dir_path, false).unwrap(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
             )
             .expect("failed to create test provider factory"),
         }
@@ -60,7 +60,7 @@ impl TestStageDB {
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
-                StaticFileProvider::read_write(static_dir_path, false).unwrap(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
             )
             .expect("failed to create test provider factory"),
         }

@@ -12,9 +12,7 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
-use alloy_primitives::{
-    b256, keccak256, map::HashSet, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
-};
+use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
@@ -103,7 +101,6 @@ impl<N> Clone for StaticFileProvider<N> {
 pub struct StaticFileProviderBuilder<P> {
     access: StaticFileAccess,
     use_metrics: bool,
-    enable_v2_static_files: bool,
     blocks_per_file: HashMap<StaticFileSegment, u64>,
     path: P,
 }
@@ -114,7 +111,6 @@ impl<P: AsRef<Path>> StaticFileProviderBuilder<P> {
         Self {
             path,
             access: StaticFileAccess::RW,
-            enable_v2_static_files: false,
             blocks_per_file: Default::default(),
             use_metrics: false,
         }
@@ -125,7 +121,6 @@ impl<P: AsRef<Path>> StaticFileProviderBuilder<P> {
         Self {
             path,
             access: StaticFileAccess::RO,
-            enable_v2_static_files: false,
             blocks_per_file: Default::default(),
             use_metrics: false,
         }
@@ -174,16 +169,9 @@ impl<P: AsRef<Path>> StaticFileProviderBuilder<P> {
         self
     }
 
-    /// Enables v2 static files
-    pub const fn with_static_files_v2(mut self) -> Self {
-        self.enable_v2_static_files = true;
-        self
-    }
-
     /// Builds the final [`StaticFileProvider`] and initializes the index.
     pub fn build<N: NodePrimitives>(self) -> ProviderResult<StaticFileProvider<N>> {
-        let mut provider =
-            StaticFileProviderInner::new(self.path, self.access, self.enable_v2_static_files)?;
+        let mut provider = StaticFileProviderInner::new(self.path, self.access)?;
         if self.use_metrics {
             provider.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
         }
@@ -200,13 +188,8 @@ impl<P: AsRef<Path>> StaticFileProviderBuilder<P> {
 
 impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Creates a new [`StaticFileProvider`] with the given [`StaticFileAccess`].
-    fn new(
-        path: impl AsRef<Path>,
-        access: StaticFileAccess,
-        enable_v2_static_files: bool,
-    ) -> ProviderResult<Self> {
-        let provider =
-            Self(Arc::new(StaticFileProviderInner::new(path, access, enable_v2_static_files)?));
+    fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
+        let provider = Self(Arc::new(StaticFileProviderInner::new(path, access)?));
         provider.initialize_index()?;
         Ok(provider)
     }
@@ -223,7 +206,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// See also [`StaticFileProvider::watch_directory`].
     pub fn read_only(path: impl AsRef<Path>, watch_directory: bool) -> ProviderResult<Self> {
-        let provider = Self::new(path, StaticFileAccess::RO, false)?;
+        let provider = Self::new(path, StaticFileAccess::RO)?;
 
         if watch_directory {
             provider.watch_directory();
@@ -233,11 +216,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Creates a new [`StaticFileProvider`] with read-write access.
-    pub fn read_write(
-        path: impl AsRef<Path>,
-        enable_v2_static_files: bool,
-    ) -> ProviderResult<Self> {
-        Self::new(path, StaticFileAccess::RW, enable_v2_static_files)
+    pub fn read_write(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        Self::new(path, StaticFileAccess::RW)
     }
 
     /// Watches the directory for changes and updates the in-memory index when modifications
@@ -385,21 +365,13 @@ pub struct StaticFileProviderInner<N> {
     access: StaticFileAccess,
     /// Number of blocks per file, per segment.
     blocks_per_file: HashMap<StaticFileSegment, u64>,
-    /// Whether or not to write to specific segments.
-    ///
-    /// Writers will not be returned for these segments.
-    read_only_segments: HashSet<StaticFileSegment>,
     /// Write lock for when access is [`StaticFileAccess::RW`].
     _lock_file: Option<StorageLock>,
 }
 
 impl<N: NodePrimitives> StaticFileProviderInner<N> {
     /// Creates a new [`StaticFileProviderInner`].
-    fn new(
-        path: impl AsRef<Path>,
-        access: StaticFileAccess,
-        enable_v2_static_files: bool,
-    ) -> ProviderResult<Self> {
+    fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
         let _lock_file = if access.is_read_write() {
             StorageLock::try_acquire(path.as_ref()).map_err(ProviderError::other)?.into()
         } else {
@@ -410,13 +382,6 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
         for segment in StaticFileSegment::iter() {
             blocks_per_file.insert(segment, DEFAULT_BLOCKS_PER_STATIC_FILE);
         }
-
-        // do not set read only segments if v2 is enabled
-        let read_only_segments = if enable_v2_static_files {
-            Default::default()
-        } else {
-            HashSet::from_iter([StaticFileSegment::AccountChangeSets])
-        };
 
         let provider = Self {
             map: Default::default(),
@@ -430,7 +395,6 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             metrics: None,
             access,
             blocks_per_file,
-            read_only_segments,
             _lock_file,
         };
 
@@ -1709,7 +1673,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         block: BlockNumber,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
-        if self.access.is_read_only() || self.read_only_segments.contains(&segment) {
+        if self.access.is_read_only() {
             return Err(ProviderError::ReadOnlyStaticFileAccess)
         }
 

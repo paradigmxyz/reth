@@ -665,7 +665,7 @@ mod tests {
     fn test_account_changeset_static_files() {
         let (static_dir, _) = create_test_static_files_dir();
 
-        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir, true)
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
             .expect("Failed to create static file provider");
 
         // Helper function to generate test changesets
@@ -736,7 +736,7 @@ mod tests {
     fn test_get_account_before_block() {
         let (static_dir, _) = create_test_static_files_dir();
 
-        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir, true)
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
             .expect("Failed to create static file provider");
 
         // Setup test data
@@ -842,7 +842,6 @@ mod tests {
             let sf_rw: StaticFileProvider<EthPrimitives> =
                 StaticFileProviderBuilder::read_write(&static_dir)
                     .with_blocks_per_file(blocks_per_file)
-                    .with_static_files_v2()
                     .build()
                     .expect("failed to create static file provider");
 
@@ -912,7 +911,6 @@ mod tests {
         // Test truncation scenarios
         let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
             .with_blocks_per_file(blocks_per_file)
-            .with_static_files_v2()
             .build()
             .expect("failed to create static file provider");
 
@@ -955,7 +953,7 @@ mod tests {
     fn test_changeset_binary_search() {
         let (static_dir, _) = create_test_static_files_dir();
 
-        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir, true)
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
             .expect("Failed to create static file provider");
 
         // Create a block with many account changes to test binary search

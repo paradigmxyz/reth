@@ -60,14 +60,6 @@ pub struct DatabaseArgs {
         value_parser = value_parser!(SyncMode),
     )]
     pub sync_mode: Option<SyncMode>,
-    /// Explicitly enabled static file writers.
-    ///
-    /// For release / backwards compatibility purposes, some static file writers are disabled by
-    /// default. See `read_only_segments` in `StaticFileProviderInner`.
-    ///
-    /// This flag enables writing for these static file segments.
-    #[arg(long = "db.enable-v2-static-files")]
-    pub enable_v2_static_files: bool,
 }
 
 impl DatabaseArgs {
