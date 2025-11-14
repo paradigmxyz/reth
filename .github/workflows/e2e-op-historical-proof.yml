@@ -53,7 +53,12 @@ jobs:
         run: |
           make all
 
-      - name: Run E2E kurtosis tests
+      - name: Run core e2e tests
         working-directory: crates/optimism/tests
         run: |
-          make test-e2e-kurtosis
+          make test-e2e-kurtosis GO_PKG_NAME=proofs/core
+
+      - name: Run reorg e2e tests
+        working-directory: crates/optimism/tests
+        run: |
+          make test-e2e-kurtosis GO_PKG_NAME=proofs/reorg
