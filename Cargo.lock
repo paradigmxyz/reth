@@ -9500,6 +9500,7 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-storage-api",
  "reth-tasks",
+ "ringbuffer",
  "serde_json",
  "test-case",
  "tokio",

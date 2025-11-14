@@ -400,6 +400,12 @@ pub struct OpEthApiBuilder<NetworkT = Optimism> {
     ///
     /// [flashblocks]: reth_optimism_flashblocks
     flashblocks_url: Option<Url>,
+    /// Enable flashblock consensus client to drive the chain forward.
+    ///
+    /// When enabled, flashblock sequences are submitted to the engine API via
+    /// `newPayload` and `forkchoiceUpdated` calls, advancing the canonical chain state.
+    /// Requires `flashblocks_url` to be set.
+    flashblock_consensus: bool,
     /// Marker for network types.
     _nt: PhantomData<NetworkT>,
 }
@@ -411,6 +417,7 @@ impl<NetworkT> Default for OpEthApiBuilder<NetworkT> {
             sequencer_headers: Vec::new(),
             min_suggested_priority_fee: 1_000_000,
             flashblocks_url: None,
+            flashblock_consensus: false,
             _nt: PhantomData,
         }
     }
@@ -424,6 +431,7 @@ impl<NetworkT> OpEthApiBuilder<NetworkT> {
             sequencer_headers: Vec::new(),
             min_suggested_priority_fee: 1_000_000,
             flashblocks_url: None,
+            flashblock_consensus: false,
             _nt: PhantomData,
         }
     }
@@ -449,6 +457,12 @@ impl<NetworkT> OpEthApiBuilder<NetworkT> {
     /// With a subscription to flashblocks secure websocket connection.
     pub fn with_flashblocks(mut self, flashblocks_url: Option<Url>) -> Self {
         self.flashblocks_url = flashblocks_url;
+        self
+    }
+
+    /// With flashblock consensus client enabled to drive chain forward
+    pub const fn with_flashblock_consensus(mut self, flashblock_consensus: bool) -> Self {
+        self.flashblock_consensus = flashblock_consensus;
         self
     }
 }
@@ -484,6 +498,7 @@ where
             sequencer_headers,
             min_suggested_priority_fee,
             flashblocks_url,
+            flashblock_consensus,
             ..
         } = self;
         let rpc_converter =
@@ -517,12 +532,14 @@ where
             let in_progress_rx = service.subscribe_in_progress();
             ctx.components.task_executor().spawn(Box::pin(service.run(tx)));
 
-            info!(target: "reth::cli", "Launching FlashBlockConsensusClient");
-            let flashblock_client = FlashBlockConsensusClient::new(
-                ctx.engine_handle.clone(),
-                flashblocks_sequence.subscribe(),
-            )?;
-            ctx.components.task_executor().spawn(Box::pin(flashblock_client.run()));
+            if flashblock_consensus {
+                info!(target: "reth::cli", "Launching FlashBlockConsensusClient");
+                let flashblock_client = FlashBlockConsensusClient::new(
+                    ctx.engine_handle.clone(),
+                    flashblocks_sequence.subscribe(),
+                )?;
+                ctx.components.task_executor().spawn(Box::pin(flashblock_client.run()));
+            }
 
             Some(FlashblocksListeners::new(
                 pending_rx,
