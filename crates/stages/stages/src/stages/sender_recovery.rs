@@ -20,7 +20,7 @@ use reth_stages_api::{
     StageId, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use std::{fmt::Debug, ops::Range, sync::mpsc};
+use std::{fmt::Debug, ops::Range, sync::mpsc, time::Instant};
 use thiserror::Error;
 use tracing::*;
 
@@ -120,15 +120,23 @@ where
             range_output.block_range.zip(block_body_indices).collect::<Vec<_>>();
 
         for range in batch {
-            let block_numbers = range
-                .clone()
-                .map(|tx| {
-                    blocks_with_indices
-                        .iter()
-                        .find_map(|(block, index)| index.contains_tx(tx).then_some(*block))
-                        .unwrap()
-                })
-                .collect();
+            let start = Instant::now();
+            let mut block_numbers = Vec::with_capacity((range.end - range.start) as usize);
+            let mut current_block_idx = 0;
+
+            for tx in range.clone() {
+                // Move to the next block that contains this transaction
+                while current_block_idx < blocks_with_indices.len() {
+                    let (block, index) = &blocks_with_indices[current_block_idx];
+                    if index.contains_tx(tx) {
+                        block_numbers.push(*block);
+                        break;
+                    }
+                    current_block_idx += 1;
+                }
+            }
+            let elapsed = start.elapsed();
+            debug!(target: "sync::stages::sender_recovery", ?elapsed, len = block_numbers.len(), "Calculated block numbers");
             recover_range(range, block_numbers, provider, tx_batch_sender.clone(), &mut writer)?;
         }
 
