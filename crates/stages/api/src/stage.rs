@@ -91,7 +91,7 @@ impl ExecInput {
         &self,
         provider: &Provider,
         tx_threshold: u64,
-    ) -> Result<TransactionRangeOutput, StageError>
+    ) -> Result<Option<TransactionRangeOutput>, StageError>
     where
         Provider: StaticFileProviderFactory + BlockReader,
     {
@@ -99,11 +99,7 @@ impl ExecInput {
         let Some(lowest_transactions_block) =
             provider.static_file_provider().get_lowest_range_start(StaticFileSegment::Transactions)
         else {
-            return Ok(TransactionRangeOutput {
-                tx_range: 0..0,
-                block_range: 0..=0,
-                is_final_range: true,
-            });
+            return Ok(None)
         };
 
         // We can only process transactions that have associated static files, so we cap the start
@@ -114,6 +110,13 @@ impl ExecInput {
         // accordingly.
         let start_block = self.next_block().max(lowest_transactions_block);
         let target_block = self.target();
+
+        // If the start block is greater than the target, then there's no transactions to process
+        // and we return early. It's possible to trigger this scenario when running `reth
+        // stage run` manually for a range of transactions that doesn't exist.
+        if start_block > target_block {
+            return Ok(None)
+        }
 
         let start_block_body = provider
             .block_body_indices(start_block)?
@@ -129,11 +132,7 @@ impl ExecInput {
 
         if all_tx_cnt == 0 {
             // if there is no more transaction return back.
-            return Ok(TransactionRangeOutput {
-                tx_range: first_tx_num..first_tx_num,
-                block_range: start_block..=target_block,
-                is_final_range: true,
-            })
+            return Ok(None)
         }
 
         // get block of this tx
@@ -154,11 +153,11 @@ impl ExecInput {
         };
 
         let tx_range = first_tx_num..next_tx_num;
-        Ok(TransactionRangeOutput {
+        Ok(Some(TransactionRangeOutput {
             tx_range,
             block_range: start_block..=end_block,
             is_final_range,
-        })
+        }))
     }
 }
 
@@ -354,6 +353,7 @@ mod tests {
 
             let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap()
                 .unwrap();
             assert_eq!(range_output.tx_range, 0..0);
             assert_eq!(range_output.block_range, 0..=0);
@@ -367,6 +367,7 @@ mod tests {
 
             let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap()
                 .unwrap();
             assert_eq!(range_output.tx_range, 0..0);
             assert_eq!(range_output.block_range, 0..=0);
@@ -396,6 +397,7 @@ mod tests {
 
             let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap()
                 .unwrap();
             assert_eq!(range_output.tx_range, 0..2);
             assert_eq!(range_output.block_range, 1..=1);
@@ -424,6 +426,7 @@ mod tests {
 
             let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap()
                 .unwrap();
             assert_eq!(range_output.tx_range, 2..3);
             assert_eq!(range_output.block_range, 2..=2);
@@ -445,6 +448,7 @@ mod tests {
 
             let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap()
                 .unwrap();
             assert_eq!(range_output.tx_range, 2..3);
             assert_eq!(range_output.block_range, 2..=2);
@@ -473,6 +477,7 @@ mod tests {
 
             let range_output = exec_input
                 .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap()
                 .unwrap();
             assert_eq!(range_output.tx_range, 3..4);
             assert_eq!(range_output.block_range, 3..=3);
