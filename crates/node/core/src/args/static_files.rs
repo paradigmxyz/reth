@@ -26,12 +26,12 @@ pub struct StaticFilesArgs {
 
     /// Store receipts in static files instead of the database.
     ///
-    /// When enabled, receipts will be written to static files on disk instead of the database.
+    /// When enabled, receipts are written to static files instead of the database.
     ///
-    /// Note: This setting can only be configured at genesis initialization. Once
-    /// the node has been initialized, changing this flag requires re-syncing from scratch.
+    /// Note: changing this setting on an existing node with non-empty receipts can result in
+    /// unexpected behavior.
     #[arg(long = "static-files.receipts")]
-    pub receipts: bool,
+    pub receipts: Option<bool>,
 }
 
 impl StaticFilesArgs {
@@ -49,15 +49,12 @@ impl StaticFilesArgs {
                     .blocks_per_file_transaction_senders
                     .or(config.blocks_per_file.transaction_senders),
             },
+            receipts: self.receipts.or(config.receipts),
         }
     }
 
     /// Converts the static files arguments into [`StorageSettings`].
     pub const fn to_settings(&self) -> StorageSettings {
-        if self.receipts {
-            StorageSettings::new().with_receipts_in_static_files()
-        } else {
-            StorageSettings::legacy()
-        }
+        StorageSettings::legacy().with_receipts_in_static_files_opt(self.receipts)
     }
 }

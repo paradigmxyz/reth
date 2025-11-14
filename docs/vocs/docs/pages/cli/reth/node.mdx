@@ -275,6 +275,13 @@ Networking:
       --network-id <NETWORK_ID>
           Optional network ID to override the chain specification's network ID for P2P connections
 
+      --netrestrict <NETRESTRICT>
+          Restrict network communication to the given IP networks (CIDR masks).
+
+          Comma separated list of CIDR network specifications. Only peers with IP addresses within these ranges will be allowed to connect.
+
+          Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -957,12 +964,14 @@ Static Files:
       --static-files.blocks-per-file.transaction_senders <BLOCKS_PER_FILE_TRANSACTION_SENDERS>
           Number of blocks per file for the transaction senders segment
 
-      --static-files.receipts
+      --static-files.receipts <RECEIPTS>
           Store receipts in static files instead of the database.
 
-          When enabled, receipts will be written to static files on disk instead of the database.
+          When enabled, receipts are written to static files instead of the database.
 
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+          Note: changing this setting on an existing node with non-empty receipts can result in unexpected behavior.
+
+          [possible values: true, false]
 
 Ress:
       --ress.enable
