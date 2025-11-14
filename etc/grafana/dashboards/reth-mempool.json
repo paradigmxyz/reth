@@ -88,6 +88,118 @@
             },
             "fieldConfig": {
                 "defaults": {
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            }
+                        ]
+                    },
+                    "unit": "short"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 0,
+                "y": 3
+            },
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "table",
+                    "placement": "right"
+                },
+                "tooltip": {
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${DS_PROMETHEUS}"
+                    },
+                    "editorMode": "code",
+                    "expr": "reth_network_peer_queue_hashes{$instance_label=\"$instance\"}",
+                    "legendFormat": "hashes",
+                    "range": true,
+                    "refId": "A"
+                }
+            ],
+            "title": "Peer Queue Hashes",
+            "type": "timeseries",
+            "transparent": true,
+            "id": 3001
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            }
+                        ]
+                    },
+                    "unit": "none"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 12,
+                "y": 3
+            },
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "table",
+                    "placement": "right"
+                },
+                "tooltip": {
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${DS_PROMETHEUS}"
+                    },
+                    "editorMode": "code",
+                    "expr": "reth_network_peer_queue_size{$instance_label=\"$instance\"}",
+                    "legendFormat": "peers",
+                    "range": true,
+                    "refId": "A"
+                }
+            ],
+            "title": "Peer Queue Size",
+            "type": "timeseries",
+            "transparent": true,
+            "id": 3002
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "fieldConfig": {
+                "defaults": {
                     "color": {
                         "mode": "thresholds"
                     },
@@ -118,7 +230,9 @@
                 "orientation": "auto",
                 "percentChangeColorMode": "standard",
                 "reduceOptions": {
-                    "calcs": ["lastNotNull"],
+                    "calcs": [
+                        "lastNotNull"
+                    ],
                     "fields": "",
                     "values": false
                 },
@@ -186,7 +300,9 @@
                 "orientation": "auto",
                 "percentChangeColorMode": "standard",
                 "reduceOptions": {
-                    "calcs": ["lastNotNull"],
+                    "calcs": [
+                        "lastNotNull"
+                    ],
                     "fields": "",
                     "values": false
                 },
@@ -254,7 +370,9 @@
                 "orientation": "auto",
                 "percentChangeColorMode": "standard",
                 "reduceOptions": {
-                    "calcs": ["lastNotNull"],
+                    "calcs": [
+                        "lastNotNull"
+                    ],
                     "fields": "",
                     "values": false
                 },
@@ -322,7 +440,9 @@
                 "orientation": "auto",
                 "percentChangeColorMode": "standard",
                 "reduceOptions": {
-                    "calcs": ["lastNotNull"],
+                    "calcs": [
+                        "lastNotNull"
+                    ],
                     "fields": "",
                     "values": false
                 },
@@ -390,7 +510,9 @@
                 "orientation": "auto",
                 "percentChangeColorMode": "standard",
                 "reduceOptions": {
-                    "calcs": ["lastNotNull"],
+                    "calcs": [
+                        "lastNotNull"
+                    ],
                     "fields": "",
                     "values": false
                 },
@@ -458,7 +580,9 @@
                 "orientation": "auto",
                 "percentChangeColorMode": "standard",
                 "reduceOptions": {
-                    "calcs": ["lastNotNull"],
+                    "calcs": [
+                        "lastNotNull"
+                    ],
                     "fields": "",
                     "values": false
                 },
@@ -3595,7 +3719,9 @@
                     "displayMode": "table",
                     "placement": "right",
                     "showLegend": true,
-                    "values": ["value"]
+                    "values": [
+                        "value"
+                    ]
                 },
                 "tooltip": {
                     "mode": "multi",
@@ -3678,7 +3804,9 @@
                 },
                 "pieType": "pie",
                 "reduceOptions": {
-                    "calcs": ["lastNotNull"],
+                    "calcs": [
+                        "lastNotNull"
+                    ],
                     "fields": "",
                     "values": false
                 },

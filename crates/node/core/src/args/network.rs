@@ -244,6 +244,7 @@ impl NetworkArgs {
                 self.soft_limit_byte_size_pooled_transactions_response,
                 self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
                 self.max_capacity_cache_txns_pending_fetch,
+                true,
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             propagation_mode: self.propagation_mode,
