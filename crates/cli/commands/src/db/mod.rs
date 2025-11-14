@@ -92,7 +92,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
-                let access_rights = if command.inconsistent {
+                let access_rights = if command.skip_consistency_checks {
                     AccessRights::RoInconsistent
                 } else {
                     AccessRights::RO

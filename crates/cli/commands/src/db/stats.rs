@@ -20,7 +20,7 @@ use std::{sync::Arc, time::Duration};
 pub struct Command {
     /// Skip consistency checks for static files.
     #[arg(long, default_value_t = false)]
-    pub(crate) inconsistent: bool,
+    pub(crate) skip_consistency_checks: bool,
 
     /// Show only the total size for static files.
     #[arg(long, default_value_t = false)]
