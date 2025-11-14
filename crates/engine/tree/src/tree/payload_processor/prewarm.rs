@@ -150,13 +150,10 @@ where
             // When transaction_count_hint is 0, it means the count is unknown. In this case, spawn
             // max workers to handle potentially many transactions in parallel rather
             // than bottlenecking on a single worker.
-            let (workers_needed, skip_txs) = if transaction_count_hint == 0 {
-                (max_concurrency, 0)
+            let workers_needed = if transaction_count_hint == 0 {
+                max_concurrency
             } else {
-                // We want to skip the first half of the txs for prewarming, since it just ends up
-                // conflicting with the main execution thread.
-                let skip = transaction_count_hint / 2 + 1;
-                (transaction_count_hint.saturating_sub(skip).min(max_concurrency), skip)
+                transaction_count_hint.min(max_concurrency)
             };
 
             // Initialize worker handles container
@@ -177,11 +174,6 @@ where
                         "Termination requested, stopping transaction distribution"
                     );
                     break;
-                }
-
-                if tx_index < skip_txs {
-                    tx_index += 1;
-                    continue;
                 }
 
                 let indexed_tx = IndexedTransaction { index: tx_index, tx };
