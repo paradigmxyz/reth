@@ -6,8 +6,8 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_trie::{
-    trie_cursor::{TrieCursor, TrieCursorFactory},
-    updates::StorageTrieUpdates,
+    trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor},
+    updates::StorageTrieUpdatesSorted,
     BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
 
@@ -26,18 +26,24 @@ impl<TX> TrieCursorFactory for DatabaseTrieCursorFactory<&TX>
 where
     TX: DbTx,
 {
-    type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
-    type StorageTrieCursor =
-        DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
+    type AccountTrieCursor<'a>
+        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>
+    where
+        Self: 'a;
 
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+    type StorageTrieCursor<'a>
+        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>
+    where
+        Self: 'a;
+
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         Ok(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         Ok(DatabaseStorageTrieCursor::new(
             self.0.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
@@ -85,6 +91,10 @@ where
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.0.current()?.map(|(k, _)| k.0))
     }
+
+    fn reset(&mut self) {
+        // No-op for database cursors
+    }
 }
 
 /// A cursor over the storage tries stored in the database.
@@ -110,31 +120,19 @@ where
         + DbDupCursorRO<tables::StoragesTrie>
         + DbDupCursorRW<tables::StoragesTrie>,
 {
-    /// Writes storage updates
-    pub fn write_storage_trie_updates(
+    /// Writes storage updates that are already sorted
+    pub fn write_storage_trie_updates_sorted(
         &mut self,
-        updates: &StorageTrieUpdates,
+        updates: &StorageTrieUpdatesSorted,
     ) -> Result<usize, DatabaseError> {
         // The storage trie for this account has to be deleted.
         if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
             self.cursor.delete_current_duplicates()?;
         }
 
-        // Merge updated and removed nodes. Updated nodes must take precedence.
-        let mut storage_updates = updates
-            .removed_nodes_ref()
-            .iter()
-            .filter_map(|n| (!updates.storage_nodes_ref().contains_key(n)).then_some((n, None)))
-            .collect::<Vec<_>>();
-        storage_updates.extend(
-            updates.storage_nodes_ref().iter().map(|(nibbles, node)| (nibbles, Some(node))),
-        );
-
-        // Sort trie node updates.
-        storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
-
         let mut num_entries = 0;
-        for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
+        for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
+        {
             num_entries += 1;
             let nibbles = StoredNibblesSubKey(*nibbles);
             // Delete the old entry if it exists.
@@ -195,6 +193,19 @@ where
     /// Retrieves the current value in the storage trie cursor.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.cursor.current()?.map(|(_, v)| v.nibbles.0))
+    }
+
+    fn reset(&mut self) {
+        // No-op for database cursors
+    }
+}
+
+impl<C> TrieStorageCursor for DatabaseStorageTrieCursor<C>
+where
+    C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send + Sync,
+{
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.hashed_address = hashed_address;
     }
 }
 

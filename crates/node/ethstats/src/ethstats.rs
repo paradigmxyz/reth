@@ -109,10 +109,9 @@ where
             "Attempting to connect to EthStats server at {}", self.credentials.host
         );
         let full_url = format!("ws://{}/api", self.credentials.host);
-        let url = Url::parse(&full_url)
-            .map_err(|e| EthStatsError::InvalidUrl(format!("Invalid URL: {full_url} - {e}")))?;
+        let url = Url::parse(&full_url).map_err(EthStatsError::Url)?;
 
-        match timeout(CONNECT_TIMEOUT, connect_async(url.to_string())).await {
+        match timeout(CONNECT_TIMEOUT, connect_async(url.as_str())).await {
             Ok(Ok((ws_stream, _))) => {
                 debug!(
                     target: "ethstats",
@@ -123,7 +122,7 @@ where
                 self.login().await?;
                 Ok(())
             }
-            Ok(Err(e)) => Err(EthStatsError::InvalidUrl(e.to_string())),
+            Ok(Err(e)) => Err(EthStatsError::WebSocket(e)),
             Err(_) => {
                 debug!(target: "ethstats", "Connection to EthStats server timed out");
                 Err(EthStatsError::Timeout)
@@ -559,24 +558,32 @@ where
 
         // Start the read loop in a separate task
         let read_handle = {
-            let conn = self.conn.clone();
+            let conn_arc = self.conn.clone();
             let message_tx = message_tx.clone();
             let shutdown_tx = shutdown_tx.clone();
 
             tokio::spawn(async move {
                 loop {
-                    let conn = conn.read().await;
-                    if let Some(conn) = conn.as_ref() {
+                    let conn_guard = conn_arc.read().await;
+                    if let Some(conn) = conn_guard.as_ref() {
                         match conn.read_json().await {
                             Ok(msg) => {
                                 if message_tx.send(msg).await.is_err() {
                                     break;
                                 }
                             }
-                            Err(e) => {
-                                debug!(target: "ethstats", "Read error: {}", e);
-                                break;
-                            }
+                            Err(e) => match e {
+                                crate::error::ConnectionError::Serialization(err) => {
+                                    debug!(target: "ethstats", "JSON parse error from stats server: {}", err);
+                                }
+                                other => {
+                                    debug!(target: "ethstats", "Read error: {}", other);
+                                    drop(conn_guard);
+                                    if let Some(conn) = conn_arc.write().await.take() {
+                                        let _ = conn.close().await;
+                                    }
+                                }
+                            },
                         }
                     } else {
                         sleep(RECONNECT_INTERVAL).await;
@@ -659,10 +666,12 @@ where
                 }
 
                 // Handle reconnection
-                _ = reconnect_interval.tick(), if self.conn.read().await.is_none() => {
-                    match self.connect().await {
-                        Ok(_) => info!(target: "ethstats", "Reconnected successfully"),
-                        Err(e) => debug!(target: "ethstats", "Reconnect failed: {}", e),
+                _ = reconnect_interval.tick() => {
+                    if self.conn.read().await.is_none() {
+                        match self.connect().await {
+                            Ok(_) => info!(target: "ethstats", "Reconnected successfully"),
+                            Err(e) => debug!(target: "ethstats", "Reconnect failed: {}", e),
+                        }
                     }
                 }
             }

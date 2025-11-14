@@ -36,11 +36,15 @@ impl CliRunner {
     pub const fn from_runtime(tokio_runtime: tokio::runtime::Runtime) -> Self {
         Self { tokio_runtime }
     }
-}
 
-// === impl CliRunner ===
+    /// Executes an async block on the runtime and blocks until completion.
+    pub fn block_on<F, T>(&self, fut: F) -> T
+    where
+        F: Future<Output = T>,
+    {
+        self.tokio_runtime.block_on(fut)
+    }
 
-impl CliRunner {
     /// Executes the given _async_ command on the tokio runtime until the command future resolves or
     /// until the process receives a `SIGINT` or `SIGTERM` signal.
     ///

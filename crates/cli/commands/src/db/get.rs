@@ -1,4 +1,3 @@
-use alloy_consensus::Header;
 use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
@@ -66,9 +65,10 @@ impl Command {
             }
             Subcommand::StaticFile { segment, key, raw } => {
                 let (key, mask): (u64, _) = match segment {
-                    StaticFileSegment::Headers => {
-                        (table_key::<tables::Headers>(&key)?, <HeaderWithHashMask<Header>>::MASK)
-                    }
+                    StaticFileSegment::Headers => (
+                        table_key::<tables::Headers>(&key)?,
+                        <HeaderWithHashMask<HeaderTy<N>>>::MASK,
+                    ),
                     StaticFileSegment::Transactions => {
                         (table_key::<tables::Transactions>(&key)?, <TransactionMask<TxTy<N>>>::MASK)
                     }
@@ -77,17 +77,15 @@ impl Command {
                     }
                 };
 
-                let content = tool.provider_factory.static_file_provider().find_static_file(
-                    segment,
-                    |provider| {
-                        let mut cursor = provider.cursor()?;
-                        cursor.get(key.into(), mask).map(|result| {
-                            result.map(|vec| {
-                                vec.iter().map(|slice| slice.to_vec()).collect::<Vec<_>>()
-                            })
-                        })
-                    },
-                )?;
+                let content = tool
+                    .provider_factory
+                    .static_file_provider()
+                    .get_segment_provider(segment, key)?
+                    .cursor()?
+                    .get(key.into(), mask)
+                    .map(|result| {
+                        result.map(|vec| vec.iter().map(|slice| slice.to_vec()).collect::<Vec<_>>())
+                    })?;
 
                 match content {
                     Some(content) => {

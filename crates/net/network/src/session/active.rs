@@ -237,16 +237,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::NewPooledTransactionHashes68(msg) => {
-                if msg.hashes.len() != msg.types.len() || msg.hashes.len() != msg.sizes.len() {
-                    return OnIncomingMessageOutcome::BadMessage {
-                        error: EthStreamError::TransactionHashesInvalidLenOfFields {
-                            hashes_len: msg.hashes.len(),
-                            types_len: msg.types.len(),
-                            sizes_len: msg.sizes.len(),
-                        },
-                        message: EthMessage::NewPooledTransactionHashes68(msg),
-                    }
-                }
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::GetBlockHeaders(req) => {
@@ -921,6 +911,16 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
 
     pub(crate) fn shrink_to_fit(&mut self) {
         self.messages.shrink_to_fit();
+    }
+}
+
+impl<N: NetworkPrimitives> Drop for QueuedOutgoingMessages<N> {
+    fn drop(&mut self) {
+        // Ensure gauge is decremented for any remaining items to avoid metric leak on teardown.
+        let remaining = self.messages.len();
+        if remaining > 0 {
+            self.count.decrement(remaining as f64);
+        }
     }
 }
 

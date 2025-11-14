@@ -5,7 +5,7 @@ use alloy_primitives::{
 };
 use futures::StreamExt;
 use parking_lot::RwLock;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_chain_state::ExecutedBlock;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_node_api::{ConsensusEngineEvent, NodePrimitives};
 use reth_primitives_traits::{Bytecode, RecoveredBlock};
@@ -20,14 +20,14 @@ pub struct PendingState<N: NodePrimitives>(Arc<RwLock<PendingStateInner<N>>>);
 
 #[derive(Default, Debug)]
 struct PendingStateInner<N: NodePrimitives> {
-    blocks_by_hash: B256Map<ExecutedBlockWithTrieUpdates<N>>,
+    blocks_by_hash: B256Map<ExecutedBlock<N>>,
     invalid_blocks_by_hash: B256Map<Arc<RecoveredBlock<N::Block>>>,
     block_hashes_by_number: BTreeMap<BlockNumber, B256HashSet>,
 }
 
 impl<N: NodePrimitives> PendingState<N> {
     /// Insert executed block with trie updates.
-    pub fn insert_block(&self, block: ExecutedBlockWithTrieUpdates<N>) {
+    pub fn insert_block(&self, block: ExecutedBlock<N>) {
         let mut this = self.0.write();
         let block_hash = block.recovered_block.hash();
         this.block_hashes_by_number
@@ -46,13 +46,13 @@ impl<N: NodePrimitives> PendingState<N> {
     }
 
     /// Returns only valid executed blocks by hash.
-    pub fn executed_block(&self, hash: &B256) -> Option<ExecutedBlockWithTrieUpdates<N>> {
+    pub fn executed_block(&self, hash: &B256) -> Option<ExecutedBlock<N>> {
         self.0.read().blocks_by_hash.get(hash).cloned()
     }
 
     /// Returns valid recovered block.
     pub fn recovered_block(&self, hash: &B256) -> Option<Arc<RecoveredBlock<N::Block>>> {
-        self.executed_block(hash).map(|b| b.recovered_block.clone())
+        self.executed_block(hash).map(|b| b.recovered_block)
     }
 
     /// Returns invalid recovered block.
@@ -123,8 +123,7 @@ pub async fn maintain_pending_state<P>(
             }
             // ignore
             ConsensusEngineEvent::CanonicalChainCommitted(_, _) |
-            ConsensusEngineEvent::BlockReceived(_) |
-            ConsensusEngineEvent::LiveSyncProgress(_) => (),
+            ConsensusEngineEvent::BlockReceived(_) => (),
         }
     }
 }

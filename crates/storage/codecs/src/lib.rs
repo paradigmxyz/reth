@@ -312,10 +312,9 @@ where
             return (None, buf)
         }
 
-        let (len, mut buf) = decode_varuint(buf);
+        let (len, buf) = decode_varuint(buf);
 
-        let (element, _) = T::from_compact(&buf[..len], len);
-        buf.advance(len);
+        let (element, buf) = T::from_compact(buf, len);
 
         (Some(element), buf)
     }

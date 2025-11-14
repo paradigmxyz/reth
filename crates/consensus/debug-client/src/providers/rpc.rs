@@ -61,34 +61,42 @@ where
     type Block = PrimitiveBlock;
 
     async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
-        let Ok(mut stream) = self.full_block_stream().await.inspect_err(|err| {
-            warn!(
-                target: "consensus::debug-client",
-                %err,
-                url=%self.url,
-                "Failed to subscribe to blocks",
-            );
-        }) else {
-            return
-        };
+        loop {
+            let Ok(mut stream) = self.full_block_stream().await.inspect_err(|err| {
+                warn!(
+                    target: "consensus::debug-client",
+                    %err,
+                    url=%self.url,
+                    "Failed to subscribe to blocks",
+                );
+            }) else {
+                return
+            };
 
-        while let Some(res) = stream.next().await {
-            match res {
-                Ok(block) => {
-                    if tx.send((self.convert)(block)).await.is_err() {
-                        // Channel closed.
-                        break;
+            while let Some(res) = stream.next().await {
+                match res {
+                    Ok(block) => {
+                        if tx.send((self.convert)(block)).await.is_err() {
+                            // Channel closed.
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            target: "consensus::debug-client",
+                            %err,
+                            url=%self.url,
+                            "Failed to fetch a block",
+                        );
                     }
                 }
-                Err(err) => {
-                    warn!(
-                        target: "consensus::debug-client",
-                        %err,
-                        url=%self.url,
-                        "Failed to fetch a block",
-                    );
-                }
             }
+            // if stream terminated we want to re-establish it again
+            debug!(
+                target: "consensus::debug-client",
+                url=%self.url,
+                "Re-estbalishing block subscription",
+            );
         }
     }
 

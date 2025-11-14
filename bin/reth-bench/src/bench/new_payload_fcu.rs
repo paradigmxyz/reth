@@ -30,8 +30,18 @@ pub struct Command {
     rpc_url: String,
 
     /// How long to wait after a forkchoice update before sending the next payload.
-    #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
-    wait_time: Option<Duration>,
+    #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, default_value = "250ms", verbatim_doc_comment)]
+    wait_time: Duration,
+
+    /// The size of the block buffer (channel capacity) for prefetching blocks from the RPC
+    /// endpoint.
+    #[arg(
+        long = "rpc-block-buffer-size",
+        value_name = "RPC_BLOCK_BUFFER_SIZE",
+        default_value = "20",
+        verbatim_doc_comment
+    )]
+    rpc_block_buffer_size: usize,
 
     #[command(flatten)]
     benchmark: BenchmarkArgs,
@@ -48,7 +58,12 @@ impl Command {
             is_optimism,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
-        let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
+        let buffer_size = self.rpc_block_buffer_size;
+
+        // Use a oneshot channel to propagate errors from the spawned task
+        let (error_sender, mut error_receiver) = tokio::sync::oneshot::channel();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer_size);
+
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
                 let block_res = block_provider
@@ -60,24 +75,17 @@ impl Command {
                     Ok(block) => block,
                     Err(e) => {
                         tracing::error!("Failed to fetch block {next_block}: {e}");
+                        let _ = error_sender.send(e);
                         break;
                     }
                 };
-                let header = block.header.clone();
 
-                let (version, params) = match block_to_new_payload(block, is_optimism) {
-                    Ok(result) => result,
-                    Err(e) => {
-                        tracing::error!("Failed to convert block to new payload: {e}");
-                        break;
-                    }
-                };
-                let head_block_hash = header.hash;
-                let safe_block_hash =
-                    block_provider.get_block_by_number(header.number.saturating_sub(32).into());
+                let head_block_hash = block.header.hash;
+                let safe_block_hash = block_provider
+                    .get_block_by_number(block.header.number.saturating_sub(32).into());
 
-                let finalized_block_hash =
-                    block_provider.get_block_by_number(header.number.saturating_sub(64).into());
+                let finalized_block_hash = block_provider
+                    .get_block_by_number(block.header.number.saturating_sub(64).into());
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
@@ -93,14 +101,7 @@ impl Command {
 
                 next_block += 1;
                 if let Err(e) = sender
-                    .send((
-                        header,
-                        version,
-                        params,
-                        head_block_hash,
-                        safe_block_hash,
-                        finalized_block_hash,
-                    ))
+                    .send((block, head_block_hash, safe_block_hash, finalized_block_hash))
                     .await
                 {
                     tracing::error!("Failed to send block data: {e}");
@@ -114,15 +115,16 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((header, version, params, head, safe, finalized)) = {
+        while let Some((block, head, safe, finalized)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
             result
         } {
             // just put gas used here
-            let gas_used = header.gas_used;
-            let block_number = header.number;
+            let gas_used = block.header.gas_used;
+            let block_number = block.header.number;
+            let transaction_count = block.transactions.len() as u64;
 
             debug!(target: "reth-bench", ?block_number, "Sending payload",);
 
@@ -133,6 +135,7 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
+            let (version, params) = block_to_new_payload(block, is_optimism)?;
             let start = Instant::now();
             call_new_payload(&auth_provider, version, params).await?;
 
@@ -143,8 +146,13 @@ impl Command {
             // calculate the total duration and the fcu latency, record
             let total_latency = start.elapsed();
             let fcu_latency = total_latency - new_payload_result.latency;
-            let combined_result =
-                CombinedResult { block_number, new_payload_result, fcu_latency, total_latency };
+            let combined_result = CombinedResult {
+                block_number,
+                transaction_count,
+                new_payload_result,
+                fcu_latency,
+                total_latency,
+            };
 
             // current duration since the start of the benchmark minus the time
             // waiting for blocks
@@ -153,14 +161,18 @@ impl Command {
             // convert gas used to gigagas, then compute gigagas per second
             info!(%combined_result);
 
-            // wait if we need to
-            if let Some(wait_time) = self.wait_time {
-                tokio::time::sleep(wait_time).await;
-            }
+            // wait before sending the next payload
+            tokio::time::sleep(self.wait_time).await;
 
             // record the current result
-            let gas_row = TotalGasRow { block_number, gas_used, time: current_duration };
+            let gas_row =
+                TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
+        }
+
+        // Check if the spawned task encountered an error
+        if let Ok(error) = error_receiver.try_recv() {
+            return Err(error);
         }
 
         let (gas_output_results, combined_results): (_, Vec<CombinedResult>) =

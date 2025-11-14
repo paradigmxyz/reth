@@ -301,21 +301,24 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 /// database tables as the source of truth. This will iteratively recompute the entire trie based
 /// on the hashed state, and produce any discovered [`Output`]s via the `next` method.
 #[derive(Debug)]
-pub struct Verifier<T: TrieCursorFactory, H> {
-    trie_cursor_factory: T,
+pub struct Verifier<'a, T: TrieCursorFactory, H> {
+    trie_cursor_factory: &'a T,
     hashed_cursor_factory: H,
     branch_node_iter: StateRootBranchNodesIter<H>,
     outputs: Vec<Output>,
-    account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor>>,
-    storage: Option<(B256, SingleVerifier<DepthFirstTrieIterator<T::StorageTrieCursor>>)>,
+    account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor<'a>>>,
+    storage: Option<(B256, SingleVerifier<DepthFirstTrieIterator<T::StorageTrieCursor<'a>>>)>,
     complete: bool,
 }
 
-impl<T: TrieCursorFactory + Clone, H: HashedCursorFactory + Clone> Verifier<T, H> {
+impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H> {
     /// Creates a new verifier instance.
-    pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Result<Self, DatabaseError> {
+    pub fn new(
+        trie_cursor_factory: &'a T,
+        hashed_cursor_factory: H,
+    ) -> Result<Self, DatabaseError> {
         Ok(Self {
-            trie_cursor_factory: trie_cursor_factory.clone(),
+            trie_cursor_factory,
             hashed_cursor_factory: hashed_cursor_factory.clone(),
             branch_node_iter: StateRootBranchNodesIter::new(hashed_cursor_factory),
             outputs: Default::default(),
@@ -326,7 +329,7 @@ impl<T: TrieCursorFactory + Clone, H: HashedCursorFactory + Clone> Verifier<T, H
     }
 }
 
-impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
+impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H> {
     fn new_storage(
         &mut self,
         account: B256,
@@ -400,9 +403,8 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
                     // need to validate that all accounts coming after it have empty storages.
                     let prev_account = *prev_account;
 
-                    // Calculate the max possible account address.
-                    let mut max_account = B256::ZERO;
-                    max_account.reverse();
+                    // Calculate the max possible account address (all bits set).
+                    let max_account = B256::from([0xFFu8; 32]);
 
                     self.verify_empty_storages(prev_account, max_account, false, true)?;
                 }
@@ -445,7 +447,7 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
     }
 }
 
-impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Iterator for Verifier<T, H> {
+impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Iterator for Verifier<'a, T, H> {
     type Item = Result<Output, StateRootError>;
 
     fn next(&mut self) -> Option<Self::Item> {

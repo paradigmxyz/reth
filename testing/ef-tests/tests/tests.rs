@@ -93,7 +93,7 @@ macro_rules! blockchain_test {
                 .join("ethereum-tests")
                 .join("BlockchainTests");
 
-            BlockchainTests::new(suite_path).run_only(&format!("{}", stringify!($dir)));
+            BlockchainTests::new(suite_path).run_only(stringify!($dir));
         }
     };
 }

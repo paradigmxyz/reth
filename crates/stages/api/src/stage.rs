@@ -1,12 +1,13 @@
 use crate::{error::StageError, StageCheckpoint, StageId};
 use alloy_primitives::{BlockNumber, TxNumber};
-use reth_provider::{BlockReader, ProviderError};
+use reth_provider::{BlockReader, ProviderError, StaticFileProviderFactory, StaticFileSegment};
 use std::{
     cmp::{max, min},
     future::{poll_fn, Future},
     ops::{Range, RangeInclusive},
     task::{Context, Poll},
 };
+use tracing::instrument;
 
 /// Stage execution input, see [`Stage::execute`].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -15,6 +16,26 @@ pub struct ExecInput {
     pub target: Option<BlockNumber>,
     /// The checkpoint of this stage the last time it was executed.
     pub checkpoint: Option<StageCheckpoint>,
+}
+
+/// Return type for [`ExecInput::next_block_range_with_threshold`].
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct BlockRangeOutput {
+    /// The block range to execute.
+    pub block_range: RangeInclusive<BlockNumber>,
+    /// Whether this is the final range to execute.
+    pub is_final_range: bool,
+}
+
+/// Return type for [`ExecInput::next_block_range_with_transaction_threshold`].
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct TransactionRangeOutput {
+    /// The transaction range to execute.
+    pub tx_range: Range<TxNumber>,
+    /// The block range to execute.
+    pub block_range: RangeInclusive<BlockNumber>,
+    /// Whether this is the final range to execute.
+    pub is_final_range: bool,
 }
 
 impl ExecInput {
@@ -42,8 +63,7 @@ impl ExecInput {
 
     /// Return next block range that needs to be executed.
     pub fn next_block_range(&self) -> RangeInclusive<BlockNumber> {
-        let (range, _) = self.next_block_range_with_threshold(u64::MAX);
-        range
+        self.next_block_range_with_threshold(u64::MAX).block_range
     }
 
     /// Return true if this is the first block range to execute.
@@ -52,11 +72,7 @@ impl ExecInput {
     }
 
     /// Return the next block range to execute.
-    /// Return pair of the block range and if this is final block range.
-    pub fn next_block_range_with_threshold(
-        &self,
-        threshold: u64,
-    ) -> (RangeInclusive<BlockNumber>, bool) {
+    pub fn next_block_range_with_threshold(&self, threshold: u64) -> BlockRangeOutput {
         let current_block = self.checkpoint();
         let start = current_block.block_number + 1;
         let target = self.target();
@@ -64,21 +80,39 @@ impl ExecInput {
         let end = min(target, current_block.block_number.saturating_add(threshold));
 
         let is_final_range = end == target;
-        (start..=end, is_final_range)
+        BlockRangeOutput { block_range: start..=end, is_final_range }
     }
 
     /// Return the next block range determined the number of transactions within it.
     /// This function walks the block indices until either the end of the range is reached or
     /// the number of transactions exceeds the threshold.
+    #[instrument(level = "debug", target = "sync::stages", skip(provider), ret)]
     pub fn next_block_range_with_transaction_threshold<Provider>(
         &self,
         provider: &Provider,
         tx_threshold: u64,
-    ) -> Result<(Range<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError>
+    ) -> Result<TransactionRangeOutput, StageError>
     where
-        Provider: BlockReader,
+        Provider: StaticFileProviderFactory + BlockReader,
     {
-        let start_block = self.next_block();
+        // Get lowest available block number for transactions
+        let Some(lowest_transactions_block) =
+            provider.static_file_provider().get_lowest_range_start(StaticFileSegment::Transactions)
+        else {
+            return Ok(TransactionRangeOutput {
+                tx_range: 0..0,
+                block_range: 0..=0,
+                is_final_range: true,
+            });
+        };
+
+        // We can only process transactions that have associated static files, so we cap the start
+        // block by lowest available block number.
+        //
+        // Certain transactions may not have associated static files when user deletes them
+        // manually. In that case, we can't process them, and need to adjust the start block
+        // accordingly.
+        let start_block = self.next_block().max(lowest_transactions_block);
         let target_block = self.target();
 
         let start_block_body = provider
@@ -95,7 +129,11 @@ impl ExecInput {
 
         if all_tx_cnt == 0 {
             // if there is no more transaction return back.
-            return Ok((first_tx_num..first_tx_num, start_block..=target_block, true))
+            return Ok(TransactionRangeOutput {
+                tx_range: first_tx_num..first_tx_num,
+                block_range: start_block..=target_block,
+                is_final_range: true,
+            })
         }
 
         // get block of this tx
@@ -105,7 +143,7 @@ impl ExecInput {
             // get tx block number. next_tx_num in this case will be less than all_tx_cnt.
             // So we are sure that transaction must exist.
             let end_block_number = provider
-                .transaction_block(first_tx_num + tx_threshold)?
+                .block_by_transaction_id(first_tx_num + tx_threshold)?
                 .expect("block of tx must exist");
             // we want to get range of all transactions of this block, so we are fetching block
             // body.
@@ -116,7 +154,11 @@ impl ExecInput {
         };
 
         let tx_range = first_tx_num..next_tx_num;
-        Ok((tx_range, start_block..=end_block, is_final_range))
+        Ok(TransactionRangeOutput {
+            tx_range,
+            block_range: start_block..=end_block,
+            is_final_range,
+        })
     }
 }
 
@@ -277,3 +319,164 @@ pub trait StageExt<Provider>: Stage<Provider> {
 }
 
 impl<Provider, S: Stage<Provider> + ?Sized> StageExt<Provider> for S {}
+
+#[cfg(test)]
+mod tests {
+    use reth_chainspec::MAINNET;
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
+    use reth_db_api::{models::StoredBlockBodyIndices, tables, transaction::DbTxMut};
+    use reth_provider::{
+        test_utils::MockNodeTypesWithDB, ProviderFactory, StaticFileProviderBuilder,
+        StaticFileProviderFactory, StaticFileSegment,
+    };
+    use reth_stages_types::StageCheckpoint;
+    use reth_testing_utils::generators::{self, random_signed_tx};
+
+    use crate::ExecInput;
+
+    #[test]
+    fn test_exec_input_next_block_range_with_transaction_threshold() {
+        let mut rng = generators::rng();
+        let provider_factory = ProviderFactory::<MockNodeTypesWithDB>::new(
+            create_test_rw_db(),
+            MAINNET.clone(),
+            StaticFileProviderBuilder::read_write(create_test_static_files_dir().0.keep())
+                .unwrap()
+                .with_blocks_per_file(1)
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+
+        // Without checkpoint, without transactions in static files
+        {
+            let exec_input = ExecInput { target: Some(100), checkpoint: None };
+
+            let range_output = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(range_output.tx_range, 0..0);
+            assert_eq!(range_output.block_range, 0..=0);
+            assert!(range_output.is_final_range);
+        }
+
+        // With checkpoint at block 10, without transactions in static files
+        {
+            let exec_input =
+                ExecInput { target: Some(1), checkpoint: Some(StageCheckpoint::new(10)) };
+
+            let range_output = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(range_output.tx_range, 0..0);
+            assert_eq!(range_output.block_range, 0..=0);
+            assert!(range_output.is_final_range);
+        }
+
+        // Without checkpoint, with transactions in static files starting from block 1
+        {
+            let exec_input = ExecInput { target: Some(1), checkpoint: None };
+
+            let mut provider_rw = provider_factory.provider_rw().unwrap();
+            provider_rw
+                .tx_mut()
+                .put::<tables::BlockBodyIndices>(
+                    1,
+                    StoredBlockBodyIndices { first_tx_num: 0, tx_count: 2 },
+                )
+                .unwrap();
+            let mut writer =
+                provider_rw.get_static_file_writer(0, StaticFileSegment::Transactions).unwrap();
+            writer.increment_block(0).unwrap();
+            writer.increment_block(1).unwrap();
+            writer.append_transaction(0, &random_signed_tx(&mut rng)).unwrap();
+            writer.append_transaction(1, &random_signed_tx(&mut rng)).unwrap();
+            drop(writer);
+            provider_rw.commit().unwrap();
+
+            let range_output = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(range_output.tx_range, 0..2);
+            assert_eq!(range_output.block_range, 1..=1);
+            assert!(range_output.is_final_range);
+        }
+
+        // With checkpoint at block 1, with transactions in static files starting from block 1
+        {
+            let exec_input =
+                ExecInput { target: Some(2), checkpoint: Some(StageCheckpoint::new(1)) };
+
+            let mut provider_rw = provider_factory.provider_rw().unwrap();
+            provider_rw
+                .tx_mut()
+                .put::<tables::BlockBodyIndices>(
+                    2,
+                    StoredBlockBodyIndices { first_tx_num: 2, tx_count: 1 },
+                )
+                .unwrap();
+            let mut writer =
+                provider_rw.get_static_file_writer(1, StaticFileSegment::Transactions).unwrap();
+            writer.increment_block(2).unwrap();
+            writer.append_transaction(2, &random_signed_tx(&mut rng)).unwrap();
+            drop(writer);
+            provider_rw.commit().unwrap();
+
+            let range_output = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(range_output.tx_range, 2..3);
+            assert_eq!(range_output.block_range, 2..=2);
+            assert!(range_output.is_final_range);
+        }
+
+        // Without checkpoint, with transactions in static files starting from block 2
+        {
+            let exec_input = ExecInput { target: Some(2), checkpoint: None };
+
+            provider_factory
+                .static_file_provider()
+                .delete_jar(StaticFileSegment::Transactions, 0)
+                .unwrap();
+            provider_factory
+                .static_file_provider()
+                .delete_jar(StaticFileSegment::Transactions, 1)
+                .unwrap();
+
+            let range_output = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(range_output.tx_range, 2..3);
+            assert_eq!(range_output.block_range, 2..=2);
+            assert!(range_output.is_final_range);
+        }
+
+        // Without checkpoint, with transactions in static files starting from block 2
+        {
+            let exec_input =
+                ExecInput { target: Some(3), checkpoint: Some(StageCheckpoint::new(2)) };
+
+            let mut provider_rw = provider_factory.provider_rw().unwrap();
+            provider_rw
+                .tx_mut()
+                .put::<tables::BlockBodyIndices>(
+                    3,
+                    StoredBlockBodyIndices { first_tx_num: 3, tx_count: 1 },
+                )
+                .unwrap();
+            let mut writer =
+                provider_rw.get_static_file_writer(1, StaticFileSegment::Transactions).unwrap();
+            writer.increment_block(3).unwrap();
+            writer.append_transaction(3, &random_signed_tx(&mut rng)).unwrap();
+            drop(writer);
+            provider_rw.commit().unwrap();
+
+            let range_output = exec_input
+                .next_block_range_with_transaction_threshold(&provider_factory, 10)
+                .unwrap();
+            assert_eq!(range_output.tx_range, 3..4);
+            assert_eq!(range_output.block_range, 3..=3);
+            assert!(range_output.is_final_range);
+        }
+    }
+}

@@ -161,8 +161,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
-        let block_range = static_file_provider.find_fixed_range(block);
-        let (jar, path) = match static_file_provider.get_segment_provider_from_block(
+        let block_range = static_file_provider.find_fixed_range(segment, block);
+        let (jar, path) = match static_file_provider.get_segment_provider_for_block(
             segment,
             block_range.start(),
             None,
@@ -351,7 +351,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 self.data_path = data_path;
 
                 *self.writer.user_header_mut() = SegmentHeader::new(
-                    self.reader().find_fixed_range(last_block + 1),
+                    self.reader().find_fixed_range(segment, last_block + 1),
                     None,
                     None,
                     segment,
@@ -531,7 +531,20 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// blocks.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
-    pub fn append_header(
+    pub fn append_header(&mut self, header: &N::BlockHeader, hash: &BlockHash) -> ProviderResult<()>
+    where
+        N::BlockHeader: Compact,
+    {
+        self.append_header_with_td(header, U256::ZERO, hash)
+    }
+
+    /// Appends header to static file with a specified total difficulty.
+    ///
+    /// It **CALLS** `increment_block()` since the number of headers is equal to the number of
+    /// blocks.
+    ///
+    /// Returns the current [`BlockNumber`] as seen in the static file.
+    pub fn append_header_with_td(
         &mut self,
         header: &N::BlockHeader,
         total_difficulty: U256,

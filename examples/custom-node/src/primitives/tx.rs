@@ -23,7 +23,7 @@ pub enum CustomTransaction {
     /// A regular Optimism transaction as defined by [`OpTxEnvelope`].
     #[envelope(flatten)]
     Op(OpTxEnvelope),
-    /// A [`TxPayment`] tagged with type 0x7E.
+    /// A [`TxPayment`] tagged with type 0x2A (decimal 42).
     #[envelope(ty = 42)]
     Payment(Signed<TxPayment>),
 }
@@ -33,7 +33,7 @@ impl RlpBincode for CustomTransaction {}
 impl reth_codecs::alloy::transaction::Envelope for CustomTransaction {
     fn signature(&self) -> &Signature {
         match self {
-            CustomTransaction::Op(tx) => tx.signature(),
+            CustomTransaction::Op(tx) => reth_codecs::alloy::transaction::Envelope::signature(tx),
             CustomTransaction::Payment(tx) => tx.signature(),
         }
     }

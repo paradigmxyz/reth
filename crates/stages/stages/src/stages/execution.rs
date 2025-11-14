@@ -11,9 +11,9 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
-    StaticFileProviderFactory, StatsReader, TransactionVariant,
+    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -39,7 +39,6 @@ use super::missing_static_data_error;
 /// Input tables:
 /// - [`tables::CanonicalHeaders`] get next block to execute.
 /// - [`tables::Headers`] get for revm environment variables.
-/// - [`tables::HeaderTerminalDifficulties`]
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///
@@ -186,11 +185,15 @@ where
         unwind_to: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
+        Provider: StaticFileProviderFactory
+            + DBProvider
+            + BlockReader
+            + HeaderProvider
+            + StorageSettingsCache,
     {
-        // If there's any receipts pruning configured, receipts are written directly to database and
-        // inconsistencies are expected.
-        if provider.prune_modes_ref().has_receipts_pruning() {
+        // On old nodes, if there's any receipts pruning configured, receipts are written directly
+        // to database and inconsistencies are expected.
+        if EitherWriter::receipts_destination(provider).is_database() {
             return Ok(())
         }
 
@@ -260,7 +263,8 @@ where
             Primitives: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
         > + StatsReader
         + BlockHashReader
-        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>,
+        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
+        + StorageSettingsCache,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -896,7 +900,7 @@ mod tests {
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
-        let modes = [None, Some(PruneModes::none())];
+        let modes = [None, Some(PruneModes::default())];
         let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
             Address::random(),
             PruneMode::Distance(100000),
@@ -1033,7 +1037,7 @@ mod tests {
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
-        let modes = [None, Some(PruneModes::none())];
+        let modes = [None, Some(PruneModes::default())];
         let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
             Address::random(),
             PruneMode::Before(100000),
