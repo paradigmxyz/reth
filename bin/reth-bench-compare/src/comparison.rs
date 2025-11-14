@@ -45,6 +45,7 @@ pub(crate) struct CombinedLatencyRow {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct TotalGasRow {
     pub block_number: u64,
+    pub transaction_count: u64,
     pub gas_used: u64,
     pub time: u128,
 }
