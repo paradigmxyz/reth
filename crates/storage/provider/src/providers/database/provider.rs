@@ -335,7 +335,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             self.write_trie_updates_sorted(&trie_updates_sorted)?;
         }
 
-        // batch insert hashes and intermediate merkle nodes
+        // batch insert hashes
         if !aggregated_hashed_state.is_empty() {
             self.write_hashed_state(&aggregated_hashed_state.into_sorted())?;
         }
