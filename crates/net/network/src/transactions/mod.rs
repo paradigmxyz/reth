@@ -440,8 +440,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
     /// `false` if [`TransactionsManager`] is operating close to full capacity.
     fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         self.pending_pool_imports_info
-            .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports) &&
-            self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
+            .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports)
     }
 
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
@@ -508,13 +507,15 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
     /// Runs an operation to fetch hashes that are cached in [`TransactionFetcher`].
     fn on_fetch_hashes_pending_fetch(&mut self) {
         // try drain transaction hashes pending fetch
-        let info = &self.pending_pool_imports_info;
-        let max_pending_pool_imports = info.max_pending_pool_imports;
-        let has_capacity_wrt_pending_pool_imports =
-            |divisor| info.has_capacity(max_pending_pool_imports / divisor);
+        self.transaction_fetcher.on_fetch_pending_hashes(&self.peers);
+    }
 
-        self.transaction_fetcher
-            .on_fetch_pending_hashes(&self.peers, has_capacity_wrt_pending_pool_imports);
+    /// Attempts to immediately schedule fetching of pending hashes if both the transaction fetcher
+    /// and the pool have spare capacity.
+    fn try_schedule_pending_fetches(&mut self) {
+        if self.has_capacity_for_fetching_pending_hashes() {
+            self.on_fetch_hashes_pending_fetch();
+        }
     }
 
     fn on_request_error(&self, peer_id: PeerId, req_err: RequestError) {
@@ -778,14 +779,16 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
             );
 
             self.transaction_fetcher.buffer_hashes(hashes, Some(peer_id));
-
+            self.try_schedule_pending_fetches();
             return
         }
 
         let mut hashes_to_request =
             RequestTxHashes::with_capacity(valid_announcement_data.len() / 4);
-        let surplus_hashes =
-            self.transaction_fetcher.pack_request(&mut hashes_to_request, valid_announcement_data);
+        let surplus_hashes = {
+            let mut builder = self.transaction_fetcher.request_builder();
+            builder.pack_from_announcement(&mut hashes_to_request, valid_announcement_data)
+        };
 
         if !surplus_hashes.is_empty() {
             trace!(target: "net::tx",
@@ -796,6 +799,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
             );
 
             self.transaction_fetcher.buffer_hashes(surplus_hashes, Some(peer_id));
+            self.try_schedule_pending_fetches();
         }
 
         trace!(target: "net::tx",
@@ -822,6 +826,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
+            self.try_schedule_pending_fetches();
         }
     }
 }
@@ -1492,6 +1497,7 @@ where
                 trace!(target: "net::tx", ?peer_id, "peer returned empty response");
             }
         }
+        self.try_schedule_pending_fetches();
     }
 }
 
@@ -1581,7 +1587,7 @@ where
         // Advance incoming transaction events (stream new txns/announcements from
         // network manager and queue for import to pool/fetch txns).
         //
-        // This will potentially remove hashes from hashes pending fetch, it the event
+        // This will potentially remove hashes from hashes pending fetch if the event
         // is an announcement (if same hashes are announced that didn't fit into a
         // previous request).
         //
@@ -1629,11 +1635,7 @@ where
         //
         // Sends at most one request.
         duration_metered_exec!(
-            {
-                if this.has_capacity_for_fetching_pending_hashes() {
-                    this.on_fetch_hashes_pending_fetch();
-                }
-            },
+            this.try_schedule_pending_fetches(),
             poll_durations.acc_pending_fetch
         );
 
@@ -1832,8 +1834,9 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
     /// Append a transaction to the list of full transaction if the total message bytes size doesn't
     /// exceed the soft maximum target byte size. The limit is soft, meaning if one single
     /// transaction goes over the limit, it will be broadcasted in its own [`Transactions`]
-    /// message. The same pattern is followed in filling a [`GetPooledTransactions`] request in
-    /// [`TransactionFetcher::fill_request_from_hashes_pending_fetch`].
+    /// message. The same pattern is followed when
+    /// [`RequestBuilder::fill_from_pending_fetch`](crate::transactions::fetcher::RequestBuilder::fill_from_pending_fetch)
+    /// assembles a [`GetPooledTransactions`] request.
     ///
     /// If the transaction is unsuitable for broadcast or would exceed the softlimit, it is appended
     /// to list of pooled transactions, (e.g. 4844 transactions).
@@ -2622,7 +2625,7 @@ mod tests {
         assert_eq!(tx_fetcher.active_peers.len(), 0);
 
         // sends requests for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers);
 
         assert_eq!(tx_fetcher.num_pending_hashes(), 0);
         // as long as request is in flight peer_1 is not idle
@@ -2689,7 +2692,7 @@ mod tests {
         assert_eq!(tx_fetcher.active_peers.len(), 0);
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
