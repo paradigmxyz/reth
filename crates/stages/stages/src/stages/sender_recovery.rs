@@ -82,24 +82,27 @@ where
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let range_output =
-            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
+        let Some(range_output) =
+            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?
+        else {
+            info!(target: "sync::stages::sender_recovery", "No transaction senders to recover");
+            EitherWriter::new_senders(
+                provider,
+                provider
+                    .static_file_provider()
+                    .get_highest_static_file_block(StaticFileSegment::Transactions)
+                    .unwrap_or_default(),
+            )?
+            .ensure_at_block(input.target())?;
+            return Ok(ExecOutput {
+                checkpoint: StageCheckpoint::new(input.target())
+                    .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+                done: true,
+            })
+        };
         let end_block = *range_output.block_range.end();
 
         let mut writer = EitherWriter::new_senders(provider, *range_output.block_range.start())?;
-
-        // No transactions to walk over
-        if range_output.tx_range.is_empty() {
-            info!(target: "sync::stages::sender_recovery", tx_range = ?range_output.tx_range, "Target transaction already reached");
-            writer.ensure_at_block(*range_output.block_range.end())?;
-
-            return Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new(end_block)
-                    .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-                done: range_output.is_final_range,
-            })
-        }
-
         writer.ensure_at_block(range_output.block_range.start().saturating_sub(1))?;
 
         info!(target: "sync::stages::sender_recovery", tx_range = ?range_output.tx_range, "Recovering senders");
