@@ -110,10 +110,6 @@ impl<Provider> StageSetBuilder<Provider> {
     /// If the new stage has a different ID,
     /// it will maintain the original stage's position in the execution order.
     pub fn replace<S: Stage<Provider> + 'static>(mut self, stage_id: StageId, stage: S) -> Self {
-        self.stages
-            .get(&stage_id)
-            .unwrap_or_else(|| panic!("Stage does not exist in set: {stage_id}"));
-
         if stage.id() == stage_id {
             return self.set(stage);
         }
