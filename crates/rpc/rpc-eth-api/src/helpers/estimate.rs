@@ -6,12 +6,14 @@ use alloy_evm::overrides::apply_state_overrides;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::StateOverride, BlockId};
-use core::fmt::Debug;
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
-use reth_evm::{ConfigureEvm, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
-use reth_revm::{database::{EvmStateProvider, StateProviderDatabase}, db::State};
+use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
+use reth_revm::{
+    database::{EvmStateProvider, StateProviderDatabase},
+    db::State,
+};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     error::{api::FromEvmHalt, FromEvmError},
@@ -22,7 +24,6 @@ use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Transaction},
     primitives::KECCAK_EMPTY,
-    Database,
 };
 use tracing::trace;
 
@@ -96,8 +97,10 @@ pub trait EstimateCall: Call {
         let is_basic_transfer = if tx_env.input().is_empty() &&
             let TxKind::Call(to) = tx_env.kind()
         {
-            match db.basic(to) {
-                Ok(Some(account)) => account.code_hash == KECCAK_EMPTY,
+            match db.database.basic_account(&to) {
+                Ok(Some(account)) => {
+                    account.bytecode_hash.is_none() || account.bytecode_hash == Some(KECCAK_EMPTY)
+                }
                 _ => true,
             }
         } else {
@@ -307,7 +310,7 @@ pub trait EstimateCall: Call {
         max_gas_limit: u64,
     ) -> Result<U256, Self::Error>
     where
-        DB: Database<Error = ProviderError> + Debug,
+        DB: Database<Error = ProviderError>,
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();
