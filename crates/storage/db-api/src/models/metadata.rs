@@ -7,16 +7,24 @@ use serde::{Deserialize, Serialize};
 ///
 /// These should be set during `init_genesis` or `init_db` depending on whether we want dictate
 /// behaviour of new or old nodes respectively.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Compact)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
 pub struct StorageSettings {
     /// Whether this node always writes receipts to static files.
     ///
     /// If this is set to FALSE AND receipt pruning IS ENABLED, all receipts should be written to DB. Otherwise, they should be written to static files. This ensures that older nodes do not need to migrate their current DB tables to static files. For more, read: <https://github.com/paradigmxyz/reth/issues/18890#issuecomment-3457760097>
+    #[serde(default)]
     pub receipts_in_static_files: bool,
     /// Whether this node always writes transaction senders to static files.
+    #[serde(default)]
     pub transaction_senders_in_static_files: bool,
+}
+
+impl Default for StorageSettings {
+    fn default() -> Self {
+        Self::legacy()
+    }
 }
 
 impl StorageSettings {
