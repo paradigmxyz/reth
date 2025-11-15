@@ -447,11 +447,14 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Resolve the final datadir path.
+    ///
+    /// Uses chainspec-based naming (via `EthChainSpec::name()`), falling back to
+    /// the chain's canonical name or id for built-in chains.
     pub fn datadir(&self) -> ChainPath<DataDirPath>
     where
         ChainSpec: EthChainSpec,
     {
-        self.datadir.clone().resolve_datadir(self.chain.chain())
+        self.datadir.clone().resolve_datadir(self.chain.as_ref())
     }
 
     /// Load an application configuration from a specified path.
