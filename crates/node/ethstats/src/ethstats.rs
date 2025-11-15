@@ -18,6 +18,7 @@ use reth_transaction_pool::TransactionPool;
 use chrono::Local;
 use serde_json::Value;
 use std::{
+    borrow::Cow,
     str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
@@ -388,12 +389,12 @@ where
     ///
     /// # Arguments
     /// * `list` - Vector of block numbers to fetch and report
-    async fn report_history(&self, list: Option<&Vec<u64>>) -> Result<(), EthStatsError> {
+    async fn report_history(&self, list: Option<&[u64]>) -> Result<(), EthStatsError> {
         let conn = self.conn.read().await;
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
-        let indexes = if let Some(list) = list {
-            list
+        let indexes: Cow<'_, [u64]> = if let Some(list) = list {
+            Cow::Borrowed(list)
         } else {
             let best_block_number = self
                 .provider
@@ -402,11 +403,11 @@ where
 
             let start = best_block_number.saturating_sub(HISTORY_UPDATE_RANGE);
 
-            &(start..=best_block_number).collect()
+            Cow::Owned((start..=best_block_number).collect())
         };
 
         let mut blocks = Vec::with_capacity(indexes.len());
-        for &block_number in indexes {
+        for &block_number in indexes.iter() {
             match self.provider.block_by_id(block_number.into()) {
                 Ok(Some(block)) => {
                     blocks.push(block);
@@ -517,7 +518,7 @@ where
                     return Ok(());
                 }
 
-                let block_numbers = block_numbers
+                let block_numbers: Vec<u64> = block_numbers
                     .unwrap()
                     .iter()
                     .map(|val| {
@@ -531,7 +532,7 @@ where
                     })
                     .collect::<Result<_, _>>()?;
 
-                self.report_history(Some(&block_numbers)).await?;
+                self.report_history(Some(block_numbers.as_slice())).await?;
             }
             other => debug!(target: "ethstats", "Unhandled command: {}", other),
         }
