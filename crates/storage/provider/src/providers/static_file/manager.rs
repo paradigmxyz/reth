@@ -1019,7 +1019,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     }
                 }
                 StaticFileSegment::TransactionSenders => {
-                    if !provider.cached_storage_settings().senders_in_static_files {
+                    if !provider.cached_storage_settings().transaction_senders_in_static_files {
                         continue
                     }
                 }

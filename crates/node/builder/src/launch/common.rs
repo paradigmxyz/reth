@@ -490,9 +490,14 @@ where
         let provider_rw = factory.provider_rw()?;
         let old_settings = provider_rw.cached_storage_settings();
         // Destruct the config struct to not forget to update the settings with new segments
-        let StaticFilesConfig { blocks_per_file: _, receipts: receipts_in_static_files } =
-            *static_files_config;
-        let new_settings = old_settings.with_receipts_in_static_files_opt(receipts_in_static_files);
+        let StaticFilesConfig {
+            blocks_per_file: _,
+            receipts: receipts_in_static_files,
+            transaction_senders: transaction_senders_in_static_files,
+        } = *static_files_config;
+        let new_settings = old_settings
+            .with_receipts_in_static_files_opt(receipts_in_static_files)
+            .with_transaction_senders_in_static_files_opt(transaction_senders_in_static_files);
 
         if new_settings == old_settings {
             debug!(target: "reth::cli", settings = ?new_settings, "Storage settings are already up to date");

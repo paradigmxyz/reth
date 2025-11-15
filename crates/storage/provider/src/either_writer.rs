@@ -1,7 +1,5 @@
 //! Generic writer abstraction for writing to either database tables or static files.
 
-use std::fmt::{Display, Formatter};
-
 use crate::{providers::StaticFileProviderRWRefMut, StaticFileProviderFactory};
 use alloy_primitives::{Address, BlockNumber, TxNumber};
 use reth_db::{
@@ -105,7 +103,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: StorageSettingsCache,
     {
         // Write senders to static files only if they're explicitly enabled
-        if provider.cached_storage_settings().senders_in_static_files {
+        if provider.cached_storage_settings().transaction_senders_in_static_files {
             EitherWriterDestination::StaticFile
         } else {
             EitherWriterDestination::Database

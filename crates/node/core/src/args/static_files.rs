@@ -32,6 +32,15 @@ pub struct StaticFilesArgs {
     /// unexpected behavior.
     #[arg(long = "static-files.receipts")]
     pub receipts: Option<bool>,
+
+    /// Store transaction senders in static files instead of the database.
+    ///
+    /// When enabled, transaction senders are written to static files instead of the database.
+    ///
+    /// Note: changing this setting on an existing node with non-empty transaction senders can
+    /// result in unexpected behavior.
+    #[arg(long = "static-files.transaction-senders")]
+    pub transaction_senders: Option<bool>,
 }
 
 impl StaticFilesArgs {
@@ -50,6 +59,7 @@ impl StaticFilesArgs {
                     .or(config.blocks_per_file.transaction_senders),
             },
             receipts: self.receipts.or(config.receipts),
+            transaction_senders: self.transaction_senders.or(config.transaction_senders),
         }
     }
 

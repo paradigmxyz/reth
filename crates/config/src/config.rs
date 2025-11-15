@@ -427,6 +427,10 @@ pub struct StaticFilesConfig {
     ///
     /// When enabled, receipts are written to static files instead of the database.
     pub receipts: Option<bool>,
+    /// Store transaction senders in static files instead of the database.
+    ///
+    /// When enabled, transaction senders are written to static files instead of the database.
+    pub transaction_senders: Option<bool>,
 }
 
 /// Configuration for the number of blocks per file for each segment.
