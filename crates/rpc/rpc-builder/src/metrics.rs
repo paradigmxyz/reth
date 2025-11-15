@@ -195,7 +195,7 @@ impl<F: Future<Output = MethodResponse>> Future for MeteredRequestFuture<F> {
             if let Some(call_metrics) =
                 this.method.and_then(|method| this.metrics.inner.call_metrics.get(method))
             {
-                call_metrics.response_time_seconds.record(elapsed);
+                call_metrics.time_seconds.record(elapsed);
                 if resp.is_success() {
                     call_metrics.successful_total.increment(1);
                 } else {
@@ -300,5 +300,5 @@ struct RpcServerCallMetrics {
     /// The number of failed calls
     failed_total: Counter,
     /// Response for a single call
-    response_time_seconds: Histogram,
+    time_seconds: Histogram,
 }
