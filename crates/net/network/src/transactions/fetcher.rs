@@ -410,6 +410,15 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
     }
 
+    /// Tries to serve pending hashes via the peer-queue scheduler.
+    ///
+    /// This inspects `pending_by_peer` for the next hash assigned to an idle peer, validates that
+    /// the hash is still pending, fills the remainder of the request from the peer's seen set, and
+    /// dispatches the `GetPooledTransactions` request immediately. The provided
+    /// `search_durations` are updated with the time spent finding the candidate and filling the
+    /// request so the caller can account for scheduler efficiency. Returns `true` if a request was
+    /// successfully sent, or `false` if no idle peer/hash pair could be found or the candidate
+    /// entry turned out to be stale.
     fn try_request_via_peer_queue(
         &mut self,
         peers: &HashMap<PeerId, PeerMetadata<N>>,
