@@ -307,6 +307,15 @@ RPC:
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
 
+      --http.rpcprefix <HTTP_RPCPREFIX>
+          HTTP path prefix for JSON-RPC endpoint
+
+          Sets a custom path prefix for all HTTP RPC requests. By default, the server accepts requests at the root path "/". This option allows serving RPC requests under a custom path, for example "/rpc".
+
+          Example: --http.rpcprefix /custom/path
+
+          [default: /]
+
       --ws
           Enable the WS-RPC server
 
@@ -327,6 +336,15 @@ RPC:
           Rpc Modules to be configured for the WS server
 
           [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner, mev]
+
+      --ws.rpcprefix <WS_RPCPREFIX>
+          `WebSocket` path prefix for JSON-RPC endpoint
+
+          Sets a custom path prefix for all `WebSocket` RPC requests. By default, the server accepts requests at the root path "/". This option allows serving RPC requests under a custom path, for example "/ws".
+
+          Example: --ws.rpcprefix /custom/path
+
+          [default: /]
 
       --ipcdisable
           Disable the IPC-RPC server
