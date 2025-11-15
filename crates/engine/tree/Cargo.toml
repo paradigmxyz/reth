@@ -112,6 +112,10 @@ harness = false
 name = "state_root_task"
 harness = false
 
+[[bench]]
+name = "multiproof_chunking"
+harness = false
+
 [features]
 test-utils = [
     "reth-chain-state/test-utils",
