@@ -206,7 +206,6 @@ where
 
     let mut processed_transactions = 0;
     let mut block_numbers = block_numbers.into_iter();
-    let mut last_block_number = None;
     for channel in receivers {
         while let Ok(recovered) = channel.recv() {
             let (tx_id, sender) = match recovered {
@@ -246,28 +245,7 @@ where
             };
 
             let new_block_number = block_numbers.next().unwrap();
-
-            // If this is the first block we're processing or the current block number was updated,
-            // increment the destination block number
-            if last_block_number != Some(new_block_number) {
-                // Special case for block number #0 that cannot have transactions, but still
-                // needs to be incremented
-                if new_block_number == 1 {
-                    writer.increment_block(0)?;
-                }
-                loop {
-                    let Some(next_block_number) = writer.next_block_number() else {
-                        break;
-                    };
-                    if next_block_number > new_block_number {
-                        break;
-                    }
-
-                    writer.increment_block(next_block_number)?;
-                }
-                last_block_number = Some(new_block_number);
-            }
-
+            writer.ensure_at_block(new_block_number)?;
             writer.append_sender(tx_id, &sender)?;
             processed_transactions += 1;
         }
