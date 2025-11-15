@@ -4,7 +4,7 @@ use alloc::{
     string::{String, ToString},
 };
 use alloy_primitives::TxNumber;
-use core::{fmt, ops::RangeInclusive, str::FromStr};
+use core::{ops::RangeInclusive, str::FromStr};
 use serde::{Deserialize, Serialize};
 use strum::{EnumIs, EnumString};
 
@@ -20,6 +20,7 @@ use strum::{EnumIs, EnumString};
     Deserialize,
     Serialize,
     EnumString,
+    derive_more::Display,
     EnumIs,
 )]
 #[strum(serialize_all = "kebab-case")]
@@ -35,12 +36,6 @@ pub enum StaticFileSegment {
     Receipts,
     /// Static File segment responsible for the `TransactionSenders` table.
     TransactionSenders,
-}
-
-impl fmt::Display for StaticFileSegment {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
 }
 
 impl StaticFileSegment {

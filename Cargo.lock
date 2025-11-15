@@ -10605,6 +10605,7 @@ version = "1.9.2"
 dependencies = [
  "alloy-primitives",
  "clap",
+ "derive_more",
  "insta",
  "reth-nippy-jar",
  "serde",

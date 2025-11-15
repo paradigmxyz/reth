@@ -15,6 +15,7 @@ workspace = true
 alloy-primitives.workspace = true
 
 clap = { workspace = true, features = ["derive"], optional = true }
+derive_more.workspace = true
 serde = { workspace = true, features = ["derive"] }
 strum = { workspace = true, features = ["derive"] }
 
@@ -27,6 +28,7 @@ insta.workspace = true
 default = ["std"]
 std = [
     "alloy-primitives/std",
+    "derive_more/std",
     "serde/std",
     "strum/std",
     "serde_json/std",
