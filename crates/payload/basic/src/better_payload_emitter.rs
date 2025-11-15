@@ -38,9 +38,11 @@ where
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         match self.inner.try_build(args) {
-            Ok(BuildOutcome::Better { payload, cached_reads }) => {
-                let _ = self.better_payloads_tx.send(Arc::new(payload.clone()));
-                Ok(BuildOutcome::Better { payload, cached_reads })
+            Ok(res) => {
+                if let Some(payload) = res.payload().cloned() {
+                    let _ = self.better_payloads_tx.send(Arc::new(payload));
+                }
+                Ok(res)
             }
             res => res,
         }

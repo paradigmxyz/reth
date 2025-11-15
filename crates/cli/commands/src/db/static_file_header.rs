@@ -1,11 +1,9 @@
 use clap::{Parser, Subcommand};
-use reth_cli::chainspec::ChainSpecParser;
-use reth_provider::StaticFileProviderFactory;
+use reth_db_common::DbTool;
+use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use std::path::PathBuf;
 use tracing::warn;
-
-use crate::common::{AccessRights, CliNodeTypes, EnvironmentArgs};
 
 /// The arguments for the `reth db static-file-header` command
 #[derive(Parser, Debug)]
@@ -34,21 +32,12 @@ enum Source {
 
 impl Command {
     /// Execute `db static-file-header` command
-    pub fn execute<N: CliNodeTypes, C: ChainSpecParser<ChainSpec = N::ChainSpec>>(
-        self,
-        env: EnvironmentArgs<C>,
-    ) -> eyre::Result<()> {
-        // Try to initialize the environment as read-only. If it fails, try to initialize it as
-        // read-only without consistency checks.
-        let provider_factory = match env.init::<N>(AccessRights::RO) {
-            Ok(env) => env,
-            Err(err) => {
-                warn!(?err, "Failed to initialize environment");
-                env.init::<N>(AccessRights::RoInconsistent)?
-            }
+    pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
+        let static_file_provider = tool.provider_factory.static_file_provider();
+        if let Err(err) = static_file_provider.check_consistency(&tool.provider_factory.provider()?)
+        {
+            warn!("Error checking consistency of static files: {err}");
         }
-        .provider_factory;
-        let static_file_provider = provider_factory.static_file_provider();
 
         // Get the provider based on the source
         let provider = match self.source {

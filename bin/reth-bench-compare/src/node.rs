@@ -30,6 +30,7 @@ pub(crate) struct NodeManager {
     additional_reth_args: Vec<String>,
     comparison_dir: Option<PathBuf>,
     tracing_endpoint: Option<String>,
+    otlp_max_queue_size: usize,
 }
 
 impl NodeManager {
@@ -46,6 +47,7 @@ impl NodeManager {
             additional_reth_args: args.reth_args.clone(),
             comparison_dir: None,
             tracing_endpoint: args.traces.otlp.as_ref().map(|u| u.to_string()),
+            otlp_max_queue_size: args.otlp_max_queue_size,
         }
     }
 
@@ -267,7 +269,9 @@ impl NodeManager {
 
         // Set high queue size to prevent trace dropping during benchmarks
         if self.tracing_endpoint.is_some() {
-            cmd.env("OTEL_BLRP_MAX_QUEUE_SIZE", "10000");
+            cmd.env("OTEL_BSP_MAX_QUEUE_SIZE", self.otlp_max_queue_size.to_string()); // Traces
+            cmd.env("OTEL_BLRP_MAX_QUEUE_SIZE", "10000"); // Logs
+
             // Set service name to differentiate baseline vs feature runs in Jaeger
             cmd.env("OTEL_SERVICE_NAME", format!("reth-{}", ref_type));
         }
