@@ -38,15 +38,14 @@ const ERA1_MAINNET_URL: &str = "https://era.ithaca.xyz/era1/";
 /// Succinct list of mainnet files we want to download
 /// from <https://era.ithaca.xyz/era1/>
 /// for testing purposes
-const ERA1_MAINNET_FILES_NAMES: [&str; 8] = [
+const ERA1_MAINNET_FILES_NAMES: [&str; 7] = [
     "mainnet-00000-5ec1ffb8.era1",
     "mainnet-00003-d8b8a40b.era1",
     "mainnet-00151-e322efe1.era1",
     "mainnet-00293-0d6c5812.era1",
     "mainnet-00443-ea71b6f9.era1",
     "mainnet-01367-d7efc68f.era1",
-    "mainnet-01610-99fdde4b.era1",
-    "mainnet-01895-3f81607c.era1",
+    "mainnet-01517-be94d5d0.era1", // Last era until we can decode right now
 ];
 
 /// Sepolia network name
@@ -84,12 +83,12 @@ const ERA_HOODI_FILES_NAMES: [&str; 4] = [
 ];
 
 /// Default mainnet url
-/// for downloading sepolia `.era1` files
-/// TODO: to replace with internal era files hosting url
+/// for downloading mainnet `.era` files
+//TODO: to replace with internal era files hosting url
 const ERA_MAINNET_URL: &str = "https://mainnet.era.nimbus.team/";
 
-/// Succinct list of sepolia files we want to download
-/// from <https://era.nimbus.team/> //TODO: to replace with internal era files hosting url
+/// Succinct list of mainnet files we want to download
+/// from <https://mainnet.era.nimbus.team/> //TODO: to replace with internal era files hosting url
 /// for testing purposes
 const ERA_MAINNET_FILES_NAMES: [&str; 4] = [
     "mainnet-00000-4b363db9.era",
