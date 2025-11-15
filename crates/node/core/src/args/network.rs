@@ -354,6 +354,12 @@ impl NetworkArgs {
         self
     }
 
+    /// Configures the [`NatResolver`]
+    pub const fn with_nat_resolver(mut self, nat: NatResolver) -> Self {
+        self.nat = nat;
+        self
+    }
+
     /// Change networking port numbers based on the instance number, if provided.
     /// Ports are updated to `previous_value + instance - 1`
     ///

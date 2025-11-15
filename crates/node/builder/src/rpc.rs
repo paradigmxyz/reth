@@ -23,7 +23,10 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_rpc::eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer};
+use reth_rpc::{
+    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
+    AdminApi,
+};
 use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
@@ -382,6 +385,21 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcHandle<Node, EthApi> {
         &self,
     ) -> &EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>> {
         &self.engine_events
+    }
+
+    /// Returns the `EthApi` instance of the rpc server.
+    pub fn eth_api(&self) -> &EthApi {
+        self.rpc_registry.registry.eth_api()
+    }
+
+    /// Returns an instance of the [`AdminApi`] for the rpc server.
+    pub fn admin_api(
+        &self,
+    ) -> AdminApi<Node::Network, <Node::Types as NodeTypes>::ChainSpec, Node::Pool>
+    where
+        <Node::Types as NodeTypes>::ChainSpec: EthereumHardforks,
+    {
+        self.rpc_registry.registry.admin_api()
     }
 }
 
