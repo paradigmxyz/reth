@@ -2945,8 +2945,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     }
 
     fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()> {
+        let last_block_number = self.last_block_number()?;
         // Clean up HeaderNumbers for blocks being removed, we must clear all indexes from MDBX.
-        for hash in self.canonical_hashes_range(block + 1, self.last_block_number()? + 1)? {
+        for hash in self.canonical_hashes_range(block + 1, last_block_number + 1)? {
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
         }
 
@@ -2988,22 +2989,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             }
         }
 
-        // TODO: integrate into EitherWriter
-        if EitherWriter::senders_destination(self).is_static_file() {
-            let static_file_transaction_sender_num = self
-                .static_file_provider
-                .get_highest_static_file_tx(StaticFileSegment::TransactionSenders);
-
-            let to_delete = static_file_transaction_sender_num
-                .map(|static_num| (static_num + 1).saturating_sub(unwind_tx_from))
-                .unwrap_or_default();
-
-            self.static_file_provider
-                .latest_writer(StaticFileSegment::TransactionSenders)?
-                .prune_transaction_senders(to_delete, block)?;
-        } else {
-            self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
-        }
+        EitherWriter::new_senders(self, last_block_number)?.prune_senders(unwind_tx_from, block)?;
 
         self.remove_bodies_above(block)?;
 
