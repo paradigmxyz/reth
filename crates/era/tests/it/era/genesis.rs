@@ -6,7 +6,7 @@
 use crate::{EraTestDownloader, ERA_HOODI_FILES_NAMES, HOODI};
 
 #[tokio::test(flavor = "multi_thread")]
-//#[ignore = "download intensive"]
+// #[ignore = "download intensive"]
 async fn test_hoodi_genesis_era_decompression() -> eyre::Result<()> {
     let downloader = EraTestDownloader::new().await?;
 

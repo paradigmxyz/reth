@@ -8,7 +8,7 @@
 
 use reqwest::{Client, Url};
 use reth_era::{
-    common::file_ops::FileReader,
+    common::file_ops::{EraFileType, FileReader},
     e2s::error::E2sError,
     era::file::{EraFile, EraReader},
     era1::file::{Era1File, Era1Reader},
@@ -68,18 +68,34 @@ const ERA1_SEPOLIA_FILES_NAMES: [&str; 4] = [
 
 const HOODI: &str = "hoodi";
 
-/// Default sepolia url
-/// for downloading sepolia `.era1` files
+/// Default hoodi url
+/// for downloading hoodi `.era` files
+/// TODO: to replace with internal era files hosting url
 const ERA_HOODI_URL: &str = "https://hoodi.era.nimbus.team/";
 
-/// Succinct list of sepolia files we want to download
-/// from <https://hoodi.era.nimbus.team/>
+/// Succinct list of hoodi files we want to download
+/// from <https://hoodi.era.nimbus.team/> //TODO: to replace with internal era files hosting url
 /// for testing purposes
 const ERA_HOODI_FILES_NAMES: [&str; 4] = [
     "hoodi-00000-212f13fc.era",
     "hoodi-00021-857e418b.era",
     "hoodi-00175-202aaa6d.era",
     "hoodi-00201-0d521fc8.era",
+];
+
+/// Default mainnet url
+/// for downloading sepolia `.era1` files
+/// TODO: to replace with internal era files hosting url
+const ERA_MAINNET_URL: &str = "https://mainnet.era.nimbus.team/";
+
+/// Succinct list of sepolia files we want to download
+/// from <https://era.nimbus.team/> //TODO: to replace with internal era files hosting url
+/// for testing purposes
+const ERA_MAINNET_FILES_NAMES: [&str; 4] = [
+    "mainnet-00000-4b363db9.era",
+    "mainnet-00518-4e267a3a.era",
+    "mainnet-01140-f70d4869.era",
+    "mainnet-01581-82073d28.era",
 ];
 
 /// Utility for downloading `.era1` files for tests
@@ -115,7 +131,7 @@ impl EraTestDownloader {
         // check if the filename is supported
         self.validate_filename(filename, network)?;
 
-        let url = self.get_network_url(network)?;
+        let (url, _): (&str, &[&str]) = self.get_network_config(filename, network)?;
         let final_url = Url::from_str(url).map_err(|e| eyre!("Failed to parse URL: {}", e))?;
 
         let folder = self.temp_dir.path();
@@ -150,29 +166,9 @@ impl EraTestDownloader {
 
     /// Validate that filename is in the supported list for the network
     fn validate_filename(&self, filename: &str, network: &str) -> Result<()> {
-        let is_valid = match network {
-            MAINNET => ERA1_MAINNET_FILES_NAMES.contains(&filename),
-            SEPOLIA => ERA1_SEPOLIA_FILES_NAMES.contains(&filename),
-            HOODI => ERA_HOODI_FILES_NAMES.contains(&filename),
-            _ => {
-                return Err(eyre!(
-                    "Unknown network: {}. Supported networks: {}, {}, {}",
-                    network,
-                    MAINNET,
-                    SEPOLIA,
-                    HOODI
-                ));
-            }
-        };
+        let (_, supported_files) = self.get_network_config(filename, network)?;
 
-        if !is_valid {
-            let supported_files = match network {
-                MAINNET => &ERA1_MAINNET_FILES_NAMES[..],
-                SEPOLIA => &ERA1_SEPOLIA_FILES_NAMES[..],
-                HOODI => &ERA_HOODI_FILES_NAMES[..],
-                _ => &[],
-            };
-
+        if !supported_files.contains(&filename) {
             return Err(eyre!(
                 "Unknown file: '{}' for network '{}'. Supported files: {:?}",
                 filename,
@@ -184,18 +180,24 @@ impl EraTestDownloader {
         Ok(())
     }
 
-    /// Get the base URL for a network
-    fn get_network_url(&self, network: &str) -> Result<&'static str> {
-        match network {
-            MAINNET => Ok(ERA1_MAINNET_URL),
-            SEPOLIA => Ok(ERA1_SEPOLIA_URL),
-            HOODI => Ok(ERA_HOODI_URL),
+    /// Get network configuration, URL and supported files,  based on network and file type
+    fn get_network_config(
+        &self,
+        filename: &str,
+        network: &str,
+    ) -> Result<(&'static str, &'static [&'static str])> {
+        let file_type = EraFileType::from_filename(filename)
+            .ok_or_else(|| eyre!("Unknown file extension for: {}", filename))?;
+
+        match (network, file_type) {
+            (MAINNET, EraFileType::Era1) => Ok((ERA1_MAINNET_URL, &ERA1_MAINNET_FILES_NAMES[..])),
+            (MAINNET, EraFileType::Era) => Ok((ERA_MAINNET_URL, &ERA_MAINNET_FILES_NAMES[..])),
+            (SEPOLIA, EraFileType::Era1) => Ok((ERA1_SEPOLIA_URL, &ERA1_SEPOLIA_FILES_NAMES[..])),
+            (HOODI, EraFileType::Era) => Ok((ERA_HOODI_URL, &ERA_HOODI_FILES_NAMES[..])),
             _ => Err(eyre!(
-                "Unknown network: {}. Supported networks: {}, {}, {}",
+                "Unsupported combination: network '{}' with file type '{:?}'",
                 network,
-                MAINNET,
-                SEPOLIA,
-                HOODI
+                file_type
             )),
         }
     }
