@@ -8,31 +8,73 @@ on:
 jobs:
   build:
     name: build reproducible binaries
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            machine: machine-1
+          - runner: ubuntu-22.04
+            machine: machine-2
     steps:
       - uses: actions/checkout@v5
-      - uses: rui314/setup-mold@v1
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: x86_64-unknown-linux-gnu
-      - name: Install cross main
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build reproducible binary with Docker
         run: |
-          cargo install cross --git https://github.com/cross-rs/cross
-      - name: Install cargo-cache
+          RUST_TOOLCHAIN=$(rustc --version | cut -d' ' -f2)
+          docker build \
+            --build-arg "RUST_TOOLCHAIN=${RUST_TOOLCHAIN}" \
+            -f Dockerfile.reproducible -t reth:release \
+            --target artifacts \
+            --output type=local,dest=./target .
+
+      - name: Calculate SHA256
+        id: sha256
         run: |
-          cargo install cargo-cache
-      - uses: Swatinem/rust-cache@v2
+          sha256sum target/reth > checksum.sha256
+          echo "Binaries SHA256 on ${{ matrix.machine }}: $(cat checksum.sha256)"
+
+      - name: Upload the hash
+        uses: actions/upload-artifact@v4
         with:
-          cache-on-failure: true
-      - name: Build Reth
+          name: checksum-${{ matrix.machine }}
+          path: |
+            checksum.sha256
+          retention-days: 1
+
+  compare:
+    name: compare reproducible binaries
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts from machine-1
+        uses: actions/download-artifact@v4
+        with:
+          name: checksum-machine-1
+          path: machine-1/
+      - name: Download artifacts from machine-2
+        uses: actions/download-artifact@v4
+        with:
+          name: checksum-machine-2
+          path: machine-2/
+      - name: Compare SHA256 hashes
         run: |
-          make build-reproducible
-          mv target/x86_64-unknown-linux-gnu/release/reth reth-build-1
-      - name: Clean cache
-        run: make clean && cargo cache -a
-      - name: Build Reth again
-        run: |
-          make build-reproducible
-          mv target/x86_64-unknown-linux-gnu/release/reth reth-build-2
-      - name: Compare binaries
-        run: cmp reth-build-1 reth-build-2
+          echo "=== SHA256 Comparison ==="
+          echo "Machine 1 hash:"
+          cat machine-1/checksum.sha256
+          echo "Machine 2 hash:"
+          cat machine-2/checksum.sha256
+
+          if cmp -s machine-1/checksum.sha256 machine-2/checksum.sha256; then
+            echo "✅ SUCCESS: Binaries are identical (reproducible build verified)"
+          else
+            echo "❌ FAILURE: Binaries differ (reproducible build failed)"
+            exit 1
+          fi
