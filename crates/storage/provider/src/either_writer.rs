@@ -3,6 +3,7 @@
 use crate::{providers::StaticFileProviderRWRefMut, StaticFileProviderFactory};
 use alloy_primitives::{BlockNumber, TxNumber};
 use reth_db::{
+    cursor::DbCursorRO,
     table::Value,
     transaction::{CursorMutTy, DbTxMut},
 };
@@ -41,18 +42,13 @@ impl<'a> EitherWriter<'a, (), ()> {
         P::Tx: DbTxMut,
         ReceiptTy<P::Primitives>: Value,
     {
-        // Write receipts to static files only if they're explicitly enabled or we don't have
-        // receipts pruning
-        if provider.cached_storage_settings().receipts_in_static_files ||
-            !provider.prune_modes_ref().has_receipts_pruning()
-        {
-            Ok(EitherWriter::StaticFile(
-                provider.get_static_file_writer(block_number, StaticFileSegment::Receipts)?,
-            ))
-        } else {
-            Ok(EitherWriter::Database(
+        match Self::receipts_destination(provider) {
+            EitherWriterDestination::Database => Ok(EitherWriter::Database(
                 provider.tx_ref().cursor_write::<tables::Receipts<ReceiptTy<P::Primitives>>>()?,
-            ))
+            )),
+            EitherWriterDestination::StaticFile => Ok(EitherWriter::StaticFile(
+                provider.get_static_file_writer(block_number, StaticFileSegment::Receipts)?,
+            )),
         }
     }
 }
@@ -80,6 +76,37 @@ where
             Self::Database(cursor) => Ok(cursor.append(tx_num, receipt)?),
             Self::StaticFile(writer) => writer.append_receipt(tx_num, receipt),
         }
+    }
+
+    /// Removes receipts for transaction numbers above the specified.
+    pub fn prune_receipts_above(&mut self, from_tx: TxNumber) -> ProviderResult<()>
+    where
+        CURSOR: DbCursorRO<tables::Receipts<N::Receipt>>,
+    {
+        match self {
+            Self::Database(cursor) => {
+                let mut walker = cursor.walk_range(from_tx..)?;
+                while walker.next().transpose()?.is_some() {
+                    walker.delete_current()?;
+                }
+            }
+            Self::StaticFile(writer) => {
+                let highest_static_file_receipt_block = writer
+                    .reader()
+                    .get_highest_static_file_block(StaticFileSegment::Receipts)
+                    .unwrap_or_default();
+                let highest_static_file_receipt_number =
+                    writer.reader().get_highest_static_file_tx(StaticFileSegment::Receipts);
+
+                let to_delete = highest_static_file_receipt_number
+                    .map(|static_num| (static_num + 1).saturating_sub(from_tx))
+                    .unwrap_or_default();
+
+                writer.prune_receipts(to_delete, highest_static_file_receipt_block)?;
+            }
+        }
+
+        Ok(())
     }
 }
 

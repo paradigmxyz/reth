@@ -383,31 +383,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         Ok(())
     }
-
-    /// Removes receipts from all transactions starting with provided number (inclusive).
-    fn remove_receipts_from(
-        &self,
-        from_tx: TxNumber,
-        last_block: BlockNumber,
-    ) -> ProviderResult<()> {
-        // iterate over block body and remove receipts
-        self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
-
-        if EitherWriter::receipts_destination(self).is_static_file() {
-            let static_file_receipt_num =
-                self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
-
-            let to_delete = static_file_receipt_num
-                .map(|static_num| (static_num + 1).saturating_sub(from_tx))
-                .unwrap_or_default();
-
-            self.static_file_provider
-                .latest_writer(StaticFileSegment::Receipts)?
-                .prune_receipts(to_delete, last_block)?;
-        }
-
-        Ok(())
-    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for DatabaseProvider<TX, N> {
@@ -1896,7 +1871,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
     fn remove_state_above(&self, block: BlockNumber) -> ProviderResult<()> {
-        let range = block + 1..=self.last_block_number()?;
+        let last_block_number = self.last_block_number()?;
+        let range = block + 1..=last_block_number;
 
         if range.is_empty() {
             return Ok(());
@@ -1959,7 +1935,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
-        self.remove_receipts_from(from_transaction_num, block)?;
+        EitherWriter::new_receipts(self, last_block_number)?
+            .prune_receipts_above(from_transaction_num)?;
 
         Ok(())
     }
@@ -1989,7 +1966,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         &self,
         block: BlockNumber,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
-        let range = block + 1..=self.last_block_number()?;
+        let last_block_number = self.last_block_number()?;
+        let range = block + 1..=last_block_number;
 
         if range.is_empty() {
             return Ok(ExecutionOutcome::default())
@@ -2092,7 +2070,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             receipts.push(block_receipts);
         }
 
-        self.remove_receipts_from(from_transaction_num, block)?;
+        EitherWriter::new_receipts(self, last_block_number)?
+            .prune_receipts_above(from_transaction_num)?;
 
         Ok(ExecutionOutcome::new_init(
             state,
