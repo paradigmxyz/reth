@@ -423,6 +423,14 @@ impl EtlConfig {
 pub struct StaticFilesConfig {
     /// Number of blocks per file for each segment.
     pub blocks_per_file: BlocksPerFileConfig,
+    /// Store receipts in static files instead of the database.
+    ///
+    /// When enabled, receipts are written to static files instead of the database.
+    pub receipts: Option<bool>,
+    /// Store transaction senders in static files instead of the database.
+    ///
+    /// When enabled, transaction senders are written to static files instead of the database.
+    pub transaction_senders: Option<bool>,
 }
 
 /// Configuration for the number of blocks per file for each segment.
@@ -436,6 +444,8 @@ pub struct BlocksPerFileConfig {
     pub transactions: Option<u64>,
     /// Number of blocks per file for the receipts segment.
     pub receipts: Option<u64>,
+    /// Number of blocks per file for the transaction senders segment.
+    pub transaction_senders: Option<u64>,
 }
 
 impl StaticFilesConfig {
@@ -443,7 +453,8 @@ impl StaticFilesConfig {
     ///
     /// Returns an error if any blocks per file value is zero.
     pub fn validate(&self) -> eyre::Result<()> {
-        let BlocksPerFileConfig { headers, transactions, receipts } = self.blocks_per_file;
+        let BlocksPerFileConfig { headers, transactions, receipts, transaction_senders } =
+            self.blocks_per_file;
         eyre::ensure!(headers != Some(0), "Headers segment blocks per file must be greater than 0");
         eyre::ensure!(
             transactions != Some(0),
@@ -453,12 +464,17 @@ impl StaticFilesConfig {
             receipts != Some(0),
             "Receipts segment blocks per file must be greater than 0"
         );
+        eyre::ensure!(
+            transaction_senders != Some(0),
+            "Transaction senders segment blocks per file must be greater than 0"
+        );
         Ok(())
     }
 
     /// Converts the blocks per file configuration into a [`HashMap`] per segment.
     pub fn as_blocks_per_file_map(&self) -> HashMap<StaticFileSegment, u64> {
-        let BlocksPerFileConfig { headers, transactions, receipts } = self.blocks_per_file;
+        let BlocksPerFileConfig { headers, transactions, receipts, transaction_senders } =
+            self.blocks_per_file;
 
         let mut map = HashMap::new();
         // Iterating over all possible segments allows us to do an exhaustive match here,
@@ -468,6 +484,7 @@ impl StaticFilesConfig {
                 StaticFileSegment::Headers => headers,
                 StaticFileSegment::Transactions => transactions,
                 StaticFileSegment::Receipts => receipts,
+                StaticFileSegment::TransactionSenders => transaction_senders,
             };
 
             if let Some(blocks_per_file) = blocks_per_file {

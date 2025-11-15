@@ -6,7 +6,7 @@ use crate::{
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, MetadataProvider,
+    EitherWriter, HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, MetadataProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, StaticFileWriter, TransactionVariant, TransactionsProvider,
 };
@@ -467,11 +467,19 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.provider()?.senders_by_tx_range(range)
+        if EitherWriter::senders_destination(self).is_static_file() {
+            self.static_file_provider.senders_by_tx_range(range)
+        } else {
+            self.provider()?.senders_by_tx_range(range)
+        }
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        self.provider()?.transaction_sender(id)
+        if EitherWriter::senders_destination(self).is_static_file() {
+            self.static_file_provider.transaction_sender(id)
+        } else {
+            self.provider()?.transaction_sender(id)
+        }
     }
 }
 

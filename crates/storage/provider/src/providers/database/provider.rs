@@ -681,27 +681,27 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         HF: Fn(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
         BF: Fn(H, BodyTy<N>, Vec<Address>) -> ProviderResult<B>,
     {
-        let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
-
         self.block_range(range, headers_range, |header, body, tx_range| {
             let senders = if tx_range.is_empty() {
                 Vec::new()
             } else {
                 // fetch senders from the senders table
-                let known_senders =
-                    senders_cursor
-                        .walk_range(tx_range.clone())?
-                        .collect::<Result<HashMap<_, _>, _>>()?;
+                // TODO: optimize
+                let known_senders = self.senders_by_tx_range(tx_range)?;
 
                 let mut senders = Vec::with_capacity(body.transactions().len());
-                for (tx_num, tx) in tx_range.zip(body.transactions()) {
-                    match known_senders.get(&tx_num) {
+                for (tx, sender) in body
+                    .transactions()
+                    .iter()
+                    .zip(known_senders.into_iter().map(Some).chain(std::iter::repeat(None)))
+                {
+                    match sender {
                         None => {
                             // recover the sender from the transaction if not found
                             let sender = tx.recover_signer_unchecked()?;
                             senders.push(sender);
                         }
-                        Some(sender) => senders.push(*sender),
+                        Some(sender) => senders.push(sender),
                     }
                 }
 
@@ -1344,11 +1344,19 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.cursor_read_collect::<tables::TransactionSenders>(range)
+        if EitherWriter::senders_destination(self).is_static_file() {
+            self.static_file_provider.senders_by_tx_range(range)
+        } else {
+            self.cursor_read_collect::<tables::TransactionSenders>(range)
+        }
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        Ok(self.tx.get::<tables::TransactionSenders>(id)?)
+        if EitherWriter::senders_destination(self).is_static_file() {
+            self.static_file_provider.transaction_sender(id)
+        } else {
+            Ok(self.tx.get::<tables::TransactionSenders>(id)?)
+        }
     }
 }
 
@@ -2824,8 +2832,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// If withdrawals are not empty, this will modify
     /// [`BlockWithdrawals`](tables::BlockWithdrawals).
     ///
-    /// If the provider has __not__ configured full sender pruning, this will modify
-    /// [`TransactionSenders`](tables::TransactionSenders).
+    /// If the provider has __not__ configured full sender pruning, this will modify either:
+    /// * [`StaticFileSegment::TransactionSenders`] (if `static_files_v2_enabled` flag is enabled)
+    /// * [`TransactionSenders`](tables::TransactionSenders) (if `static_files_v2_enabled` flag is
+    ///   disabled)
     ///
     /// If the provider has __not__ configured full transaction lookup pruning, this will modify
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
@@ -2856,11 +2866,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         let tx_count = block.body().transaction_count() as u64;
 
         // Ensures we have all the senders for the block's transactions.
+        let mut senders_writer = EitherWriter::new_senders(self, block.number())?;
         for (transaction, sender) in block.body().transactions_iter().zip(block.senders_iter()) {
             let hash = transaction.tx_hash();
 
             if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
-                self.tx.put::<tables::TransactionSenders>(next_tx_num, *sender)?;
+                senders_writer.append_sender(next_tx_num, sender)?;
             }
 
             if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
@@ -2934,8 +2945,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     }
 
     fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()> {
+        let last_block_number = self.last_block_number()?;
         // Clean up HeaderNumbers for blocks being removed, we must clear all indexes from MDBX.
-        for hash in self.canonical_hashes_range(block + 1, self.last_block_number()? + 1)? {
+        for hash in self.canonical_hashes_range(block + 1, last_block_number + 1)? {
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
         }
 
@@ -2977,7 +2989,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             }
         }
 
-        self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
+        EitherWriter::new_senders(self, last_block_number)?.prune_senders(unwind_tx_from, block)?;
 
         self.remove_bodies_above(block)?;
 
@@ -4754,7 +4766,8 @@ mod tests {
         // Static files mode
         {
             let factory = create_test_provider_factory();
-            let storage_settings = StorageSettings::new().with_receipts_in_static_files();
+            let storage_settings =
+                StorageSettings::legacy().with_receipts_in_static_files_opt(Some(true));
             factory.set_storage_settings_cache(storage_settings);
             let factory = factory.with_prune_modes(PruneModes {
                 receipts: Some(PruneMode::Before(2)),

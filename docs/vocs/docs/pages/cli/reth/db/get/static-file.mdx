@@ -11,9 +11,10 @@ Usage: reth db get static-file [OPTIONS] <SEGMENT> <KEY>
 Arguments:
   <SEGMENT>
           Possible values:
-          - headers:      Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
-          - transactions: Static File segment responsible for the `Transactions` table
-          - receipts:     Static File segment responsible for the `Receipts` table
+          - headers:             Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
+          - transactions:        Static File segment responsible for the `Transactions` table
+          - receipts:            Static File segment responsible for the `Receipts` table
+          - transaction-senders: Static File segment responsible for the `TransactionSenders` table
 
   <KEY>
           The key to get content for
