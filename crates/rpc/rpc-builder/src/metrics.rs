@@ -62,7 +62,7 @@ impl RpcRequestMetrics {
         Self::new(module, RpcTransport::WebSocket)
     }
 
-    /// Creates a new instance of the metrics layer for Ws.
+    /// Creates a new instance of the metrics layer for Ipc.
     pub(crate) fn ipc(module: &RpcModule<()>) -> Self {
         Self::new(module, RpcTransport::Ipc)
     }
@@ -127,7 +127,20 @@ where
     }
 
     fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
-        self.inner.batch(req)
+        self.metrics.inner.connection_metrics.batches_started_total.increment(1);
+
+        for batch_entry in req.iter().flatten() {
+            let method_name = batch_entry.method_name();
+            if let Some(call_metrics) = self.metrics.inner.call_metrics.get(method_name) {
+                call_metrics.started_total.increment(1);
+            }
+        }
+
+        MeteredBatchRequestsFuture {
+            fut: self.inner.batch(req),
+            started_at: Instant::now(),
+            metrics: self.metrics.clone(),
+        }
     }
 
     fn notification<'a>(
@@ -182,13 +195,49 @@ impl<F: Future<Output = MethodResponse>> Future for MeteredRequestFuture<F> {
             if let Some(call_metrics) =
                 this.method.and_then(|method| this.metrics.inner.call_metrics.get(method))
             {
-                call_metrics.time_seconds.record(elapsed);
+                call_metrics.response_time_seconds.record(elapsed);
                 if resp.is_success() {
                     call_metrics.successful_total.increment(1);
                 } else {
                     call_metrics.failed_total.increment(1);
                 }
             }
+        }
+        res
+    }
+}
+
+/// Response future to update the metrics for a batch of request/response pairs.
+#[pin_project::pin_project]
+pub struct MeteredBatchRequestsFuture<F> {
+    #[pin]
+    fut: F,
+    /// time when the batch request started
+    started_at: Instant,
+    /// metrics for the batch
+    metrics: RpcRequestMetrics,
+}
+
+impl<F> std::fmt::Debug for MeteredBatchRequestsFuture<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MeteredBatchRequestsFuture")
+    }
+}
+
+impl<F> Future for MeteredBatchRequestsFuture<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let res = this.fut.poll(cx);
+
+        if res.is_ready() {
+            let elapsed = this.started_at.elapsed().as_secs_f64();
+            this.metrics.inner.connection_metrics.batches_finished_total.increment(1);
+            this.metrics.inner.connection_metrics.batch_response_time_seconds.record(elapsed);
         }
         res
     }
@@ -232,6 +281,12 @@ struct RpcServerConnectionMetrics {
     requests_finished_total: Counter,
     /// Response for a single request/response pair
     request_time_seconds: Histogram,
+    /// The number of batch requests started
+    batches_started_total: Counter,
+    /// The number of batch requests finished
+    batches_finished_total: Counter,
+    /// Response time for a batch request
+    batch_response_time_seconds: Histogram,
 }
 
 /// Metrics for the RPC calls
@@ -245,5 +300,5 @@ struct RpcServerCallMetrics {
     /// The number of failed calls
     failed_total: Counter,
     /// Response for a single call
-    time_seconds: Histogram,
+    response_time_seconds: Histogram,
 }
