@@ -50,7 +50,9 @@ use reth_rpc_eth_api::{
     RpcNodeCore, RpcReceipt, RpcTransaction, RpcTxReq,
 };
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
-use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
+use reth_rpc_layer::{
+    AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret, PathPrefixLayer,
+};
 use reth_storage_api::{
     AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, ProviderBlock,
     StateProviderFactory,
@@ -67,9 +69,6 @@ use std::{
 use tower_http::cors::CorsLayer;
 
 pub use cors::CorsDomainError;
-
-mod path_prefix;
-pub use path_prefix::{PathPrefixLayer, PathPrefixService};
 
 // re-export for convenience
 pub use jsonrpsee::server::ServerBuilder;

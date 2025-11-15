@@ -36,7 +36,6 @@ jsonrpsee = { workspace = true, features = ["server"] }
 tower-http = { workspace = true, features = ["full"] }
 tower = { workspace = true, features = ["full"] }
 http.workspace = true
-http-body.workspace = true
 pin-project.workspace = true
 
 # metrics

@@ -74,8 +74,8 @@ pub struct RpcServerArgs {
     /// This option allows serving RPC requests under a custom path, for example "/rpc".
     ///
     /// Example: --http.rpcprefix /custom/path
-    #[arg(long = "http.rpcprefix", default_value = "/")]
-    pub http_rpcprefix: String,
+    #[arg(long = "http.rpcprefix")]
+    pub http_rpcprefix: Option<String>,
 
     /// Enable the WS-RPC server
     #[arg(long)]
@@ -104,8 +104,8 @@ pub struct RpcServerArgs {
     /// This option allows serving RPC requests under a custom path, for example "/ws".
     ///
     /// Example: --ws.rpcprefix /custom/path
-    #[arg(long = "ws.rpcprefix", default_value = "/")]
-    pub ws_rpcprefix: String,
+    #[arg(long = "ws.rpcprefix")]
+    pub ws_rpcprefix: Option<String>,
 
     /// Disable the IPC-RPC server
     #[arg(long)]
@@ -414,13 +414,13 @@ impl Default for RpcServerArgs {
             http_disable_compression: false,
             http_api: None,
             http_corsdomain: None,
-            http_rpcprefix: "/".to_string(),
+            http_rpcprefix: None,
             ws: false,
             ws_addr: Ipv4Addr::LOCALHOST.into(),
             ws_port: constants::DEFAULT_WS_RPC_PORT,
             ws_allowed_origins: None,
             ws_api: None,
-            ws_rpcprefix: "/".to_string(),
+            ws_rpcprefix: None,
             ipcdisable: false,
             ipcpath: constants::DEFAULT_IPC_ENDPOINT.to_string(),
             ipc_socket_permissions: None,

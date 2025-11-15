@@ -9,6 +9,7 @@ use http_body::Body;
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tower::{Layer, Service};
@@ -17,7 +18,7 @@ use tower::{Layer, Service};
 #[derive(Debug, Clone)]
 pub struct PathPrefixLayer {
     /// The path prefix to strip from requests
-    prefix: String,
+    prefix: Arc<str>,
 }
 
 impl PathPrefixLayer {
@@ -28,7 +29,7 @@ impl PathPrefixLayer {
     pub fn new(prefix: impl Into<String>) -> Self {
         let prefix = prefix.into();
         let normalized = Self::normalize_prefix(&prefix);
-        Self { prefix: normalized }
+        Self { prefix: normalized.into() }
     }
 
     /// Normalizes a path prefix:
@@ -63,7 +64,7 @@ impl<S> Layer<S> for PathPrefixLayer {
 #[derive(Debug, Clone)]
 pub struct PathPrefixService<S> {
     inner: S,
-    prefix: String,
+    prefix: Arc<str>,
 }
 
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for PathPrefixService<S>
@@ -83,12 +84,12 @@ where
         let path = req.uri().path();
 
         // If prefix is root, pass through unchanged
-        if self.prefix == "/" {
+        if &*self.prefix == "/" {
             return PathPrefixFuture::Inner(self.inner.call(req));
         }
 
         // Check if path starts with the prefix
-        if path.starts_with(&self.prefix) {
+        if path.starts_with(&*self.prefix) {
             // Strip the prefix from the path
             let new_path = if path.len() == self.prefix.len() {
                 // Path is exactly the prefix, use root
@@ -176,3 +177,4 @@ mod tests {
         assert_eq!(PathPrefixLayer::normalize_prefix("/api/v1/"), "/api/v1");
     }
 }
+

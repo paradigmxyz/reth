@@ -15,9 +15,11 @@ mod auth_client_layer;
 mod auth_layer;
 mod compression_layer;
 mod jwt_validator;
+mod path_prefix;
 
 pub use auth_layer::{AuthService, ResponseFuture};
 pub use compression_layer::CompressionLayer;
+pub use path_prefix::{PathPrefixLayer, PathPrefixService};
 
 // Export alloy JWT types
 pub use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
