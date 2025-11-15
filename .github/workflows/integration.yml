@@ -79,4 +79,4 @@ jobs:
         with:
           cache-on-failure: true
       - name: run era1 files integration tests
-        run: cargo nextest run --package reth-era --test it -- --ignored
+        run: cargo nextest run --release --package reth-era --test it -- --ignored

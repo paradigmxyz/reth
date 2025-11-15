@@ -14,16 +14,16 @@ use reth_era::{
 use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;
 
-use crate::{open_test_file, Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, MAINNET};
+use crate::{open_era1_test_file, EraTestDownloader, ERA1_MAINNET_FILES_NAMES, MAINNET};
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]
 async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Result<()> {
-    let downloader = Era1TestDownloader::new().await.expect("Failed to create downloader");
+    let downloader = EraTestDownloader::new().await.expect("Failed to create downloader");
 
     for &filename in &ERA1_MAINNET_FILES_NAMES {
         println!("\nTesting file: {filename}");
-        let file = open_test_file(filename, &downloader, MAINNET).await?;
+        let file = open_era1_test_file(filename, &downloader, MAINNET).await?;
 
         // Test block decompression across different positions in the file
         let test_block_indices = [
