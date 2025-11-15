@@ -336,12 +336,13 @@ mod tests {
     /// Calculate the branch node stored in the database by feeding the provided state to the hash
     /// builder and taking the trie updates.
     fn get_hash_builder_branch_nodes(
-        state: impl IntoIterator<Item = (Nibbles, Account)> + Clone,
+        state: impl IntoIterator<Item = (Nibbles, Account)>,
     ) -> HashMap<Nibbles, BranchNodeCompact> {
+        let state: Vec<_> = state.into_iter().collect();
         let mut hash_builder = HashBuilder::default().with_updates(true);
 
         let mut prefix_set = PrefixSetMut::default();
-        prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
+        prefix_set.extend_keys(state.iter().map(|(nibbles, _)| *nibbles));
         let walker = TrieWalker::<_>::state_trie(NoopAccountTrieCursor, prefix_set.freeze());
 
         let hashed_post_state = HashedPostState::default()
