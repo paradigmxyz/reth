@@ -341,13 +341,16 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     }
 
     pub fn ensure_at_block(&mut self, advance_to: BlockNumber) -> ProviderResult<()> {
-        let highest_block = self
-            .reader()
-            .get_highest_static_file_block(self.writer.user_header().segment())
-            .unwrap_or_default();
-        match highest_block.cmp(&advance_to) {
+        let current_block = if let Some(current_block_number) = self.current_block_number() {
+            current_block_number
+        } else {
+            self.increment_block(0)?;
+            0
+        };
+
+        match current_block.cmp(&advance_to) {
             Ordering::Less => {
-                for block in highest_block..=advance_to {
+                for block in current_block + 1..=advance_to {
                     self.increment_block(block)?;
                 }
             }
@@ -355,7 +358,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             Ordering::Greater => {
                 return Err(ProviderError::UnexpectedStaticFileBlockNumber(
                     self.writer.user_header().segment(),
-                    highest_block,
+                    current_block,
                     advance_to,
                 ));
             }
@@ -403,6 +406,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         Ok(())
+    }
+
+    pub fn current_block_number(&self) -> Option<u64> {
+        self.writer.user_header().block_end()
     }
 
     /// Returns a block number that is one next to the current tip of static files.
