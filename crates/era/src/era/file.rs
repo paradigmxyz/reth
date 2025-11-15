@@ -275,6 +275,14 @@ impl<W: Write> EraWriter<W> {
     ) -> Result<(), E2sError> {
         self.ensure_version_written()?;
 
+        // Ensure blocks are written before state/indices
+        if self.has_written_state ||
+            self.has_written_block_slot_index ||
+            self.has_written_state_slot_index
+        {
+            return Err(E2sError::Ssz("Cannot write blocks after state or indices".to_string()));
+        }
+
         let entry = block.to_entry();
         self.writer.write_entry(&entry)?;
         Ok(())
@@ -311,9 +319,7 @@ impl<W: Write> EraWriter<W> {
 
     /// Write the state slot index
     pub fn write_state_slot_index(&mut self, slot_index: &SlotIndex) -> Result<(), E2sError> {
-        if !self.has_written_version {
-            self.ensure_version_written()?;
-        }
+        self.ensure_version_written()?;
 
         if self.has_written_state_slot_index {
             return Err(E2sError::Ssz("State slot index already written".to_string()));
