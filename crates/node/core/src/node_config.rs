@@ -237,6 +237,46 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Set the [`ChainSpec`] for the node and converts the type to that chainid.
+    pub fn map_chain<C>(self, chain: impl Into<Arc<C>>) -> NodeConfig<C> {
+        let Self {
+            datadir,
+            config,
+            metrics,
+            instance,
+            network,
+            rpc,
+            txpool,
+            builder,
+            debug,
+            db,
+            dev,
+            pruning,
+            engine,
+            era,
+            static_files,
+            ..
+        } = self;
+        NodeConfig {
+            datadir,
+            config,
+            chain: chain.into(),
+            metrics,
+            instance,
+            network,
+            rpc,
+            txpool,
+            builder,
+            debug,
+            db,
+            dev,
+            pruning,
+            engine,
+            era,
+            static_files,
+        }
+    }
+
     /// Set the metrics address for the node
     pub fn with_metrics(mut self, metrics: MetricArgs) -> Self {
         self.metrics = metrics;

@@ -75,6 +75,11 @@ pub struct Discv5 {
     discovered_peer_filter: MustNotIncludeKeys,
     /// Metrics for underlying [`discv5::Discv5`] node and filtered discovered peers.
     metrics: Discv5Metrics,
+    /// Returns the _local_ [`NodeRecord`] this service was started with.
+    // Note: we must track this separately because the `discv5::Discv5` does not necessarily
+    // provide this via it's [`local_enr`](discv5::Discv5::local_ner()) This is intended for
+    // obtaining the port this service was launched at
+    local_node_record: NodeRecord,
 }
 
 impl Discv5 {
@@ -155,22 +160,29 @@ impl Discv5 {
         enr.try_into().ok()
     }
 
+    /// Returns the local [`Enr`] of the service.
+    pub fn local_enr(&self) -> Enr<discv5::enr::CombinedKey> {
+        self.discv5.local_enr()
+    }
+
+    /// The port the discv5 service is listening on.
+    pub fn local_port(&self) -> u16 {
+        self.local_node_record.udp_port
+    }
+
     /// Spawns [`discv5::Discv5`]. Returns [`discv5::Discv5`] handle in reth compatible wrapper type
     /// [`Discv5`], a receiver of [`discv5::Event`]s from the underlying node, and the local
     /// [`Enr`](discv5::Enr) converted into the reth compatible [`NodeRecord`] type.
     pub async fn start(
         sk: &SecretKey,
         discv5_config: Config,
-    ) -> Result<(Self, mpsc::Receiver<discv5::Event>, NodeRecord), Error> {
+    ) -> Result<(Self, mpsc::Receiver<discv5::Event>), Error> {
         //
         // 1. make local enr from listen config
         //
-        let (enr, bc_enr, fork_key, rlpx_ip_mode) = build_local_enr(sk, &discv5_config);
+        let (enr, local_node_record, fork_key, rlpx_ip_mode) = build_local_enr(sk, &discv5_config);
 
-        trace!(target: "net::discv5",
-            ?enr,
-            "local ENR"
-        );
+        trace!(target: "net::discv5", ?enr, "local ENR");
 
         //
         // 2. start discv5
@@ -217,9 +229,15 @@ impl Discv5 {
         );
 
         Ok((
-            Self { discv5, rlpx_ip_mode, fork_key, discovered_peer_filter, metrics },
+            Self {
+                discv5,
+                rlpx_ip_mode,
+                fork_key,
+                discovered_peer_filter,
+                metrics,
+                local_node_record,
+            },
             discv5_updates,
-            bc_enr,
         ))
     }
 

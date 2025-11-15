@@ -24,7 +24,7 @@ use reth_rpc_api::servers::AdminApiServer;
 use reth_tasks::TaskManager;
 use std::{
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 alloy_sol_types::sol! {
@@ -360,7 +360,7 @@ async fn test_admin_external_ip() -> eyre::Result<()> {
             NetworkArgs::default().with_nat_resolver(NatResolver::ExternalIp(external_ip)),
         )
         .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http().with_auth_ipc());
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(exec)
@@ -369,8 +369,6 @@ async fn test_admin_external_ip() -> eyre::Result<()> {
         .await?;
 
     let api = node.add_ons_handle.admin_api();
-
-    tokio::time::sleep(Duration::from_secs(60)).await;
 
     let info = api.node_info().await.unwrap();
 
