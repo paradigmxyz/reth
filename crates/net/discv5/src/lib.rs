@@ -166,7 +166,7 @@ impl Discv5 {
     }
 
     /// The port the discv5 service is listening on.
-    pub fn local_port(&self) -> u16 {
+    pub const fn local_port(&self) -> u16 {
         self.local_node_record.udp_port
     }
 
@@ -717,12 +717,14 @@ mod test {
             fork_key: None,
             discovered_peer_filter: MustNotIncludeKeys::default(),
             metrics: Discv5Metrics::default(),
+            local_node_record: NodeRecord::new(
+                (Ipv4Addr::LOCALHOST, 30303).into(),
+                PeerId::random(),
+            ),
         }
     }
 
-    async fn start_discovery_node(
-        udp_port_discv5: u16,
-    ) -> (Discv5, mpsc::Receiver<discv5::Event>, NodeRecord) {
+    async fn start_discovery_node(udp_port_discv5: u16) -> (Discv5, mpsc::Receiver<discv5::Event>) {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
@@ -743,11 +745,11 @@ mod test {
         // rig test
 
         // rig node_1
-        let (node_1, mut stream_1, _) = start_discovery_node(30344).await;
+        let (node_1, mut stream_1) = start_discovery_node(30344).await;
         let node_1_enr = node_1.with_discv5(|discv5| discv5.local_enr());
 
         // rig node_2
-        let (node_2, mut stream_2, _) = start_discovery_node(30355).await;
+        let (node_2, mut stream_2) = start_discovery_node(30355).await;
         let node_2_enr = node_2.with_discv5(|discv5| discv5.local_enr());
 
         trace!(target: "net::discv5::test",

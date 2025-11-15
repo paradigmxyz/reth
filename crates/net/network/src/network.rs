@@ -238,16 +238,19 @@ impl<N: NetworkPrimitives> PeersInfo for NetworkHandle<N> {
         } else if let Some(discv5) = self.inner.discv5.as_ref() {
             // for disv5 we must check if we have an external ip configured
             if let Some(external) = self.inner.nat.and_then(|nat| nat.as_external_ip()) {
-                return NodeRecord::new((external, discv5.local_port()).into(), *self.peer_id());
+                NodeRecord::new((external, discv5.local_port()).into(), *self.peer_id())
+            } else {
+                // use the node record that discv5 tracks or use localhost
+                self.inner.discv5.as_ref().and_then(|d| d.node_record()).unwrap_or_else(|| {
+                    NodeRecord::new(
+                        (std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), discv5.local_port())
+                            .into(),
+                        *self.peer_id(),
+                    )
+                })
             }
-            // use the node record that discv5 tracks or use localhost
-            self.inner.discv5.as_ref().and_then(|d| d.node_record()).unwrap_or_else(|| {
-                NodeRecord::new(
-                    (std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), discv5.local_port())
-                        .into(),
-                    *self.peer_id(),
-                )
-            })
+            // also use the tcp port
+            .with_tcp_port(self.inner.listener_address.lock().port())
         } else {
             let external_ip = self.inner.nat.and_then(|nat| nat.as_external_ip());
 

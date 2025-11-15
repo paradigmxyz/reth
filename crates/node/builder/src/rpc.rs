@@ -388,7 +388,7 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcHandle<Node, EthApi> {
     }
 
     /// Returns the `EthApi` instance of the rpc server.
-    pub fn eth_api(&self) -> &EthApi {
+    pub const fn eth_api(&self) -> &EthApi {
         self.rpc_registry.registry.eth_api()
     }
 
