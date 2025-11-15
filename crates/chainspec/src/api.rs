@@ -1,5 +1,9 @@
 use crate::{ChainSpec, DepositContract};
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    vec::Vec,
+};
 use alloy_chains::Chain;
 use alloy_eips::{calc_next_block_base_fee, eip1559::BaseFeeParams, eip7840::BlobParams};
 use alloy_genesis::Genesis;
@@ -21,6 +25,13 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// Returns the chain id number
     fn chain_id(&self) -> u64 {
         self.chain().id()
+    }
+
+    /// Returns the name of the chain.
+    ///
+    /// Defaults to the string representation of the chain.
+    fn name(&self) -> String {
+        self.chain().to_string()
     }
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.

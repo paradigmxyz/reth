@@ -131,7 +131,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
     pub async fn execute<N>(self) -> Result<()> {
-        let data_dir = self.env.datadir.resolve_datadir(self.env.chain.chain());
+        let data_dir = self.env.datadir.resolve_datadir(&*self.env.chain);
         fs::create_dir_all(&data_dir)?;
 
         let url = match self.url {

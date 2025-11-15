@@ -166,7 +166,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
         C::ChainSpec: EthChainSpec + Hardforks + EthereumHardforks + Send + Sync + 'static,
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
-        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
+        let data_dir = self.datadir.clone().resolve_datadir(&*self.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         // Load configuration
