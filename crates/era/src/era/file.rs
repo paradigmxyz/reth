@@ -20,9 +20,7 @@ use crate::{
         group::{EraGroup, EraId, SlotIndex},
     },
 };
-
 use std::{
-    collections::VecDeque,
     fs::File,
     io::{Read, Seek, Write},
 };
@@ -70,10 +68,8 @@ pub struct EraReader<R: Read> {
 
 /// An iterator of [`BeaconBlockIterator`] streaming from [`E2StoreReader`].
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct BeaconBlockIterator<R: Read> {
     reader: E2StoreReader<R>,
-    blocks: VecDeque<CompressedSignedBeaconBlock>,
     state: Option<CompressedBeaconState>,
     other_entries: Vec<Entry>,
     block_slot_index: Option<SlotIndex>,
@@ -84,7 +80,6 @@ impl<R: Read> BeaconBlockIterator<R> {
     fn new(reader: E2StoreReader<R>) -> Self {
         Self {
             reader,
-            blocks: Default::default(),
             state: None,
             other_entries: Default::default(),
             block_slot_index: None,
@@ -207,7 +202,6 @@ impl FileReader for EraReader<File> {}
 pub struct EraWriter<W: Write> {
     writer: E2StoreWriter<W>,
     has_written_version: bool,
-    has_written_blocks: bool,
     has_written_state: bool,
     has_written_block_slot_index: bool,
     has_written_state_slot_index: bool,
@@ -221,7 +215,6 @@ impl<W: Write> StreamWriter<W> for EraWriter<W> {
         Self {
             writer: E2StoreWriter::new(writer),
             has_written_version: false,
-            has_written_blocks: false,
             has_written_state: false,
             has_written_block_slot_index: false,
             has_written_state_slot_index: false,
@@ -286,7 +279,6 @@ impl<W: Write> EraWriter<W> {
 
         let entry = block.to_entry();
         self.writer.write_entry(&entry)?;
-        self.has_written_blocks = true;
         Ok(())
     }
 
