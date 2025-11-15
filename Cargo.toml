@@ -466,17 +466,14 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "33.0.0", default-features = false }
+revm = { version = "33.1.0", default-features = false }
 revm-bytecode = { version = "7.1.1", default-features = false }
 revm-database = { version = "9.0.5", default-features = false }
 revm-state = { version = "8.1.1", default-features = false }
 revm-primitives = { version = "21.0.2", default-features = false }
-revm-interpreter = { version = "31.0.0", default-features = false }
-revm-inspector = { version = "12.0.2", default-features = false }
-revm-context = { version = "12.0.0", default-features = false }
-revm-context-interface = { version = "12.0.1", default-features = false }
+revm-interpreter = { version = "31.1.0", default-features = false }
 revm-database-interface = { version = "8.0.5", default-features = false }
-op-revm = { version = "14.0.0", default-features = false }
+op-revm = { version = "14.1.0", default-features = false }
 revm-inspectors = "0.33.0"
 
 # eth
@@ -728,6 +725,9 @@ vergen = "9.0.4"
 visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
+
+# networking
+ipnet = "2.11"
 
 # [patch.crates-io]
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }

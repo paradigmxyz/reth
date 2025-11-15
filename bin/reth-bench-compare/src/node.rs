@@ -30,6 +30,7 @@ pub(crate) struct NodeManager {
     additional_reth_args: Vec<String>,
     comparison_dir: Option<PathBuf>,
     tracing_endpoint: Option<String>,
+    otlp_max_queue_size: usize,
 }
 
 impl NodeManager {
@@ -46,6 +47,7 @@ impl NodeManager {
             additional_reth_args: args.reth_args.clone(),
             comparison_dir: None,
             tracing_endpoint: args.traces.otlp.as_ref().map(|u| u.to_string()),
+            otlp_max_queue_size: args.otlp_max_queue_size,
         }
     }
 
@@ -203,6 +205,9 @@ impl NodeManager {
         cmd.arg("--");
         cmd.args(reth_args);
 
+        // Set environment variable to disable log styling
+        cmd.env("RUST_LOG_STYLE", "never");
+
         Ok(cmd)
     }
 
@@ -210,17 +215,22 @@ impl NodeManager {
     fn create_direct_command(&self, reth_args: &[String]) -> Command {
         let binary_path = &reth_args[0];
 
-        if self.use_sudo {
+        let mut cmd = if self.use_sudo {
             info!("Starting reth node with sudo...");
-            let mut cmd = Command::new("sudo");
-            cmd.args(reth_args);
-            cmd
+            let mut sudo_cmd = Command::new("sudo");
+            sudo_cmd.args(reth_args);
+            sudo_cmd
         } else {
             info!("Starting reth node...");
-            let mut cmd = Command::new(binary_path);
-            cmd.args(&reth_args[1..]); // Skip the binary path since it's the command
-            cmd
-        }
+            let mut reth_cmd = Command::new(binary_path);
+            reth_cmd.args(&reth_args[1..]); // Skip the binary path since it's the command
+            reth_cmd
+        };
+
+        // Set environment variable to disable log styling
+        cmd.env("RUST_LOG_STYLE", "never");
+
+        cmd
     }
 
     /// Start a reth node using the specified binary path and return the process handle
@@ -259,7 +269,9 @@ impl NodeManager {
 
         // Set high queue size to prevent trace dropping during benchmarks
         if self.tracing_endpoint.is_some() {
-            cmd.env("OTEL_BLRP_MAX_QUEUE_SIZE", "10000");
+            cmd.env("OTEL_BSP_MAX_QUEUE_SIZE", self.otlp_max_queue_size.to_string()); // Traces
+            cmd.env("OTEL_BLRP_MAX_QUEUE_SIZE", "10000"); // Logs
+
             // Set service name to differentiate baseline vs feature runs in Jaeger
             cmd.env("OTEL_SERVICE_NAME", format!("reth-{}", ref_type));
         }
@@ -484,6 +496,9 @@ impl NodeManager {
         }
 
         cmd.args(["to-block", &block_number.to_string()]);
+
+        // Set environment variable to disable log styling
+        cmd.env("RUST_LOG_STYLE", "never");
 
         // Debug log the command
         debug!("Executing reth unwind command: {:?}", cmd);

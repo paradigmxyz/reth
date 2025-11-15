@@ -122,3 +122,45 @@ impl<T: StreamWriter<File>> FileWriter for T {
         Self::create(path, file)
     }
 }
+
+/// Era file type identifier
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EraFileType {
+    /// Consensus layer ERA file, `.era`
+    /// Contains beacon blocks and states
+    Era,
+    /// Execution layer ERA1 file, `.era1`
+    /// Contains execution blocks pre-merge
+    Era1,
+}
+
+impl EraFileType {
+    /// Get the file extension for this type, dot included
+    pub const fn extension(&self) -> &'static str {
+        match self {
+            Self::Era => ".era",
+            Self::Era1 => ".era1",
+        }
+    }
+
+    /// Detect file type from a filename
+    pub fn from_filename(filename: &str) -> Option<Self> {
+        if filename.ends_with(".era") {
+            Some(Self::Era)
+        } else if filename.ends_with(".era1") {
+            Some(Self::Era1)
+        } else {
+            None
+        }
+    }
+
+    /// Detect file type from URL
+    /// By default, it assumes `Era` type
+    pub fn from_url(url: &str) -> Self {
+        if url.contains("era1") {
+            Self::Era1
+        } else {
+            Self::Era
+        }
+    }
+}
