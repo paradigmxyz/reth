@@ -1,5 +1,6 @@
 //! Multiproof task related functionality.
 
+use super::chunking::compute_chunk_plan;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
     keccak256,
@@ -683,9 +684,10 @@ pub(crate) struct MultiProofTaskMetrics {
 /// See the `run()` method documentation for detailed lifecycle flow.
 #[derive(Debug)]
 pub(super) struct MultiProofTask {
-    /// The size of proof targets chunk to spawn in one calculation.
-    /// If None, chunking is disabled and all targets are processed in a single proof.
-    chunk_size: Option<usize>,
+    /// Minimum chunk size when splitting work across idle workers.
+    /// Chunking is only applied if at least 2 chunks can be formed and
+    /// each chunk would be at least this size. If `None`, chunking is disabled.
+    min_chunk_size: Option<usize>,
     /// Receiver for state root related messages (prefetch, state updates, finish signal).
     rx: CrossbeamReceiver<MultiProofMessage>,
     /// Sender for state root related messages.
@@ -711,14 +713,14 @@ impl MultiProofTask {
     pub(super) fn new(
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
-        chunk_size: Option<usize>,
+        min_chunk_size: Option<usize>,
     ) -> Self {
         let (tx, rx) = unbounded();
         let (proof_result_tx, proof_result_rx) = unbounded();
         let metrics = MultiProofTaskMetrics::default();
 
         Self {
-            chunk_size,
+            min_chunk_size,
             rx,
             tx,
             proof_result_rx,
@@ -767,13 +769,6 @@ impl MultiProofTask {
             .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
 
         // Process proof targets in chunks.
-        let mut chunks = 0;
-
-        // Only chunk if multiple account or storage workers are available to take advantage of
-        // parallelism.
-        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
-            1 ||
-            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
 
         let mut dispatch = |proof_targets| {
             self.multiproof_manager.dispatch(
@@ -787,22 +782,30 @@ impl MultiProofTask {
                 }
                 .into(),
             );
-            chunks += 1;
         };
 
-        if should_chunk &&
-            let Some(chunk_size) = self.chunk_size &&
-            proof_targets.chunking_length() > chunk_size
-        {
-            let mut chunks = 0usize;
-            for proof_targets_chunk in proof_targets.chunks(chunk_size) {
-                dispatch(proof_targets_chunk);
-                chunks += 1;
+        let dispatched_chunks = if let Some(min_chunk) = self.min_chunk_size {
+            let total = proof_targets.chunking_length();
+            let idle = self.multiproof_manager.proof_worker_handle.available_account_workers();
+
+            if let Some(plan) = compute_chunk_plan(total, idle, min_chunk) {
+                let mut c = 0usize;
+                for proof_targets_chunk in proof_targets.chunks_with(plan.base, plan.increased) {
+                    dispatch(proof_targets_chunk);
+                    c += 1;
+                }
+                tracing::Span::current().record("chunks", c);
+                c
+            } else {
+                dispatch(proof_targets);
+                1
             }
-            tracing::Span::current().record("chunks", chunks);
         } else {
             dispatch(proof_targets);
-        }
+            1
+        };
+
+        let chunks = dispatched_chunks as u64;
 
         self.metrics.prefetch_proof_chunks_histogram.record(chunks as f64);
 
@@ -917,15 +920,10 @@ impl MultiProofTask {
         let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
 
         // Process state updates in chunks.
-        let mut chunks = 0;
 
         let mut spawned_proof_targets = MultiProofTargets::default();
 
-        // Only chunk if multiple account or storage workers are available to take advantage of
-        // parallelism.
-        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
-            1 ||
-            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
+        // Compute chunking plan based on available account workers and minimum chunk size.
 
         let mut dispatch = |hashed_state_update| {
             let proof_targets = get_proof_targets(
@@ -946,23 +944,30 @@ impl MultiProofTask {
                 }
                 .into(),
             );
-
-            chunks += 1;
         };
 
-        if should_chunk &&
-            let Some(chunk_size) = self.chunk_size &&
-            not_fetched_state_update.chunking_length() > chunk_size
-        {
-            let mut chunks = 0usize;
-            for chunk in not_fetched_state_update.chunks(chunk_size) {
-                dispatch(chunk);
-                chunks += 1;
+        let dispatched_chunks = if let Some(min_chunk) = self.min_chunk_size {
+            let total = not_fetched_state_update.chunking_length();
+            let idle = self.multiproof_manager.proof_worker_handle.available_account_workers();
+
+            if let Some(plan) = compute_chunk_plan(total, idle, min_chunk) {
+                let mut c = 0usize;
+                for chunk in not_fetched_state_update.chunks_with(plan.base, plan.increased) {
+                    dispatch(chunk);
+                    c += 1;
+                }
+                tracing::Span::current().record("chunks", c);
+                c
+            } else {
+                dispatch(not_fetched_state_update);
+                1
             }
-            tracing::Span::current().record("chunks", chunks);
         } else {
             dispatch(not_fetched_state_update);
-        }
+            1
+        };
+
+        let chunks = dispatched_chunks as u64;
 
         self.metrics
             .state_update_proof_targets_accounts_histogram
