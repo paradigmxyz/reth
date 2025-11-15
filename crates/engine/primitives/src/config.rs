@@ -7,17 +7,18 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
 /// Minimum number of workers we allow configuring explicitly.
-pub const MIN_WORKER_COUNT: usize = 32;
+pub const MIN_WORKER_COUNT: usize = 16;
 
 /// Returns the default number of storage worker threads based on available parallelism.
 ///
 /// Uses the higher of:
 /// - 2x CPU thread count
-/// - 32 workers (minimum)
+/// - 16 workers (minimum)
 ///
-/// The minimum of 32 workers is based on performance testing showing that lower counts
-/// are insufficient for chains like Base, which require higher parallelism for proof
-/// computation during state root calculations.
+/// The minimum of 16 workers is based on performance testing showing this is the optimal
+/// balance between parallelism and resource usage. Testing shows I/O-bound proof operations
+/// benefit from 2x CPU oversubscription, with 16 workers providing sufficient throughput
+/// while avoiding excessive memory pressure and MDBX reader table contention.
 ///
 /// TODO: We should dynamically adjust this based on the number of available workers.
 fn default_storage_worker_count() -> usize {
