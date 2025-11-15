@@ -177,4 +177,3 @@ mod tests {
         assert_eq!(PathPrefixLayer::normalize_prefix("/api/v1/"), "/api/v1");
     }
 }
-

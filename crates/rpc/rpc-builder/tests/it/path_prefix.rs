@@ -177,4 +177,3 @@ fn test_normalize_prefix() {
     let layer5 = PathPrefixLayer::new("/api/v1");
     assert!(format!("{:?}", layer5).contains("PathPrefixLayer"));
 }
-
