@@ -464,6 +464,13 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV4> {
+        let current_timestamp =
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+        if self.inner.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+            return Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+            ));
+        }
         self.get_payload_inner(payload_id, EngineApiMessageVersion::V4).await
     }
 
