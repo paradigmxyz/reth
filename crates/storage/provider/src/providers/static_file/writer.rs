@@ -706,7 +706,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     ///
     /// Note: `last_block` refers to the block the unwinds ends at if dealing with transaction-based
     /// data.
-    fn queue_prune(
+    pub fn queue_prune(
         &mut self,
         to_delete: u64,
         last_block: Option<BlockNumber>,
@@ -792,7 +792,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     }
 
     /// Returns a [`StaticFileProvider`] for reading.
-    pub fn reader(&self) -> StaticFileProvider<N> {
+    fn reader(&self) -> StaticFileProvider<N> {
         Self::upgrade_provider_to_strong_reference(&self.reader)
     }
 
@@ -818,6 +818,25 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Helper function to access a mutable reference to [`SegmentHeader`].
     pub const fn user_header_mut(&mut self) -> &mut SegmentHeader {
         self.writer.user_header_mut()
+    }
+
+    /// Helper function to access the segment of the static file.
+    pub const fn segment(&self) -> StaticFileSegment {
+        self.user_header().segment()
+    }
+
+    /// Gets the highest static file's block height if it exists for a static file segment.
+    ///
+    /// If there is nothing on disk for the current segment, this will return [`None`].
+    pub fn get_highest_static_file_block(&self) -> Option<BlockNumber> {
+        self.reader().get_highest_static_file_block(self.user_header().segment())
+    }
+
+    /// Gets the highest static file transaction.
+    ///
+    /// If there is nothing on disk for the current segment, this will return [`None`].
+    pub fn get_highest_static_file_tx(&self) -> Option<TxNumber> {
+        self.reader().get_highest_static_file_tx(self.user_header().segment())
     }
 
     /// Helper function to override block range for testing.
