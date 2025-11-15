@@ -192,19 +192,23 @@ impl RethRpcServerConfig for RpcServerArgs {
 
         if self.http {
             let socket_address = SocketAddr::new(self.http_addr, self.http_port);
+            let prefix = (self.http_rpcprefix != "/").then(|| self.http_rpcprefix.clone());
             config = config
                 .with_http_address(socket_address)
                 .with_http(self.http_ws_server_builder())
                 .with_http_cors(self.http_corsdomain.clone())
+                .with_http_path_prefix(prefix)
                 .with_http_disable_compression(self.http_disable_compression);
         }
 
         if self.ws {
             let socket_address = SocketAddr::new(self.ws_addr, self.ws_port);
+            let prefix = (self.ws_rpcprefix != "/").then(|| self.ws_rpcprefix.clone());
             // Ensure WS CORS is applied regardless of HTTP being enabled
             config = config
                 .with_ws_address(socket_address)
                 .with_ws(self.http_ws_server_builder())
+                .with_ws_path_prefix(prefix)
                 .with_ws_cors(self.ws_allowed_origins.clone());
         }
 

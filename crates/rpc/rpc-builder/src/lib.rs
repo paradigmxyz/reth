@@ -68,6 +68,9 @@ use tower_http::cors::CorsLayer;
 
 pub use cors::CorsDomainError;
 
+mod path_prefix;
+pub use path_prefix::{PathPrefixLayer, PathPrefixService};
+
 // re-export for convenience
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::server::ServerConfigBuilder;
@@ -1024,6 +1027,8 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     http_cors_domains: Option<String>,
     /// Address where to bind the http server to
     http_addr: Option<SocketAddr>,
+    /// HTTP path prefix for JSON-RPC endpoint
+    http_path_prefix: Option<String>,
     /// Control whether http responses should be compressed
     http_disable_compression: bool,
     /// Configs for WS server
@@ -1032,6 +1037,8 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     ws_cors_domains: Option<String>,
     /// Address where to bind the ws server to
     ws_addr: Option<SocketAddr>,
+    /// `WebSocket` path prefix for JSON-RPC endpoint
+    ws_path_prefix: Option<String>,
     /// Configs for JSON-RPC IPC server
     ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     /// The Endpoint where to launch the ipc server
@@ -1051,10 +1058,12 @@ impl Default for RpcServerConfig<Identity> {
             http_server_config: None,
             http_cors_domains: None,
             http_addr: None,
+            http_path_prefix: None,
             http_disable_compression: false,
             ws_server_config: None,
             ws_cors_domains: None,
             ws_addr: None,
+            ws_path_prefix: None,
             ipc_server_config: None,
             ipc_endpoint: None,
             jwt_secret: None,
@@ -1115,10 +1124,12 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             http_server_config: self.http_server_config,
             http_cors_domains: self.http_cors_domains,
             http_addr: self.http_addr,
+            http_path_prefix: self.http_path_prefix,
             http_disable_compression: self.http_disable_compression,
             ws_server_config: self.ws_server_config,
             ws_cors_domains: self.ws_cors_domains,
             ws_addr: self.ws_addr,
+            ws_path_prefix: self.ws_path_prefix,
             ipc_server_config: self.ipc_server_config,
             ipc_endpoint: self.ipc_endpoint,
             jwt_secret: self.jwt_secret,
@@ -1165,6 +1176,32 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     pub const fn with_ws_address(mut self, addr: SocketAddr) -> Self {
         self.ws_addr = Some(addr);
         self
+    }
+
+    /// Configures the path prefix for the HTTP server
+    ///
+    /// Default is `/` (root path)
+    pub fn with_http_path_prefix(mut self, prefix: Option<String>) -> Self {
+        self.http_path_prefix = prefix;
+        self
+    }
+
+    /// Configures the path prefix for the `WebSocket` server
+    ///
+    /// Default is `/` (root path)
+    pub fn with_ws_path_prefix(mut self, prefix: Option<String>) -> Self {
+        self.ws_path_prefix = prefix;
+        self
+    }
+
+    /// Returns the configured HTTP path prefix
+    pub fn http_path_prefix(&self) -> Option<&str> {
+        self.http_path_prefix.as_deref()
+    }
+
+    /// Returns the configured `WebSocket` path prefix
+    pub fn ws_path_prefix(&self) -> Option<&str> {
+        self.ws_path_prefix.as_deref()
     }
 
     /// Sets a custom [`IdProvider`] for all configured transports.
@@ -1320,9 +1357,14 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             modules.config.ensure_ws_http_identical()?;
 
             if let Some(config) = self.http_server_config {
+                // Determine which path prefix to use (prefer HTTP prefix, fall back to WS prefix)
+                let path_prefix =
+                    self.http_path_prefix.clone().or_else(|| self.ws_path_prefix.clone());
+
                 let server = ServerBuilder::new()
                     .set_http_middleware(
                         tower::ServiceBuilder::new()
+                            .option_layer(path_prefix.map(PathPrefixLayer::new))
                             .option_layer(Self::maybe_cors_layer(cors)?)
                             .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
                             .option_layer(Self::maybe_compression_layer(
@@ -1377,6 +1419,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 .set_config(config.ws_only().build())
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
+                        .option_layer(self.ws_path_prefix.clone().map(PathPrefixLayer::new))
                         .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
@@ -1402,6 +1445,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 .set_config(config.http_only().build())
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
+                        .option_layer(self.http_path_prefix.clone().map(PathPrefixLayer::new))
                         .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
                         .option_layer(Self::maybe_compression_layer(self.http_disable_compression)),

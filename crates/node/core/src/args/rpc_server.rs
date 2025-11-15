@@ -67,6 +67,16 @@ pub struct RpcServerArgs {
     #[arg(long = "http.corsdomain")]
     pub http_corsdomain: Option<String>,
 
+    /// HTTP path prefix for JSON-RPC endpoint
+    ///
+    /// Sets a custom path prefix for all HTTP RPC requests.
+    /// By default, the server accepts requests at the root path "/".
+    /// This option allows serving RPC requests under a custom path, for example "/rpc".
+    ///
+    /// Example: --http.rpcprefix /custom/path
+    #[arg(long = "http.rpcprefix", default_value = "/")]
+    pub http_rpcprefix: String,
+
     /// Enable the WS-RPC server
     #[arg(long)]
     pub ws: bool,
@@ -86,6 +96,16 @@ pub struct RpcServerArgs {
     /// Rpc Modules to be configured for the WS server
     #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub ws_api: Option<RpcModuleSelection>,
+
+    /// `WebSocket` path prefix for JSON-RPC endpoint
+    ///
+    /// Sets a custom path prefix for all `WebSocket` RPC requests.
+    /// By default, the server accepts requests at the root path "/".
+    /// This option allows serving RPC requests under a custom path, for example "/ws".
+    ///
+    /// Example: --ws.rpcprefix /custom/path
+    #[arg(long = "ws.rpcprefix", default_value = "/")]
+    pub ws_rpcprefix: String,
 
     /// Disable the IPC-RPC server
     #[arg(long)]
@@ -394,11 +414,13 @@ impl Default for RpcServerArgs {
             http_disable_compression: false,
             http_api: None,
             http_corsdomain: None,
+            http_rpcprefix: "/".to_string(),
             ws: false,
             ws_addr: Ipv4Addr::LOCALHOST.into(),
             ws_port: constants::DEFAULT_WS_RPC_PORT,
             ws_allowed_origins: None,
             ws_api: None,
+            ws_rpcprefix: "/".to_string(),
             ipcdisable: false,
             ipcpath: constants::DEFAULT_IPC_ENDPOINT.to_string(),
             ipc_socket_permissions: None,
