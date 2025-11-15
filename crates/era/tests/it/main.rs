@@ -63,7 +63,7 @@ const ERA1_SEPOLIA_FILES_NAMES: [&str; 4] = [
     "sepolia-00000-643a00f7.era1",
     "sepolia-00074-0e81003c.era1",
     "sepolia-00173-b6924da5.era1",
-    "sepolia-00182-a4f0a8a1.era1 ",
+    "sepolia-00182-a4f0a8a1.era1",
 ];
 
 const HOODI: &str = "hoodi";
