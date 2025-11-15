@@ -3000,7 +3000,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
             self.static_file_provider
                 .latest_writer(StaticFileSegment::TransactionSenders)?
-                .prune_transaction_senders(to_delete, unwind_tx_from)?;
+                .prune_transaction_senders(to_delete, block)?;
         } else {
             self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
         }
