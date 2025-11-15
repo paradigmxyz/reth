@@ -18,6 +18,10 @@ pub struct RollupArgs {
     #[arg(long = "rollup.disable-tx-pool-gossip")]
     pub disable_txpool_gossip: bool,
 
+    /// Enable transaction pool admission
+    #[arg(long = "rollup.enable-tx-pool-admission")]
+    pub enable_txpool_admission: bool,
+
     /// By default the pending block equals the latest block
     /// to save resources and not leak txs from the tx-pool,
     /// this flag enables computing of the pending block
@@ -81,6 +85,7 @@ impl Default for RollupArgs {
         Self {
             sequencer: None,
             disable_txpool_gossip: false,
+            enable_txpool_admission: false,
             compute_pending_block: false,
             discovery_v4: false,
             enable_tx_conditional: false,

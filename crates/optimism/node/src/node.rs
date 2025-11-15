@@ -194,6 +194,7 @@ impl OpNode {
             .with_min_suggested_priority_fee(self.args.min_suggested_priority_fee)
             .with_historical_rpc(self.args.historical_rpc.clone())
             .with_flashblocks(self.args.flashblocks_url.clone())
+            .with_enable_txpool_admission(self.args.enable_txpool_admission)
     }
 
     /// Instantiates the [`ProviderFactoryBuilder`] for an opstack node.
@@ -685,6 +686,8 @@ pub struct OpAddOnsBuilder<NetworkT, RpcMiddleware = Identity> {
     gas_limit_config: Option<OpGasLimitConfig>,
     /// Enable transaction conditionals.
     enable_tx_conditional: bool,
+    /// Enable txpool admission
+    enable_txpool_admission: bool,
     /// Marker for network types.
     _nt: PhantomData<NetworkT>,
     /// Minimum suggested priority fee (tip)
@@ -706,6 +709,7 @@ impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
             da_config: None,
             gas_limit_config: None,
             enable_tx_conditional: false,
+            enable_txpool_admission: false,
             min_suggested_priority_fee: 1_000_000,
             _nt: PhantomData,
             rpc_middleware: Identity::new(),
@@ -745,6 +749,11 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
         self.enable_tx_conditional = enable_tx_conditional;
         self
     }
+    /// Configure if transaction pool submission should be enabled.
+    pub const fn with_enable_txpool_admission(mut self, enable_txpool_admission: bool) -> Self {
+        self.enable_txpool_admission = enable_txpool_admission;
+        self
+    }
 
     /// Configure the minimum priority fee (tip)
     pub const fn with_min_suggested_priority_fee(mut self, min: u64) -> Self {
@@ -775,6 +784,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             da_config,
             gas_limit_config,
             enable_tx_conditional,
+            enable_txpool_admission,
             min_suggested_priority_fee,
             tokio_runtime,
             _nt,
@@ -788,6 +798,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             da_config,
             gas_limit_config,
             enable_tx_conditional,
+            enable_txpool_admission,
             min_suggested_priority_fee,
             _nt,
             rpc_middleware,
@@ -821,6 +832,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             da_config,
             gas_limit_config,
             enable_tx_conditional,
+            enable_txpool_admission,
             min_suggested_priority_fee,
             historical_rpc,
             rpc_middleware,
@@ -835,7 +847,8 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
                     .with_sequencer(sequencer_url.clone())
                     .with_sequencer_headers(sequencer_headers.clone())
                     .with_min_suggested_priority_fee(min_suggested_priority_fee)
-                    .with_flashblocks(flashblocks_url),
+                    .with_flashblocks(flashblocks_url)
+                    .with_enable_txpool_admission(enable_txpool_admission),
                 PVB::default(),
                 EB::default(),
                 EVB::default(),
