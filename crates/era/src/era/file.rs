@@ -121,7 +121,8 @@ impl<R: Read + Seek> BeaconBlockIterator<R> {
                 }
                 SLOT_INDEX => {
                     let slot_index = SlotIndex::from_entry(&entry)?;
-                    // Determine if this is block or state index based on what we've seen
+                    // if we haven't seen the state yet, this slot index is for blocks,
+                    // if we have seen the state, this slot index is for the state
                     if self.state.is_none() {
                         self.block_slot_index = Some(slot_index);
                     } else {
