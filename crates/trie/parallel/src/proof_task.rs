@@ -80,27 +80,11 @@ type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootErro
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
 /// Batching configuration for storage proof job processing.
-///
-/// These constants control how storage workers collect and process jobs to improve
-/// CPU cache utilization and reduce work queue polling overhead.
-///
-/// Note: This batches job *processing*, not result sending. Each proof result is still
-/// sent individually through its dedicated channel. The performance benefit comes from:
-/// - Reduced `recv()` syscalls on the work queue (using `try_recv()` after first `recv()`)
-/// - Better CPU cache locality from processing similar jobs sequentially
-/// - Reduced context switching overhead
 mod batching {
-    /// Maximum number of jobs to process together before checking for new work.
-    ///
-    /// Limits latency impact and ensures fairness among workers. Value of 32 balances
-    /// throughput (processing similar jobs together) with responsiveness (checking for
-    /// high-priority jobs frequently).
+    /// Maximum number of jobs to collect from the work queue at once.
     pub(super) const MAX_BATCH_SIZE: usize = 32;
 
-    /// Minimum queue depth required to trigger batch collection.
-    ///
-    /// When queue has fewer than 2 items, we process jobs individually to minimize
-    /// latency. Batching only activates under load when there's actual work pressure.
+    /// Minimum queue depth to enable batching.
     pub(super) const MIN_QUEUE_FOR_BATCHING: usize = 2;
 }
 
@@ -723,53 +707,35 @@ where
         }
     }
 
-    /// Attempts to collect a batch of jobs from the work queue for processing.
+    /// Collects multiple jobs from the work queue when available.
     ///
-    /// Adaptively determines batch size based on current queue depth:
-    /// - Queue depth < 2: Return single job (minimize latency)
-    /// - Queue depth 2-32: Collect available jobs up to queue depth
-    /// - Queue depth > 32: Collect up to `MAX_BATCH_SIZE` (limit latency impact)
-    ///
-    /// All job types (storage proofs and blinded node requests) are included in the
-    /// returned batch. Caller is responsible for separating and processing appropriately.
-    ///
-    /// Stops collecting early if a blinded node request is encountered, as these are
-    /// latency-sensitive and should be processed quickly.
+    /// Returns immediately with a single job if queue depth is low.
+    /// Stops collecting if a blinded node request is encountered.
     fn try_collect_batch_static(
         work_rx: &CrossbeamReceiver<StorageWorkerJob>,
-        worker_id: usize,
+        _worker_id: usize,
         first_job: StorageWorkerJob,
     ) -> Vec<StorageWorkerJob> {
-        // Blinded node requests are latency-sensitive, never batch them
         if matches!(first_job, StorageWorkerJob::BlindedStorageNode { .. }) {
             return vec![first_job];
         }
 
         let queue_len = work_rx.len();
-
-        // If queue is small, process single job to minimize latency
         if queue_len < batching::MIN_QUEUE_FOR_BATCHING {
             return vec![first_job];
         }
 
-        // Determine target batch size based on queue pressure
         let target_batch_size = queue_len.min(batching::MAX_BATCH_SIZE);
 
         let mut batch = Vec::with_capacity(target_batch_size);
         batch.push(first_job);
 
-        // Collect additional storage proof jobs (non-blocking)
         for _ in 1..target_batch_size {
             match work_rx.try_recv() {
                 Ok(job) => {
-                    // Check if this is a blinded node request before moving the job
-                    let is_blinded_node = matches!(job, StorageWorkerJob::BlindedStorageNode { .. });
-
-                    // Include all job types in batch - they'll be separated during processing
+                    let is_blinded_node =
+                        matches!(job, StorageWorkerJob::BlindedStorageNode { .. });
                     batch.push(job);
-
-                    // Stop collecting if we encountered a blinded node request
-                    // (it needs immediate processing for low latency)
                     if is_blinded_node {
                         break;
                     }
@@ -780,14 +746,6 @@ where
                 ) => break,
             }
         }
-
-        trace!(
-            target: "trie::proof_task",
-            worker_id,
-            batch_size = batch.len(),
-            queue_len,
-            "Collected storage proof batch"
-        );
 
         batch
     }
@@ -842,10 +800,8 @@ where
             // Mark worker as busy.
             available_workers.fetch_sub(1, Ordering::Relaxed);
 
-            // Try to collect a batch of jobs for processing
             let jobs = Self::try_collect_batch_static(&work_rx, worker_id, first_job);
 
-            // Separate job types for appropriate handling
             let mut storage_proofs = Vec::new();
             let mut blinded_nodes = Vec::new();
 
@@ -856,10 +812,7 @@ where
                 }
             }
 
-            // Process storage proofs (batched if multiple, individual if single)
-            let storage_proof_count = storage_proofs.len();
-            if storage_proof_count > 1 {
-                // Process as batch for better cache utilization
+            if storage_proofs.len() > 1 {
                 Self::process_storage_proof_batch(
                     worker_id,
                     &proof_tx,
@@ -868,7 +821,6 @@ where
                     &mut cursor_metrics_cache,
                 );
             } else {
-                // Process individually
                 for job in storage_proofs {
                     if let StorageWorkerJob::StorageProof { input, proof_result_sender } = job {
                         Self::process_storage_proof(
@@ -883,7 +835,6 @@ where
                 }
             }
 
-            // Always process blinded node requests individually (latency-sensitive)
             for job in blinded_nodes {
                 if let StorageWorkerJob::BlindedStorageNode { account, path, result_sender } = job {
                     Self::process_blinded_node(
@@ -897,7 +848,6 @@ where
                 }
             }
 
-            // Mark worker as available again.
             available_workers.fetch_add(1, Ordering::Relaxed);
         }
 
@@ -1004,15 +954,7 @@ where
         }
     }
 
-    /// Processes a batch of storage proof requests for better CPU cache utilization.
-    ///
-    /// Processing similar jobs sequentially improves cache locality and reduces overhead
-    /// from context switching. Each proof is still computed and sent individually.
-    ///
-    /// Performance benefits:
-    /// - Better instruction cache utilization (same code path executed repeatedly)
-    /// - Better data cache utilization (similar data structures accessed)
-    /// - Reduced overhead from repeatedly checking the work queue
+    /// Processes multiple storage proof requests sequentially.
     fn process_storage_proof_batch<Provider>(
         worker_id: usize,
         proof_tx: &ProofTaskTx<Provider>,
@@ -1022,17 +964,6 @@ where
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
-        let batch_start = Instant::now();
-        let batch_size = jobs.len();
-
-        trace!(
-            target: "trie::proof_task",
-            worker_id,
-            batch_size,
-            "Processing storage proof batch"
-        );
-
-        // Process each proof in the batch
         for job in jobs {
             if let StorageWorkerJob::StorageProof { input, proof_result_sender } = job {
                 Self::process_storage_proof(
@@ -1045,17 +976,6 @@ where
                 );
             }
         }
-
-        let batch_elapsed = batch_start.elapsed();
-
-        trace!(
-            target: "trie::proof_task",
-            worker_id,
-            batch_size,
-            batch_elapsed_us = batch_elapsed.as_micros(),
-            avg_proof_time_us = batch_elapsed.as_micros() / batch_size as u128,
-            "Completed storage proof batch"
-        );
     }
 
     /// Processes a blinded storage node lookup request.
