@@ -1,11 +1,3 @@
-# reth node
-
-Start the node
-
-```bash
-$ reth node --help
-```
-```txt
 Usage: reth node [OPTIONS]
 
 Options:
@@ -723,16 +715,6 @@ Debug:
           compare them against local execution when a bad block is encountered, helping identify
           discrepancies in state execution.
 
-#### Replaying Old Transactions Without an Archive Node
-
-When you only need to inspect a single historical transaction, exporting its prestate from Geth and
-loading it into Reth is often faster than syncing an archive node. The helper module
-`testing/testing-utils/src/prestate.rs` parses the JSON produced by `debug_traceTransaction` with
-`prestateTracer` and extends a `Genesis` alloc with the required accounts/storage. You can then
-start a lightweight node (see `crates/ethereum/node/tests/e2e/prestate.rs` for a concrete example)
-and invoke `debug_traceCall`/`debug_traceTransaction` locally with the `prestateTracer` options to
-replay the transaction in-place.
-
       --ethstats <ETHSTATS>
           The URL of the ethstats server to connect to. Example: `nodename:secret@host:port`
 
@@ -1116,5 +1098,3 @@ Tracing:
           Defaults to TRACE if not specified.
 
           [default: debug]
-```
-
