@@ -3,8 +3,8 @@ use reth_payload_builder::PayloadBuilderError;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-/// Emits events when a better payload is built. Delegates the actual payload building
-/// to an inner [`PayloadBuilder`].
+/// Emits events when a payload is built (both `Better` and `Freeze` outcomes).
+/// Delegates the actual payload building to an inner [`PayloadBuilder`].
 #[derive(Debug, Clone)]
 pub struct BetterPayloadEmitter<PB: PayloadBuilder> {
     better_payloads_tx: broadcast::Sender<Arc<PB::BuiltPayload>>,
@@ -16,7 +16,8 @@ where
     PB: PayloadBuilder,
 {
     /// Create a new [`BetterPayloadEmitter`] with the given inner payload builder.
-    /// Owns the sender half of a broadcast channel that emits the better payloads.
+    /// Owns the sender half of a broadcast channel that emits payloads when they are built
+    /// (for both `Better` and `Freeze` outcomes).
     pub const fn new(
         better_payloads_tx: broadcast::Sender<Arc<PB::BuiltPayload>>,
         inner: PB,
@@ -39,6 +40,9 @@ where
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         match self.inner.try_build(args) {
             Ok(res) => {
+                // Emit payload for both Better and Freeze outcomes, as both represent valid
+                // payloads that should be available to subscribers (e.g., for
+                // insertion into engine service).
                 if let Some(payload) = res.payload().cloned() {
                     let _ = self.better_payloads_tx.send(Arc::new(payload));
                 }
