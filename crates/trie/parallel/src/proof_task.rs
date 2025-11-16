@@ -713,7 +713,6 @@ where
     /// Stops collecting if a blinded node request is encountered.
     fn try_collect_batch_static(
         work_rx: &CrossbeamReceiver<StorageWorkerJob>,
-        _worker_id: usize,
         first_job: StorageWorkerJob,
     ) -> Vec<StorageWorkerJob> {
         if matches!(first_job, StorageWorkerJob::BlindedStorageNode { .. }) {
@@ -800,52 +799,42 @@ where
             // Mark worker as busy.
             available_workers.fetch_sub(1, Ordering::Relaxed);
 
-            let jobs = Self::try_collect_batch_static(&work_rx, worker_id, first_job);
+            let jobs = Self::try_collect_batch_static(&work_rx, first_job);
 
             let mut storage_proofs = Vec::new();
             let mut blinded_nodes = Vec::new();
 
             for job in jobs {
                 match job {
-                    StorageWorkerJob::StorageProof { .. } => storage_proofs.push(job),
-                    StorageWorkerJob::BlindedStorageNode { .. } => blinded_nodes.push(job),
-                }
-            }
-
-            if storage_proofs.len() > 1 {
-                Self::process_storage_proof_batch(
-                    worker_id,
-                    &proof_tx,
-                    storage_proofs,
-                    &mut storage_proofs_processed,
-                    &mut cursor_metrics_cache,
-                );
-            } else {
-                for job in storage_proofs {
-                    if let StorageWorkerJob::StorageProof { input, proof_result_sender } = job {
-                        Self::process_storage_proof(
-                            worker_id,
-                            &proof_tx,
-                            input,
-                            proof_result_sender,
-                            &mut storage_proofs_processed,
-                            &mut cursor_metrics_cache,
-                        );
+                    StorageWorkerJob::StorageProof { input, proof_result_sender } => {
+                        storage_proofs.push((input, proof_result_sender));
+                    }
+                    StorageWorkerJob::BlindedStorageNode { account, path, result_sender } => {
+                        blinded_nodes.push((account, path, result_sender));
                     }
                 }
             }
 
-            for job in blinded_nodes {
-                if let StorageWorkerJob::BlindedStorageNode { account, path, result_sender } = job {
-                    Self::process_blinded_node(
-                        worker_id,
-                        &proof_tx,
-                        account,
-                        path,
-                        result_sender,
-                        &mut storage_nodes_processed,
-                    );
-                }
+            for (input, proof_result_sender) in storage_proofs {
+                Self::process_storage_proof(
+                    worker_id,
+                    &proof_tx,
+                    input,
+                    proof_result_sender,
+                    &mut storage_proofs_processed,
+                    &mut cursor_metrics_cache,
+                );
+            }
+
+            for (account, path, result_sender) in blinded_nodes {
+                Self::process_blinded_node(
+                    worker_id,
+                    &proof_tx,
+                    account,
+                    path,
+                    result_sender,
+                    &mut storage_nodes_processed,
+                );
             }
 
             available_workers.fetch_add(1, Ordering::Relaxed);
@@ -951,30 +940,6 @@ where
                 storage_hashed_cursor: hashed_cursor_metrics,
             };
             cursor_metrics_cache.extend(&per_proof_cache);
-        }
-    }
-
-    /// Processes multiple storage proof requests sequentially.
-    fn process_storage_proof_batch<Provider>(
-        worker_id: usize,
-        proof_tx: &ProofTaskTx<Provider>,
-        jobs: Vec<StorageWorkerJob>,
-        storage_proofs_processed: &mut u64,
-        cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
-    ) where
-        Provider: TrieCursorFactory + HashedCursorFactory,
-    {
-        for job in jobs {
-            if let StorageWorkerJob::StorageProof { input, proof_result_sender } = job {
-                Self::process_storage_proof(
-                    worker_id,
-                    proof_tx,
-                    input,
-                    proof_result_sender,
-                    storage_proofs_processed,
-                    cursor_metrics_cache,
-                );
-            }
         }
     }
 
