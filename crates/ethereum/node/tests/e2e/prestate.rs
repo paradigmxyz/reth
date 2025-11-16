@@ -15,7 +15,7 @@ use serde::Deserialize;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 
 const PRESTATE_SNAPSHOT: &str =
-    include_str!("../../../../../testing/prestate/tx-0x391f4b6a382d3bcc3120adc2ea8c62003e604e487d97281129156fd284a1a89d.json");
+    include_str!("../../../../../testing/prestate/tx-selfdestruct-prestate.json");
 
 #[tokio::test]
 async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
