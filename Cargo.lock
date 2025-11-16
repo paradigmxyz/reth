@@ -3613,6 +3613,7 @@ dependencies = [
  "reth-network-peers",
  "reth-node-builder",
  "reth-op",
+ "reth-optimism-flashblocks",
  "reth-optimism-forks",
  "reth-payload-builder",
  "reth-rpc-api",
