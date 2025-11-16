@@ -43,9 +43,14 @@ pub fn read_dir(
         .collect::<eyre::Result<Vec<_>>>()?;
     let mut checksums = checksums.ok_or_eyre("Missing file `checksums.txt` in the `dir`")?;
 
+    let start_index = start_from as usize / BLOCKS_PER_FILE;
+    for _ in 0..start_index {
+        checksums.next().transpose()?.ok_or_eyre("Got less checksums than ERA files")?;
+    }
+
     entries.sort_by(|(left, _), (right, _)| left.cmp(right));
 
-    Ok(stream::iter(entries.into_iter().skip(start_from as usize / BLOCKS_PER_FILE).map(
+    Ok(stream::iter(entries.into_iter().skip_while(move |(n, _)| *n < start_index).map(
         move |(_, path)| {
             let expected_checksum =
                 checksums.next().transpose()?.ok_or_eyre("Got less checksums than ERA files")?;
