@@ -29,7 +29,7 @@ use tracing::{debug, error, instrument, trace};
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker.
-const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 60;
+const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
