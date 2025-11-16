@@ -1,7 +1,9 @@
 use crate::utils::eth_payload_attributes;
+use alloy_eips::BlockId;
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Address, Bytes, ChainId, U256};
-use alloy_rpc_types_eth::{TransactionInput, TransactionRequest};
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInput, TransactionRequest};
 use alloy_rpc_types_trace::geth::{
     AccountState, GethDebugTracingCallOptions, GethDebugTracingOptions, PreStateConfig,
     PreStateFrame,
@@ -37,15 +39,18 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     let (mut nodes, _tasks, _) =
         setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes).await?;
     let node = nodes.pop().expect("node available");
-    let debug_api = node.rpc.inner.debug_api();
+    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
 
-    let trace = debug_api
-        .debug_trace_call(
-            build_selfdestruct_request(),
-            None,
-            GethDebugTracingCallOptions::new(GethDebugTracingOptions::prestate_tracer(
-                PreStateConfig::default(),
-            )),
+    let trace: alloy_rpc_types_trace::geth::GethTrace = provider
+        .raw_request::<_, _>(
+            "debug_traceCall".into(),
+            (
+                build_selfdestruct_request(),
+                BlockId::Number(BlockNumberOrTag::Latest),
+                GethDebugTracingCallOptions::new(GethDebugTracingOptions::prestate_tracer(
+                    PreStateConfig::default(),
+                )),
+            ),
         )
         .await?;
 
