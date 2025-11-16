@@ -102,11 +102,9 @@ fn filtered_accounts(frame: PreStateFrame) -> BTreeMap<Address, AccountState> {
     ];
 
     match frame {
-        PreStateFrame::Default(mode) => mode
-            .0
-            .into_iter()
-            .filter(|(addr, _)| addresses.contains(addr))
-            .collect(),
+        PreStateFrame::Default(mode) => {
+            mode.0.into_iter().filter(|(addr, _)| addresses.contains(addr)).collect()
+        }
         PreStateFrame::Diff(diff) => diff
             .pre
             .into_iter()

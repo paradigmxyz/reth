@@ -43,12 +43,12 @@ pub enum PrestateError {
 impl fmt::Display for PrestateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PrestateError::Io(err) => write!(f, "failed to read prestate: {err}"),
-            PrestateError::Json(err) => write!(f, "failed to parse prestate json: {err}"),
-            PrestateError::Hex { field, value, .. } => {
+            Self::Io(err) => write!(f, "failed to read prestate: {err}"),
+            Self::Json(err) => write!(f, "failed to parse prestate json: {err}"),
+            Self::Hex { field, value, .. } => {
                 write!(f, "failed to decode hex for {field}: {value}")
             }
-            PrestateError::InvalidQuantity { field, value } => {
+            Self::InvalidQuantity { field, value } => {
                 write!(f, "invalid {field} quantity: {value}")
             }
         }
@@ -58,10 +58,10 @@ impl fmt::Display for PrestateError {
 impl std::error::Error for PrestateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            PrestateError::Io(err) => Some(err),
-            PrestateError::Json(err) => Some(err),
-            PrestateError::Hex { source, .. } => Some(source),
-            PrestateError::InvalidQuantity { .. } => None,
+            Self::Io(err) => Some(err),
+            Self::Json(err) => Some(err),
+            Self::Hex { source, .. } => Some(source),
+            Self::InvalidQuantity { .. } => None,
         }
     }
 }
@@ -160,7 +160,7 @@ impl TryFrom<RawPrestateAccount> for GenesisAccount {
             Some(entries)
         };
 
-        Ok(GenesisAccount::default()
+        Ok(Self::default()
             .with_balance(balance)
             .with_nonce(value.nonce)
             .with_code(code)
