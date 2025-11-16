@@ -9181,6 +9181,7 @@ dependencies = [
  "alloy-rpc-types-beacon",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
+ "alloy-rpc-types-trace",
  "alloy-signer",
  "alloy-sol-types",
  "eyre",
@@ -9213,9 +9214,11 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-tasks",
+ "reth-testing-utils",
  "reth-tracing",
  "reth-transaction-pool",
  "revm",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -10710,6 +10713,8 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "secp256k1 0.30.0",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

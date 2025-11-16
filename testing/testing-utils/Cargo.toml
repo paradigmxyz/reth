@@ -23,3 +23,5 @@ alloy-eips.workspace = true
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 rand_08.workspace = true
+serde.workspace = true
+serde_json.workspace = true
