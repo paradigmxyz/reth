@@ -103,7 +103,8 @@ impl BenchmarkRunner {
             cmd.args(["--wait-time", wait_time]);
         }
 
-        cmd.stdout(std::process::Stdio::piped())
+        cmd.env("RUST_LOG_STYLE", "never")
+            .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 
@@ -190,7 +191,8 @@ impl BenchmarkRunner {
             cmd.args(["--wait-time", wait_time]);
         }
 
-        cmd.stdout(std::process::Stdio::piped())
+        cmd.env("RUST_LOG_STYLE", "never")
+            .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 

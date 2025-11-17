@@ -1,28 +1,20 @@
 //! Compatibility functions for rpc `Transaction` type.
 use crate::{
-    fees::{CallFees, CallFeesError},
-    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest,
+    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest, TryIntoTxEnv,
 };
 use alloy_consensus::{
     error::ValueError, transaction::Recovered, EthereumTxEnvelope, Sealable, TxEip4844,
 };
 use alloy_network::Network;
-use alloy_primitives::{Address, TxKind, U256};
-use alloy_rpc_types_eth::{
-    request::{TransactionInputError, TransactionRequest},
-    Transaction, TransactionInfo,
-};
+use alloy_primitives::{Address, U256};
+use alloy_rpc_types_eth::{request::TransactionRequest, Transaction, TransactionInfo};
 use core::error;
 use dyn_clone::DynClone;
-use reth_evm::{
-    revm::context_interface::{either::Either, Block},
-    BlockEnvFor, ConfigureEvm, EvmEnvFor, TxEnvFor,
-};
+use reth_evm::{BlockEnvFor, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
     TxTy,
 };
-use revm_context::{BlockEnv, CfgEnv, TxEnv};
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
@@ -462,7 +454,7 @@ where
         tx_req: TxReq,
         evm_env: &EvmEnvFor<Evm>,
     ) -> Result<TxEnvFor<Evm>, Self::Error> {
-        tx_req.try_into_tx_env(&evm_env.cfg_env, &evm_env.block_env)
+        tx_req.try_into_tx_env(evm_env)
     }
 }
 
@@ -488,122 +480,6 @@ where
         evm_env: &EvmEnvFor<Evm>,
     ) -> Result<TxEnvFor<Evm>, Self::Error> {
         self(tx_req, evm_env)
-    }
-}
-
-/// Converts `self` into `T`.
-///
-/// Should create an executable transaction environment using [`TransactionRequest`].
-pub trait TryIntoTxEnv<T, BlockEnv = reth_evm::revm::context::BlockEnv> {
-    /// An associated error that can occur during the conversion.
-    type Err;
-
-    /// Performs the conversion.
-    fn try_into_tx_env<Spec>(
-        self,
-        cfg_env: &CfgEnv<Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<T, Self::Err>;
-}
-
-/// An Ethereum specific transaction environment error than can occur during conversion from
-/// [`TransactionRequest`].
-#[derive(Debug, Error)]
-pub enum EthTxEnvError {
-    /// Error while decoding or validating transaction request fees.
-    #[error(transparent)]
-    CallFees(#[from] CallFeesError),
-    /// Both data and input fields are set and not equal.
-    #[error(transparent)]
-    Input(#[from] TransactionInputError),
-}
-
-impl TryIntoTxEnv<TxEnv> for TransactionRequest {
-    type Err = EthTxEnvError;
-
-    fn try_into_tx_env<Spec>(
-        self,
-        cfg_env: &CfgEnv<Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<TxEnv, Self::Err> {
-        // Ensure that if versioned hashes are set, they're not empty
-        if self.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
-            return Err(CallFeesError::BlobTransactionMissingBlobHashes.into())
-        }
-
-        let tx_type = self.minimal_tx_type() as u8;
-
-        let Self {
-            from,
-            to,
-            gas_price,
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
-            gas,
-            value,
-            input,
-            nonce,
-            access_list,
-            chain_id,
-            blob_versioned_hashes,
-            max_fee_per_blob_gas,
-            authorization_list,
-            transaction_type: _,
-            sidecar: _,
-        } = self;
-
-        let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
-            CallFees::ensure_fees(
-                gas_price.map(U256::from),
-                max_fee_per_gas.map(U256::from),
-                max_priority_fee_per_gas.map(U256::from),
-                U256::from(block_env.basefee),
-                blob_versioned_hashes.as_deref(),
-                max_fee_per_blob_gas.map(U256::from),
-                block_env.blob_gasprice().map(U256::from),
-            )?;
-
-        let gas_limit = gas.unwrap_or(
-            // Use maximum allowed gas limit. The reason for this
-            // is that both Erigon and Geth use pre-configured gas cap even if
-            // it's possible to derive the gas limit from the block:
-            // <https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956
-            // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94>
-            block_env.gas_limit,
-        );
-
-        let chain_id = chain_id.unwrap_or(cfg_env.chain_id);
-
-        let caller = from.unwrap_or_default();
-
-        let nonce = nonce.unwrap_or_default();
-
-        let env = TxEnv {
-            tx_type,
-            gas_limit,
-            nonce,
-            caller,
-            gas_price: gas_price.saturating_to(),
-            gas_priority_fee: max_priority_fee_per_gas.map(|v| v.saturating_to()),
-            kind: to.unwrap_or(TxKind::Create),
-            value: value.unwrap_or_default(),
-            data: input.try_into_unique_input().map_err(EthTxEnvError::from)?.unwrap_or_default(),
-            chain_id: Some(chain_id),
-            access_list: access_list.unwrap_or_default(),
-            // EIP-4844 fields
-            blob_hashes: blob_versioned_hashes.unwrap_or_default(),
-            max_fee_per_blob_gas: max_fee_per_blob_gas
-                .map(|v| v.saturating_to())
-                .unwrap_or_default(),
-            // EIP-7702 fields
-            authorization_list: authorization_list
-                .unwrap_or_default()
-                .into_iter()
-                .map(Either::Left)
-                .collect(),
-        };
-
-        Ok(env)
     }
 }
 
@@ -990,13 +866,12 @@ where
 pub mod op {
     use super::*;
     use alloy_consensus::SignableTransaction;
-    use alloy_primitives::{Address, Bytes, Signature};
+    use alloy_signer::Signature;
     use op_alloy_consensus::{
         transaction::{OpDepositInfo, OpTransactionInfo},
         OpTxEnvelope,
     };
     use op_alloy_rpc_types::OpTransactionRequest;
-    use op_revm::OpTransaction;
     use reth_optimism_primitives::DepositReceipt;
     use reth_primitives_traits::SignedTransaction;
     use reth_storage_api::{errors::ProviderError, ReceiptProvider};
@@ -1052,22 +927,6 @@ pub mod op {
             let signature = Signature::new(Default::default(), Default::default(), false);
 
             Ok(tx.into_signed(signature).into())
-        }
-    }
-
-    impl TryIntoTxEnv<OpTransaction<TxEnv>> for OpTransactionRequest {
-        type Err = EthTxEnvError;
-
-        fn try_into_tx_env<Spec>(
-            self,
-            cfg_env: &CfgEnv<Spec>,
-            block_env: &BlockEnv,
-        ) -> Result<OpTransaction<TxEnv>, Self::Err> {
-            Ok(OpTransaction {
-                base: self.as_ref().clone().try_into_tx_env(cfg_env, block_env)?,
-                enveloped_tx: Some(Bytes::new()),
-                deposit: Default::default(),
-            })
         }
     }
 }
@@ -1146,8 +1005,6 @@ mod transaction_response_tests {
     #[cfg(feature = "op")]
     mod op {
         use super::*;
-        use crate::transaction::TryIntoTxEnv;
-        use revm_context::{BlockEnv, CfgEnv};
 
         #[test]
         fn test_optimism_transaction_conversion() {
@@ -1179,24 +1036,6 @@ mod transaction_response_tests {
             let result = <OpTransactionSigned as TryFromTransactionResponse<Optimism>>::from_transaction_response(tx_response);
 
             assert!(result.is_ok());
-        }
-
-        #[test]
-        fn test_op_into_tx_env() {
-            use op_alloy_rpc_types::OpTransactionRequest;
-            use op_revm::{transaction::OpTxTr, OpSpecId};
-            use revm_context::Transaction;
-
-            let s = r#"{"from":"0x0000000000000000000000000000000000000000","to":"0x6d362b9c3ab68c0b7c79e8a714f1d7f3af63655f","input":"0x1626ba7ec8ee0d506e864589b799a645ddb88b08f5d39e8049f9f702b3b61fa15e55fc73000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000550000002d6db27c52e3c11c1cf24072004ac75cba49b25bf45f513902e469755e1f3bf2ca8324ad16930b0a965c012a24bb1101f876ebebac047bd3b6bf610205a27171eaaeffe4b5e5589936f4e542d637b627311b0000000000000000000000","data":"0x1626ba7ec8ee0d506e864589b799a645ddb88b08f5d39e8049f9f702b3b61fa15e55fc73000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000550000002d6db27c52e3c11c1cf24072004ac75cba49b25bf45f513902e469755e1f3bf2ca8324ad16930b0a965c012a24bb1101f876ebebac047bd3b6bf610205a27171eaaeffe4b5e5589936f4e542d637b627311b0000000000000000000000","chainId":"0x7a69"}"#;
-
-            let req: OpTransactionRequest = serde_json::from_str(s).unwrap();
-
-            let cfg = CfgEnv::<OpSpecId>::default();
-            let block_env = BlockEnv::default();
-            let tx_env = req.try_into_tx_env(&cfg, &block_env).unwrap();
-            assert_eq!(tx_env.gas_limit(), block_env.gas_limit);
-            assert_eq!(tx_env.gas_price(), 0);
-            assert!(tx_env.enveloped_tx().unwrap().is_empty());
         }
     }
 }

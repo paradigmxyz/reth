@@ -6,8 +6,9 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     TableViewer, Tables,
 };
+use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{ProviderFactory, StaticFileProviderFactory};
+use reth_provider::StaticFileProviderFactory;
 use reth_static_file_types::StaticFileSegment;
 
 /// The arguments for the `reth db clear` command
@@ -19,16 +20,13 @@ pub struct Command {
 
 impl Command {
     /// Execute `db clear` command
-    pub fn execute<N: NodeTypesWithDB>(
-        self,
-        provider_factory: ProviderFactory<N>,
-    ) -> eyre::Result<()> {
+    pub fn execute<N: NodeTypesWithDB>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         match self.subcommand {
             Subcommands::Mdbx { table } => {
-                table.view(&ClearViewer { db: provider_factory.db_ref() })?
+                table.view(&ClearViewer { db: tool.provider_factory.db_ref() })?
             }
             Subcommands::StaticFile { segment } => {
-                let static_file_provider = provider_factory.static_file_provider();
+                let static_file_provider = tool.provider_factory.static_file_provider();
                 let static_files = iter_static_files(static_file_provider.directory())?;
 
                 if let Some(segment_static_files) = static_files.get(&segment) {

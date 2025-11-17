@@ -79,22 +79,13 @@ impl Command {
                         break;
                     }
                 };
-                let header = block.header.clone();
 
-                let (version, params) = match block_to_new_payload(block, is_optimism) {
-                    Ok(result) => result,
-                    Err(e) => {
-                        tracing::error!("Failed to convert block to new payload: {e}");
-                        let _ = error_sender.send(e);
-                        break;
-                    }
-                };
-                let head_block_hash = header.hash;
-                let safe_block_hash =
-                    block_provider.get_block_by_number(header.number.saturating_sub(32).into());
+                let head_block_hash = block.header.hash;
+                let safe_block_hash = block_provider
+                    .get_block_by_number(block.header.number.saturating_sub(32).into());
 
-                let finalized_block_hash =
-                    block_provider.get_block_by_number(header.number.saturating_sub(64).into());
+                let finalized_block_hash = block_provider
+                    .get_block_by_number(block.header.number.saturating_sub(64).into());
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
@@ -110,14 +101,7 @@ impl Command {
 
                 next_block += 1;
                 if let Err(e) = sender
-                    .send((
-                        header,
-                        version,
-                        params,
-                        head_block_hash,
-                        safe_block_hash,
-                        finalized_block_hash,
-                    ))
+                    .send((block, head_block_hash, safe_block_hash, finalized_block_hash))
                     .await
                 {
                     tracing::error!("Failed to send block data: {e}");
@@ -131,15 +115,16 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((header, version, params, head, safe, finalized)) = {
+        while let Some((block, head, safe, finalized)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
             result
         } {
             // just put gas used here
-            let gas_used = header.gas_used;
-            let block_number = header.number;
+            let gas_used = block.header.gas_used;
+            let block_number = block.header.number;
+            let transaction_count = block.transactions.len() as u64;
 
             debug!(target: "reth-bench", ?block_number, "Sending payload",);
 
@@ -150,6 +135,7 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
+            let (version, params) = block_to_new_payload(block, is_optimism)?;
             let start = Instant::now();
             call_new_payload(&auth_provider, version, params).await?;
 
@@ -160,8 +146,13 @@ impl Command {
             // calculate the total duration and the fcu latency, record
             let total_latency = start.elapsed();
             let fcu_latency = total_latency - new_payload_result.latency;
-            let combined_result =
-                CombinedResult { block_number, new_payload_result, fcu_latency, total_latency };
+            let combined_result = CombinedResult {
+                block_number,
+                transaction_count,
+                new_payload_result,
+                fcu_latency,
+                total_latency,
+            };
 
             // current duration since the start of the benchmark minus the time
             // waiting for blocks
@@ -174,7 +165,8 @@ impl Command {
             tokio::time::sleep(self.wait_time).await;
 
             // record the current result
-            let gas_row = TotalGasRow { block_number, gas_used, time: current_duration };
+            let gas_row =
+                TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
         }
 

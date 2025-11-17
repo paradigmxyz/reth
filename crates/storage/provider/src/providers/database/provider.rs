@@ -22,7 +22,7 @@ use crate::{
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
-    BlockHeader,
+    BlockHeader, TxReceipt,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
@@ -69,8 +69,7 @@ use reth_trie::{
         TrieCursorIter,
     },
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    BranchNodeCompact, HashedPostStateSorted, Nibbles, StoredNibbles, StoredNibblesSubKey,
-    TrieChangeSetsEntry,
+    HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
 };
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
@@ -131,6 +130,13 @@ impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
     pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
     }
+
+    /// Override the minimum pruning distance for testing purposes.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
+        self.0.minimum_pruning_distance = distance;
+        self
+    }
 }
 
 impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
@@ -157,6 +163,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage: Arc<N::Storage>,
     /// Storage configuration settings for this node
     storage_settings: Arc<RwLock<StorageSettings>>,
+    /// Minimum distance from tip required for pruning
+    minimum_pruning_distance: u64,
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -218,7 +226,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
     #[cfg(feature = "test-utils")]
     /// Sets the prune modes for provider.
-    pub const fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+    pub fn set_prune_modes(&mut self, prune_modes: PruneModes) {
         self.prune_modes = prune_modes;
     }
 }
@@ -231,6 +239,14 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     /// Returns a static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
+    }
+
+    fn get_static_file_writer(
+        &self,
+        block: BlockNumber,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<crate::providers::StaticFileProviderRWRefMut<'_, Self::Primitives>> {
+        self.static_file_provider.get_writer(block, segment)
     }
 }
 
@@ -254,7 +270,15 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage, storage_settings }
+        Self {
+            tx,
+            chain_spec,
+            static_file_provider,
+            prune_modes,
+            storage,
+            storage_settings,
+            minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+        }
     }
 }
 
@@ -369,7 +393,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // iterate over block body and remove receipts
         self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
 
-        if !self.prune_modes.has_receipts_pruning() {
+        if EitherWriter::receipts_destination(self).is_static_file() {
             let static_file_receipt_num =
                 self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
 
@@ -501,7 +525,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage, storage_settings }
+        Self {
+            tx,
+            chain_spec,
+            static_file_provider,
+            prune_modes,
+            storage,
+            storage_settings,
+            minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+        }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -1606,22 +1638,29 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
-        // Write receipts to static files only if they're explicitly enabled or we don't have
-        // receipts pruning
-        let mut receipts_writer = if self.storage_settings.read().receipts_in_static_files ||
-            !self.prune_modes.has_receipts_pruning()
-        {
-            EitherWriter::StaticFile(
-                self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?,
-            )
-        } else {
-            EitherWriter::Database(self.tx.cursor_write::<tables::Receipts<Self::Receipt>>()?)
-        };
+        let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
+
+        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
+        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
         // [`PruneSegment::ContractLogs`].
-        let prunable_receipts =
-            PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
+        //
+        // Receipts can only be skipped if we're dealing with legacy nodes that write them to
+        // Database, OR if receipts_in_static_files is enabled but no receipts exist in static
+        // files yet. Once receipts exist in static files, we must continue writing to maintain
+        // continuity and have no gaps.
+        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database() ||
+            self.static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none()) &&
+            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
+
+        // Prepare set of addresses which logs should not be pruned.
+        let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+        for (_, addresses) in contract_log_pruner.range(..first_block) {
+            allowed_addresses.extend(addresses.iter().copied());
+        }
 
         for (idx, (receipts, first_tx_index)) in
             execution_outcome.receipts.iter().zip(block_indices).enumerate()
@@ -1640,8 +1679,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 continue
             }
 
+            // If there are new addresses to retain after this block number, track them
+            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+                allowed_addresses.extend(new_addresses.iter().copied());
+            }
+
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
+                // Skip writing receipt if log filter is active and it does not have any logs to
+                // retain
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                {
+                    continue
+                }
 
                 receipts_writer.append_receipt(receipt_idx, receipt)?;
             }
@@ -2115,17 +2167,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         // Wrap the cursor in DatabaseAccountTrieCursor
         let mut db_account_cursor = DatabaseAccountTrieCursor::new(curr_values_cursor);
 
-        // Static empty array for when updates_overlay is None
-        static EMPTY_ACCOUNT_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
-
-        // Get the overlay updates for account trie, or use an empty array
-        let account_overlay_updates = updates_overlay
-            .map(|overlay| overlay.account_nodes_ref())
-            .unwrap_or(&EMPTY_ACCOUNT_UPDATES);
+        // Create empty TrieUpdatesSorted for when updates_overlay is None
+        let empty_updates = TrieUpdatesSorted::default();
+        let overlay = updates_overlay.unwrap_or(&empty_updates);
 
         // Wrap the cursor in InMemoryTrieCursor with the overlay
         let mut in_memory_account_cursor =
-            InMemoryTrieCursor::new(Some(&mut db_account_cursor), account_overlay_updates);
+            InMemoryTrieCursor::new_account(&mut db_account_cursor, overlay);
 
         for (path, _) in trie_updates.account_nodes_ref() {
             num_entries += 1;
@@ -2363,8 +2411,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
             B256::default(), // Will be set per iteration
         );
 
-        // Static empty array for when updates_overlay is None
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+        // Create empty TrieUpdatesSorted for when updates_overlay is None
+        let empty_updates = TrieUpdatesSorted::default();
 
         for (hashed_address, storage_trie_updates) in storage_tries {
             let changeset_key = BlockNumberHashedAddress((block_number, *hashed_address));
@@ -2373,15 +2421,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
             changed_curr_values_cursor =
                 DatabaseStorageTrieCursor::new(changed_curr_values_cursor.cursor, *hashed_address);
 
-            // Get the overlay updates for this storage trie, or use an empty array
-            let overlay_updates = updates_overlay
-                .and_then(|overlay| overlay.storage_tries_ref().get(hashed_address))
-                .map(|updates| updates.storage_nodes_ref())
-                .unwrap_or(&EMPTY_UPDATES);
+            // Get the overlay updates, or use empty updates
+            let overlay = updates_overlay.unwrap_or(&empty_updates);
 
             // Wrap the cursor in InMemoryTrieCursor with the overlay
-            let mut in_memory_changed_cursor =
-                InMemoryTrieCursor::new(Some(&mut changed_curr_values_cursor), overlay_updates);
+            let mut in_memory_changed_cursor = InMemoryTrieCursor::new_storage(
+                &mut changed_curr_values_cursor,
+                overlay,
+                *hashed_address,
+            );
 
             // Create an iterator which produces the current values of all updated paths, or None if
             // they are currently unset.
@@ -2397,8 +2445,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
                     DatabaseStorageTrieCursor::new(wiped_nodes_cursor.cursor, *hashed_address);
 
                 // Wrap the wiped nodes cursor in InMemoryTrieCursor with the overlay
-                let mut in_memory_wiped_cursor =
-                    InMemoryTrieCursor::new(Some(&mut wiped_nodes_cursor), overlay_updates);
+                let mut in_memory_wiped_cursor = InMemoryTrieCursor::new_storage(
+                    &mut wiped_nodes_cursor,
+                    overlay,
+                    *hashed_address,
+                );
 
                 let all_nodes = TrieCursorIter::new(&mut in_memory_wiped_cursor);
 
@@ -3154,7 +3205,9 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         BlockWriter,
     };
+    use reth_ethereum_primitives::Receipt;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
+    use reth_trie::Nibbles;
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
@@ -4629,5 +4682,143 @@ mod tests {
             storage_node2.state_mask,
             "storage_nibbles2 should have the value that was created and will be deleted"
         );
+    }
+
+    #[test]
+    fn test_prunable_receipts_logic() {
+        let insert_blocks =
+            |provider_rw: &DatabaseProviderRW<_, _>, tip_block: u64, tx_count: u8| {
+                let mut rng = generators::rng();
+                for block_num in 0..=tip_block {
+                    let block = random_block(
+                        &mut rng,
+                        block_num,
+                        BlockParams { tx_count: Some(tx_count), ..Default::default() },
+                    );
+                    provider_rw.insert_block(block.try_recover().unwrap()).unwrap();
+                }
+            };
+
+        let write_receipts = |provider_rw: DatabaseProviderRW<_, _>, block: u64| {
+            let outcome = ExecutionOutcome {
+                first_block: block,
+                receipts: vec![vec![Receipt {
+                    tx_type: Default::default(),
+                    success: true,
+                    cumulative_gas_used: block, // identifier to assert against
+                    logs: vec![],
+                }]],
+                ..Default::default()
+            };
+            provider_rw.write_state(&outcome, crate::OriginalValuesKnown::No).unwrap();
+            provider_rw.commit().unwrap();
+        };
+
+        // Legacy mode (receipts in DB) - should be prunable
+        {
+            let factory = create_test_provider_factory();
+            let storage_settings = StorageSettings::legacy();
+            factory.set_storage_settings_cache(storage_settings);
+            let factory = factory.with_prune_modes(PruneModes {
+                receipts: Some(PruneMode::Before(100)),
+                ..Default::default()
+            });
+
+            let tip_block = 200u64;
+            let first_block = 1u64;
+
+            // create chain
+            let provider_rw = factory.provider_rw().unwrap();
+            insert_blocks(&provider_rw, tip_block, 1);
+            provider_rw.commit().unwrap();
+
+            write_receipts(
+                factory.provider_rw().unwrap().with_minimum_pruning_distance(100),
+                first_block,
+            );
+            write_receipts(
+                factory.provider_rw().unwrap().with_minimum_pruning_distance(100),
+                tip_block - 1,
+            );
+
+            let provider = factory.provider().unwrap();
+
+            for (block, num_receipts) in [(0, 0), (tip_block - 1, 1)] {
+                assert!(provider
+                    .receipts_by_block(block.into())
+                    .unwrap()
+                    .is_some_and(|r| r.len() == num_receipts));
+            }
+        }
+
+        // Static files mode
+        {
+            let factory = create_test_provider_factory();
+            let storage_settings = StorageSettings::new().with_receipts_in_static_files();
+            factory.set_storage_settings_cache(storage_settings);
+            let factory = factory.with_prune_modes(PruneModes {
+                receipts: Some(PruneMode::Before(2)),
+                ..Default::default()
+            });
+
+            let tip_block = 200u64;
+
+            // create chain
+            let provider_rw = factory.provider_rw().unwrap();
+            insert_blocks(&provider_rw, tip_block, 1);
+            provider_rw.commit().unwrap();
+
+            // Attempt to write receipts for block 0 and 1 (should be skipped)
+            write_receipts(factory.provider_rw().unwrap().with_minimum_pruning_distance(100), 0);
+            write_receipts(factory.provider_rw().unwrap().with_minimum_pruning_distance(100), 1);
+
+            assert!(factory
+                .static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none(),);
+            assert!(factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Receipts)
+                .is_some_and(|b| b == 1),);
+
+            // Since we have prune mode Before(2), the next receipt (block 2) should be written to
+            // static files.
+            write_receipts(factory.provider_rw().unwrap().with_minimum_pruning_distance(100), 2);
+            assert!(factory
+                .static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_some_and(|num| num == 2),);
+
+            // After having a receipt already in static files, attempt to skip the next receipt by
+            // changing the prune mode. It should NOT skip it and should still write the receipt,
+            // since static files do not support gaps.
+            let factory = factory.with_prune_modes(PruneModes {
+                receipts: Some(PruneMode::Before(100)),
+                ..Default::default()
+            });
+            let provider_rw = factory.provider_rw().unwrap().with_minimum_pruning_distance(1);
+            assert!(PruneMode::Distance(1).should_prune(3, tip_block));
+            write_receipts(provider_rw, 3);
+
+            // Ensure we can only fetch the 2 last receipts.
+            //
+            // Test setup only has 1 tx per block and each receipt has its cumulative_gas_used set
+            // to the block number it belongs to easily identify and assert.
+            let provider = factory.provider().unwrap();
+            assert!(EitherWriter::receipts_destination(&provider).is_static_file());
+            for (num, num_receipts) in [(0, 0), (1, 0), (2, 1), (3, 1)] {
+                assert!(provider
+                    .receipts_by_block(num.into())
+                    .unwrap()
+                    .is_some_and(|r| r.len() == num_receipts));
+
+                let receipt = provider.receipt(num).unwrap();
+                if num_receipts > 0 {
+                    assert!(receipt.is_some_and(|r| r.cumulative_gas_used == num));
+                } else {
+                    assert!(receipt.is_none());
+                }
+            }
+        }
     }
 }
