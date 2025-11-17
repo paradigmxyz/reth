@@ -95,7 +95,7 @@ where
     /// Generate state witness
     pub fn generate_witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
         if let Some(witness) = self.witness_cache.lock().get(&block_hash).cloned() {
-            return Ok(witness.as_ref().clone())
+            return Ok((*witness).clone())
         }
 
         let block =
@@ -182,11 +182,12 @@ where
             witness_state_provider.witness(trie_input, hashed_state)?
         };
 
-        // Insert witness into the cache.
-        let cached_witness = Arc::new(witness.clone());
-        self.witness_cache.lock().insert(block_hash, cached_witness);
+        // Insert witness into the cache and return it, avoiding double cloning.
+        let cached_witness = Arc::new(witness);
+        self.witness_cache.lock().insert(block_hash, cached_witness.clone());
 
-        Ok(witness)
+        // Clone from the Arc for return (now that it's in the cache).
+        Ok((*cached_witness).clone())
     }
 }
 
