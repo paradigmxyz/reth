@@ -28,6 +28,9 @@ pub use service::{FlashBlockBuildInfo, FlashBlockService};
 
 mod worker;
 
+#[cfg(test)]
+mod test_utils;
+
 mod ws;
 pub use ws::{WsConnect, WsFlashBlockStream};
 
