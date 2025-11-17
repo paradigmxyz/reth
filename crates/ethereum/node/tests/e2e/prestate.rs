@@ -20,6 +20,8 @@ const PRESTATE_SNAPSHOT: &str =
     include_str!("../../../../../testing/prestate/tx-selfdestruct-prestate.json");
 
 #[tokio::test]
+/// Replays the selfdestruct transaction via `debug_traceCall` and ensures Reth's prestate matches
+/// Geth's captured snapshot.
 async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -62,6 +64,7 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     Ok(())
 }
 
+/// Builds the transaction payload that mirrors the historical selfdestruct call.
 fn build_selfdestruct_request() -> TransactionRequest {
     let from = address!("0xa7fb5ca286fc3fd67525629048a4de3ba24cba2e");
     let to = address!("0xc77ad0a71008d7094a62cfbd250a2eb2afdf2776");
@@ -86,6 +89,7 @@ fn build_selfdestruct_request() -> TransactionRequest {
     request
 }
 
+/// Parses the bundled snapshot so we can compare against Geth's prestate output.
 fn expected_snapshot_frame() -> Result<PreStateFrame> {
     #[derive(Deserialize)]
     struct Snapshot {
@@ -96,6 +100,7 @@ fn expected_snapshot_frame() -> Result<PreStateFrame> {
     Ok(serde_json::from_value(snapshot.result)?)
 }
 
+/// Filters a `PreStateFrame` down to the accounts touched by the transaction.
 fn filtered_accounts(frame: PreStateFrame) -> BTreeMap<Address, AccountState> {
     let addresses = [
         address!("0xa7fb5ca286fc3fd67525629048a4de3ba24cba2e"),
