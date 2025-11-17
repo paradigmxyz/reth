@@ -875,6 +875,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Initializes the inner transaction and block index
     pub fn initialize_index(&self) -> ProviderResult<()> {
         let mut indexes = self.indexes.write();
+        indexes.clear();
 
         for (segment, headers) in iter_static_files(&self.path).map_err(ProviderError::other)? {
             // Update first and last block for each segment
@@ -884,10 +885,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let min_block_range = Some(headers.first().expect("headers are not empty").0);
             let max_block = headers.last().expect("headers are not empty").0.end();
 
-            let mut expected_block_ranges_by_max_block = indexes
-                .get_mut(&segment)
-                .map(|index| std::mem::take(&mut index.expected_block_ranges_by_max_block))
-                .unwrap_or_default();
+            let mut expected_block_ranges_by_max_block = BTreeMap::default();
             let mut available_block_ranges_by_max_tx = None;
 
             for (block_range, header) in headers {
