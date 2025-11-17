@@ -292,7 +292,11 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                 // If all rows are to be pruned
                 if new_num_offsets <= 1 {
                     // <= 1 because the one offset would actually be the expected file data size
-                    self.offsets_file.get_mut().set_len(1)?;
+                    //
+                    // When no rows remain, keep the offset size byte and the final offset (data file size = 0).
+                    // This maintains the same structure as when a file is initially created.
+                    // See `NippyJarWriter::create_or_open_files` for the initial file format.
+                    self.offsets_file.get_mut().set_len(1 + OFFSET_SIZE_BYTES as u64)?;
                     self.data_file.get_mut().set_len(0)?;
                 } else {
                     // Calculate the new length for the on-disk offset list
