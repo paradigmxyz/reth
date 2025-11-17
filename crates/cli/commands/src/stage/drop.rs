@@ -48,9 +48,11 @@ impl<C: ChainSpecParser> Command<C> {
             _ => None,
         };
 
-        // We can only enqueue the pruning because if the task is interrupted after we have deleted
-        // the files, BUT before we have committed the DB we'd lose essential data and would need to
-        // recover it manually (eg. copy paste static files from other node).
+        // Calling `StaticFileProviderRW::prune_*` will instruct the writer to prune rows only
+        // when `StaticFileProviderRW::commit` is called. We need to do that instead of
+        // deleting the jar files, otherwise if the task were to be interrupted after we
+        // have deleted them, BUT before we have committed the checkpoints to the database, we'd
+        // lose essential data.
         if let Some(static_file_segment) = static_file_segment {
             let static_file_provider = tool.provider_factory.static_file_provider();
             if let Some(highest_block) =
