@@ -13,7 +13,6 @@
 
 extern crate alloc;
 
-use crate::alloc::string::ToString;
 use alloy_primitives::Bytes;
 use reth_chainspec::EthereumHardforks;
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
@@ -463,21 +462,19 @@ pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjec
     let mut last_request_type = None;
     for request in requests {
         if request.len() <= 1 {
-            return Err(EngineObjectValidationError::InvalidParams(
-                "EmptyExecutionRequest".to_string().into(),
-            ))
+            return Err(EngineObjectValidationError::InvalidParams("EmptyExecutionRequest".into()))
         }
 
         let request_type = request[0];
         if Some(request_type) < last_request_type {
             return Err(EngineObjectValidationError::InvalidParams(
-                "OutOfOrderExecutionRequest".to_string().into(),
+                "OutOfOrderExecutionRequest".into(),
             ))
         }
 
         if Some(request_type) == last_request_type {
             return Err(EngineObjectValidationError::InvalidParams(
-                "DuplicatedExecutionRequestType".to_string().into(),
+                "DuplicatedExecutionRequestType".into(),
             ))
         }
 
