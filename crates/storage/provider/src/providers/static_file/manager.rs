@@ -771,11 +771,16 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 let index = indexes
                     .entry(segment)
                     .and_modify(|index| {
+                        // Update max block
                         index.max_block = segment_max_block;
 
+                        // Update expected block range index
+
+                        // Remove all expected block ranges that are less than the new max block
                         index
                             .expected_block_ranges_by_max_block
                             .retain(|_, block_range| block_range.start() < fixed_range.start());
+                        // Insert new expected block range
                         index
                             .expected_block_ranges_by_max_block
                             .insert(fixed_range.end(), fixed_range);
