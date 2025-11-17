@@ -69,7 +69,8 @@ use reth_trie::{
         TrieCursorIter,
     },
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
+    HashedPostState, HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey,
+    TrieChangeSetsEntry,
 };
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
@@ -305,13 +306,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         debug!(target: "providers::db", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
+        let mut aggregated_hashed_state = HashedPostState::default();
+        let mut aggregated_trie_updates_sorted = TrieUpdatesSorted::default();
+
         // TODO: Do performant / batched writes for each type of object
         // instead of a loop over all blocks,
         // meaning:
         //  * blocks
         //  * state
-        //  * hashed state
-        //  * trie updates (cannot naively extend, need helper)
+        //  * hashed state (already done)
+        //  * trie updates sorted (already done)
         //  * indices (already done basically)
         // Insert the blocks
         for ExecutedBlock { recovered_block, execution_output, hashed_state, trie_updates } in
@@ -324,14 +328,21 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Must be written after blocks because of the receipt lookup.
             self.write_state(&execution_output, OriginalValuesKnown::No)?;
 
-            // insert hashes and intermediate merkle nodes
-            self.write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
+            aggregated_hashed_state.extend(Arc::unwrap_or_clone(hashed_state));
 
             // sort trie updates and insert changesets
             let trie_updates_sorted = (*trie_updates).clone().into_sorted();
             self.write_trie_changesets(block_number, &trie_updates_sorted, None)?;
-            self.write_trie_updates_sorted(&trie_updates_sorted)?;
+            aggregated_trie_updates_sorted.extend_ref(&trie_updates_sorted);
         }
+
+        // batch insert hashes
+        if !aggregated_hashed_state.is_empty() {
+            self.write_hashed_state(&aggregated_hashed_state.into_sorted())?;
+        }
+
+        // batch write trie updates sorted
+        self.write_trie_updates_sorted(&aggregated_trie_updates_sorted)?;
 
         // update history indices
         self.update_history_indices(first_number..=last_block_number)?;
