@@ -199,7 +199,7 @@ where
 
     let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp);
     let protocol_max_blob_count =
-        blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_else(Default::default);
+        blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_default();
 
     // Apply user-configured blob limit (EIP-7872)
     // Per EIP-7872: if the minimum is zero, set it to one
