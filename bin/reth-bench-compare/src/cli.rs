@@ -134,6 +134,16 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub traces: TraceArgs,
 
+    /// Maximum queue size for OTLP Batch Span Processor (traces).
+    /// Higher values prevent trace drops when benchmarking many blocks.
+    #[arg(
+        long,
+        value_name = "OTLP_BUFFER_SIZE",
+        default_value = "32768",
+        help_heading = "Tracing"
+    )]
+    pub otlp_max_queue_size: usize,
+
     /// Additional arguments to pass to baseline reth node command
     ///
     /// Example: `--baseline-args "--debug.tip 0xabc..."`
