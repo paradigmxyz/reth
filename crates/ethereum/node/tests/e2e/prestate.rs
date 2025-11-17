@@ -1,122 +1,111 @@
-use crate::utils::eth_payload_attributes;
 use alloy_eips::BlockId;
-use alloy_genesis::Genesis;
-use alloy_primitives::{address, Address, Bytes, ChainId, U256};
-use alloy_provider::{ext::DebugApi, ProviderBuilder};
-use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInput, TransactionRequest};
+use alloy_genesis::{Genesis, GenesisAccount};
+use alloy_provider::ext::DebugApi;
+use alloy_rpc_types_eth::{Transaction, TransactionRequest};
 use alloy_rpc_types_trace::geth::{
-    AccountState, GethDebugTracingCallOptions, GethDebugTracingOptions, PreStateConfig,
-    PreStateFrame,
+    AccountState, GethDebugTracingOptions, PreStateConfig, PreStateFrame, PreStateMode,
 };
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::setup;
+use reth_node_builder::{NodeBuilder, NodeHandle};
+use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
-use reth_testing_utils::prestate::{extend_genesis_with_prestate, parse_geth_prestate};
-use serde::Deserialize;
-use std::{collections::BTreeMap, str::FromStr, sync::Arc};
+use reth_rpc_server_types::RpcModuleSelection;
+use reth_tasks::TaskManager;
+use std::sync::Arc;
 
-const PRESTATE_SNAPSHOT: &str =
-    include_str!("../../../../../testing/prestate/tx-selfdestruct-prestate.json");
-
-#[tokio::test]
 /// Replays the selfdestruct transaction via `debug_traceCall` and ensures Reth's prestate matches
 /// Geth's captured snapshot.
+// <https://github.com/paradigmxyz/reth/issues/19703>
+#[tokio::test]
 async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let mut genesis: Genesis =
-        serde_json::from_str(include_str!("../assets/genesis.json")).expect("valid genesis");
-    let alloc = parse_geth_prestate(PRESTATE_SNAPSHOT).expect("prestate snapshot");
-    extend_genesis_with_prestate(&mut genesis, alloc);
+    const PRESTATE_SNAPSHOT: &str =
+        include_str!("../../../../../testing/prestate/0x391f4b6a382d3bcc3120adc2ea8c62003e604e487d97281129156fd284a1a89d.json");
+
+    let mut genesis: Genesis = MAINNET.genesis().clone();
+
+    let exec = TaskManager::current();
+    let exec = exec.executor();
+
+    let prestate = serde_json::from_str::<PreStateMode>(PRESTATE_SNAPSHOT).unwrap();
+
+    genesis.alloc.extend(
+        prestate.clone().0.into_iter().map(|(addr, state)| (addr, account_state_to_genesis(state))),
+    );
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
             .genesis(genesis)
             .cancun_activated()
+            .prague_activated()
             .build(),
     );
 
-    let (mut nodes, _tasks, _) =
-        setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes).await?;
-    let node = nodes.pop().expect("node available");
-    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
+    let node_config = NodeConfig::test().with_chain(chain_spec).with_rpc(
+        RpcServerArgs::default()
+            .with_unused_ports()
+            .with_http()
+            .with_http_api(RpcModuleSelection::all_modules().into()),
+    );
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(exec)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    let provider = node.rpc_server_handle().eth_http_provider().unwrap();
+
+    // <https://etherscan.io/tx/0x391f4b6a382d3bcc3120adc2ea8c62003e604e487d97281129156fd284a1a89d>
+    let tx = r#"{
+        "type": "0x2",
+        "chainId": "0x1",
+        "nonce": "0x39af8",
+        "gas": "0x249f0",
+        "maxFeePerGas": "0xc6432e2d7",
+        "maxPriorityFeePerGas": "0x68889c2b",
+        "to": "0xc77ad0a71008d7094a62cfbd250a2eb2afdf2776",
+        "value": "0x0",
+        "accessList": [],
+        "input": "0xf3fef3a3000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec700000000000000000000000000000000000000000000000000000000000f6b64",
+        "r": "0x40ab901a8262d5e6fe9b6513996cd5df412526580cab7410c13acc9dd9f6ec93",
+        "s": "0x6b76354c8cb1c1d6dbebfd555be9053170f02a648c4b36740e3fd7c6e9499572",
+        "yParity": "0x1",
+        "v": "0x1",
+        "hash": "0x391f4b6a382d3bcc3120adc2ea8c62003e604e487d97281129156fd284a1a89d",
+        "blockHash": "0xf9b77bcf8c69544304dff34129f3bdc71f00fdf766c1522ed6ac1382726ead82",
+        "blockNumber": "0x1294fd2",
+        "transactionIndex": "0x3a",
+        "from": "0xa7fb5ca286fc3fd67525629048a4de3ba24cba2e",
+        "gasPrice": "0x7c5bcc0e0"
+    }"#;
+    let tx = serde_json::from_str::<Transaction>(tx).unwrap();
+    let request = TransactionRequest::from_recovered_transaction(tx.into_recovered());
 
     let trace: PreStateFrame = provider
         .debug_trace_call_prestate(
-            build_selfdestruct_request(),
-            BlockId::Number(BlockNumberOrTag::Latest),
-            GethDebugTracingCallOptions::new(GethDebugTracingOptions::prestate_tracer(
-                PreStateConfig::default(),
-            )),
+            request,
+            BlockId::latest(),
+            GethDebugTracingOptions::prestate_tracer(PreStateConfig::default()).into(),
         )
         .await?;
 
-    let expected_frame = expected_snapshot_frame()?;
-    let actual_frame = trace;
-
-    let expected_accounts = filtered_accounts(expected_frame);
-    let actual_accounts = filtered_accounts(actual_frame);
-
-    assert_eq!(actual_accounts, expected_accounts, "prestate tracer should match geth output");
+    similar_asserts::assert_eq!(trace, PreStateFrame::Default(prestate));
 
     Ok(())
 }
 
-/// Builds the transaction payload that mirrors the historical selfdestruct call.
-fn build_selfdestruct_request() -> TransactionRequest {
-    let from = address!("0xa7fb5ca286fc3fd67525629048a4de3ba24cba2e");
-    let to = address!("0xc77ad0a71008d7094a62cfbd250a2eb2afdf2776");
-    let gas_limit = u64::from_str_radix("249f0", 16).expect("gas hex");
-    let max_fee_per_gas = u128::from_str_radix("c6432e2d7", 16).expect("max fee");
-    let max_priority_fee_per_gas = u128::from_str_radix("68889c2b", 16).expect("tip");
-    let nonce = u64::from_str_radix("39af8", 16).expect("nonce hex");
-    let input = Bytes::from_str("0xf3fef3a3000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec700000000000000000000000000000000000000000000000000000000000f6b64")
-        .expect("tx data");
+fn account_state_to_genesis(value: AccountState) -> GenesisAccount {
+    let balance = value.balance.unwrap_or_default();
+    let code = value.code.filter(|code| !code.is_empty());
+    let storage = (!value.storage.is_empty()).then_some(value.storage);
 
-    let mut request = TransactionRequest::default()
-        .from(from)
-        .to(to)
-        .gas_limit(gas_limit)
-        .max_fee_per_gas(max_fee_per_gas)
-        .max_priority_fee_per_gas(max_priority_fee_per_gas)
-        .nonce(nonce)
-        .transaction_type(2)
-        .value(U256::ZERO)
-        .input(TransactionInput::new(input));
-    request.chain_id = Some(ChainId::from(1u64));
-    request
-}
-
-/// Parses the bundled snapshot so we can compare against Geth's prestate output.
-fn expected_snapshot_frame() -> Result<PreStateFrame> {
-    #[derive(Deserialize)]
-    struct Snapshot {
-        result: serde_json::Value,
-    }
-
-    let snapshot: Snapshot = serde_json::from_str(PRESTATE_SNAPSHOT)?;
-    Ok(serde_json::from_value(snapshot.result)?)
-}
-
-/// Filters a `PreStateFrame` down to the accounts touched by the transaction.
-fn filtered_accounts(frame: PreStateFrame) -> BTreeMap<Address, AccountState> {
-    let addresses = [
-        address!("0xa7fb5ca286fc3fd67525629048a4de3ba24cba2e"),
-        address!("0xc77ad0a71008d7094a62cfbd250a2eb2afdf2776"),
-        address!("0xdac17f958d2ee523a2206206994597c13d831ec7"),
-    ];
-
-    match frame {
-        PreStateFrame::Default(mode) => {
-            mode.0.into_iter().filter(|(addr, _)| addresses.contains(addr)).collect()
-        }
-        PreStateFrame::Diff(diff) => diff
-            .pre
-            .into_iter()
-            .chain(diff.post)
-            .filter(|(addr, _)| addresses.contains(addr))
-            .collect(),
-    }
+    GenesisAccount::default()
+        .with_balance(balance)
+        .with_nonce(value.nonce)
+        .with_code(code)
+        .with_storage(storage)
 }

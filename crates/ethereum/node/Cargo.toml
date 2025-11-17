@@ -77,6 +77,7 @@ serde_json.workspace = true
 rand.workspace = true
 serde.workspace = true
 alloy-rpc-types-trace.workspace = true
+similar-asserts.workspace = true
 
 [features]
 default = []

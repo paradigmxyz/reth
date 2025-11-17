@@ -19,11 +19,7 @@ alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["rand"] }
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
-alloy-rpc-types-trace.workspace = true
 
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 rand_08.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-eyre.workspace = true

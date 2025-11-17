@@ -9220,6 +9220,7 @@ dependencies = [
  "revm",
  "serde",
  "serde_json",
+ "similar-asserts",
  "tokio",
 ]
 
@@ -10708,15 +10709,11 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
- "alloy-rpc-types-trace",
- "eyre",
  "rand 0.8.5",
  "rand 0.9.2",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "secp256k1 0.30.0",
- "serde",
- "serde_json",
 ]
 
 [[package]]
