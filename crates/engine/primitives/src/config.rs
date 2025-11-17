@@ -30,7 +30,7 @@ fn default_account_worker_count() -> usize {
 }
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
-pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 10;
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
 
 /// Default number of reserved CPU cores for non-reth processes.
 ///
