@@ -396,7 +396,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     /// existing file, if any.
     ///
     /// This function will block indefinitely if a write lock for
-    /// [`Self::static_files_expected_block_index`] is acquired. In that case, use
+    /// [`Self::indexes`] is already acquired. In that case, use
     /// [`Self::find_fixed_range_with_block_index`].
     pub fn find_fixed_range(
         &self,
