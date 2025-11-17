@@ -90,6 +90,12 @@ impl MultiProofTargets {
         ChunkedMultiProofTargets::new(self, size)
     }
 
+    /// Returns an iterator that yields chunks where the first `increased` chunks have size
+    /// `size + 1` and the remaining have size `size`.
+    pub fn chunks_with(self, size: usize, increased: usize) -> ChunkedMultiProofTargets {
+        ChunkedMultiProofTargets::new_with_increased(self, size, increased)
+    }
+
     /// Returns the number of items that will be considered during chunking in `[Self::chunks]`.
     pub fn chunking_length(&self) -> usize {
         self.values().map(|slots| 1 + slots.len().saturating_sub(1)).sum::<usize>()
@@ -120,6 +126,7 @@ impl MultiProofTargets {
 pub struct ChunkedMultiProofTargets {
     flattened_targets: alloc::vec::IntoIter<(B256, Option<B256>)>,
     size: usize,
+    increased: usize,
 }
 
 impl ChunkedMultiProofTargets {
@@ -139,7 +146,13 @@ impl ChunkedMultiProofTargets {
                 }
             })
             .sorted();
-        Self { flattened_targets, size }
+        Self { flattened_targets, size, increased: 0 }
+    }
+
+    fn new_with_increased(targets: MultiProofTargets, size: usize, increased: usize) -> Self {
+        let mut this = Self::new(targets, size);
+        this.increased = increased;
+        this
     }
 }
 
@@ -147,7 +160,9 @@ impl Iterator for ChunkedMultiProofTargets {
     type Item = MultiProofTargets;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let chunk = self.flattened_targets.by_ref().take(self.size).fold(
+        let extra = usize::from(self.increased > 0);
+
+        let chunk = self.flattened_targets.by_ref().take(self.size + extra).fold(
             MultiProofTargets::default(),
             |mut acc, (address, slot)| {
                 let entry = acc.entry(address).or_default();
@@ -161,6 +176,9 @@ impl Iterator for ChunkedMultiProofTargets {
         if chunk.is_empty() {
             None
         } else {
+            if extra == 1 {
+                self.increased -= 1;
+            }
             Some(chunk)
         }
     }
@@ -1100,5 +1118,29 @@ mod tests {
                 chunking_length, size
             );
         }
+    }
+
+    #[test]
+    fn no_workers_no_chunk_plan() {
+        fn compute_chunk_plan(
+            total: usize,
+            idle: usize,
+            min_chunk: usize,
+        ) -> Option<(usize, usize, usize)> {
+            if idle == 0 || total == 0 {
+                return None;
+            }
+            let max_chunks_amount = total / min_chunk;
+            let chunks = max_chunks_amount.min(idle);
+            (chunks >= 2).then(|| {
+                let base = total / chunks;
+                let increased = total % chunks;
+                (chunks, base, increased)
+            })
+        }
+        assert!(compute_chunk_plan(10, 0, 3).is_none());
+        assert!(compute_chunk_plan(0, 2, 1).is_none());
+        // With workers but too small total for 2 chunks -> max_chunks=1 -> None
+        assert!(compute_chunk_plan(3, 4, 3).is_none());
     }
 }
