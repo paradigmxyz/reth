@@ -1,7 +1,7 @@
 //! reth data directories.
 
 use crate::{args::DatadirArgs, utils::parse_path};
-use reth_chainspec::{Chain, EthChainSpec};
+use reth_chainspec::Chain;
 use std::{
     env::VarError,
     fmt::{Debug, Display, Formatter},
@@ -154,14 +154,12 @@ impl<D> PlatformPath<D> {
 }
 
 impl<D> PlatformPath<D> {
-    /// Converts the path to a `ChainPath` with the given `Chain`.
-    pub fn with_chain(
-        &self,
-        chainspec: impl EthChainSpec,
-        datadir_args: DatadirArgs,
-    ) -> ChainPath<D> {
-        let platform_path = self.platform_path_from_name(chainspec.name().as_str());
-        ChainPath::new(platform_path, chainspec.chain(), datadir_args)
+    /// Converts the path to a `ChainPath` with the given chain name.
+    pub fn with_chain(&self, name: &str, datadir_args: DatadirArgs) -> ChainPath<D> {
+        // extract chain name
+        let platform_path = self.platform_path_from_name(name);
+
+        ChainPath::new(platform_path, name.to_string(), datadir_args)
     }
 
     fn platform_path_from_name(&self, name: &str) -> Self {
@@ -184,24 +182,18 @@ pub struct MaybePlatformPath<D>(Option<PlatformPath<D>>);
 // === impl MaybePlatformPath ===
 
 impl<D: XdgPath> MaybePlatformPath<D> {
-    /// Returns the path if it is set, otherwise returns the default path for the given chain.
-    pub fn unwrap_or_chain_default(
-        &self,
-        chainspec: impl EthChainSpec,
-        datadir_args: DatadirArgs,
-    ) -> ChainPath<D> {
+    /// Returns the path if it is set, otherwise returns the default path for the given chain name.
+    pub fn unwrap_or_chain_default(&self, name: &str, datadir_args: DatadirArgs) -> ChainPath<D> {
         ChainPath(
-            self.0.clone().unwrap_or_else(|| {
-                PlatformPath::default().platform_path_from_name(chainspec.name().as_str())
-            }),
-            chainspec.chain(),
+            self.0.clone().unwrap_or_else(|| PlatformPath::default().platform_path_from_name(name)),
+            name.to_string(),
             datadir_args,
         )
     }
 
-    /// Returns the default platform path for the specified [Chain].
-    pub fn chain_default(chainspec: impl EthChainSpec) -> ChainPath<D> {
-        PlatformPath::default().with_chain(chainspec, DatadirArgs::default())
+    /// Returns the default platform path for the specified chain name.
+    pub fn chain_default(name: &str) -> ChainPath<D> {
+        PlatformPath::default().with_chain(name, DatadirArgs::default())
     }
 
     /// Returns true if a custom path is set
@@ -269,14 +261,14 @@ impl<D> From<PathBuf> for MaybePlatformPath<D> {
 ///  * sepolia: `<DIR>/sepolia`
 ///  * holesky: `<DIR>/holesky`
 ///
-/// Otherwise, the path will be dependent on the chain ID:
-///  * `<DIR>/<CHAIN_ID>`
+/// Otherwise, the path will be dependent on the chain name:
+///  * `<DIR>/<CHAIN_NAME>`
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChainPath<D>(PlatformPath<D>, Chain, DatadirArgs);
+pub struct ChainPath<D>(PlatformPath<D>, String, DatadirArgs);
 
 impl<D> ChainPath<D> {
-    /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
-    pub const fn new(path: PlatformPath<D>, chain: Chain, datadir_args: DatadirArgs) -> Self {
+    /// Returns a new `ChainPath` given a `PlatformPath` and a chain name.
+    pub const fn new(path: PlatformPath<D>, chain: String, datadir_args: DatadirArgs) -> Self {
         Self(path, chain, datadir_args)
     }
 
@@ -383,30 +375,29 @@ impl<D> From<ChainPath<D>> for PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
 
     #[test]
     fn test_maybe_data_dir_path() {
         let path = MaybePlatformPath::<DataDirPath>::default();
-        let path = path.unwrap_or_chain_default(&*MAINNET, DatadirArgs::default());
+        let path = path.unwrap_or_chain_default("mainnet", DatadirArgs::default());
         assert!(path.as_ref().ends_with("reth/mainnet"), "{path:?}");
 
         let db_path = path.db();
         assert!(db_path.ends_with("reth/mainnet/db"), "{db_path:?}");
 
         let path = MaybePlatformPath::<DataDirPath>::from_str("my/path/to/datadir").unwrap();
-        let path = path.unwrap_or_chain_default(&*MAINNET, DatadirArgs::default());
+        let path = path.unwrap_or_chain_default("mainnet", DatadirArgs::default());
         assert!(path.as_ref().ends_with("my/path/to/datadir"), "{path:?}");
     }
 
     #[test]
     fn test_maybe_testnet_datadir_path() {
         let path = MaybePlatformPath::<DataDirPath>::default();
-        let path = path.unwrap_or_chain_default(&*HOLESKY, DatadirArgs::default());
+        let path = path.unwrap_or_chain_default("holesky", DatadirArgs::default());
         assert!(path.as_ref().ends_with("reth/holesky"), "{path:?}");
 
         let path = MaybePlatformPath::<DataDirPath>::default();
-        let path = path.unwrap_or_chain_default(&*SEPOLIA, DatadirArgs::default());
+        let path = path.unwrap_or_chain_default("sepolia", DatadirArgs::default());
         assert!(path.as_ref().ends_with("reth/sepolia"), "{path:?}");
     }
 }

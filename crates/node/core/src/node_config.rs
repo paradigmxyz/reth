@@ -451,7 +451,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     where
         ChainSpec: EthChainSpec,
     {
-        self.datadir.clone().resolve_datadir(&*self.chain)
+        self.datadir.clone().resolve_datadir(self.chain.name().as_str())
     }
 
     /// Load an application configuration from a specified path.

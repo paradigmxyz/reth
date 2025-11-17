@@ -2,7 +2,6 @@
 
 use crate::dirs::{ChainPath, DataDirPath, MaybePlatformPath};
 use clap::Args;
-use reth_chainspec::EthChainSpec;
 use std::path::PathBuf;
 
 /// Parameters for datadir configuration
@@ -31,9 +30,9 @@ pub struct DatadirArgs {
 
 impl DatadirArgs {
     /// Resolves the final datadir path.
-    pub fn resolve_datadir(self, chainspec: impl EthChainSpec) -> ChainPath<DataDirPath> {
+    pub fn resolve_datadir(self, name: &str) -> ChainPath<DataDirPath> {
         let datadir = self.datadir.clone();
-        datadir.unwrap_or_chain_default(chainspec, self)
+        datadir.unwrap_or_chain_default(name, self)
     }
 }
 

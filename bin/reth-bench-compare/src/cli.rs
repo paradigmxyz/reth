@@ -1,10 +1,9 @@
 //! CLI argument parsing and main command orchestration.
 
-use alloy_consensus::Header;
 use alloy_provider::{Provider, ProviderBuilder};
 use clap::Parser;
 use eyre::{eyre, Result, WrapErr};
-use reth_chainspec::{Chain, EthChainSpec, HOLESKY, MAINNET, SEPOLIA};
+use reth_chainspec::Chain;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::{DatadirArgs, LogArgs, TraceArgs};
 use reth_tracing::FileWorkerGuard;
@@ -48,18 +47,6 @@ impl std::fmt::Display for DisableStartupSyncStateIdle {
             Self::Feature => write!(f, "feature"),
             Self::All => write!(f, "all"),
         }
-    }
-}
-
-fn get_chainspec(chain: Chain) -> &'static dyn EthChainSpec<Header = Header> {
-    if chain == Chain::mainnet() {
-        &*MAINNET
-    } else if chain == Chain::sepolia() {
-        &*SEPOLIA
-    } else if chain == Chain::holesky() {
-        &*HOLESKY
-    } else {
-        panic!("unsupported chain for bench-compare");
     }
 }
 
@@ -245,7 +232,8 @@ impl Args {
             }
             None => {
                 // Use the same logic as reth: <datadir>/<chain>/jwt.hex
-                let chain_path = self.datadir.clone().resolve_datadir(get_chainspec(self.chain));
+                let chain_path =
+                    self.datadir.clone().resolve_datadir(self.chain.to_string().as_str());
                 chain_path.jwt()
             }
         }
@@ -253,7 +241,7 @@ impl Args {
 
     /// Get the resolved datadir path using the chain
     pub(crate) fn datadir_path(&self) -> PathBuf {
-        let chain_path = self.datadir.clone().resolve_datadir(get_chainspec(self.chain));
+        let chain_path = self.datadir.clone().resolve_datadir(self.chain.to_string().as_str());
         chain_path.data_dir().to_path_buf()
     }
 

@@ -12,7 +12,7 @@ use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks, Hardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -1306,7 +1306,7 @@ where
         tree_config: TreeConfig,
     ) -> eyre::Result<Self::EngineValidator> {
         let validator = self.payload_validator_builder.build(ctx).await?;
-        let data_dir = ctx.config.datadir.clone().resolve_datadir(&*ctx.config.chain);
+        let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.name().as_str());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
         Ok(BasicEngineValidator::new(
             ctx.node.provider().clone(),

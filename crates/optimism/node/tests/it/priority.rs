@@ -128,7 +128,7 @@ async fn test_custom_block_priority_config() {
         config
             .datadir
             .datadir
-            .unwrap_or_chain_default(config.chain.clone(), config.datadir.clone())
+            .unwrap_or_chain_default(config.chain.as_ref().name().as_str(), config.datadir.clone())
             .db(),
     );
     let tasks = TaskManager::current();
