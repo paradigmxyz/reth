@@ -258,7 +258,10 @@ mod tests {
             // Set up initial state if provided
             if let Some(initial_range) = initial_range {
                 *writer.user_header_mut() = SegmentHeader::new(
-                    initial_range,
+                    // Expected block range needs to have a fixed size that's determined by the
+                    // provider itself
+                    static_provider
+                        .find_fixed_range(StaticFileSegment::Transactions, initial_range.start()),
                     Some(initial_range),
                     Some(initial_range),
                     StaticFileSegment::Transactions,
@@ -276,13 +279,9 @@ mod tests {
                 idx
             );
 
-            // Update to new range
-            *writer.user_header_mut() = SegmentHeader::new(
-                updated_range,
-                Some(updated_range),
-                Some(updated_range),
-                StaticFileSegment::Transactions,
-            );
+            // Update to new block and tx ranges
+            writer.user_header_mut().set_block_range(updated_range);
+            writer.user_header_mut().set_tx_range(updated_range);
             writer.inner().set_dirty();
             writer.commit().unwrap(); // update_index is called inside
 
