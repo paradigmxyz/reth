@@ -1,5 +1,4 @@
 *                           @gakonst
-bin/reth-bench-compare/     @mediocregopher @shekhirin @yongkangc
 crates/blockchain-tree-api/ @rakita @mattsse @Rjected
 crates/blockchain-tree/     @rakita @mattsse @Rjected
 crates/chain-state/         @fgimenez @mattsse
@@ -41,5 +40,6 @@ crates/tasks/               @mattsse
 crates/tokio-util/          @fgimenez
 crates/transaction-pool/    @mattsse @yongkangc
 crates/trie/                @Rjected @shekhirin @mediocregopher
+bin/reth-bench-compare/     @mediocregopher @shekhirin @yongkangc
 etc/                        @Rjected @shekhirin
 .github/                    @gakonst @DaniPopes
