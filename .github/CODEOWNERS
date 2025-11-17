@@ -1,4 +1,5 @@
 *                           @gakonst
+bin/reth-bench-compare/     @mediocregopher @shekhirin @yongkangc
 crates/blockchain-tree-api/ @rakita @mattsse @Rjected
 crates/blockchain-tree/     @rakita @mattsse @Rjected
 crates/chain-state/         @fgimenez @mattsse
