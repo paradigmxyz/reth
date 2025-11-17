@@ -61,12 +61,16 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     }
 
     pub(crate) fn commit(&self) -> ProviderResult<()> {
+        debug!(target: "provider::static_file", "Committing all static file segments");
+
         for writer_lock in [&self.headers, &self.transactions, &self.receipts] {
             let mut writer = writer_lock.write();
             if let Some(writer) = writer.as_mut() {
                 writer.commit()?;
             }
         }
+
+        debug!(target: "provider::static_file", "Committed all static file segments");
         Ok(())
     }
 
@@ -219,6 +223,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             self.user_header_mut().prune(pruned_rows);
         }
 
+        debug!(
+            target: "provider::static_file",
+            segment = ?self.writer.user_header().segment(),
+            path = ?self.data_path,
+            pruned_rows,
+            "Ensuring end range consistency"
+        );
+
         self.writer.commit().map_err(ProviderError::other)?;
 
         // Updates the [SnapshotProvider] manager
@@ -237,6 +249,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         // Truncates the data file if instructed to.
         if let Some((to_delete, last_block_number)) = self.prune_on_commit.take() {
+            debug!(
+                target: "provider::static_file",
+                segment = ?self.writer.user_header().segment(),
+                to_delete,
+                "Pruning data on commit"
+            );
             match self.writer.user_header().segment() {
                 StaticFileSegment::Headers => self.prune_header_data(to_delete)?,
                 StaticFileSegment::Transactions => self
@@ -248,6 +266,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         if self.writer.is_dirty() {
+            debug!(
+                target: "provider::static_file",
+                segment = ?self.writer.user_header().segment(),
+                "Committing writer to disk"
+            );
+
             // Commits offsets and new user_header to disk
             self.writer.commit().map_err(ProviderError::other)?;
 
@@ -264,7 +288,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 segment = ?self.writer.user_header().segment(),
                 path = ?self.data_path,
                 duration = ?start.elapsed(),
-                "Commit"
+                "Committed writer to disk"
             );
 
             self.update_index()?;
@@ -279,6 +303,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     #[cfg(feature = "test-utils")]
     pub fn commit_without_sync_all(&mut self) -> ProviderResult<()> {
         let start = Instant::now();
+
+        debug!(
+            target: "provider::static_file",
+            segment = ?self.writer.user_header().segment(),
+            "Committing writer to disk (without sync)"
+        );
 
         // Commits offsets and new user_header to disk
         self.writer.commit_without_sync_all().map_err(ProviderError::other)?;
@@ -296,7 +326,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             segment = ?self.writer.user_header().segment(),
             path = ?self.data_path,
             duration = ?start.elapsed(),
-            "Commit"
+            "Committed writer to disk (without sync)"
         );
 
         self.update_index()?;
