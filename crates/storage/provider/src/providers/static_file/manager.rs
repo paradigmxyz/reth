@@ -617,6 +617,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         segment_max_block: Option<BlockNumber>,
     ) -> ProviderResult<()> {
+        debug!(
+            target: "provider::static_file",
+            ?segment,
+            ?segment_max_block,
+            "Updating provider index"
+        );
+
         let mut min_block = self.static_files_min_block.write();
         let mut max_block = self.static_files_max_block.write();
         let mut tx_index = self.static_files_tx_index.write();
@@ -701,18 +708,22 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
 
                 // Update the cached provider.
+                debug!(target: "provider::static_file", ?segment, "Inserting updated jar into cache");
                 self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
 
                 // Delete any cached provider that no longer has an associated jar.
+                debug!(target: "provider::static_file", ?segment, "Cleaning up jar map");
                 self.map.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
             }
             None => {
+                debug!(target: "provider::static_file", ?segment, "Removing segment from index");
                 tx_index.remove(&segment);
                 max_block.remove(&segment);
                 min_block.remove(&segment);
             }
         };
 
+        debug!(target: "provider::static_file", ?segment, "Updated provider index");
         Ok(())
     }
 
