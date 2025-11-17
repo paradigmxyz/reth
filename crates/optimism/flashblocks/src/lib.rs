@@ -28,6 +28,8 @@ pub use service::{FlashBlockBuildInfo, FlashBlockService};
 
 mod worker;
 
+mod cache;
+
 #[cfg(test)]
 mod test_utils;
 
