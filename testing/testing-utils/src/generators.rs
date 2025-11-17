@@ -345,7 +345,7 @@ where
                 let old = if entry.value.is_zero() {
                     let old = storage.remove(&entry.key);
                     if matches!(old, Some(U256::ZERO)) {
-                        return None
+                        return None;
                     }
                     old
                 } else {
@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn test_sign_eip_155() {
         // reference: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-155.md#example
-        let transaction = Transaction::Legacy(TxLegacy {
+        let tx = TxLegacy {
             chain_id: Some(1),
             nonce: 9,
             gas_price: 20 * 10_u128.pow(9),
@@ -537,12 +537,11 @@ mod tests {
             to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
             value: U256::from(10_u128.pow(18)),
             input: Bytes::default(),
-        });
+        };
+        let transaction = Transaction::Legacy(tx.clone());
 
-        // TODO resolve dependency issue
-        // let expected =
-        // hex!("ec098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a764000080018080");
-        // assert_eq!(expected, &alloy_rlp::encode(transaction));
+        let expected = hex!("ec098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a764000080018080");
+        assert_eq!(expected.to_vec(), alloy_rlp::encode(tx));
 
         let hash = transaction.signature_hash();
         let expected =
