@@ -2867,6 +2867,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         // Ensures we have all the senders for the block's transactions.
         let mut senders_writer = EitherWriter::new_senders(self, block.number())?;
+        senders_writer.increment_block(block.number())?;
         for (transaction, sender) in block.body().transactions_iter().zip(block.senders_iter()) {
             let hash = transaction.tx_hash();
 
