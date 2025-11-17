@@ -341,7 +341,6 @@ mod tests {
         use reth_ethereum_primitives::TransactionSigned;
         use reth_primitives_traits::{SealedBlock, SealedHeader};
         use reth_provider::{BlockNumReader, HeaderProvider, TransactionsProvider};
-        use reth_static_file::SegmentRangeInclusive;
         use reth_testing_utils::generators::{
             random_block_range, random_signed_tx, BlockRangeParams,
         };
@@ -409,9 +408,7 @@ mod tests {
                             tx_count: progress.transaction_count() as u64,
                         };
 
-                        static_file_producer
-                            .user_header_mut()
-                            .set_block_range(SegmentRangeInclusive::new(0, progress.number));
+                        static_file_producer.set_block_range(0..=progress.number);
 
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);

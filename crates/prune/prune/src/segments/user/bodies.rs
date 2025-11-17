@@ -280,8 +280,8 @@ mod tests {
             );
 
             // Update to new block and tx ranges
-            writer.user_header_mut().set_block_range(updated_range);
-            writer.user_header_mut().set_tx_range(updated_range);
+            writer.user_header_mut().set_block_range(updated_range.start(), updated_range.end());
+            writer.user_header_mut().set_tx_range(updated_range.start(), updated_range.end());
             writer.inner().set_dirty();
             writer.commit().unwrap(); // update_index is called inside
 

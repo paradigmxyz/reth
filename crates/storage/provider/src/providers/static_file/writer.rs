@@ -490,9 +490,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                     expected_block_start = self.writer.user_header().expected_block_start();
                 }
             }
-            self.writer
-                .user_header_mut()
-                .set_block_range(SegmentRangeInclusive::new(expected_block_start, last_block));
+            self.writer.user_header_mut().set_block_range(expected_block_start, last_block);
         }
 
         // Commits new changes to disk.
@@ -549,7 +547,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             }
             self.writer.user_header_mut().increment_tx();
         } else {
-            self.writer.user_header_mut().set_tx_range(SegmentRangeInclusive::new(tx_num, tx_num));
+            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
         }
 
         self.append_column(value)?;
@@ -849,6 +847,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Helper function to access a mutable reference to [`SegmentHeader`].
     pub const fn user_header_mut(&mut self) -> &mut SegmentHeader {
         self.writer.user_header_mut()
+    }
+
+    /// Helper function to override block range for testing.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub const fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
+        self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
     }
 
     /// Helper function to override block range for testing.

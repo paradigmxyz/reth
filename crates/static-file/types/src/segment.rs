@@ -271,13 +271,23 @@ impl SegmentHeader {
     }
 
     /// Sets a new `block_range`.
-    pub const fn set_block_range(&mut self, block_range: SegmentRangeInclusive) {
-        self.block_range = Some(block_range);
+    pub const fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
+        if let Some(block_range) = &mut self.block_range {
+            block_range.start = block_start;
+            block_range.end = block_end;
+        } else {
+            self.block_range = Some(SegmentRangeInclusive::new(block_start, block_end))
+        }
     }
 
     /// Sets a new `tx_range`.
-    pub const fn set_tx_range(&mut self, tx_range: SegmentRangeInclusive) {
-        self.tx_range = Some(tx_range);
+    pub const fn set_tx_range(&mut self, tx_start: TxNumber, tx_end: TxNumber) {
+        if let Some(tx_range) = &mut self.tx_range {
+            tx_range.start = tx_start;
+            tx_range.end = tx_end;
+        } else {
+            self.tx_range = Some(SegmentRangeInclusive::new(tx_start, tx_end))
+        }
     }
 
     /// Returns the row offset which depends on whether the segment is block or transaction based.
