@@ -23,18 +23,12 @@ where
 {
     /// Map of block numbers to block hashes.
     /// This is used to service the `BLOCKHASH` opcode.
-    // TODO: use Vec instead -- ancestors should be contiguous
-    // TODO: so we can use the current_block_number and an offset to
-    // TODO: get the block number of a particular ancestor
     block_hashes_by_block_number: BTreeMap<u64, B256>,
     /// Map of code hashes to bytecode.
     /// Used to fetch contract code needed during execution.
     bytecode: B256Map<Bytecode>,
     /// The sparse Merkle Patricia Trie containing account and storage state.
     /// This is used to provide account/storage values during EVM execution.
-    /// TODO: Ideally we do not have this trie and instead a simple map.
-    /// TODO: Then as a corollary we can avoid unnecessary hashing in `Database::storage`
-    /// TODO: and `Database::basic` without needing to cache the hashed Addresses and Keys
     trie: &'a T,
 }
 
