@@ -1,5 +1,6 @@
 use crate::utils::eth_payload_attributes;
 use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig};
+use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
 use alloy_rpc_types_beacon::relay::{
@@ -11,8 +12,16 @@ use alloy_rpc_types_eth::TransactionRequest;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::setup_engine;
+use reth_network::types::NatResolver;
+use reth_node_builder::{NodeBuilder, NodeHandle};
+use reth_node_core::{
+    args::{NetworkArgs, RpcServerArgs},
+    node_config::NodeConfig,
+};
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
+use reth_rpc_api::servers::AdminApiServer;
+use reth_tasks::TaskManager;
 use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -326,6 +335,44 @@ async fn test_eth_config() -> eyre::Result<()> {
     assert_eq!(config.last.unwrap().activation_time, osaka_timestamp);
     assert_eq!(config.current.activation_time, prague_timestamp);
     assert_eq!(config.next.unwrap().activation_time, osaka_timestamp);
+
+    Ok(())
+}
+
+// <https://github.com/paradigmxyz/reth/issues/19765>
+#[tokio::test]
+async fn test_admin_external_ip() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let exec = TaskManager::current();
+    let exec = exec.executor();
+
+    // Chain spec with test allocs
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let chain_spec =
+        Arc::new(ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis).build());
+
+    let external_ip = "10.64.128.71".parse().unwrap();
+    // Node setup
+    let node_config = NodeConfig::test()
+        .with_chain(chain_spec)
+        .with_network(
+            NetworkArgs::default().with_nat_resolver(NatResolver::ExternalIp(external_ip)),
+        )
+        .with_unused_ports()
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(exec)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    let api = node.add_ons_handle.admin_api();
+
+    let info = api.node_info().await.unwrap();
+
+    assert_eq!(info.ip, external_ip);
 
     Ok(())
 }
