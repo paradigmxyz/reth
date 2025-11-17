@@ -79,14 +79,11 @@ use crate::proof_task_metrics::{
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
-/// Batching configuration for storage proof job processing.
-mod batching {
-    /// Maximum number of jobs to collect from the work queue at once.
-    pub(super) const MAX_BATCH_SIZE: usize = 32;
+/// Maximum number of jobs to collect from the work queue at once.
+const MAX_BATCH_SIZE: usize = 32;
 
-    /// Minimum queue depth to enable batching.
-    pub(super) const MIN_QUEUE_FOR_BATCHING: usize = 2;
-}
+/// Minimum queue depth to enable batching.
+const MIN_QUEUE_FOR_BATCHING: usize = 2;
 
 /// A handle that provides type-safe access to proof worker pools.
 ///
@@ -720,11 +717,11 @@ where
         }
 
         let queue_len = work_rx.len();
-        if queue_len < batching::MIN_QUEUE_FOR_BATCHING {
+        if queue_len < MIN_QUEUE_FOR_BATCHING {
             return vec![first_job];
         }
 
-        let target_batch_size = queue_len.min(batching::MAX_BATCH_SIZE);
+        let target_batch_size = queue_len.min(MAX_BATCH_SIZE);
 
         let mut batch = Vec::with_capacity(target_batch_size);
         batch.push(first_job);
@@ -801,8 +798,8 @@ where
 
             let jobs = Self::try_collect_batch_static(&work_rx, first_job);
 
-            let mut storage_proofs = Vec::new();
-            let mut blinded_nodes = Vec::new();
+            let mut storage_proofs = Vec::with_capacity(jobs.len());
+            let mut blinded_nodes = Vec::with_capacity(jobs.len());
 
             for job in jobs {
                 match job {
