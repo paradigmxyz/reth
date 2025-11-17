@@ -285,7 +285,7 @@ impl<N: NodePrimitives> Deref for StaticFileProvider<N> {
 pub struct StaticFileProviderInner<N> {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
-    jars: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
+    map: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
     /// Indexes per segment.
     indexes: RwLock<HashMap<StaticFileSegment, StaticFileSegmentIndex>>,
     /// This is an additional index that tracks the expired height, this will track the highest
@@ -328,7 +328,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
         }
 
         let provider = Self {
-            jars: Default::default(),
+            map: Default::default(),
             indexes: Default::default(),
             writers: Default::default(),
             earliest_history_height: Default::default(),
@@ -357,13 +357,13 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     pub fn find_fixed_range_with_block_index(
         &self,
         segment: StaticFileSegment,
-        expected_block_index: Option<&SegmentRanges>,
+        block_index: Option<&SegmentRanges>,
         block: BlockNumber,
     ) -> SegmentRangeInclusive {
         let blocks_per_file =
             self.blocks_per_file.get(&segment).copied().unwrap_or(DEFAULT_BLOCKS_PER_STATIC_FILE);
 
-        if let Some(block_index) = expected_block_index {
+        if let Some(block_index) = block_index {
             // Find first block range that contains the requested block
             if let Some((_, range)) = block_index.iter().find(|(max_block, _)| block <= **max_block)
             {
@@ -560,7 +560,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         fixed_block_range_end: BlockNumber,
     ) {
-        self.jars.remove(&(fixed_block_range_end, segment));
+        self.map.remove(&(fixed_block_range_end, segment));
     }
 
     /// This handles history expiry by deleting all static files for the given segment below the
@@ -633,7 +633,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<SegmentHeader> {
         let fixed_block_range = self.find_fixed_range(segment, block);
         let key = (fixed_block_range.end(), segment);
-        let jar = if let Some((_, jar)) = self.jars.remove(&key) {
+        let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
         } else {
             let file = self.path.join(segment.filename(&fixed_block_range));
@@ -669,14 +669,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         // Avoid using `entry` directly to avoid a write lock in the common case.
         trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Getting provider");
-        let mut provider: StaticFileJarProvider<'_, N> = if let Some(jar) = self.jars.get(&key) {
+        let mut provider: StaticFileJarProvider<'_, N> = if let Some(jar) = self.map.get(&key) {
             trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
             jar.into()
         } else {
             trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
             let jar = NippyJar::load(&path).map_err(ProviderError::other)?;
-            self.jars.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
+            self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
         };
 
         if let Some(metrics) = &self.metrics {
@@ -858,11 +858,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
                 // Update the cached provider.
                 debug!(target: "provider::static_file", ?segment, "Inserting updated jar into cache");
-                self.jars.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
+                self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
 
                 // Delete any cached provider that no longer has an associated jar.
                 debug!(target: "provider::static_file", ?segment, "Cleaning up jar map");
-                self.jars.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
+                self.map.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
             }
             None => {
                 debug!(target: "provider::static_file", ?segment, "Removing segment from index");
@@ -917,7 +917,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         }
 
         // If this is a re-initialization, we need to clear this as well
-        self.jars.clear();
+        self.map.clear();
 
         // initialize the expired history height to the lowest static file block
         if let Some(lowest_range) =
