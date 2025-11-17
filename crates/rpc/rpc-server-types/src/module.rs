@@ -240,7 +240,7 @@ impl From<Vec<RethRpcModule>> for RpcModuleSelection {
 
 impl<const N: usize> From<[RethRpcModule; N]> for RpcModuleSelection {
     fn from(s: [RethRpcModule; N]) -> Self {
-        Self::Selection(s.iter().cloned().collect())
+        Self::Selection(s.into_iter().collect())
     }
 }
 
