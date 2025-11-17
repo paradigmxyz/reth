@@ -5,7 +5,7 @@ use clap::Parser;
 use eyre::{eyre, Result, WrapErr};
 use reth_chainspec::Chain;
 use reth_cli_runner::CliContext;
-use reth_node_core::args::{DatadirArgs, LogArgs};
+use reth_node_core::args::{DatadirArgs, LogArgs, TraceArgs};
 use reth_tracing::FileWorkerGuard;
 use std::{net::TcpListener, path::PathBuf, str::FromStr};
 use tokio::process::Command;
@@ -130,6 +130,19 @@ pub(crate) struct Args {
 
     #[command(flatten)]
     pub logs: LogArgs,
+
+    #[command(flatten)]
+    pub traces: TraceArgs,
+
+    /// Maximum queue size for OTLP Batch Span Processor (traces).
+    /// Higher values prevent trace drops when benchmarking many blocks.
+    #[arg(
+        long,
+        value_name = "OTLP_BUFFER_SIZE",
+        default_value = "32768",
+        help_heading = "Tracing"
+    )]
+    pub otlp_max_queue_size: usize,
 
     /// Additional arguments to pass to baseline reth node command
     ///

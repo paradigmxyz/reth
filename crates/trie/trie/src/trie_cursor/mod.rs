@@ -18,6 +18,12 @@ pub mod depth_first;
 #[cfg(test)]
 pub mod mock;
 
+/// Metrics tracking trie cursor implementations.
+pub mod metrics;
+#[cfg(feature = "metrics")]
+pub use metrics::TrieCursorMetrics;
+pub use metrics::{InstrumentedTrieCursor, TrieCursorMetricsCache};
+
 pub use self::{depth_first::DepthFirstTrieIterator, in_memory::*, subnode::CursorSubNode};
 
 /// Factory for creating trie cursors.

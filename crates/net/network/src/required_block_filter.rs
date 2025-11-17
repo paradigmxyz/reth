@@ -3,7 +3,7 @@
 //! This module provides functionality to filter out peers that don't have
 //! specific required blocks (primarily used for shadowfork testing).
 
-use alloy_primitives::B256;
+use alloy_eips::BlockNumHash;
 use futures::StreamExt;
 use reth_eth_wire_types::{GetBlockHeaders, HeadersDirection};
 use reth_network_api::{
@@ -16,11 +16,13 @@ use tracing::{debug, info, trace};
 ///
 /// This task listens for new peer sessions and checks if they have the required
 /// block hashes. Peers that don't have these blocks are banned.
+///
+/// This type is mainly used to connect peers on shadow forks (e.g. mainnet shadowfork=
 pub struct RequiredBlockFilter<N> {
     /// Network handle for listening to events and managing peer reputation.
     network: N,
-    /// List of block hashes that peers must have to be considered valid.
-    block_hashes: Vec<B256>,
+    /// List of block number-hash pairs that peers must have to be considered valid.
+    block_num_hashes: Vec<BlockNumHash>,
 }
 
 impl<N> RequiredBlockFilter<N>
@@ -28,8 +30,8 @@ where
     N: NetworkEventListenerProvider + Peers + Clone + Send + Sync + 'static,
 {
     /// Creates a new required block peer filter.
-    pub const fn new(network: N, block_hashes: Vec<B256>) -> Self {
-        Self { network, block_hashes }
+    pub const fn new(network: N, block_num_hashes: Vec<BlockNumHash>) -> Self {
+        Self { network, block_num_hashes }
     }
 
     /// Spawns the required block peer filter task.
@@ -37,12 +39,12 @@ where
     /// This task will run indefinitely, monitoring new peer sessions and filtering
     /// out peers that don't have the required blocks.
     pub fn spawn(self) {
-        if self.block_hashes.is_empty() {
+        if self.block_num_hashes.is_empty() {
             debug!(target: "net::filter", "No required block hashes configured, skipping peer filtering");
             return;
         }
 
-        info!(target: "net::filter", "Starting required block peer filter with {} block hashes", self.block_hashes.len());
+        info!(target: "net::filter", "Starting required block peer filter with {} block hashes", self.block_num_hashes.len());
 
         tokio::spawn(async move {
             self.run().await;
@@ -60,10 +62,18 @@ where
 
                 // Spawn a task to check this peer's blocks
                 let network = self.network.clone();
-                let block_hashes = self.block_hashes.clone();
+                let block_num_hashes = self.block_num_hashes.clone();
+                let peer_block_number = info.status.latest_block.unwrap_or(0);
 
                 tokio::spawn(async move {
-                    Self::check_peer_blocks(network, peer_id, messages, block_hashes).await;
+                    Self::check_peer_blocks(
+                        network,
+                        peer_id,
+                        messages,
+                        block_num_hashes,
+                        peer_block_number,
+                    )
+                    .await;
                 });
             }
         }
@@ -74,9 +84,19 @@ where
         network: N,
         peer_id: reth_network_api::PeerId,
         messages: reth_network_api::PeerRequestSender<PeerRequest<N::Primitives>>,
-        block_hashes: Vec<B256>,
+        block_num_hashes: Vec<BlockNumHash>,
+        latest_peer_block: u64,
     ) {
-        for block_hash in block_hashes {
+        for block_num_hash in block_num_hashes {
+            // Skip if peer's block number is lower than required, peer might also be syncing and
+            // still on the same chain.
+            if block_num_hash.number > 0 && latest_peer_block <= block_num_hash.number {
+                debug!(target: "net::filter", "Skipping check for block {} - peer {} only at block {}", 
+                       block_num_hash.number, peer_id, latest_peer_block);
+                continue;
+            }
+
+            let block_hash = block_num_hash.hash;
             trace!(target: "net::filter", "Checking if peer {} has block {}", peer_id, block_hash);
 
             // Create a request for block headers
@@ -139,28 +159,35 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::BlockNumHash;
     use alloy_primitives::{b256, B256};
     use reth_network_api::noop::NoopNetwork;
 
     #[test]
     fn test_required_block_filter_creation() {
         let network = NoopNetwork::default();
-        let block_hashes = vec![
-            b256!("0x1111111111111111111111111111111111111111111111111111111111111111"),
-            b256!("0x2222222222222222222222222222222222222222222222222222222222222222"),
+        let block_num_hashes = vec![
+            BlockNumHash::new(
+                0,
+                b256!("0x1111111111111111111111111111111111111111111111111111111111111111"),
+            ),
+            BlockNumHash::new(
+                23115201,
+                b256!("0x2222222222222222222222222222222222222222222222222222222222222222"),
+            ),
         ];
 
-        let filter = RequiredBlockFilter::new(network, block_hashes.clone());
-        assert_eq!(filter.block_hashes.len(), 2);
-        assert_eq!(filter.block_hashes, block_hashes);
+        let filter = RequiredBlockFilter::new(network, block_num_hashes.clone());
+        assert_eq!(filter.block_num_hashes.len(), 2);
+        assert_eq!(filter.block_num_hashes, block_num_hashes);
     }
 
     #[test]
     fn test_required_block_filter_empty_hashes_does_not_spawn() {
         let network = NoopNetwork::default();
-        let block_hashes = vec![];
+        let block_num_hashes = vec![];
 
-        let filter = RequiredBlockFilter::new(network, block_hashes);
+        let filter = RequiredBlockFilter::new(network, block_num_hashes);
         // This should not panic and should exit early when spawn is called
         filter.spawn();
     }
@@ -170,10 +197,10 @@ mod tests {
         // This test would require a more complex setup with mock network components
         // For now, we ensure the basic structure is correct
         let network = NoopNetwork::default();
-        let block_hashes = vec![B256::default()];
+        let block_num_hashes = vec![BlockNumHash::new(0, B256::default())];
 
-        let filter = RequiredBlockFilter::new(network, block_hashes);
+        let filter = RequiredBlockFilter::new(network, block_num_hashes);
         // Verify the filter can be created and basic properties are set
-        assert_eq!(filter.block_hashes.len(), 1);
+        assert_eq!(filter.block_num_hashes.len(), 1);
     }
 }

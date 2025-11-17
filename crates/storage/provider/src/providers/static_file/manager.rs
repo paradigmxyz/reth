@@ -3,9 +3,9 @@ use super::{
     StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
 };
 use crate::{
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt,
+    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
+    HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -40,7 +40,7 @@ use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
     DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
-use reth_storage_api::{BlockBodyIndicesProvider, DBProvider};
+use reth_storage_api::{BlockBodyIndicesProvider, DBProvider, StorageSettingsCache};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -109,6 +109,25 @@ impl<N: NodePrimitives> StaticFileProviderBuilder<N> {
     /// Creates a new builder with read-only access.
     pub fn read_only(path: impl AsRef<Path>) -> ProviderResult<Self> {
         StaticFileProviderInner::new(path, StaticFileAccess::RO).map(|inner| Self { inner })
+    }
+
+    /// Set custom blocks per file for specific segments.
+    ///
+    /// Each static file segment is stored across multiple files, and each of these files contains
+    /// up to the specified number of blocks of data. When the file gets full, a new file is
+    /// created with the new block range.
+    ///
+    /// This setting affects the size of each static file, and can be set per segment.
+    ///
+    /// If it is changed for an existing node, existing static files will not be affected and will
+    /// be finished with the old blocks per file setting, but new static files will use the new
+    /// setting.
+    pub fn with_blocks_per_file_for_segments(
+        mut self,
+        segments: HashMap<StaticFileSegment, u64>,
+    ) -> Self {
+        self.inner.blocks_per_file.extend(segments);
+        self
     }
 
     /// Set a custom number of blocks per file for all segments.
@@ -520,7 +539,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 &path
                     .file_name()
                     .ok_or_else(|| {
-                        ProviderError::MissingStaticFilePath(segment, path.to_path_buf())
+                        ProviderError::MissingStaticFileSegmentPath(segment, path.to_path_buf())
                     })?
                     .to_string_lossy(),
             )
@@ -539,6 +558,21 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         }
 
         Ok(None)
+    }
+
+    /// Gets the [`StaticFileJarProvider`] of the requested path.
+    pub fn get_segment_provider_for_path(
+        &self,
+        path: &Path,
+    ) -> ProviderResult<Option<StaticFileJarProvider<'_, N>>> {
+        StaticFileSegment::parse_filename(
+            &path
+                .file_name()
+                .ok_or_else(|| ProviderError::MissingStaticFilePath(path.to_path_buf()))?
+                .to_string_lossy(),
+        )
+        .map(|(segment, block_range)| self.get_or_create_jar_provider(segment, &block_range))
+        .transpose()
     }
 
     /// Given a segment and block range it removes the cached provider from the map.
@@ -582,7 +616,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut deleted_headers = Vec::new();
 
         loop {
-            let Some(block_height) = self.get_lowest_static_file_block(segment) else {
+            let Some(block_height) = self.get_lowest_range_end(segment) else {
                 return Ok(deleted_headers)
             };
 
@@ -928,10 +962,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,
-        has_receipt_pruning: bool,
     ) -> ProviderResult<Option<PipelineTarget>>
     where
-        Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
+        Provider: DBProvider
+            + BlockReader
+            + StageCheckpointReader
+            + ChainSpecProvider
+            + StorageSettingsCache,
         N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
     {
         // OVM historical import is broken and does not work with this check. It's importing
@@ -969,8 +1006,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             match segment {
                 StaticFileSegment::Headers | StaticFileSegment::Transactions => {}
                 StaticFileSegment::Receipts => {
-                    if has_receipt_pruning {
-                        // Pruned nodes (including full node) do not store receipts as static files.
+                    if EitherWriter::receipts_destination(provider).is_database() {
+                        // Old pruned nodes (including full node) do not store receipts as static
+                        // files.
                         continue
                     }
 
@@ -1191,17 +1229,25 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 "Unwinding static file segment."
             );
             let mut writer = self.latest_writer(segment)?;
-            if segment.is_headers() {
-                // TODO(joshie): is_block_meta
-                writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
-            } else if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
-                // todo joshie: is querying block_body_indices a potential issue once bbi is moved
-                // to sf as well
-                let number = highest_static_file_entry - block.last_tx_num();
-                if segment.is_receipts() {
-                    writer.prune_receipts(number, checkpoint_block_number)?;
-                } else {
-                    writer.prune_transactions(number, checkpoint_block_number)?;
+            match segment {
+                StaticFileSegment::Headers => {
+                    // TODO(joshie): is_block_meta
+                    writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
+                }
+                StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
+                    if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
+                        let number = highest_static_file_entry - block.last_tx_num();
+
+                        match segment {
+                            StaticFileSegment::Transactions => {
+                                writer.prune_transactions(number, checkpoint_block_number)?
+                            }
+                            StaticFileSegment::Receipts => {
+                                writer.prune_receipts(number, checkpoint_block_number)?
+                            }
+                            StaticFileSegment::Headers => unreachable!(),
+                        }
+                    }
                 }
             }
             writer.commit()?;
@@ -1221,29 +1267,29 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.earliest_history_height.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Gets the lowest transaction static file block if it exists.
-    ///
-    /// For example if the transactions static file has blocks 0-499, this will return 499..
-    ///
-    /// If there is nothing on disk for the given segment, this will return [`None`].
-    pub fn get_lowest_transaction_static_file_block(&self) -> Option<BlockNumber> {
-        self.get_lowest_static_file_block(StaticFileSegment::Transactions)
-    }
-
-    /// Gets the lowest static file's block height if it exists for a static file segment.
-    ///
-    /// For example if the static file has blocks 0-499, this will return 499..
-    ///
-    /// If there is nothing on disk for the given segment, this will return [`None`].
-    pub fn get_lowest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
-        self.static_files_min_block.read().get(&segment).map(|range| range.end())
-    }
-
     /// Gets the lowest static file's block range if it exists for a static file segment.
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_lowest_range(&self, segment: StaticFileSegment) -> Option<SegmentRangeInclusive> {
         self.static_files_min_block.read().get(&segment).copied()
+    }
+
+    /// Gets the lowest static file's block range start if it exists for a static file segment.
+    ///
+    /// For example if the lowest static file has blocks 0-499, this will return 0.
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
+    pub fn get_lowest_range_start(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
+        self.get_lowest_range(segment).map(|range| range.start())
+    }
+
+    /// Gets the lowest static file's block range end if it exists for a static file segment.
+    ///
+    /// For example if the static file has blocks 0-499, this will return 499.
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
+    pub fn get_lowest_range_end(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
+        self.get_lowest_range(segment).map(|range| range.end())
     }
 
     /// Gets the highest static file's block height if it exists for a static file segment.

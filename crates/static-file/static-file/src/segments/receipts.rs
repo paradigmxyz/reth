@@ -3,9 +3,7 @@ use alloy_primitives::BlockNumber;
 use reth_codecs::Compact;
 use reth_db_api::{cursor::DbCursorRO, table::Value, tables, transaction::DbTx};
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{
-    providers::StaticFileWriter, BlockReader, DBProvider, StaticFileProviderFactory,
-};
+use reth_provider::{BlockReader, DBProvider, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::ops::RangeInclusive;
@@ -29,9 +27,8 @@ where
         provider: Provider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
-        let static_file_provider = provider.static_file_provider();
         let mut static_file_writer =
-            static_file_provider.get_writer(*block_range.start(), StaticFileSegment::Receipts)?;
+            provider.get_static_file_writer(*block_range.start(), StaticFileSegment::Receipts)?;
 
         for block in block_range {
             static_file_writer.increment_block(block)?;
