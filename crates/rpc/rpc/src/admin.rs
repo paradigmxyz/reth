@@ -189,9 +189,8 @@ where
     /// Handler for `admin_clearTxpool`
     async fn clear_txpool(&self) -> RpcResult<u64> {
         let all_hashes = self.pool.all_transaction_hashes();
-        let count = all_hashes.len() as u64;
-        let _ = self.pool.remove_transactions(all_hashes);
-        Ok(count)
+        let removed = self.pool.remove_transactions(all_hashes);
+        Ok(removed.len() as u64)
     }
 }
 
