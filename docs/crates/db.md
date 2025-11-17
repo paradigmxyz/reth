@@ -8,12 +8,14 @@ The database is a central component to Reth, enabling persistent storage for dat
 
 Within Reth, the database is organized via "tables". A table is any struct that implements the `Table` trait.
 
-[File: crates/storage/db-api/src/table.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/table.rs#L64-L93)
+[File: crates/storage/db-api/src/table.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/table.rs#L87-L101)
 
 ```rust ignore
 pub trait Table: Send + Sync + Debug + 'static {
     /// Return table name as it is present inside the MDBX.
     const NAME: &'static str;
+    /// Whether the table is also a `DUPSORT` table.
+    const DUPSORT: bool;
     /// Key element of `Table`.
     ///
     /// Sorting should be taken into account when encoding this.
@@ -32,10 +34,10 @@ pub trait Value: Compress + Decompress + Serialize {}
 
 The `Table` trait has two generic values, `Key` and `Value`, which need to implement the `Key` and `Value` traits, respectively. The `Encode` trait is responsible for transforming data into bytes so it can be stored in the database, while the `Decode` trait transforms the bytes back into their original form. Similarly, the `Compress` and `Decompress` traits transform the data to and from a compressed format when storing or reading data from the database.
 
-There are many tables within the node, all used to store different types of data from `Headers` to `Transactions` and more. Below is a list of all of the tables. You can follow [this link](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db/src/tables/mod.rs#L274-L414) if you would like to see the table definitions for any of the tables below.
+There are many tables within the node, all used to store different types of data from `Headers` to `Transactions` and more. Below is a list of all of the tables. You can follow [this link](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/tables/mod.rs) if you would like to see the table definitions for any of the tables below.
 
 - CanonicalHeaders
-- HeaderTerminalDifficulties
+- HeaderTerminalDifficulties (deprecated)
 - HeaderNumbers
 - Headers
 - BlockBodyIndices
@@ -56,26 +58,29 @@ There are many tables within the node, all used to store different types of data
 - HashedStorages
 - AccountsTrie
 - StoragesTrie
+- AccountsTrieChangeSets
+- StoragesTrieChangeSets
 - TransactionSenders
 - StageCheckpoints
 - StageCheckpointProgresses
 - PruneCheckpoints
 - VersionHistory
 - ChainState
+- Metadata
 
 <br>
 
 ## Database
 
-Reth's database design revolves around its main [Database trait](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/database.rs#L8-L52), which implements the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
+Reth's database design revolves around its main [Database trait](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/database.rs#L8-L52), which implements the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
 
-[File: crates/storage/db-api/src/database.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/database.rs#L8-L52)
+[File: crates/storage/db-api/src/database.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/database.rs#L8-L52)
 
 ```rust ignore
 /// Main Database trait that can open read-only and read-write transactions.
 ///
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for consumption.
-pub trait Database: Send + Sync {
+pub trait Database: Send + Sync + Debug {
     /// Read-Only database transaction
     type TX: DbTx + Send + Sync + Debug + 'static;
     /// Read-Write database transaction
@@ -93,11 +98,11 @@ pub trait Database: Send + Sync {
     /// end of the execution.
     fn view<T, F>(&self, f: F) -> Result<T, DatabaseError>
     where
-        F: FnOnce(&Self::TX) -> T,
+        F: FnOnce(&mut Self::TX) -> T,
     {
-        let tx = self.tx()?;
+        let mut tx = self.tx()?;
 
-        let res = f(&tx);
+        let res = f(&mut tx);
         tx.commit()?;
 
         Ok(res)
@@ -119,50 +124,39 @@ pub trait Database: Send + Sync {
 }
 ```
 
-Any type that implements the `Database` trait can create a database transaction, as well as view or update existing transactions. As an example, let's revisit the `Transaction` struct from the `stages` crate. This struct contains a field named `db` which is a reference to a generic type `DB` that implements the `Database` trait. The `Transaction` struct can use the `db` field to store new headers, bodies and senders in the database. In the code snippet below, you can see the `Transaction::open()` method, which uses the `Database::tx_mut()` function to create a mutable transaction.
-
-[File: crates/stages/src/db.rs](https://github.com/paradigmxyz/reth/blob/00a49f5ee78b0a88fea409283e6bb9c96d4bb31e/crates/stages/src/db.rs#L28)
+Any type that implements the `Database` trait can create a database transaction, as well as view or update existing transactions. For example, you can open a read-write transaction directly via `tx_mut()`, write to tables, and commit:
 
 ```rust ignore
-pub struct Transaction<'this, DB: Database> {
-    /// A handle to the DB.
-    pub(crate) db: &'this DB,
-    tx: Option<<DB as Database>::TXMut>,
-}
-
-//--snip--
-impl<'this, DB> Transaction<'this, DB>
-where
-    DB: Database,
-{
-    //--snip--
-
-    /// Open a new inner transaction.
-    pub fn open(&mut self) -> Result<(), Error> {
-        self.tx = Some(self.db.tx_mut()?);
-        Ok(())
-    }
-}
+let tx = db.tx_mut()?;
+tx.put::<tables::CanonicalHeaders>(block_number, block.hash())?;
+tx.put::<tables::Headers>(block_number, header.clone())?;
+tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
+tx.commit()?;
 ```
 
 The `Database` defines two associated types `TX` and `TXMut`.
 
-[File: crates/storage/db-api/src/database.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/database.rs#L54-L78)
+[File: crates/storage/db-api/src/database.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/database.rs)
 
 The `TX` type can be any type that implements the `DbTx` trait, which provides a set of functions to interact with read only transactions.
 
-[File: crates/storage/db-api/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/transaction.rs#L7-L29)
+[File: crates/storage/db-api/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/transaction.rs#L11-L40)
 
 ```rust ignore
 /// Read only transaction
-pub trait DbTx: Send + Sync {
+pub trait DbTx: Debug + Send + Sync {
     /// Cursor type for this read-only transaction
     type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
     /// `DupCursor` type for this read-only transaction
     type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send + Sync;
 
-    /// Get value
+    /// Get value by an owned key
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError>;
+    /// Get value by a reference to the encoded key (avoids cloning for raw keys)
+    fn get_by_encoded_key<T: Table>(
+        &self,
+        key: &<T::Key as Encode>::Encoded,
+    ) -> Result<Option<T::Value>, DatabaseError>;
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
     fn commit(self) -> Result<bool, DatabaseError>;
@@ -181,7 +175,7 @@ pub trait DbTx: Send + Sync {
 
 The `TXMut` type can be any type that implements the `DbTxMut` trait, which provides a set of functions to interact with read/write transactions and the associated cursor types.
 
-[File: crates/storage/db-api/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/transaction.rs#L31-L54)
+[File: crates/storage/db-api/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/transaction.rs)
 
 ```rust ignore
 /// Read write transaction that allows writing to database
@@ -196,8 +190,12 @@ pub trait DbTxMut: Send + Sync {
         + Send
         + Sync;
 
-    /// Put value in database
+    /// Put value to database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
+    /// Append value with the largest key to database (fast path)
+    fn append<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        self.put::<T>(key, value)
+    }
     /// Delete value from database
     fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>)
         -> Result<bool, DatabaseError>;
@@ -212,21 +210,16 @@ pub trait DbTxMut: Send + Sync {
 
 Let's take a look at the `DbTx` and `DbTxMut` traits in action.
 
-Revisiting the `DatabaseProvider<Tx>` struct as an example, the `DatabaseProvider<Tx>::header_by_number()` function uses the `DbTx::get()` function to get a header from the `Headers` table.
+Revisiting the `DatabaseProvider<Tx>` struct as an example, the `DatabaseProvider<Tx>::header_by_number()` function currently delegates to the static-file provider:
 
-[File: crates/storage/provider/src/providers/database/provider.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/provider/src/providers/database/provider.rs#L1319-L1336)
+[File: crates/storage/provider/src/providers/database/mod.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/provider/src/providers/database/mod.rs#L280-L282)
 
 ```rust ignore
 impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
    //--snip--
 
-    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            num,
-            |static_file| static_file.header_by_number(num),
-            || Ok(self.tx.get::<tables::Headers>(num)?),
-        )
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
+        self.static_file_provider.header_by_number(num)
     }
 
    //--snip--
@@ -235,7 +228,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
 
 Notice that the function uses a [turbofish](https://techblog.tonsser.com/posts/what-is-rusts-turbofish) to define which table to use when passing in the `key` to the `DbTx::get()` function. Taking a quick look at the function definition, a generic `T` is defined that implements the `Table` trait mentioned at the beginning of this chapter.
 
-[File: crates/storage/db-api/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/transaction.rs#L15)
+[File: crates/storage/db-api/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/transaction.rs)
 
 ```rust ignore
 fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError>;
@@ -245,31 +238,29 @@ This design pattern is very powerful and allows Reth to use the methods availabl
 
 Let's take a look at a couple of examples before moving on. In the snippet below, the `DbTxMut::put()` method is used to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
 
-[File: crates/storage/provider/src/providers/database/provider.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/provider/src/providers/database/provider.rs#L2606-L2745)
+[File: crates/storage/provider/src/providers/database/provider.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/provider/src/providers/database/provider.rs)
 
 ```rust ignore
 self.tx.put::<tables::CanonicalHeaders>(block_number, block.hash())?;
-self.tx.put::<tables::Headers>(block_number, block.header.as_ref().clone())?;
+self.tx.put::<tables::Headers>(block_number, block.header.clone())?;
 self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
 ```
 
 Let's take a look at the `DatabaseProviderRW<DB: Database>` struct, which is used to create a mutable transaction to interact with the database.
 The `DatabaseProviderRW<DB: Database>` struct implements the `Deref` and `DerefMut` traits, which return a reference to its first field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `Database` trait, which is defined as `type TXMut: DbTxMut + DbTx + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
 
-This next example uses the `DbTx::cursor_read()` method to get a `Cursor`. The `Cursor` type provides a way to traverse through rows in a database table, one row at a time. A cursor enables the program to perform an operation (updating, deleting, etc) on each row in the table individually. The following code snippet gets a cursor for a few different tables in the database.
+This next example shows reading headers from static files using the static-file provider.
 
-[File: crates/static-file/static-file/src/segments/headers.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/static-file/static-file/src/segments/headers.rs#L22-L58)
+[File: crates/storage/provider/src/providers/static_file/manager.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/provider/src/providers/static_file/manager.rs#L1680-L1690)
 
 ```rust ignore
-# Get a cursor for the Headers table
-let mut headers_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
-# Then we can walk the cursor to get the headers for a specific block range
-let headers_walker = headers_cursor.walk_range(block_range.clone())?;
+// Read headers for a specific block range from static files
+let headers = provider.static_file_provider().headers_range(block_range.clone())?;
 ```
 
 Let's look at an example of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
 
-[File: crates/stages/stages/src/stages/bodies.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/stages/stages/src/stages/bodies.rs#L267-L345)
+[File: crates/stages/stages/src/stages/bodies.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/stages/src/stages/bodies.rs)
 
 ```rust ignore
 /// Unwind the stage.
