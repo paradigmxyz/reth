@@ -25,15 +25,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
 
         let mut done = true;
         while keys.peek().is_some() {
-            if let Some(key) = keys.next_if(|_| !limiter.is_limit_reached()) {
-                let row = cursor.seek_exact(key)?;
-                if let Some(row) = row {
-                    cursor.delete_current()?;
-                    limiter.increment_deleted_entries_count();
-                    deleted_entries += 1;
-                    delete_callback(row);
-                }
-            } else {
+            if limiter.is_limit_reached() {
                 debug!(
                     target: "providers::db",
                     ?limiter,
@@ -44,6 +36,15 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
                 );
                 done = false;
                 break
+            }
+
+            let key = keys.next().expect("peek() said Some");
+            let row = cursor.seek_exact(key)?;
+            if let Some(row) = row {
+                cursor.delete_current()?;
+                limiter.increment_deleted_entries_count();
+                deleted_entries += 1;
+                delete_callback(row);
             }
         }
 
