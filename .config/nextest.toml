@@ -15,3 +15,8 @@ slow-timeout = { period = "2m", terminate-after = 10 }
 [[profile.default.overrides]]
 filter = "binary(e2e_testsuite)"
 slow-timeout = { period = "2m", terminate-after = 3 }
+
+# Various slow e2e tests
+[[profile.default.overrides]]
+filter = "test(test_long_reorg) | test(blob_conversion_at_osaka)"
+slow-timeout = { period = "3m", terminate-after = 3 }
