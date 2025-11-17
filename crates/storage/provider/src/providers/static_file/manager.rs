@@ -51,10 +51,6 @@ use std::{
 };
 use tracing::{debug, info, trace, warn};
 
-/// Alias type for a map that can be queried for block or transaction ranges. It uses `u64` to
-/// represent either a block or a transaction number end of a static file range.
-type SegmentRanges = HashMap<StaticFileSegment, BTreeMap<u64, SegmentRangeInclusive>>;
-
 /// Access mode on a static file provider. RO/RW.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub enum StaticFileAccess {
@@ -285,17 +281,8 @@ impl<N: NodePrimitives> Deref for StaticFileProvider<N> {
 pub struct StaticFileProviderInner<N> {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
-    map: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
-    /// Min static file range for each segment.
-    /// This index is initialized on launch to keep track of the lowest, non-expired static file
-    /// per segment and gets updated on `Self::update_index()`.
-    ///
-    /// This tracks the lowest static file per segment together with the block range in that
-    /// file. E.g. static file is batched in 500k block intervals then the lowest static file
-    /// is [0..499K], and the block range is start = 0, end = 499K.
-    /// This index is mainly used to History expiry, which targets transactions, e.g. pre-merge
-    /// history expiry would lead to removing all static files below the merge height.
-    static_files_min_block: RwLock<HashMap<StaticFileSegment, SegmentRangeInclusive>>,
+    jars: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
+    indexes: RwLock<HashMap<StaticFileSegment, StaticFileSegmentIndex>>,
     /// This is an additional index that tracks the expired height, this will track the highest
     /// block number that has been expired (missing). The first, non expired block is
     /// `expired_history_height + 1`.
@@ -307,21 +294,6 @@ pub struct StaticFileProviderInner<N> {
     /// This additional tracker exists for more efficient lookups because the node must be aware of
     /// the expired height.
     earliest_history_height: AtomicU64,
-    /// Max static file block for each segment
-    static_files_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
-    /// Expected on disk static file block ranges indexed by max expected blocks.
-    ///
-    /// For example, a static file for expected block range `0..=499_000` may have only block range
-    /// `0..=1000` contained in it, as it wasn't fully filled yet. This index maps the max expected
-    /// block to the expected range, i.e. block `499_000` to block range `0..=499_000`.
-    static_files_expected_block_index: RwLock<SegmentRanges>,
-    /// Available on disk static file block ranges indexed by max transactions.
-    ///
-    /// For example, a static file for block range `0..=499_000` may only have block range
-    /// `0..=1000` and transaction range `0..=2000` contained in it. This index maps the max
-    /// available transaction to the available block range, i.e. transaction `2000` to block range
-    /// `0..=1000`.
-    static_files_tx_index: RwLock<SegmentRanges>,
     /// Directory where `static_files` are located
     path: PathBuf,
     /// Maintains a writer set of [`StaticFileSegment`].
@@ -351,13 +323,10 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
         }
 
         let provider = Self {
-            map: Default::default(),
+            jars: Default::default(),
+            indexes: Default::default(),
             writers: Default::default(),
-            static_files_min_block: Default::default(),
             earliest_history_height: Default::default(),
-            static_files_max_block: Default::default(),
-            static_files_expected_block_index: Default::default(),
-            static_files_tx_index: Default::default(),
             path: path.as_ref().to_path_buf(),
             metrics: None,
             access,
@@ -383,13 +352,13 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     pub fn find_fixed_range_with_block_index(
         &self,
         segment: StaticFileSegment,
-        block_index: Option<&BTreeMap<u64, SegmentRangeInclusive>>,
+        expected_block_index: Option<&BTreeMap<u64, SegmentRangeInclusive>>,
         block: BlockNumber,
     ) -> SegmentRangeInclusive {
         let blocks_per_file =
             self.blocks_per_file.get(&segment).copied().unwrap_or(DEFAULT_BLOCKS_PER_STATIC_FILE);
 
-        if let Some(block_index) = block_index {
+        if let Some(block_index) = expected_block_index {
             // Find first block range that contains the requested block
             if let Some((_, range)) = block_index.iter().find(|(max_block, _)| block <= **max_block)
             {
@@ -431,7 +400,10 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     ) -> SegmentRangeInclusive {
         self.find_fixed_range_with_block_index(
             segment,
-            self.static_files_expected_block_index.read().get(&segment),
+            self.indexes
+                .read()
+                .get(&segment)
+                .map(|index| &index.expected_block_range_by_max_expected_block),
             block,
         )
     }
@@ -583,7 +555,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         fixed_block_range_end: BlockNumber,
     ) {
-        self.map.remove(&(fixed_block_range_end, segment));
+        self.jars.remove(&(fixed_block_range_end, segment));
     }
 
     /// This handles history expiry by deleting all static files for the given segment below the
@@ -656,7 +628,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<SegmentHeader> {
         let fixed_block_range = self.find_fixed_range(segment, block);
         let key = (fixed_block_range.end(), segment);
-        let jar = if let Some((_, jar)) = self.map.remove(&key) {
+        let jar = if let Some((_, jar)) = self.jars.remove(&key) {
             jar.jar
         } else {
             let file = self.path.join(segment.filename(&fixed_block_range));
@@ -692,14 +664,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         // Avoid using `entry` directly to avoid a write lock in the common case.
         trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Getting provider");
-        let mut provider: StaticFileJarProvider<'_, N> = if let Some(jar) = self.map.get(&key) {
+        let mut provider: StaticFileJarProvider<'_, N> = if let Some(jar) = self.jars.get(&key) {
             trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
             jar.into()
         } else {
             trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
             let jar = NippyJar::load(&path).map_err(ProviderError::other)?;
-            self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
+            self.jars.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
         };
 
         if let Some(metrics) = &self.metrics {
@@ -715,11 +687,16 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         block: u64,
     ) -> Option<SegmentRangeInclusive> {
-        self.static_files_max_block
-            .read()
-            .get(&segment)
-            .filter(|max| **max >= block)
-            .map(|_| self.find_fixed_range(segment, block))
+        let indexes = self.indexes.read();
+        let index = indexes.get(&segment)?;
+
+        (index.max_block >= block).then(|| {
+            self.find_fixed_range_with_block_index(
+                segment,
+                Some(&index.expected_block_range_by_max_expected_block),
+                block,
+            )
+        })
     }
 
     /// Gets a static file segment's fixed block range from the provider inner
@@ -729,12 +706,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         tx: u64,
     ) -> Option<SegmentRangeInclusive> {
-        let static_files = self.static_files_tx_index.read();
-        let segment_static_files = static_files.get(&segment)?;
+        let indexes = self.indexes.read();
+        let index = indexes.get(&segment)?;
+        let available_block_range_by_max_tx = index.available_block_range_by_max_tx.as_ref()?;
 
         // It's more probable that the request comes from a newer tx height, so we iterate
         // the static_files in reverse.
-        let mut static_files_rev_iter = segment_static_files.iter().rev().peekable();
+        let mut static_files_rev_iter = available_block_range_by_max_tx.iter().rev().peekable();
 
         while let Some((tx_end, block_range)) = static_files_rev_iter.next() {
             if tx > *tx_end {
@@ -743,7 +721,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
             let tx_start = static_files_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
-                return Some(self.find_fixed_range(segment, block_range.end()))
+                return Some(self.find_fixed_range_with_block_index(
+                    segment,
+                    Some(&index.expected_block_range_by_max_expected_block),
+                    block_range.end(),
+                ))
             }
         }
         None
@@ -760,18 +742,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         segment_max_block: Option<BlockNumber>,
     ) -> ProviderResult<()> {
-        let mut min_block = self.static_files_min_block.write();
-        let mut max_block = self.static_files_max_block.write();
-        let mut expected_block_index = self.static_files_expected_block_index.write();
-        let mut tx_index = self.static_files_tx_index.write();
+        let mut indexes = self.indexes.write();
 
         match segment_max_block {
             Some(segment_max_block) => {
-                // Update the max block for the segment
-                max_block.insert(segment, segment_max_block);
                 let fixed_range = self.find_fixed_range_with_block_index(
                     segment,
-                    expected_block_index.get(&segment),
+                    indexes
+                        .get(&segment)
+                        .map(|index| &index.expected_block_range_by_max_expected_block),
                     segment_max_block,
                 );
 
@@ -779,6 +758,28 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     &self.path.join(segment.filename(&fixed_range)),
                 )
                 .map_err(ProviderError::other)?;
+
+                let index = indexes
+                    .entry(segment)
+                    .and_modify(|index| {
+                        index.max_block = segment_max_block;
+
+                        index
+                            .expected_block_range_by_max_expected_block
+                            .retain(|_, block_range| block_range.start() < fixed_range.start());
+                        index
+                            .expected_block_range_by_max_expected_block
+                            .insert(fixed_range.end(), fixed_range);
+                    })
+                    .or_insert_with(|| StaticFileSegmentIndex {
+                        min_block_range: None,
+                        max_block: segment_max_block,
+                        expected_block_range_by_max_expected_block: BTreeMap::from([(
+                            fixed_range.end(),
+                            fixed_range,
+                        )]),
+                        available_block_range_by_max_tx: None,
+                    });
 
                 // Update min_block to track the lowest block range of the segment.
                 // This is initially set by initialize_index() on node startup, but must be updated
@@ -796,27 +797,16 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 // 3. Pruner calls get_lowest_static_file_block() -> returns 100 (correct). Without
                 //    this update, it would incorrectly return 0 (stale)
                 if let Some(current_block_range) = jar.user_header().block_range() {
-                    min_block
-                        .entry(segment)
-                        .and_modify(|current_min| {
-                            // delete_jar WILL ALWAYS re-initialize all indexes, so we are always
-                            // sure that current_min is always the lowest.
-                            if current_block_range.start() == current_min.start() {
-                                *current_min = current_block_range;
-                            }
-                        })
-                        .or_insert(current_block_range);
+                    if let Some(min_block_range) = index.min_block_range.as_mut() {
+                        // delete_jar WILL ALWAYS re-initialize all indexes, so we are always
+                        // sure that current_min is always the lowest.
+                        if current_block_range.start() == min_block_range.start() {
+                            *min_block_range = current_block_range;
+                        }
+                    } else {
+                        index.min_block_range = Some(current_block_range);
+                    }
                 }
-
-                // Update the expected block index
-                expected_block_index
-                    .entry(segment)
-                    .and_modify(|index| {
-                        index.retain(|_, block_range| block_range.start() < fixed_range.start());
-
-                        index.insert(fixed_range.end(), fixed_range);
-                    })
-                    .or_insert_with(|| BTreeMap::from([(fixed_range.end(), fixed_range)]));
 
                 // Updates the tx index by first removing all entries which have a higher
                 // block_start than our current static file.
@@ -834,41 +824,35 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         // equal than our current one. This is important in the case
                         // that we prune a lot of rows resulting in a file (and thus
                         // a higher block range) deletion.
-                        tx_index
-                            .entry(segment)
-                            .and_modify(|index| {
-                                index.retain(|_, block_range| {
-                                    block_range.start() < fixed_range.start()
-                                });
-                                index.insert(tx_end, current_block_range);
-                            })
-                            .or_insert_with(|| BTreeMap::from([(tx_end, current_block_range)]));
+                        if let Some(index) = index.available_block_range_by_max_tx.as_mut() {
+                            index
+                                .retain(|_, block_range| block_range.start() < fixed_range.start());
+                            index.insert(tx_end, current_block_range);
+                        } else {
+                            index.available_block_range_by_max_tx =
+                                Some(BTreeMap::from([(tx_end, current_block_range)]));
+                        }
                     }
                 } else if segment.is_tx_based() {
                     // The unwinded file has no more transactions/receipts. However, the highest
                     // block is within this files' block range. We only retain
                     // entries with block ranges before the current one.
-                    tx_index.entry(segment).and_modify(|index| {
+                    if let Some(index) = index.available_block_range_by_max_tx.as_mut() {
                         index.retain(|_, block_range| block_range.start() < fixed_range.start());
-                    });
+                    }
 
                     // If the index is empty, just remove it.
-                    if tx_index.get(&segment).is_some_and(|index| index.is_empty()) {
-                        tx_index.remove(&segment);
-                    }
+                    index.available_block_range_by_max_tx.take_if(|index| index.is_empty());
                 }
 
                 // Update the cached provider.
-                self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
+                self.jars.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
 
                 // Delete any cached provider that no longer has an associated jar.
-                self.map.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
+                self.jars.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
             }
             None => {
-                max_block.remove(&segment);
-                min_block.remove(&segment);
-                expected_block_index.remove(&segment);
-                tx_index.remove(&segment);
+                indexes.remove(&segment);
             }
         };
 
@@ -877,57 +861,50 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Initializes the inner transaction and block index
     pub fn initialize_index(&self) -> ProviderResult<()> {
-        let mut min_block = self.static_files_min_block.write();
-        let mut max_block = self.static_files_max_block.write();
-        let mut expected_block_index = self.static_files_expected_block_index.write();
-        let mut tx_index = self.static_files_tx_index.write();
-
-        min_block.clear();
-        max_block.clear();
-        tx_index.clear();
+        let mut indexes = self.indexes.write();
+        indexes.clear();
 
         for (segment, headers) in iter_static_files(&self.path).map_err(ProviderError::other)? {
             // Update first and last block for each segment
-            if let Some((block_range, _)) = headers.first() {
-                min_block.insert(segment, *block_range);
-            }
-            if let Some((block_range, _)) = headers.last() {
-                max_block.insert(segment, block_range.end());
-            }
+            let min_block_range = Some(headers.first().expect("headers are not empty").0);
+            let max_block = headers.last().expect("headers are not empty").0.end();
+
+            let mut expected_block_range_by_max_expected_block = BTreeMap::default();
+            let mut available_block_range_by_max_tx = None;
 
             for (block_range, header) in headers {
                 // Update max expected block -> expected_block_range index
-                expected_block_index
-                    .entry(segment)
-                    .and_modify(|index| {
-                        index.insert(header.expected_block_end(), header.expected_block_range());
-                    })
-                    .or_insert_with(|| {
-                        BTreeMap::from([(
-                            header.expected_block_end(),
-                            header.expected_block_range(),
-                        )])
-                    });
+                expected_block_range_by_max_expected_block
+                    .insert(header.expected_block_end(), header.expected_block_range());
 
                 // Update max tx -> block_range index
                 if let Some(tx_range) = header.tx_range() {
                     let tx_end = tx_range.end();
 
-                    tx_index
-                        .entry(segment)
-                        .and_modify(|index| {
-                            index.insert(tx_end, block_range);
-                        })
-                        .or_insert_with(|| BTreeMap::from([(tx_end, block_range)]));
+                    available_block_range_by_max_tx
+                        .get_or_insert_with(BTreeMap::default)
+                        .insert(tx_end, block_range);
                 }
             }
+
+            indexes.insert(
+                segment,
+                StaticFileSegmentIndex {
+                    min_block_range,
+                    max_block,
+                    expected_block_range_by_max_expected_block,
+                    available_block_range_by_max_tx,
+                },
+            );
         }
 
         // If this is a re-initialization, we need to clear this as well
-        self.map.clear();
+        self.jars.clear();
 
         // initialize the expired history height to the lowest static file block
-        if let Some(lowest_range) = min_block.get(&StaticFileSegment::Transactions) {
+        if let Some(lowest_range) =
+            indexes.get(&StaticFileSegment::Transactions).and_then(|index| index.min_block_range)
+        {
             // the earliest height is the lowest available block number
             self.earliest_history_height
                 .store(lowest_range.start(), std::sync::atomic::Ordering::Relaxed);
@@ -1271,7 +1248,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_lowest_range(&self, segment: StaticFileSegment) -> Option<SegmentRangeInclusive> {
-        self.static_files_min_block.read().get(&segment).copied()
+        self.indexes.read().get(&segment).and_then(|index| index.min_block_range)
     }
 
     /// Gets the lowest static file's block range start if it exists for a static file segment.
@@ -1296,16 +1273,17 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_highest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
-        self.static_files_max_block.read().get(&segment).copied()
+        self.indexes.read().get(&segment).map(|index| index.max_block)
     }
 
     /// Gets the highest static file transaction.
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_highest_static_file_tx(&self, segment: StaticFileSegment) -> Option<TxNumber> {
-        self.static_files_tx_index
+        self.indexes
             .read()
             .get(&segment)
+            .and_then(|index| index.available_block_range_by_max_tx.as_ref())
             .and_then(|index| index.last_key_value().map(|(last_tx, _)| *last_tx))
     }
 
@@ -1323,7 +1301,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         func: impl Fn(StaticFileJarProvider<'_, N>) -> ProviderResult<Option<T>>,
     ) -> ProviderResult<Option<T>> {
-        if let Some(ranges) = self.static_files_expected_block_index.read().get(&segment) {
+        if let Some(ranges) = self
+            .indexes
+            .read()
+            .get(&segment)
+            .map(|index| &index.expected_block_range_by_max_expected_block)
+        {
             // Iterate through all ranges in reverse order (highest to lowest)
             for range in ranges.values().rev() {
                 if let Some(res) = func(self.get_or_create_jar_provider(segment, range)?)? {
@@ -1537,15 +1520,58 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Returns `static_files` transaction index
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
-        &self.static_files_tx_index
+    pub fn tx_index(
+        &self,
+        segment: StaticFileSegment,
+    ) -> Option<BTreeMap<u64, SegmentRangeInclusive>> {
+        self.indexes
+            .read()
+            .get(&segment)
+            .and_then(|index| index.available_block_range_by_max_tx.as_ref())
+            .cloned()
     }
 
     /// Returns `static_files` expected block index
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn expected_block_index(&self) -> &RwLock<SegmentRanges> {
-        &self.static_files_expected_block_index
+    pub fn expected_block_index(
+        &self,
+        segment: StaticFileSegment,
+    ) -> Option<BTreeMap<u64, SegmentRangeInclusive>> {
+        self.indexes
+            .read()
+            .get(&segment)
+            .map(|index| &index.expected_block_range_by_max_expected_block)
+            .cloned()
     }
+}
+
+#[derive(Debug)]
+struct StaticFileSegmentIndex {
+    /// Min static file range for each segment.
+    /// This index is initialized on launch to keep track of the lowest, non-expired static file
+    /// per segment and gets updated on `Self::update_index()`.
+    ///
+    /// This tracks the lowest static file per segment together with the block range in that
+    /// file. E.g. static file is batched in 500k block intervals then the lowest static file
+    /// is [0..499K], and the block range is start = 0, end = 499K.
+    /// This index is mainly used to History expiry, which targets transactions, e.g. pre-merge
+    /// history expiry would lead to removing all static files below the merge height.
+    min_block_range: Option<SegmentRangeInclusive>,
+    /// Max static file block for each segment
+    max_block: u64,
+    /// Expected on disk static file block ranges indexed by max expected blocks.
+    ///
+    /// For example, a static file for expected block range `0..=499_000` may have only block range
+    /// `0..=1000` contained in it, as it wasn't fully filled yet. This index maps the max expected
+    /// block to the expected range, i.e. block `499_000` to block range `0..=499_000`.
+    expected_block_range_by_max_expected_block: BTreeMap<u64, SegmentRangeInclusive>,
+    /// Available on disk static file block ranges indexed by max transactions.
+    ///
+    /// For example, a static file for block range `0..=499_000` may only have block range
+    /// `0..=1000` and transaction range `0..=2000` contained in it. This index maps the max
+    /// available transaction to the available block range, i.e. transaction `2000` to block range
+    /// `0..=1000`.
+    available_block_range_by_max_tx: Option<BTreeMap<u64, SegmentRangeInclusive>>,
 }
 
 /// Helper trait to manage different [`StaticFileProviderRW`] of an `Arc<StaticFileProvider`
