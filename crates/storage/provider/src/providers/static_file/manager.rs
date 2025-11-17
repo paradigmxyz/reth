@@ -747,6 +747,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         segment_max_block: Option<BlockNumber>,
     ) -> ProviderResult<()> {
+        debug!(
+            target: "provider::static_file",
+            ?segment,
+            ?segment_max_block,
+            "Updating provider index"
+        );
         let mut indexes = self.indexes.write();
 
         match segment_max_block {
@@ -851,16 +857,20 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
 
                 // Update the cached provider.
+                debug!(target: "provider::static_file", ?segment, "Inserting updated jar into cache");
                 self.jars.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
 
                 // Delete any cached provider that no longer has an associated jar.
+                debug!(target: "provider::static_file", ?segment, "Cleaning up jar map");
                 self.jars.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
             }
             None => {
+                debug!(target: "provider::static_file", ?segment, "Removing segment from index");
                 indexes.remove(&segment);
             }
         };
 
+        debug!(target: "provider::static_file", ?segment, "Updated provider index");
         Ok(())
     }
 
