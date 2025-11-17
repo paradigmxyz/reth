@@ -1,10 +1,9 @@
 //! Database debugging tool
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
-use itertools::Itertools;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::{mdbx::tx::Tx, static_file::iter_static_files, DatabaseError};
+use reth_db::{mdbx::tx::Tx, DatabaseError};
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
@@ -15,7 +14,9 @@ use reth_db_common::{
 };
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
-use reth_provider::{DBProvider, DatabaseProviderFactory, StaticFileProviderFactory, TrieWriter};
+use reth_provider::{
+    DBProvider, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter, TrieWriter,
+};
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
@@ -47,18 +48,35 @@ impl<C: ChainSpecParser> Command<C> {
             _ => None,
         };
 
-        // Delete static file segment data before inserting the genesis header below
+        // We can only enqueue the pruning because if the task is interrupted after we have deleted
+        // the files, BUT before we have committed the DB we'd lose essential data and would need to
+        // recover it manually (eg. copy paste static files from other node).
         if let Some(static_file_segment) = static_file_segment {
             let static_file_provider = tool.provider_factory.static_file_provider();
-            let static_files = iter_static_files(static_file_provider.directory())?;
-            if let Some(segment_static_files) = static_files.get(&static_file_segment) {
-                // Delete static files from the highest to the lowest block range
-                for (block_range, _) in segment_static_files
-                    .iter()
-                    .sorted_by_key(|(block_range, _)| block_range.start())
-                    .rev()
-                {
-                    static_file_provider.delete_jar(static_file_segment, block_range.start())?;
+            if let Some(highest_block) =
+                static_file_provider.get_highest_static_file_block(static_file_segment)
+            {
+                let mut writer = static_file_provider.latest_writer(static_file_segment)?;
+
+                match static_file_segment {
+                    StaticFileSegment::Headers => {
+                        // Prune all headers leaving genesis intact.
+                        writer.prune_headers(highest_block)?;
+                    }
+                    StaticFileSegment::Transactions => {
+                        let to_delete = static_file_provider
+                            .get_highest_static_file_tx(static_file_segment)
+                            .map(|tx| tx + 1)
+                            .unwrap_or_default();
+                        writer.prune_transactions(to_delete, 0)?;
+                    }
+                    StaticFileSegment::Receipts => {
+                        let to_delete = static_file_provider
+                            .get_highest_static_file_tx(static_file_segment)
+                            .map(|receipt| receipt + 1)
+                            .unwrap_or_default();
+                        writer.prune_receipts(to_delete, 0)?;
+                    }
                 }
             }
         }
