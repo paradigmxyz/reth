@@ -2,7 +2,7 @@ use crate::utils::eth_payload_attributes;
 use alloy_eips::BlockId;
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Address, Bytes, ChainId, U256};
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::{ext::DebugApi, ProviderBuilder};
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInput, TransactionRequest};
 use alloy_rpc_types_trace::geth::{
     AccountState, GethDebugTracingCallOptions, GethDebugTracingOptions, PreStateConfig,
@@ -41,21 +41,18 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     let node = nodes.pop().expect("node available");
     let provider = ProviderBuilder::new().connect_http(node.rpc_url());
 
-    let trace: alloy_rpc_types_trace::geth::GethTrace = provider
-        .raw_request::<_, _>(
-            "debug_traceCall".into(),
-            (
-                build_selfdestruct_request(),
-                BlockId::Number(BlockNumberOrTag::Latest),
-                GethDebugTracingCallOptions::new(GethDebugTracingOptions::prestate_tracer(
-                    PreStateConfig::default(),
-                )),
-            ),
+    let trace: PreStateFrame = provider
+        .debug_trace_call_prestate(
+            build_selfdestruct_request(),
+            BlockId::Number(BlockNumberOrTag::Latest),
+            GethDebugTracingCallOptions::new(GethDebugTracingOptions::prestate_tracer(
+                PreStateConfig::default(),
+            )),
         )
         .await?;
 
     let expected_frame = expected_snapshot_frame()?;
-    let actual_frame = trace.try_into_pre_state_frame().expect("prestate frame");
+    let actual_frame = trace;
 
     let expected_accounts = filtered_accounts(expected_frame);
     let actual_accounts = filtered_accounts(actual_frame);
