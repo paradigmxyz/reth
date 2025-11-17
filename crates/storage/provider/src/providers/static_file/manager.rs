@@ -871,6 +871,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         for (segment, headers) in iter_static_files(&self.path).map_err(ProviderError::other)? {
             // Update first and last block for each segment
+            //
+            // It's safe to call `expect` here, because every segment has at least one header
+            // associated with it.
             let min_block_range = Some(headers.first().expect("headers are not empty").0);
             let max_block = headers.last().expect("headers are not empty").0.end();
 
