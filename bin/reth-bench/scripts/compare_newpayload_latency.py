@@ -135,19 +135,30 @@ def main():
         df2 = df2.head(min_len)
 
     # Convert from microseconds to milliseconds for better readability
-    latency1 = df1['total_latency'].values / 1000.0
-    latency2 = df2['total_latency'].values / 1000.0
+    latency1_us = df1['total_latency'].values.astype(float)
+    latency2_us = df2['total_latency'].values.astype(float)
+    latency1 = latency1_us / 1000.0
+    latency2 = latency2_us / 1000.0
 
     # Handle division by zero
     with np.errstate(divide='ignore', invalid='ignore'):
-        percent_diff = ((latency2 - latency1) / latency1) * 100
+        percent_diff_raw = ((latency2 - latency1) / latency1) * 100
 
-    # Remove infinite and NaN values
-    percent_diff = percent_diff[np.isfinite(percent_diff)]
-
-    if len(percent_diff) == 0:
+    # Filter out rows that produced invalid percent differences and apply the same mask everywhere
+    valid_mask = np.isfinite(percent_diff_raw)
+    if not np.any(valid_mask):
         print("Error: No valid percent differences could be calculated", file=sys.stderr)
         sys.exit(1)
+
+    percent_diff = percent_diff_raw[valid_mask]
+    latency1 = latency1[valid_mask]
+    latency2 = latency2[valid_mask]
+    latency1_us = latency1_us[valid_mask]
+    latency2_us = latency2_us[valid_mask]
+
+    block_numbers = None
+    if 'block_number' in df1.columns and 'block_number' in df2.columns:
+        block_numbers = df1['block_number'].values[valid_mask]
 
     # Calculate statistics once for use in graphs and output
     mean_diff = np.mean(percent_diff)
@@ -220,14 +231,14 @@ def main():
         comparison_color = 'green' if median_diff < 0 else 'red'
 
         # Apply moving average if requested
-        plot_latency1 = latency1[:len(percent_diff)]
-        plot_latency2 = latency2[:len(percent_diff)]
+        plot_latency1 = latency1
+        plot_latency2 = latency2
         
         if args.average:
             plot_latency1 = moving_average(plot_latency1, args.average)
             plot_latency2 = moving_average(plot_latency2, args.average)
-        if 'block_number' in df1.columns and 'block_number' in df2.columns:
-            block_numbers = df1['block_number'].values[:len(percent_diff)]
+
+        if block_numbers is not None:
             ax.plot(block_numbers, plot_latency1, 'orange', alpha=0.7, label=f'Baseline ({args.baseline_csv})')
             ax.plot(block_numbers, plot_latency2, comparison_color, alpha=0.7, label=f'Comparison ({args.comparison_csv})')
             ax.set_xlabel('Block Number')
@@ -270,12 +281,12 @@ def main():
             
         # Calculate gas per second (gas/s)
         # latency is in microseconds, so convert to seconds for gas/s calculation
-        gas1 = df1['gas_used'].values[:len(percent_diff)]
-        gas2 = df2['gas_used'].values[:len(percent_diff)]
+        gas1 = df1['gas_used'].values.astype(float)[valid_mask]
+        gas2 = df2['gas_used'].values.astype(float)[valid_mask]
         
         # Convert latency from microseconds to seconds
-        latency1_sec = df1['total_latency'].values[:len(percent_diff)] / 1_000_000.0
-        latency2_sec = df2['total_latency'].values[:len(percent_diff)] / 1_000_000.0
+        latency1_sec = latency1_us / 1_000_000.0
+        latency2_sec = latency2_us / 1_000_000.0
         
         # Calculate gas per second
         gas_per_sec1 = gas1 / latency1_sec
@@ -295,8 +306,7 @@ def main():
         median_gas_per_sec2 = np.median(original_gas_per_sec2)
         comparison_color = 'green' if median_gas_per_sec2 > median_gas_per_sec1 else 'red'
         
-        if 'block_number' in df1.columns and 'block_number' in df2.columns:
-            block_numbers = df1['block_number'].values[:len(percent_diff)]
+        if block_numbers is not None:
             ax.plot(block_numbers, gas_per_sec1, 'orange', alpha=0.7, label=f'Baseline ({args.baseline_csv})')
             ax.plot(block_numbers, gas_per_sec2, comparison_color, alpha=0.7, label=f'Comparison ({args.comparison_csv})')
             ax.set_xlabel('Block Number')
