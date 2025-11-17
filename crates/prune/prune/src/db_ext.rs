@@ -23,30 +23,17 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
 
         let mut deleted_entries = 0;
 
-        let mut done = true;
-        while keys.peek().is_some() {
-            if let Some(key) = keys.next_if(|_| !limiter.is_limit_reached()) {
-                let row = cursor.seek_exact(key)?;
-                if let Some(row) = row {
-                    cursor.delete_current()?;
-                    limiter.increment_deleted_entries_count();
-                    deleted_entries += 1;
-                    delete_callback(row);
-                }
-            } else {
-                debug!(
-                    target: "providers::db",
-                    ?limiter,
-                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
-                    time_limit = %limiter.is_time_limit_reached(),
-                    table = %T::NAME,
-                    "Pruning limit reached"
-                );
-                done = false;
-                break
+        while let Some(key) = keys.next_if(|_| !limiter.is_limit_reached()) {
+            let row = cursor.seek_exact(key)?;
+            if let Some(row) = row {
+                cursor.delete_current()?;
+                limiter.increment_deleted_entries_count();
+                deleted_entries += 1;
+                delete_callback(row);
             }
         }
 
+        let done = keys.peek().is_none();
         Ok((deleted_entries, done))
     }
 
