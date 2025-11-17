@@ -160,6 +160,11 @@ Networking:
 
           This will also deterministically set the peer ID. If not specified, it will be set in the data dir for the chain being used.
 
+      --p2p-secret-key-hex <HEX>
+          Hex encoded secret key to use for this node.
+
+          This will also deterministically set the peer ID. Cannot be used together with `--p2p-secret-key`.
+
       --no-persist-peers
           Do not persist peers.
 
@@ -179,10 +184,10 @@ Networking:
           [default: 30303]
 
       --max-outbound-peers <MAX_OUTBOUND_PEERS>
-          Maximum number of outbound requests. default: 100
+          Maximum number of outbound peers. default: 100
 
       --max-inbound-peers <MAX_INBOUND_PEERS>
-          Maximum number of inbound requests. default: 30
+          Maximum number of inbound peers. default: 30
 
       --max-tx-reqs <COUNT>
           Max concurrent `GetPooledTransactions` requests.
@@ -245,6 +250,13 @@ Networking:
 
           [default: All]
 
+      --tx-ingress-policy <TX_INGRESS_POLICY>
+          Transaction ingress policy
+
+          Determines which peers' transactions are accepted over P2P.
+
+          [default: All]
+
       --disable-tx-gossip
           Disable transaction pool gossip
 
@@ -258,10 +270,17 @@ Networking:
           [default: sqrt]
 
       --required-block-hashes <REQUIRED_BLOCK_HASHES>
-          Comma separated list of required block hashes. Peers that don't have these blocks will be filtered out
+          Comma separated list of required block hashes or block number=hash pairs. Peers that don't have these blocks will be filtered out. Format: hash or `block_number=hash` (e.g., 23115201=0x1234...)
 
       --network-id <NETWORK_ID>
           Optional network ID to override the chain specification's network ID for P2P connections
+
+      --netrestrict <NETRESTRICT>
+          Restrict network communication to the given IP networks (CIDR masks).
+
+          Comma separated list of CIDR network specifications. Only peers with IP addresses within these ranges will be allowed to connect.
+
+          Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
 
 RPC:
       --http
@@ -537,6 +556,9 @@ TxPool:
       --txpool.blob-cache-size <BLOB_CACHE_SIZE>
           Max number of entries for the in memory cache of the blob store
 
+      --txpool.disable-blobs-support
+          Disable EIP-4844 blob transaction support
+
       --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
 
@@ -649,6 +671,9 @@ Builder:
 
           [default: 3]
 
+      --builder.max-blobs <COUNT>
+          Maximum number of blobs to include per block
+
 Debug:
       --debug.terminate
           Flag indicating whether the node should be terminated after the pipeline sync
@@ -726,7 +751,20 @@ Database:
           [possible values: true, false]
 
       --db.max-size <MAX_SIZE>
-          Maximum database size (e.g., 4TB, 8MB)
+          Maximum database size (e.g., 4TB, 8TB).
+
+          This sets the "map size" of the database. If the database grows beyond this limit, the node will stop with an "environment map size limit reached" error.
+
+          The default value is 8TB.
+
+      --db.page-size <PAGE_SIZE>
+          Database page size (e.g., 4KB, 8KB, 16KB).
+
+          Specifies the page size used by the MDBX database.
+
+          The page size determines the maximum database size. MDBX supports up to 2^31 pages, so with the default 4KB page size, the maximum database size is 8TB. To allow larger databases, increase this value to 8KB or higher.
+
+          WARNING: This setting is only configurable at database creation; changing it later requires re-syncing.
 
       --db.growth-step <GROWTH_STEP>
           Database growth step (e.g., 4GB, 4KB)
@@ -912,6 +950,23 @@ ERA:
 
           The ERA1 files are read from the remote host using HTTP GET requests parsing headers
           and bodies.
+
+Static Files:
+      --static-files.blocks-per-file.headers <BLOCKS_PER_FILE_HEADERS>
+          Number of blocks per file for the headers segment
+
+      --static-files.blocks-per-file.transactions <BLOCKS_PER_FILE_TRANSACTIONS>
+          Number of blocks per file for the transactions segment
+
+      --static-files.blocks-per-file.receipts <BLOCKS_PER_FILE_RECEIPTS>
+          Number of blocks per file for the receipts segment
+
+      --static-files.receipts
+          Store receipts in static files instead of the database.
+
+          When enabled, receipts will be written to static files on disk instead of the database.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
 Ress:
       --ress.enable

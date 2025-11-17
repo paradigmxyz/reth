@@ -42,7 +42,7 @@ use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_db_common::init::{init_genesis, InitStorageError};
+use reth_db_common::init::{init_genesis_with_settings, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
@@ -67,7 +67,7 @@ use reth_node_metrics::{
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
     BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderFactory,
+    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -164,6 +164,9 @@ impl LaunchContext {
 
         // Update the config with the command line arguments
         toml_config.peers.trusted_nodes_only = config.network.trusted_only;
+
+        // Merge static file CLI arguments with config file, giving priority to CLI
+        toml_config.static_files = config.static_files.merge_with_config(toml_config.static_files);
 
         Ok(toml_config)
     }
@@ -464,21 +467,25 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = ProviderFactory::new(
-            self.right().clone(),
-            self.chain_spec(),
-            StaticFileProvider::read_write(self.data_dir().static_files())?,
-        )
-        .with_prune_modes(self.prune_modes())
-        .with_static_files_metrics();
+        // Validate static files configuration
+        let static_files_config = &self.toml_config().static_files;
+        static_files_config.validate()?;
 
-        let has_receipt_pruning = self.toml_config().prune.has_receipts_pruning();
+        // Apply per-segment blocks_per_file configuration
+        let static_file_provider =
+            StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
+                .with_metrics()
+                .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
+                .build()?;
+
+        let factory =
+            ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
+                .with_prune_modes(self.prune_modes());
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
-        if let Some(unwind_target) = factory
-            .static_file_provider()
-            .check_consistency(&factory.provider()?, has_receipt_pruning)?
+        if let Some(unwind_target) =
+            factory.static_file_provider().check_consistency(&factory.provider()?)?
         {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
@@ -617,13 +624,19 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        init_genesis(self.provider_factory())?;
+        init_genesis_with_settings(
+            self.provider_factory(),
+            self.node_config().static_files.to_settings(),
+        )?;
         Ok(self)
     }
 
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
-        init_genesis(self.provider_factory())
+        init_genesis_with_settings(
+            self.provider_factory(),
+            self.node_config().static_files.to_settings(),
+        )
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the

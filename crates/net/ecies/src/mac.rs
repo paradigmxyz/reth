@@ -14,16 +14,7 @@ use alloy_primitives::{B128, B256};
 use block_padding::NoPadding;
 use cipher::BlockEncrypt;
 use digest::KeyInit;
-use generic_array::GenericArray;
 use sha3::{Digest, Keccak256};
-use typenum::U16;
-
-/// Type alias for a fixed-size array of 16 bytes used as headers.
-///
-/// This type is defined as [`GenericArray<u8, U16>`] and is commonly employed in Ethereum `RLPx`
-/// protocol-related structures for headers. It represents 16 bytes of data used in various
-/// cryptographic operations, such as MAC (Message Authentication Code) computation.
-pub type HeaderBytes = GenericArray<u8, U16>;
 
 /// [`Ethereum MAC`](https://github.com/ethereum/devp2p/blob/master/rlpx.md#mac) state.
 ///
@@ -49,8 +40,8 @@ impl MAC {
         self.hasher.update(data)
     }
 
-    /// Accumulate the given [`HeaderBytes`] into the MAC's internal state.
-    pub fn update_header(&mut self, data: &HeaderBytes) {
+    /// Accumulate the given header bytes into the MAC's internal state.
+    pub fn update_header(&mut self, data: &[u8; 16]) {
         let aes = Aes256Enc::new_from_slice(self.secret.as_ref()).unwrap();
         let mut encrypted = self.digest().0;
 

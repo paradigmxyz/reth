@@ -80,30 +80,29 @@ where
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let (tx_range, block_range, is_final_range) =
-            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
-        let end_block = *block_range.end();
-
-        // No transactions to walk over
-        if tx_range.is_empty() {
-            info!(target: "sync::stages::sender_recovery", ?tx_range, "Target transaction already reached");
+        let Some(range_output) =
+            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?
+        else {
+            info!(target: "sync::stages::sender_recovery", "No transaction senders to recover");
             return Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new(end_block)
+                checkpoint: StageCheckpoint::new(input.target())
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-                done: is_final_range,
+                done: true,
             })
-        }
+        };
+        let end_block = *range_output.block_range.end();
 
         // Acquire the cursor for inserting elements
         let mut senders_cursor = provider.tx_ref().cursor_write::<tables::TransactionSenders>()?;
 
-        info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
+        info!(target: "sync::stages::sender_recovery", tx_range = ?range_output.tx_range, "Recovering senders");
 
         // Iterate over transactions in batches, recover the senders and append them
-        let batch = tx_range
+        let batch = range_output
+            .tx_range
             .clone()
             .step_by(BATCH_SIZE)
-            .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, tx_range.end))
+            .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, range_output.tx_range.end))
             .collect::<Vec<Range<u64>>>();
 
         let tx_batch_sender = setup_range_recovery(provider);
@@ -115,7 +114,7 @@ where
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-            done: is_final_range,
+            done: range_output.is_final_range,
         })
     }
 

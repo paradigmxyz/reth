@@ -298,11 +298,12 @@ where
     /// Handler for `eth_getFilterLogs`
     pub async fn filter_logs(&self, id: FilterId) -> Result<Vec<Log>, EthFilterError> {
         let filter = {
-            let filters = self.inner.active_filters.inner.lock().await;
-            if let FilterKind::Log(ref filter) =
-                filters.get(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?.kind
-            {
-                *filter.clone()
+            let mut filters = self.inner.active_filters.inner.lock().await;
+            let filter =
+                filters.get_mut(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
+            if let FilterKind::Log(ref inner_filter) = filter.kind {
+                filter.last_poll_timestamp = Instant::now();
+                *inner_filter.clone()
             } else {
                 // Not a log filter
                 return Err(EthFilterError::FilterNotFound(id))
@@ -1137,7 +1138,7 @@ impl<
 
                 let expected_next = last_header.number() + 1;
                 if peeked.number() != expected_next {
-                    debug!(
+                    trace!(
                         target: "rpc::eth::filter",
                         last_block = last_header.number(),
                         next_block = peeked.number(),

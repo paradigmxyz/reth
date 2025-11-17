@@ -36,6 +36,7 @@ pub(crate) struct BenchmarkResults {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct CombinedLatencyRow {
     pub block_number: u64,
+    pub transaction_count: u64,
     pub gas_used: u64,
     pub new_payload_latency: u128,
 }
@@ -44,6 +45,7 @@ pub(crate) struct CombinedLatencyRow {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct TotalGasRow {
     pub block_number: u64,
+    pub transaction_count: u64,
     pub gas_used: u64,
     pub time: u128,
 }
@@ -57,6 +59,8 @@ pub(crate) struct BenchmarkSummary {
     pub avg_new_payload_latency_ms: f64,
     pub gas_per_second: f64,
     pub blocks_per_second: f64,
+    pub min_block_number: u64,
+    pub max_block_number: u64,
 }
 
 /// Comparison report between two benchmark runs
@@ -90,6 +94,8 @@ pub(crate) struct ComparisonSummary {
 #[derive(Debug, Serialize)]
 pub(crate) struct BlockComparison {
     pub block_number: u64,
+    pub transaction_count: u64,
+    pub gas_used: u64,
     pub baseline_new_payload_latency: u128,
     pub feature_new_payload_latency: u128,
     pub new_payload_latency_change_percent: f64,
@@ -307,6 +313,9 @@ impl ComparisonGenerator {
             0.0
         };
 
+        let min_block_number = combined_data.first().unwrap().block_number;
+        let max_block_number = combined_data.last().unwrap().block_number;
+
         Ok(BenchmarkSummary {
             total_blocks,
             total_gas_used,
@@ -314,6 +323,8 @@ impl ComparisonGenerator {
             avg_new_payload_latency_ms,
             gas_per_second,
             blocks_per_second,
+            min_block_number,
+            max_block_number,
         })
     }
 
@@ -371,6 +382,8 @@ impl ComparisonGenerator {
 
                 let comparison = BlockComparison {
                     block_number: feature_row.block_number,
+                    transaction_count: feature_row.transaction_count,
+                    gas_used: feature_row.gas_used,
                     baseline_new_payload_latency: baseline_row.new_payload_latency,
                     feature_new_payload_latency: feature_row.new_payload_latency,
                     new_payload_latency_change_percent: calc_percent_change(
@@ -436,16 +449,27 @@ impl ComparisonGenerator {
         let summary = &report.comparison_summary;
 
         println!("Performance Changes:");
-        println!("  NewPayload Latency: {:+.2}%", summary.new_payload_latency_change_percent);
-        println!("  Gas/Second:         {:+.2}%", summary.gas_per_second_change_percent);
-        println!("  Blocks/Second:      {:+.2}%", summary.blocks_per_second_change_percent);
+        println!(
+            "  NewPayload Latency: {:+.2}% (total avg change)",
+            summary.new_payload_latency_change_percent
+        );
+        println!(
+            "  Gas/Second:         {:+.2}% (total avg change)",
+            summary.gas_per_second_change_percent
+        );
+        println!(
+            "  Blocks/Second:      {:+.2}% (total avg change)",
+            summary.blocks_per_second_change_percent
+        );
         println!();
 
         println!("Baseline Summary:");
         let baseline = &report.baseline.summary;
         println!(
-            "  Blocks: {}, Gas: {}, Duration: {:.2}s",
+            "  Blocks: {} (blocks {} to {}), Gas: {}, Duration: {:.2}s",
             baseline.total_blocks,
+            baseline.min_block_number,
+            baseline.max_block_number,
             baseline.total_gas_used,
             baseline.total_duration_ms as f64 / 1000.0
         );
@@ -464,8 +488,10 @@ impl ComparisonGenerator {
         println!("Feature Summary:");
         let feature = &report.feature.summary;
         println!(
-            "  Blocks: {}, Gas: {}, Duration: {:.2}s",
+            "  Blocks: {} (blocks {} to {}), Gas: {}, Duration: {:.2}s",
             feature.total_blocks,
+            feature.min_block_number,
+            feature.max_block_number,
             feature.total_gas_used,
             feature.total_duration_ms as f64 / 1000.0
         );

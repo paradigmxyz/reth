@@ -15,7 +15,6 @@ workspace = true
 ## reth
 reth-chain-state.workspace = true
 reth-chainspec.workspace = true
-reth-cli-util.workspace = true
 reth-config.workspace = true
 reth-consensus-debug-client.workspace = true
 reth-consensus.workspace = true

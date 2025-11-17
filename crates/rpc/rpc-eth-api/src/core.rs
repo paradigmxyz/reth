@@ -827,7 +827,7 @@ where
     /// Handler for: `eth_sendTransaction`
     async fn send_transaction(&self, request: RpcTxReq<T::NetworkTypes>) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?request, "Serving eth_sendTransaction");
-        Ok(EthTransactions::send_transaction(self, request).await?)
+        Ok(EthTransactions::send_transaction_request(self, request).await?)
     }
 
     /// Handler for: `eth_sendRawTransaction`

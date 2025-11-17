@@ -583,8 +583,14 @@ mod tests {
         // await recheck timeout
         tokio::time::sleep(config.recheck_interval).await;
 
+        let mut new_root = root.clone();
+        new_root.sequence_number = new_root.sequence_number.saturating_add(1);
+        new_root.enr_root = "NEW_ENR_ROOT".to_string();
+        new_root.sign(&secret_key).unwrap();
+        resolver.insert(link.domain.clone(), new_root.to_string());
+
         let enr = Enr::empty(&secret_key).unwrap();
-        resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
+        resolver.insert(format!("{}.{}", new_root.enr_root.clone(), link.domain), enr.to_base64());
 
         let event = poll_fn(|cx| service.poll(cx)).await;
 
