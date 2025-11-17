@@ -61,7 +61,7 @@ mod tests {
         test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
-    use alloy_primitives::{map::HashMap, BlockHash, Signature, TxNumber, B256};
+    use alloy_primitives::{BlockHash, Signature, TxNumber, B256};
     use rand::seq::SliceRandom;
     use reth_db::test_utils::create_test_static_files_dir;
     use reth_db_api::{transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};
@@ -391,11 +391,12 @@ mod tests {
         });
 
         // Ensure transaction index
-        let tx_index = sf_rw.tx_index().read();
-        let expected_tx_index =
-            vec![(8, SegmentRangeInclusive::new(0, 9)), (9, SegmentRangeInclusive::new(20, 29))];
+        let expected_tx_index = BTreeMap::from([
+            (8, SegmentRangeInclusive::new(0, 9)),
+            (9, SegmentRangeInclusive::new(20, 29)),
+        ]);
         assert_eq!(
-            tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+            sf_rw.tx_index(segment),
             (!expected_tx_index.is_empty()).then_some(expected_tx_index),
             "tx index mismatch",
         );
@@ -418,7 +419,7 @@ mod tests {
             last_block: u64,
             expected_tx_tip: Option<u64>,
             expected_file_count: i32,
-            expected_tx_index: Vec<(TxNumber, SegmentRangeInclusive)>,
+            expected_tx_index: BTreeMap<TxNumber, SegmentRangeInclusive>,
         ) -> eyre::Result<()> {
             let mut writer = sf_rw.latest_writer(segment)?;
 
@@ -466,9 +467,8 @@ mod tests {
             )?;
 
             // Ensure that the inner tx index (max_tx -> block range) is as expected
-            let tx_index = sf_rw.tx_index().read();
             assert_eyre(
-                tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+                sf_rw.tx_index(segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
                 (!expected_tx_index.is_empty()).then_some(expected_tx_index),
                 "tx index mismatch",
             )?;
@@ -506,7 +506,7 @@ mod tests {
                     blocks_per_file * 2,
                     Some(highest_tx - 1),
                     initial_file_count,
-                    vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
+                    BTreeMap::from([(highest_tx - 1, SegmentRangeInclusive::new(0, 9))]),
                 ),
                 // Case 1: 10..=19 has no txs. There are no txes in the whole block range, but want
                 // to unwind to block 9. Ensures that the 20..=29 and 10..=19 files
@@ -516,7 +516,7 @@ mod tests {
                     blocks_per_file - 1,
                     Some(highest_tx - 1),
                     files_per_range,
-                    vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
+                    BTreeMap::from([(highest_tx - 1, SegmentRangeInclusive::new(0, 9))]),
                 ),
                 // Case 2: Prune most txs up to block 1.
                 (
@@ -524,10 +524,10 @@ mod tests {
                     1,
                     Some(0),
                     files_per_range,
-                    vec![(0, SegmentRangeInclusive::new(0, 1))],
+                    BTreeMap::from([(0, SegmentRangeInclusive::new(0, 1))]),
                 ),
                 // Case 3: Prune remaining tx and ensure that file is not deleted.
-                (1, 0, None, files_per_range, vec![]),
+                (1, 0, None, files_per_range, BTreeMap::from([])),
             ];
 
             // Loop through test cases
@@ -584,14 +584,11 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=15)?.len(), 16);
             assert_eq!(
-                sf_rw.expected_block_index().read().deref(),
-                &HashMap::from([(
-                    StaticFileSegment::Headers,
-                    BTreeMap::from([
-                        (9, SegmentRangeInclusive::new(0, 9)),
-                        (19, SegmentRangeInclusive::new(10, 19))
-                    ])
-                )])
+                sf_rw.expected_block_index(StaticFileSegment::Headers),
+                Some(BTreeMap::from([
+                    (9, SegmentRangeInclusive::new(0, 9)),
+                    (19, SegmentRangeInclusive::new(10, 19))
+                ])),
             )
         }
 
@@ -610,15 +607,12 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=22)?.len(), 23);
             assert_eq!(
-                sf_rw.expected_block_index().read().deref(),
-                &HashMap::from([(
-                    StaticFileSegment::Headers,
-                    BTreeMap::from([
-                        (9, SegmentRangeInclusive::new(0, 9)),
-                        (19, SegmentRangeInclusive::new(10, 19)),
-                        (24, SegmentRangeInclusive::new(20, 24))
-                    ])
-                )])
+                sf_rw.expected_block_index(StaticFileSegment::Headers),
+                Some(BTreeMap::from([
+                    (9, SegmentRangeInclusive::new(0, 9)),
+                    (19, SegmentRangeInclusive::new(10, 19)),
+                    (24, SegmentRangeInclusive::new(20, 24))
+                ]))
             )
         }
 
@@ -637,17 +631,14 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=40)?.len(), 41);
             assert_eq!(
-                sf_rw.expected_block_index().read().deref(),
-                &HashMap::from([(
-                    StaticFileSegment::Headers,
-                    BTreeMap::from([
-                        (9, SegmentRangeInclusive::new(0, 9)),
-                        (19, SegmentRangeInclusive::new(10, 19)),
-                        (24, SegmentRangeInclusive::new(20, 24)),
-                        (39, SegmentRangeInclusive::new(25, 39)),
-                        (54, SegmentRangeInclusive::new(40, 54))
-                    ])
-                )])
+                sf_rw.expected_block_index(StaticFileSegment::Headers),
+                Some(BTreeMap::from([
+                    (9, SegmentRangeInclusive::new(0, 9)),
+                    (19, SegmentRangeInclusive::new(10, 19)),
+                    (24, SegmentRangeInclusive::new(20, 24)),
+                    (39, SegmentRangeInclusive::new(25, 39)),
+                    (54, SegmentRangeInclusive::new(40, 54))
+                ]))
             )
         }
 
