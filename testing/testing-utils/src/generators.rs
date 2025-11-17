@@ -345,7 +345,7 @@ where
                 let old = if entry.value.is_zero() {
                     let old = storage.remove(&entry.key);
                     if matches!(old, Some(U256::ZERO)) {
-                        return None;
+                        return None
                     }
                     old
                 } else {
@@ -541,7 +541,7 @@ mod tests {
         let transaction = Transaction::Legacy(tx.clone());
 
         let expected = hex!("ec098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a764000080018080");
-        assert_eq!(expected.to_vec(), alloy_rlp::encode(tx));
+        assert_eq!(expected.as_slice(), &alloy_rlp::encode(tx));
 
         let hash = transaction.signature_hash();
         let expected =
