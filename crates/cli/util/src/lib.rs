@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod allocator;
+pub mod cancellation;
 
 /// Helper function to load a secret key from a file.
 pub mod load_secret_key;
