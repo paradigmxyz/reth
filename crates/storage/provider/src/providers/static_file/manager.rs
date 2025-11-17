@@ -51,6 +51,10 @@ use std::{
 };
 use tracing::{debug, info, trace, warn};
 
+/// Alias type for a map that can be queried for block or transaction ranges. It uses `u64` to
+/// represent either a block or a transaction number end of a static file range.
+type SegmentRanges = BTreeMap<u64, SegmentRangeInclusive>;
+
 /// Access mode on a static file provider. RO/RW.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub enum StaticFileAccess {
@@ -282,6 +286,7 @@ pub struct StaticFileProviderInner<N> {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     jars: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
+    /// Indexes per segment.
     indexes: RwLock<HashMap<StaticFileSegment, StaticFileSegmentIndex>>,
     /// This is an additional index that tracks the expired height, this will track the highest
     /// block number that has been expired (missing). The first, non expired block is
@@ -352,7 +357,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     pub fn find_fixed_range_with_block_index(
         &self,
         segment: StaticFileSegment,
-        expected_block_index: Option<&BTreeMap<u64, SegmentRangeInclusive>>,
+        expected_block_index: Option<&SegmentRanges>,
         block: BlockNumber,
     ) -> SegmentRangeInclusive {
         let blocks_per_file =
@@ -1520,10 +1525,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Returns `static_files` transaction index
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn tx_index(
-        &self,
-        segment: StaticFileSegment,
-    ) -> Option<BTreeMap<u64, SegmentRangeInclusive>> {
+    pub fn tx_index(&self, segment: StaticFileSegment) -> Option<SegmentRanges> {
         self.indexes
             .read()
             .get(&segment)
@@ -1533,10 +1535,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Returns `static_files` expected block index
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn expected_block_index(
-        &self,
-        segment: StaticFileSegment,
-    ) -> Option<BTreeMap<u64, SegmentRangeInclusive>> {
+    pub fn expected_block_index(&self, segment: StaticFileSegment) -> Option<SegmentRanges> {
         self.indexes
             .read()
             .get(&segment)
@@ -1547,31 +1546,33 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
 #[derive(Debug)]
 struct StaticFileSegmentIndex {
-    /// Min static file range for each segment.
+    /// Min static file range.
+    ///
     /// This index is initialized on launch to keep track of the lowest, non-expired static file
-    /// per segment and gets updated on `Self::update_index()`.
+    /// per segment and gets updated on [`StaticFileProvider::update_index`].
     ///
     /// This tracks the lowest static file per segment together with the block range in that
     /// file. E.g. static file is batched in 500k block intervals then the lowest static file
     /// is [0..499K], and the block range is start = 0, end = 499K.
-    /// This index is mainly used to History expiry, which targets transactions, e.g. pre-merge
+    ///
+    /// This index is mainly used for history expiry, which targets transactions, e.g. pre-merge
     /// history expiry would lead to removing all static files below the merge height.
     min_block_range: Option<SegmentRangeInclusive>,
-    /// Max static file block for each segment
+    /// Max static file block.
     max_block: u64,
-    /// Expected on disk static file block ranges indexed by max expected blocks.
+    /// Expected static file block ranges indexed by max expected blocks.
     ///
     /// For example, a static file for expected block range `0..=499_000` may have only block range
-    /// `0..=1000` contained in it, as it wasn't fully filled yet. This index maps the max expected
+    /// `0..=1000` contained in it, as it's not fully filled yet. This index maps the max expected
     /// block to the expected range, i.e. block `499_000` to block range `0..=499_000`.
-    expected_block_range_by_max_expected_block: BTreeMap<u64, SegmentRangeInclusive>,
+    expected_block_range_by_max_expected_block: SegmentRanges,
     /// Available on disk static file block ranges indexed by max transactions.
     ///
     /// For example, a static file for block range `0..=499_000` may only have block range
     /// `0..=1000` and transaction range `0..=2000` contained in it. This index maps the max
     /// available transaction to the available block range, i.e. transaction `2000` to block range
     /// `0..=1000`.
-    available_block_range_by_max_tx: Option<BTreeMap<u64, SegmentRangeInclusive>>,
+    available_block_range_by_max_tx: Option<SegmentRanges>,
 }
 
 /// Helper trait to manage different [`StaticFileProviderRW`] of an `Arc<StaticFileProvider`
