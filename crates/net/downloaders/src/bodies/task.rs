@@ -146,21 +146,24 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
                 }
             }
 
-            match ready!(this.bodies_tx.poll_reserve(cx)) {
-                Ok(()) => match ready!(this.downloader.poll_next_unpin(cx)) {
-                    Some(bodies) => {
-                        if this.bodies_tx.send_item(bodies).is_err() {
+            match this.downloader.poll_next_unpin(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(None) => return Poll::Ready(()),
+                Poll::Ready(Some(bodies)) => {
+                    match ready!(this.bodies_tx.poll_reserve(cx)) {
+                        Ok(()) => {
+                            if this.bodies_tx.send_item(bodies).is_err() {
+                                // channel closed, this means [TaskDownloader] was dropped, so we
+                                // can also exit
+                                return Poll::Ready(())
+                            }
+                        }
+                        Err(_) => {
                             // channel closed, this means [TaskDownloader] was dropped, so we can
                             // also exit
                             return Poll::Ready(())
                         }
                     }
-                    None => return Poll::Pending,
-                },
-                Err(_) => {
-                    // channel closed, this means [TaskDownloader] was dropped, so we can also
-                    // exit
-                    return Poll::Ready(())
                 }
             }
         }
