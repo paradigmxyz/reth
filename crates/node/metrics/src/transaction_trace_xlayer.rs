@@ -46,11 +46,11 @@ pub enum NodeType {
 
 impl NodeType {
     /// Returns the string representation of the node type
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            NodeType::Sequencer => "sequencer",
-            NodeType::Rpc => "rpc",
-            NodeType::Unknown => "unknown",
+            Self::Sequencer => "sequencer",
+            Self::Rpc => "rpc",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -85,33 +85,33 @@ pub enum TransactionProcessId {
 
 impl TransactionProcessId {
     /// Returns the string representation of the process ID
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            TransactionProcessId::RpcReceiveTxEnd => "xlayer_rpc_receive_tx",
-            TransactionProcessId::SeqReceiveTxEnd => "xlayer_seq_receive_tx",
-            TransactionProcessId::SeqBlockBuildStart => "xlayer_seq_begin_block",
-            TransactionProcessId::SeqTxExecutionEnd => "xlayer_seq_package_tx",
-            TransactionProcessId::SeqBlockBuildEnd => "xlayer_seq_end_block",
-            TransactionProcessId::SeqBlockSendStart => "xlayer_seq_ds_sent",
-            TransactionProcessId::RpcBlockReceiveEnd => "xlayer_rpc_receive_block",
-            TransactionProcessId::RpcBlockInsertEnd => "xlayer_rpc_finish_block",
+            Self::RpcReceiveTxEnd => "xlayer_rpc_receive_tx",
+            Self::SeqReceiveTxEnd => "xlayer_seq_receive_tx",
+            Self::SeqBlockBuildStart => "xlayer_seq_begin_block",
+            Self::SeqTxExecutionEnd => "xlayer_seq_package_tx",
+            Self::SeqBlockBuildEnd => "xlayer_seq_end_block",
+            Self::SeqBlockSendStart => "xlayer_seq_ds_sent",
+            Self::RpcBlockReceiveEnd => "xlayer_rpc_receive_block",
+            Self::RpcBlockInsertEnd => "xlayer_rpc_finish_block",
         }
     }
 
     /// Returns the service name based on the process ID
-    pub fn service_name(&self) -> &'static str {
+    pub const fn service_name(&self) -> &'static str {
         match self {
             // RPC-related process IDs
-            TransactionProcessId::RpcReceiveTxEnd |
-            TransactionProcessId::RpcBlockReceiveEnd |
-            TransactionProcessId::RpcBlockInsertEnd => RPC_SERVICE_NAME,
+            Self::RpcReceiveTxEnd | Self::RpcBlockReceiveEnd | Self::RpcBlockInsertEnd => {
+                RPC_SERVICE_NAME
+            }
 
             // Sequencer-related process IDs
-            TransactionProcessId::SeqReceiveTxEnd |
-            TransactionProcessId::SeqBlockBuildStart |
-            TransactionProcessId::SeqTxExecutionEnd |
-            TransactionProcessId::SeqBlockBuildEnd |
-            TransactionProcessId::SeqBlockSendStart => SEQ_SERVICE_NAME,
+            Self::SeqReceiveTxEnd |
+            Self::SeqBlockBuildStart |
+            Self::SeqTxExecutionEnd |
+            Self::SeqBlockBuildEnd |
+            Self::SeqBlockSendStart => SEQ_SERVICE_NAME,
         }
     }
 }
@@ -137,23 +137,22 @@ impl TransactionTracer {
     pub fn new(enabled: bool, output_path: Option<PathBuf>, node_type: NodeType) -> Self {
         let output_file = if let Some(ref path) = output_path {
             let file_path = if path.to_string_lossy().ends_with('/') ||
-                path.to_string_lossy().ends_with('\\')
+                path.to_string_lossy().ends_with('\\') ||
+                (path.extension().is_none() && !path.exists())
             {
-                path.join("trace.log")
-            } else if path.extension().is_none() && !path.exists() {
                 path.join("trace.log")
             } else {
                 path.clone()
             };
-            if let Some(parent) = file_path.parent() {
-                if let Err(e) = fs::create_dir_all(parent) {
-                    tracing::warn!(
-                        target: "tx_trace",
-                        ?parent,
-                        error = %e,
-                        "Failed to create transaction trace output directory"
-                    );
-                }
+            if let Some(parent) = file_path.parent() &&
+                let Err(e) = fs::create_dir_all(parent)
+            {
+                tracing::warn!(
+                    target: "tx_trace",
+                    ?parent,
+                    error = %e,
+                    "Failed to create transaction trace output directory"
+                );
             }
 
             match OpenOptions::new().create(true).append(true).open(&file_path) {
@@ -200,7 +199,7 @@ impl TransactionTracer {
         match self.inner.output_file.lock() {
             Ok(mut file_guard) => {
                 if let Some(ref mut file) = *file_guard {
-                    if let Err(e) = writeln!(file, "{}", csv_line) {
+                    if let Err(e) = writeln!(file, "{csv_line}") {
                         tracing::warn!(
                             target: "tx_trace",
                             error = %e,
@@ -214,7 +213,7 @@ impl TransactionTracer {
                             let now = Instant::now();
                             let time_since_flush = now.duration_since(*last_flush);
 
-                            if count % FLUSH_INTERVAL_WRITES == 0 ||
+                            if count.is_multiple_of(FLUSH_INTERVAL_WRITES) ||
                                 time_since_flush.as_secs() >= FLUSH_INTERVAL_SECONDS
                             {
                                 *last_flush = now;
@@ -224,14 +223,12 @@ impl TransactionTracer {
                             }
                         };
 
-                        if should_flush {
-                            if let Err(e) = file.flush() {
-                                tracing::warn!(
-                                    target: "tx_trace",
-                                    error = %e,
-                                    "Failed to flush transaction trace file"
-                                );
-                            }
+                        if should_flush && let Err(e) = file.flush() {
+                            tracing::warn!(
+                                target: "tx_trace",
+                                error = %e,
+                                "Failed to flush transaction trace file"
+                            );
                         }
                     }
                 }
@@ -250,14 +247,14 @@ impl TransactionTracer {
     pub fn flush(&self) {
         match self.inner.output_file.lock() {
             Ok(mut file_guard) => {
-                if let Some(ref mut file) = *file_guard {
-                    if let Err(e) = file.flush() {
-                        tracing::warn!(
-                            target: "tx_trace",
-                            error = %e,
-                            "Failed to flush transaction trace file on shutdown"
-                        );
-                    }
+                if let Some(ref mut file) = *file_guard &&
+                    let Err(e) = file.flush()
+                {
+                    tracing::warn!(
+                        target: "tx_trace",
+                        error = %e,
+                        "Failed to flush transaction trace file on shutdown"
+                    );
                 }
             }
             Err(e) => {
@@ -303,7 +300,7 @@ impl TransactionTracer {
         let contract_address = "";
         let block_height = block_number.map(|n| n.to_string()).unwrap_or_default();
         let block_hash_str =
-            block_hash.map(|h| format!("{:#x}", h).to_lowercase()).unwrap_or_default();
+            block_hash.map(|h| format!("{h:#x}").to_lowercase()).unwrap_or_default();
         let block_time = "";
         let deposit_confirm_height = "";
         let token_id = "";
@@ -354,7 +351,7 @@ impl TransactionTracer {
         let timestamp_duration =
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
         let timestamp_ms = timestamp_duration.as_millis();
-        let trace_hash = format!("{:#x}", tx_hash);
+        let trace_hash = format!("{tx_hash:#x}");
 
         let csv_line =
             self.format_csv_line(&trace_hash, process_id, timestamp_ms, None, block_number);
@@ -401,7 +398,7 @@ impl TransactionTracer {
         let timestamp_duration =
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
         let timestamp_ms = timestamp_duration.as_millis();
-        let trace_hash = format!("{:#x}", block_hash);
+        let trace_hash = format!("{block_hash:#x}");
 
         let csv_line = self.format_csv_line(
             &trace_hash,
@@ -437,7 +434,7 @@ impl TransactionTracer {
             return;
         }
 
-        let trace_hash = format!("{:#x}", block_hash);
+        let trace_hash = format!("{block_hash:#x}");
 
         let csv_line = self.format_csv_line(
             &trace_hash,

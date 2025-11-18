@@ -344,11 +344,12 @@ impl OpHardforks for OpChainSpec {
 impl From<Genesis> for OpChainSpec {
     fn from(mut genesis: Genesis) -> Self {
         // If legacyXLayerBlock is specified in config, override genesis.number
-        if let Some(legacy_block_value) = genesis.config.extra_fields.get("legacyXLayerBlock") {
-            if let Some(legacy_block) = legacy_block_value.as_u64() {
-                genesis.number = Some(legacy_block);
-            }
+        if let Some(legacy_block_value) = genesis.config.extra_fields.get("legacyXLayerBlock") &&
+            let Some(legacy_block) = legacy_block_value.as_u64()
+        {
+            genesis.number = Some(legacy_block);
         }
+
         use reth_optimism_forks::OpHardfork;
         let optimism_genesis_info = OpGenesisInfo::extract_from(&genesis);
         let genesis_info =

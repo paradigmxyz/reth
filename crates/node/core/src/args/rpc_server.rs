@@ -254,11 +254,11 @@ pub struct RpcServerArgs {
     #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
 
-    /// XLayer: Legacy RPC endpoint URL for routing historical data
+    /// `XLayer`: Legacy RPC endpoint URL for routing historical data
     #[arg(long = "rpc.legacy-url", value_name = "URL")]
     pub legacy_rpc_url: Option<String>,
 
-    /// XLayer: Timeout for legacy RPC requests
+    /// `XLayer`: Timeout for legacy RPC requests
     #[arg(
         long = "rpc.legacy-timeout",
         value_name = "DURATION",
@@ -267,7 +267,7 @@ pub struct RpcServerArgs {
     )]
     pub legacy_rpc_timeout: Option<String>,
 
-    /// XLayer: Cutoff block (auto-derived from genesis, internal use only)
+    /// `XLayer`: Cutoff block (auto-derived from genesis, internal use only)
     #[arg(skip)]
     pub legacy_cutoff_block: Option<u64>,
 

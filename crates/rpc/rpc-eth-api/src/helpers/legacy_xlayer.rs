@@ -1,4 +1,4 @@
-//! XLayer: Legacy RPC routing utilities
+//! `XLayer`: Legacy RPC routing utilities
 
 use alloy_eips::BlockId;
 use alloy_rpc_types_eth::BlockNumberOrTag;
@@ -18,15 +18,16 @@ pub fn should_route_to_legacy(
     legacy_client: Option<&std::sync::Arc<reth_rpc_eth_types::LegacyRpcClient>>,
     number: BlockNumberOrTag,
 ) -> bool {
-    if let Some(client) = legacy_client {
-        if let BlockNumberOrTag::Number(n) = number {
-            return n < client.cutoff_block();
-        }
+    if let Some(client) = legacy_client &&
+        let BlockNumberOrTag::Number(n) = number
+    {
+        return n < client.cutoff_block();
     }
+
     false
 }
 
-/// Check if a BlockId should be routed to legacy RPC based on cutoff_block
+/// Check if a `BlockId` should be routed to legacy RPC based on `cutoff_block`
 #[inline]
 pub fn should_route_block_id_to_legacy<Provider>(
     legacy_client: Option<&std::sync::Arc<reth_rpc_eth_types::LegacyRpcClient>>,
@@ -43,7 +44,7 @@ where
     Ok(match block_id {
         Some(BlockId::Number(number)) => should_route_to_legacy(legacy_client, *number),
         Some(BlockId::Hash(hash)) => {
-            !provider.block_number(hash.block_hash).map_err(internal_rpc_err)?.is_some()
+            provider.block_number(hash.block_hash).map_err(internal_rpc_err)?.is_none()
         }
         None => false,
     })
@@ -109,7 +110,7 @@ where
     }
 }
 
-/// Route a request by BlockNumberOrTag to legacy RPC if below cutoff
+/// Route a request by `BlockNumberOrTag` to legacy RPC if below cutoff
 #[macro_export]
 macro_rules! route_by_number {
     ($method:literal, $self:ident, $number:ident, $legacy_call:expr, $local_expr:expr) => {{
@@ -123,7 +124,7 @@ macro_rules! route_by_number {
     }};
 }
 
-/// Route a request by BlockId to legacy RPC if below cutoff
+/// Route a request by `BlockId` to legacy RPC if below cutoff
 #[macro_export]
 macro_rules! route_by_block_id {
     ($method:literal, $self:ident, $block_id:ident, $legacy_call:expr, $local_expr:expr) => {{
@@ -137,7 +138,7 @@ macro_rules! route_by_block_id {
     }};
 }
 
-/// Route by optional BlockId (for state queries)
+/// Route by optional `BlockId` (for state queries)
 #[macro_export]
 macro_rules! route_by_block_id_opt {
     ($method:literal, $self:ident, $block_id:ident, $legacy_call:expr, $local_expr:expr) => {{

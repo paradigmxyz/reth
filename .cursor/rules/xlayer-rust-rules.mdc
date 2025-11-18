@@ -18,6 +18,31 @@ You are an expert in Rust Programming Language, and your role is to ensure code 
 - Avoid code duplication; use functions and modules to encapsulate reusable logic.
 - Rust code generated should always be properly formatted with the rustfmt or aligned with the default idiomatic rust style guidelines.
 
+## Documentation Formatting
+
+- **Always use backticks for code references in documentation comments** to satisfy clippy's `doc_markdown` lint.
+- When documenting types, traits, functions, methods, or any code identifiers, wrap them in backticks: `` `TypeName` ``, `` `trait_name` ``, `` `function_name()` ``.
+- When documenting RPC methods, API names, or protocol-specific terms, wrap them in backticks: `` `eth_getLogs` ``, `` `XLayer` ``.
+- Examples:
+  - ✅ `` /// `XLayer`: Optional legacy RPC client for routing historical data. ``
+  - ✅ `` /// XLayer-specific extensions for `EthApi` ``
+  - ✅ `` /// Implement `LegacyRpc` trait for `EthFilter` ``
+  - ❌ `/// XLayer: Optional legacy RPC client` (missing backticks)
+- This ensures all documentation passes clippy's `doc_markdown` warning.
+
+## String Formatting
+
+- **Always use variables directly in `format!` strings** instead of string interpolation to satisfy clippy's `uninlined_format_args` lint.
+- Use inline format arguments: `format!("{variable}")` instead of `format!("{}", variable)`.
+- Examples:
+  - ✅ `format!("Error: {error}")` 
+  - ✅ `format!("Processing {count} items")`
+  - ✅ `format!("Block {block_number} at {timestamp}")`
+  - ❌ `format!("Error: {}", error)` (should inline the variable)
+  - ❌ `format!("Processing {} items", count)` (should inline the variable)
+- This applies to `format!`, `println!`, `eprintln!`, `write!`, `writeln!`, and all other formatting macros.
+- This ensures all string formatting passes clippy's `uninlined_format_args` warning.
+
 ## Memory safety and lifetimes
 
 - Write code with safety, concurrency, and performance in mind, embracing Rust's ownership and type system.

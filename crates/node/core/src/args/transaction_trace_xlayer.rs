@@ -4,7 +4,7 @@ use clap::Args;
 use std::path::PathBuf;
 
 /// Transaction tracing parameters
-#[derive(Debug, Clone, Args, PartialEq, Eq)]
+#[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[command(next_help_heading = "Transaction Trace")]
 pub struct TransactionTraceArgs {
     /// Enable transaction tracing
@@ -17,12 +17,6 @@ pub struct TransactionTraceArgs {
     /// appended. Otherwise, the path is used directly as the output file.
     #[arg(long = "tx-trace.output-path", help_heading = "Transaction Trace", value_name = "PATH")]
     pub output_path: Option<PathBuf>,
-}
-
-impl Default for TransactionTraceArgs {
-    fn default() -> Self {
-        Self { enable: false, output_path: None }
-    }
 }
 
 #[cfg(test)]

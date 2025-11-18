@@ -576,7 +576,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
-    /// Appends header to static file without calling increment_block.
+    /// Appends header to static file without calling `increment_block`.
     /// This is useful for genesis blocks with non-zero block numbers.
     pub fn append_header_direct(
         &mut self,

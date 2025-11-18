@@ -33,6 +33,7 @@ const XLAYER_MAINNET_CHAIN_ID: u64 = 196;
 /// These values come from `config.optimism` in `genesis-mainnet.json`:
 /// - `eip1559Denominator = 100000000`
 /// - `eip1559Elasticity = 1`
+///
 /// They are inlined here so the built-in spec stays consistent with the full genesis.
 const XLAYER_MAINNET_BASE_FEE_DENOMINATOR: u128 = 100_000_000;
 const XLAYER_MAINNET_BASE_FEE_ELASTICITY: u128 = 1;
