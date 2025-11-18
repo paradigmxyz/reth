@@ -152,23 +152,27 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
                 }
             }
 
-            match ready!(this.headers_tx.poll_reserve(cx)) {
-                Ok(()) => {
-                    match ready!(this.downloader.poll_next_unpin(cx)) {
-                        Some(headers) => {
+            match this.downloader.poll_next_unpin(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(None) => {
+                    // inner downloader completed, we can terminate this task as well
+                    return Poll::Ready(())
+                }
+                Poll::Ready(Some(headers)) => {
+                    match ready!(this.headers_tx.poll_reserve(cx)) {
+                        Ok(()) => {
                             if this.headers_tx.send_item(headers).is_err() {
                                 // channel closed, this means [TaskDownloader] was dropped, so we
                                 // can also exit
                                 return Poll::Ready(())
                             }
                         }
-                        None => return Poll::Pending,
+                        Err(_) => {
+                            // channel closed, this means [TaskDownloader] was dropped, so
+                            // we can also exit
+                            return Poll::Ready(())
+                        }
                     }
-                }
-                Err(_) => {
-                    // channel closed, this means [TaskDownloader] was dropped, so
-                    // we can also exit
-                    return Poll::Ready(())
                 }
             }
         }
