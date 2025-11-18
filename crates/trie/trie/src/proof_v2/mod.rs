@@ -111,9 +111,6 @@ where
 /// A proof calculator for storage tries.
 pub type StorageProofCalculator<TC, HC> = ProofCalculator<TC, HC, StorageValueEncoder>;
 
-/// Static storage value encoder instance used by all storage proofs.
-static STORAGE_VALUE_ENCODER: StorageValueEncoder = StorageValueEncoder;
-
 impl<TC, HC> StorageProofCalculator<TC, HC>
 where
     TC: TrieStorageCursor,
@@ -139,6 +136,9 @@ where
         hashed_address: B256,
         targets: impl IntoIterator<Item = B256>,
     ) -> Result<Vec<SparseTrieNode>, StateProofError> {
+        /// Static storage value encoder instance used by all storage proofs.
+        static STORAGE_VALUE_ENCODER: StorageValueEncoder = StorageValueEncoder;
+
         self.hashed_cursor.set_hashed_address(hashed_address);
 
         // Shortcut: check if storage is empty
