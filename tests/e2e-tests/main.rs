@@ -35,7 +35,7 @@ async fn test_send_transaction() {
 #[case::eth_get_storage_at("EthGetStorageAt")]
 #[tokio::test]
 async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
-    let client = operations::create_test_client();
+    let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
     let test_address = operations::manager::DEFAULT_RICH_ADDRESS;
 
     match test_name {
@@ -53,7 +53,7 @@ async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
             // The result can be either false (not syncing) or an object with sync info
         }
         "EthGetBalance" => {
-            let balance = operations::get_balance(&client, test_address)
+            let balance = operations::get_balance(&client, test_address, None)
                 .await
                 .expect("Failed to get balance");
 
@@ -61,7 +61,7 @@ async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
             assert!(balance > U256::ZERO, "Balance should be greater than 0");
         }
         "EthGetCode" => {
-            let code = operations::eth_get_code(&client, test_address, "latest")
+            let code = operations::eth_get_code(&client, test_address, None)
                 .await
                 .expect("Failed to get code");
 
@@ -77,7 +77,7 @@ async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
             println!("EthBlockNumber result: {}", block_number);
         }
         "EthGetTransactionCount" => {
-            let tx_count = operations::eth_get_transaction_count(&client, test_address, "latest")
+            let tx_count = operations::eth_get_transaction_count(&client, test_address, None)
                 .await
                 .expect("Failed to get transaction count");
 
@@ -92,7 +92,7 @@ async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
             println!("EthGasPrice result: {}", gas_price);
         }
         "EthGetStorageAt" => {
-            let storage = operations::eth_get_storage_at(&client, test_address, "0x0", "latest")
+            let storage = operations::eth_get_storage_at(&client, test_address, "0x0", None)
                 .await
                 .expect("Failed to get storage");
 
@@ -110,7 +110,7 @@ async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
 #[case::trace_transaction("DebugTraceTransaction")]
 #[tokio::test]
 async fn test_debug_trace_rpc(#[case] test_name: &str) {
-    let client = operations::create_test_client();
+    let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
 
     // Wait for blocks to be mined
     let block_number = operations::wait_for_blocks(&client, 3).await;
@@ -119,41 +119,57 @@ async fn test_debug_trace_rpc(#[case] test_name: &str) {
     match test_name {
         "DebugTraceBlockByHash" => {
             // Get block by number to extract hash
-            let block = operations::eth_get_block_by_number(&client, block_number, false)
-                .await
-                .expect("Failed to get block");
+            let block = operations::eth_get_block_by_number_or_hash(
+                &client,
+                operations::BlockId::Number(block_number),
+                false,
+            )
+            .await
+            .expect("Failed to get block");
 
             let block_hash = block["hash"].as_str().expect("Block hash should not be empty");
 
             assert_ne!(block_hash, "", "Block hash should not be empty");
 
             // Test debug_traceBlockByHash
-            let trace_result = operations::debug_trace_block_by_hash(&client, block_hash)
-                .await
-                .expect("Failed to trace block by hash");
+            let trace_result = operations::debug_trace_block(
+                &client,
+                operations::BlockId::Hash(block_hash.to_string()),
+            )
+            .await
+            .expect("Failed to trace block by hash");
 
             assert!(!trace_result.is_null(), "Trace result should not be null");
         }
         "DebugTraceBlockByNumber" => {
             // Test debug_traceBlockByNumber
-            let trace_result = operations::debug_trace_block_by_number(&client, block_number)
-                .await
-                .expect("Failed to trace block by number");
+            let trace_result =
+                operations::debug_trace_block(&client, operations::BlockId::Number(block_number))
+                    .await
+                    .expect("Failed to trace block by number");
 
             assert!(!trace_result.is_null(), "Trace result should not be null");
         }
         "DebugTraceTransaction" => {
             // Get block by number to extract hash
-            let block = operations::eth_get_block_by_number(&client, block_number, false)
-                .await
-                .expect("Failed to get block");
+            let block = operations::eth_get_block_by_number_or_hash(
+                &client,
+                operations::BlockId::Number(block_number),
+                false,
+            )
+            .await
+            .expect("Failed to get block");
 
             let block_hash = block["hash"].as_str().expect("Block hash should not be empty");
 
             // Get block by hash with full transaction details
-            let block_info = operations::eth_get_block_by_hash(&client, block_hash, true)
-                .await
-                .expect("Failed to get block by hash");
+            let block_info = operations::eth_get_block_by_number_or_hash(
+                &client,
+                operations::BlockId::Hash(block_hash.to_string()),
+                true,
+            )
+            .await
+            .expect("Failed to get block by hash");
 
             // Extract transactions array
             let transactions = block_info["transactions"]
@@ -190,7 +206,7 @@ async fn test_debug_trace_rpc(#[case] test_name: &str) {
 #[case::block_receipts("EthGetBlockReceipts")]
 #[tokio::test]
 async fn test_eth_block_rpc(#[case] test_name: &str) {
-    let client = operations::create_test_client();
+    let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
 
     // Setup test environment
     let (block_hash, block_number) = operations::setup_test_environment(&client)
@@ -201,39 +217,51 @@ async fn test_eth_block_rpc(#[case] test_name: &str) {
 
     match test_name {
         "EthGetBlockByHash" => {
-            let block = operations::eth_get_block_by_hash(&client, &block_hash, true)
-                .await
-                .expect("Failed to get block by hash");
+            let block = operations::eth_get_block_by_number_or_hash(
+                &client,
+                operations::BlockId::Hash(block_hash.to_string()),
+                true,
+            )
+            .await
+            .expect("Failed to get block by hash");
 
             assert!(!block.is_null(), "Block should not be null");
         }
         "EthGetBlockByNumber" => {
-            let block = operations::eth_get_block_by_number(&client, block_number, true)
-                .await
-                .expect("Failed to get block by number");
+            let block = operations::eth_get_block_by_number_or_hash(
+                &client,
+                operations::BlockId::Number(block_number),
+                true,
+            )
+            .await
+            .expect("Failed to get block by number");
 
             assert!(!block.is_null(), "Block should not be null");
         }
         "EthGetBlockTransactionCountByHash" => {
-            let tx_count =
-                operations::eth_get_block_transaction_count_by_hash(&client, &block_hash)
-                    .await
-                    .expect("Failed to get block transaction count by hash");
+            let tx_count = operations::eth_get_block_transaction_count_by_number_or_hash(
+                &client,
+                operations::BlockId::Hash(block_hash.to_string()),
+            )
+            .await
+            .expect("Failed to get block transaction count by hash");
 
             println!("EthGetBlockTransactionCountByHash result: {}", tx_count);
         }
         "EthGetBlockTransactionCountByNumber" => {
-            let tx_count =
-                operations::eth_get_block_transaction_count_by_number(&client, block_number)
-                    .await
-                    .expect("Failed to get block transaction count by number");
+            let tx_count = operations::eth_get_block_transaction_count_by_number_or_hash(
+                &client,
+                operations::BlockId::Number(block_number),
+            )
+            .await
+            .expect("Failed to get block transaction count by number");
 
             println!("EthGetBlockTransactionCountByNumber result: {}", tx_count);
         }
         "EthGetTransactionByBlockHashAndIndex" => {
-            let tx = operations::eth_get_transaction_by_block_hash_and_index(
+            let tx = operations::eth_get_transaction_by_block_number_or_hash_and_index(
                 &client,
-                &block_hash,
+                operations::BlockId::Hash(block_hash.to_string()),
                 "0x0",
             )
             .await
@@ -242,9 +270,9 @@ async fn test_eth_block_rpc(#[case] test_name: &str) {
             println!("EthGetTransactionByBlockHashAndIndex result: {:?}", tx);
         }
         "EthGetTransactionByBlockNumberAndIndex" => {
-            let tx = operations::eth_get_transaction_by_block_number_and_index(
+            let tx = operations::eth_get_transaction_by_block_number_or_hash_and_index(
                 &client,
-                block_number,
+                operations::BlockId::Number(block_number),
                 "0x0",
             )
             .await
@@ -253,14 +281,12 @@ async fn test_eth_block_rpc(#[case] test_name: &str) {
             println!("EthGetTransactionByBlockNumberAndIndex result: {:?}", tx);
         }
         "EthGetBlockReceipts" => {
-            let client = operations::create_test_client();
+            let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
 
             // Deploy contracts and get ERC20 address
             let contracts =
-                operations::ensure_contracts_deployed().await.expect("Failed to deploy contracts");
-
+                operations::try_deploy_contracts().await.expect("Failed to deploy contracts");
             println!("ERC20 contract at: {:#x}", contracts.erc20);
-            println!("Deployment address (token holder): {:#x}", contracts.deployment_address);
 
             let batch_size = 10;
             let amount = U256::from(100u128) * U256::from(10u128).pow(U256::from(18u128)); // 100 tokens per transfer
@@ -350,11 +376,10 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
     use alloy_primitives::hex;
     use alloy_sol_types::{sol, SolCall};
 
-    let client = operations::create_test_client();
+    let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
 
     // Setup: Ensure contracts are deployed
-    let contracts =
-        operations::ensure_contracts_deployed().await.expect("Failed to deploy contracts");
+    let contracts = operations::try_deploy_contracts().await.expect("Failed to deploy contracts");
 
     // Setup: Send a transaction to test with
     let tx_hash = operations::transfer_token(
@@ -371,7 +396,7 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
         "EthEstimateGasSimpleTransfer" => {
             // Check balance first
             let balance =
-                operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS)
+                operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS, None)
                     .await
                     .expect("Failed to get balance");
             assert!(balance > U256::ZERO, "From address should have balance");
@@ -384,6 +409,7 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
                     "to": operations::manager::DEFAULT_L2_NEW_ACC1_ADDRESS,
                     "value": format!("{:#x}", transfer_amount),
                 })),
+                None,
             )
             .await
             .expect("Failed to estimate gas for simple transfer");
@@ -405,6 +431,7 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
                     "to": format!("{:#x}", contracts.contract_a),
                     "data": format!("0x{}", hex::encode(&calldata)),
                 })),
+                None,
             )
             .await
             .expect("Failed to estimate gas for contract call");
@@ -414,7 +441,7 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
         }
         "EthCall" => {
             let balance_before =
-                operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS)
+                operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS, None)
                     .await
                     .expect("Failed to get balance before call");
             assert!(balance_before > U256::ZERO, "From address should have balance");
@@ -432,6 +459,7 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
                     "to": format!("{:#x}", contracts.contract_c),
                     "data": format!("0x{}", hex::encode(&calldata)),
                 })),
+                None,
             )
             .await
             .expect("Failed to execute eth_call");
@@ -440,7 +468,7 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
             println!("EthCall result: {}", result);
 
             let balance_after =
-                operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS)
+                operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS, None)
                     .await
                     .expect("Failed to get balance after call");
             assert_eq!(
@@ -526,19 +554,23 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
 
 #[tokio::test]
 async fn test_eth_logs_rpc() {
-    let client = operations::create_test_client();
+    let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
 
     let (block_hash, block_number) = operations::setup_test_environment(&client)
         .await
         .expect("Failed to setup test environment");
     println!("Using block {} with hash: {}", block_number, block_hash);
-    let from_block = format!("0x{:x}", block_number);
-    let to_block = format!("0x{:x}", block_number);
     let address = "0x1234567890123456789012345678901234567890";
 
-    let logs = operations::eth_get_logs(&client, &from_block, &to_block, &address)
-        .await
-        .expect("Failed to get logs");
+    let logs = operations::eth_get_logs(
+        &client,
+        Some(operations::BlockId::Number(block_number)),
+        Some(operations::BlockId::Number(block_number)),
+        Some(address),
+        None,
+    )
+    .await
+    .expect("Failed to get logs");
 
     assert!(!logs.is_null(), "Logs should not be null");
     println!("EthGetLogs result type: {}", logs);
@@ -549,7 +581,7 @@ async fn test_eth_logs_rpc() {
 #[case::txpool_status("TxPoolStatus")]
 #[tokio::test]
 async fn test_txpool_rpc(#[case] test_name: &str) {
-    let client = operations::create_test_client();
+    let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
 
     // Setup test environment to ensure the node is running
     let (_block_hash, _block_number) = operations::setup_test_environment(&client)
@@ -616,12 +648,12 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
     use serde_json::json;
     use std::str::FromStr;
 
-    let client = operations::create_test_client();
+    let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
     let private_key = "363ea277eec54278af051fb574931aec751258450a286edce9e1f64401f3b9c8";
 
     match test_name {
         "Eip1559SimpleTransfer" => {
-            operations::ensure_contracts_deployed().await.expect("Failed to deploy contracts");
+            operations::try_deploy_contracts().await.expect("Failed to deploy contracts");
 
             let signer = PrivateKeySigner::from_str(private_key).expect("Invalid private key");
             let from_address = signer.address();
@@ -677,7 +709,7 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
         "Eip1559ContractCall" => {
             // Test for EIP-1559 contract call
             let contracts =
-                operations::ensure_contracts_deployed().await.expect("Failed to deploy contracts");
+                operations::try_deploy_contracts().await.expect("Failed to deploy contracts");
 
             let signer = PrivateKeySigner::from_str(private_key).expect("Invalid private key");
             let from_address = signer.address();
@@ -727,7 +759,7 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
         "EthFeeHistory" => {
             // Test for eth_feeHistory RPC
             let contracts =
-                operations::ensure_contracts_deployed().await.expect("Failed to deploy contracts");
+                operations::try_deploy_contracts().await.expect("Failed to deploy contracts");
 
             // Perform batch transfers to generate blocks
             let batch_size = 10;
@@ -773,9 +805,13 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
 
             for i in 0..block_count {
                 let block_num = oldest_block + i;
-                let block = operations::eth_get_block_by_number(&client, block_num, false)
-                    .await
-                    .expect("Failed to get block");
+                let block = operations::eth_get_block_by_number_or_hash(
+                    &client,
+                    operations::BlockId::Number(block_num),
+                    false,
+                )
+                .await
+                .expect("Failed to get block");
 
                 let history_base_fee =
                     base_fees[i as usize].as_str().expect("Base fee should be string");
@@ -860,9 +896,9 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
             println!("BASEFEE opcode result: {}", result);
 
             // Verify latest block has base fee
-            let latest_block = operations::eth_get_block_by_number(
+            let latest_block = operations::eth_get_block_by_number_or_hash(
                 &client,
-                operations::eth_block_number(&client).await.unwrap(),
+                operations::BlockId::Latest,
                 false,
             )
             .await
@@ -934,7 +970,7 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
             let code = operations::eth_get_code(
                 &client,
                 contract_address,
-                &format!("0x{:x}", block_number),
+                Some(operations::BlockId::Number(block_number)),
             )
             .await
             .expect("Failed to get contract code");
@@ -943,9 +979,9 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
             println!("EIP-3529 test passed: SELFDESTRUCT refund is 0");
         }
         "Eip4844BlobFields" => {
-            let block = operations::eth_get_block_by_number(
+            let block = operations::eth_get_block_by_number_or_hash(
                 &client,
-                operations::eth_block_number(&client).await.unwrap(),
+                operations::BlockId::Latest,
                 true,
             )
             .await
