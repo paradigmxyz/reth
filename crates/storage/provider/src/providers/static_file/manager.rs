@@ -1810,7 +1810,6 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<reth_db::models::AccountBeforeTx>> {
-        trace!(target: "provider::static_file", ?block_number, ?address, "Getting account before block");
         let provider = match self.get_segment_provider_for_block(
             StaticFileSegment::AccountChangeSets,
             block_number,
@@ -1822,10 +1821,8 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         };
 
         let user_header = provider.user_header();
-        trace!(target: "provider::static_file", ?user_header, "Got user header");
 
         let Some(offset) = user_header.changeset_offset(block_number) else {
-            trace!(target: "provider::static_file", ?block_number, ?address, "Returning None (no offset)");
             return Ok(None);
         };
 
@@ -1857,11 +1854,9 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
                 .get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
                 .filter(|change| change.address == address)
         {
-            trace!(target: "provider::static_file", ?block_number, ?address, ?change, "Returning change (end)");
             return Ok(Some(change));
         }
 
-        trace!(target: "provider::static_file", ?block_number, ?address, "Returning None (end)");
         Ok(None)
     }
 

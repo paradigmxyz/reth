@@ -24,16 +24,6 @@ use reth_trie::{
 /// A wrapper around a database transaction that loads prefix sets within a given block range.
 #[derive(Debug)]
 pub struct PrefixSetLoader<'a, TX, KH>(&'a TX, PhantomData<KH>);
-// pub struct PrefixSetLoader<'a, TX, P, KH> {
-//     /// The tx used to traverse storage changesets
-//     tx: &'a TX,
-
-//     /// The provider used when fetching account changesets
-//     provider: P,
-
-//     /// The keyhasher type
-//     _phantom: PhantomData<KH>,
-// }
 
 impl<'a, TX, KH> PrefixSetLoader<'a, TX, KH> {
     /// Create a new loader.

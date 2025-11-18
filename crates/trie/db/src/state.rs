@@ -159,7 +159,6 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     ) -> Result<Self, StateRootError> {
         let loaded_prefix_sets =
             load_prefix_sets_with_provider::<_, KeccakKeyHasher>(&provider, tx, range)?;
-        // let loaded_prefix_sets = PrefixSetLoader::<_, KeccakKeyHasher>::new(tx).load(range)?;
         Ok(Self::from_tx(tx).with_prefix_sets(loaded_prefix_sets))
     }
 
@@ -266,8 +265,6 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
             Bound::Excluded(n) => *n,
             Bound::Unbounded => provider.best_block_number()? + 1,
         };
-
-        tracing::debug!(target: "sync::stages::merkle_changesets", ?start, ?end, "Getting account changesets");
 
         // Iterate over account changesets and record value before first occurring account change.
         let mut accounts = HashMap::new();

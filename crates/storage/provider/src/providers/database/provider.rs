@@ -868,8 +868,6 @@ impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
-        tracing::trace!(target: "provider::static_file", ?range, ?highest_static_block, "Getting changed accounts with range");
-
         if let Some(highest) = highest_static_block {
             let start = *range.start();
             let static_end = (*range.end()).min(highest + 1);
@@ -878,14 +876,12 @@ impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
             if start <= static_end {
                 for block in start..=static_end {
                     let block_changesets = self.account_block_changeset(block)?;
-                    tracing::trace!(target: "provider::static_file", ?block, ?block_changesets, ?highest, "Got some changesets");
                     for changeset in block_changesets {
                         changed_accounts.insert(changeset.address);
                     }
                 }
             }
 
-            tracing::trace!(target: "provider::static_file", ?range, ?highest_static_block, ?changed_accounts, "Got changed accounts with range");
             Ok(changed_accounts)
         } else {
             self.tx
@@ -913,7 +909,6 @@ impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<Address, Vec<u64>>> {
-        tracing::trace!(target: "provider::static_file", ?range, "Getting changesets for range");
         // TODO: changeset metadata
         let highest_static_block = self
             .static_file_provider
@@ -936,7 +931,6 @@ impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
                 }
             }
 
-            tracing::trace!(target: "provider::static_file", ?range, ?changed_accounts_and_blocks, "Got changesets for range");
             Ok(changed_accounts_and_blocks)
         } else {
             let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
@@ -2150,7 +2144,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut changeset_writer =
                 self.static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
             changeset_writer.prune_account_changesets(block)?;
-            tracing::trace!(target: "provider::static_file", ?changesets, ?block, ?range, ?highest_block, "Removing and returning changesets for unwind");
 
             changesets
         } else {
