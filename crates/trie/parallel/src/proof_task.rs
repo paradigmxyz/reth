@@ -442,14 +442,6 @@ where
             ?hashed_address,
             target_slots = ?target_slots.len(),
             worker_id = self.id,
-            trie_cursor.next_count = tracing::field::Empty,
-            trie_cursor.seek_count = tracing::field::Empty,
-            trie_cursor.seek_exact_count = tracing::field::Empty,
-            trie_cursor.total_duration = tracing::field::Empty,
-            hashed_cursor.next_count = tracing::field::Empty,
-            hashed_cursor.seek_count = tracing::field::Empty,
-            hashed_cursor.is_storage_empty_count = tracing::field::Empty,
-            hashed_cursor.total_duration = tracing::field::Empty,
         );
         let _span_guard = span.enter();
 
@@ -1108,22 +1100,6 @@ where
             "Account multiproof calculation",
             targets = targets.len(),
             worker_id,
-            account_trie_cursor.next_count = tracing::field::Empty,
-            account_trie_cursor.seek_count = tracing::field::Empty,
-            account_trie_cursor.seek_exact_count = tracing::field::Empty,
-            account_trie_cursor.total_duration = tracing::field::Empty,
-            account_hashed_cursor.next_count = tracing::field::Empty,
-            account_hashed_cursor.seek_count = tracing::field::Empty,
-            account_hashed_cursor.is_storage_empty_count = tracing::field::Empty,
-            account_hashed_cursor.total_duration = tracing::field::Empty,
-            storage_trie_cursor.next_count = tracing::field::Empty,
-            storage_trie_cursor.seek_count = tracing::field::Empty,
-            storage_trie_cursor.seek_exact_count = tracing::field::Empty,
-            storage_trie_cursor.total_duration = tracing::field::Empty,
-            storage_hashed_cursor.next_count = tracing::field::Empty,
-            storage_hashed_cursor.seek_count = tracing::field::Empty,
-            storage_hashed_cursor.is_storage_empty_count = tracing::field::Empty,
-            storage_hashed_cursor.total_duration = tracing::field::Empty,
         );
         let _span_guard = span.enter();
 
