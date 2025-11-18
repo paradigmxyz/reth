@@ -29,17 +29,14 @@ use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
-    error::{api::FromEvmHalt, ensure_success, FromEthApiError},
+    error::FromEthApiError,
     simulate::{self, EthSimulateError},
-    EthApiError, RevertError, StateCacheDb,
+    EthApiError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx};
 use revm::{
     context::Block,
-    context_interface::{
-        result::{ExecutionResult, ResultAndState},
-        Transaction,
-    },
+    context_interface::{result::ResultAndState, Transaction},
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
@@ -221,7 +218,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let res =
                 self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
-            ensure_success(res.result)
+            Self::Error::ensure_success(res.result)
         }
     }
 
@@ -334,7 +331,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             },
                         )?;
 
-                        match ensure_success::<_, Self::Error>(res.result) {
+                        match Self::Error::ensure_success(res.result) {
                             Ok(output) => {
                                 bundle_results
                                     .push(EthCallResponse { value: Some(output), error: None });
@@ -432,46 +429,22 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let result = this.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
             let access_list = inspector.into_access_list();
+            let gas_used = result.result.gas_used();
             tx_env.set_access_list(access_list.clone());
-            match result.result {
-                ExecutionResult::Halt { reason, gas_used } => {
-                    let error =
-                        Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
-                    return Ok(AccessListResult {
-                        access_list,
-                        gas_used: U256::from(gas_used),
-                        error,
-                    })
-                }
-                ExecutionResult::Revert { output, gas_used } => {
-                    let error = Some(RevertError::new(output).to_string());
-                    return Ok(AccessListResult {
-                        access_list,
-                        gas_used: U256::from(gas_used),
-                        error,
-                    })
-                }
-                ExecutionResult::Success { .. } => {}
-            };
+            if let Err(err) = Self::Error::ensure_success(result.result) {
+                return Ok(AccessListResult {
+                    access_list,
+                    gas_used: U256::from(gas_used),
+                    error: Some(err.to_string()),
+                });
+            }
 
             // transact again to get the exact gas used
-            let gas_limit = tx_env.gas_limit();
             let result = this.transact(&mut db, evm_env, tx_env)?;
-            let res = match result.result {
-                ExecutionResult::Halt { reason, gas_used } => {
-                    let error = Some(Self::Error::from_evm_halt(reason, gas_limit).to_string());
-                    AccessListResult { access_list, gas_used: U256::from(gas_used), error }
-                }
-                ExecutionResult::Revert { output, gas_used } => {
-                    let error = Some(RevertError::new(output).to_string());
-                    AccessListResult { access_list, gas_used: U256::from(gas_used), error }
-                }
-                ExecutionResult::Success { gas_used, .. } => {
-                    AccessListResult { access_list, gas_used: U256::from(gas_used), error: None }
-                }
-            };
+            let gas_used = result.result.gas_used();
+            let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
 
-            Ok(res)
+            Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
         })
     }
 }

@@ -13,8 +13,11 @@ use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, T
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    error::{api::FromEvmHalt, FromEvmError},
-    EthApiError, RevertError, RpcInvalidTransactionError,
+    error::{
+        api::{FromEvmHalt, FromRevert},
+        FromEvmError,
+    },
+    EthApiError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_storage_api::StateProvider;
@@ -175,7 +178,7 @@ pub trait EstimateCall: Call {
                     Self::map_out_of_gas_err(&mut evm, tx_env, max_gas_limit)
                 } else {
                     // the transaction did revert
-                    Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
+                    Err(Self::Error::from_revert(output))
                 }
             }
         };
@@ -319,7 +322,7 @@ pub trait EstimateCall: Call {
             }
             ExecutionResult::Revert { output, .. } => {
                 // reverted again after bumping the limit
-                Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
+                Err(Self::Error::from_revert(output))
             }
             ExecutionResult::Halt { reason, .. } => {
                 Err(Self::Error::from_evm_halt(reason, req_gas_limit))
