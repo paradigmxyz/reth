@@ -84,7 +84,7 @@ impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
     TC: TrieCursor,
     HC: HashedCursor,
-    VE: ValueEncoder<Value = HC::Value>,
+    VE: ValueEncoder<Value = (B256, HC::Value)>,
 {
     /// Takes a re-usable `RlpNode` buffer from the internal free-list, or allocates a new one if
     /// the free-list is empty.
@@ -349,7 +349,7 @@ where
                 debug_assert_eq!(key.len(), 32);
                 // SAFETY: key is a B256 and so is exactly 32-bytes.
                 let key = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
-                let val = value_encoder.encoder_fut(val);
+                let val = value_encoder.encoder_fut((key, val));
                 (key, val)
             }) else {
                 break
@@ -395,7 +395,7 @@ impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
     TC: TrieCursor,
     HC: HashedCursor,
-    VE: ValueEncoder<Value = HC::Value>,
+    VE: ValueEncoder<Value = (B256, HC::Value)>,
 {
     /// Generate a proof for the given targets.
     ///
@@ -467,5 +467,181 @@ where
 
         // Use the static StorageValueEncoder and pass it to proof_inner
         self.proof_inner(&STORAGE_VALUE_ENCODER, targets)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
+        proof::Proof,
+        trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
+    };
+    use alloy_primitives::map::B256Map;
+    use reth_storage_errors::db::DatabaseError;
+    use reth_trie_common::{HashedPostState, MultiProofTargets};
+    use std::{collections::BTreeMap, rc::Rc};
+
+    /// A combined provider that implements both TrieCursorFactory and HashedCursorFactory.
+    ///
+    /// This is used to provide cursors for the value encoder during proof calculation.
+    #[derive(Clone)]
+    struct CombinedProvider<T, H> {
+        trie_cursor_factory: T,
+        hashed_cursor_factory: H,
+    }
+
+    impl<T, H> CombinedProvider<T, H> {
+        fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Self {
+            Self { trie_cursor_factory, hashed_cursor_factory }
+        }
+    }
+
+    impl<T: TrieCursorFactory, H> TrieCursorFactory for CombinedProvider<T, H> {
+        type AccountTrieCursor<'a>
+            = T::AccountTrieCursor<'a>
+        where
+            Self: 'a;
+        type StorageTrieCursor<'a>
+            = T::StorageTrieCursor<'a>
+        where
+            Self: 'a;
+
+        fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+            self.trie_cursor_factory.account_trie_cursor()
+        }
+
+        fn storage_trie_cursor(
+            &self,
+            hashed_address: B256,
+        ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+            self.trie_cursor_factory.storage_trie_cursor(hashed_address)
+        }
+    }
+
+    impl<T, H: HashedCursorFactory> HashedCursorFactory for CombinedProvider<T, H> {
+        type AccountCursor<'a>
+            = H::AccountCursor<'a>
+        where
+            Self: 'a;
+        type StorageCursor<'a>
+            = H::StorageCursor<'a>
+        where
+            Self: 'a;
+
+        fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+            self.hashed_cursor_factory.hashed_account_cursor()
+        }
+
+        fn hashed_storage_cursor(
+            &self,
+            hashed_address: B256,
+        ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+            self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)
+        }
+    }
+
+    /// A test harness for comparing ProofCalculator and Proof implementations.
+    ///
+    /// This harness creates mock cursor factories from a HashedPostState and provides
+    /// a method to test that both proof implementations produce equivalent results.
+    struct ProofTestHarness {
+        /// Mock factory for trie cursors (empty by default for leaf-only tests)
+        trie_cursor_factory: MockTrieCursorFactory,
+        /// Mock factory for hashed cursors, populated from HashedPostState
+        hashed_cursor_factory: MockHashedCursorFactory,
+    }
+
+    impl ProofTestHarness {
+        /// Creates a new test harness from a HashedPostState.
+        ///
+        /// The HashedPostState is used to populate the mock hashed cursor factory directly.
+        /// The trie cursor factory is empty by default, suitable for testing the leaf-only
+        /// proof calculator.
+        fn new(post_state: HashedPostState) -> Self {
+            // Extract accounts from post state, filtering out None (deleted accounts)
+            let hashed_accounts: BTreeMap<B256, _> = post_state
+                .accounts
+                .into_iter()
+                .filter_map(|(addr, account)| account.map(|acc| (addr, acc)))
+                .collect();
+
+            // Extract storage tries from post state
+            let hashed_storage_tries: B256Map<BTreeMap<B256, U256>> = post_state
+                .storages
+                .into_iter()
+                .map(|(addr, hashed_storage)| {
+                    // Convert HashedStorage to BTreeMap, filtering out zero values (deletions)
+                    let storage_map: BTreeMap<B256, U256> = hashed_storage
+                        .storage
+                        .into_iter()
+                        .filter_map(|(slot, value)| (value != U256::ZERO).then_some((slot, value)))
+                        .collect();
+                    (addr, storage_map)
+                })
+                .collect();
+
+            // Create mock hashed cursor factory populated with the post state data
+            let hashed_cursor_factory =
+                MockHashedCursorFactory::new(hashed_accounts, hashed_storage_tries);
+
+            // Create empty trie cursor factory (leaf-only calculator doesn't need trie nodes)
+            let trie_cursor_factory =
+                MockTrieCursorFactory::new(BTreeMap::new(), B256Map::default());
+
+            Self { trie_cursor_factory, hashed_cursor_factory }
+        }
+
+        /// Asserts that ProofCalculator and Proof produce equivalent results for account proofs.
+        ///
+        /// This method calls both implementations with the given account targets and compares
+        /// the results. For now, it performs a basic comparison by checking that both succeed
+        /// and produce non-empty results. More detailed comparison logic can be added as needed.
+        fn assert_proof(
+            &self,
+            targets: impl IntoIterator<Item = B256> + Clone,
+        ) -> Result<(), StateProofError> {
+            // Create ProofCalculator (proof_v2) with account cursors
+            let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
+            let hashed_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
+
+            // Create combined provider for SyncAccountValueEncoder
+            let provider = Rc::new(CombinedProvider::new(
+                self.trie_cursor_factory.clone(),
+                self.hashed_cursor_factory.clone(),
+            ));
+            let value_encoder = SyncAccountValueEncoder::new(provider);
+
+            let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
+
+            // Call ProofCalculator::proof with account targets
+            let targets_vec: Vec<B256> = targets.clone().into_iter().collect();
+            let proof_v2_result = proof_calculator.proof(&value_encoder, targets_vec)?;
+
+            // Create Proof (old implementation)
+            let proof =
+                Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone());
+
+            // Convert targets to MultiProofTargets (accounts with empty storage slots)
+            use alloy_primitives::map::B256Set;
+            let multiproof_targets: MultiProofTargets =
+                targets.into_iter().map(|addr| (addr, B256Set::default())).collect();
+
+            // Call Proof::multiproof
+            let proof_v1_result = proof.multiproof(multiproof_targets)?;
+
+            // Basic comparison: both should succeed and produce non-empty results
+            assert!(!proof_v2_result.is_empty(), "ProofCalculator returned empty result");
+            assert!(
+                !proof_v1_result.account_subtree.is_empty(),
+                "Proof::multiproof returned empty result"
+            );
+
+            // TODO: Add more detailed comparison logic here
+            // For now, we just verify both implementations succeed
+
+            Ok(())
+        }
     }
 }
