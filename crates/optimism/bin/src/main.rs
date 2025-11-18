@@ -40,10 +40,13 @@ fn main() {
 
             if enable_inner_tx {
                 // Conditionally initialize InnerTx database before consuming builder
-                let db_path = data_dir.db().parent().unwrap_or_else(|| Path::new("/")).to_path_buf();
+                let db_path =
+                    data_dir.db().parent().unwrap_or_else(|| Path::new("/")).to_path_buf();
                 match initialize(db_path) {
                     Ok(_) => info!(target: "reth::cli", "xlayer db initialized"),
-                    Err(e) => error!(target: "reth::cli", "xlayer db failed to initialize {:#?}", e),
+                    Err(e) => {
+                        error!(target: "reth::cli", "xlayer db failed to initialize {:#?}", e)
+                    }
                 }
 
                 node_builder = node_builder
@@ -79,7 +82,15 @@ async fn run_apollo(rollup_args: &RollupArgs) {
         meta_server: vec![rollup_args.xlayer_args.apollo.apollo_ip.to_string()],
         app_id: rollup_args.xlayer_args.apollo.apollo_app_id.to_string(),
         cluster_name: rollup_args.xlayer_args.apollo.apollo_cluster.to_string(),
-        namespaces: Some(rollup_args.xlayer_args.apollo.apollo_namespace.split(',').map(|s| s.to_string()).collect()),
+        namespaces: Some(
+            rollup_args
+                .xlayer_args
+                .apollo
+                .apollo_namespace
+                .split(',')
+                .map(|s| s.to_string())
+                .collect(),
+        ),
         secret: None,
     };
 

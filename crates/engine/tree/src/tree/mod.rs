@@ -27,9 +27,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{
-    NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
     BlockReader, DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StateProviderBox,
     StateProviderFactory, StateReader, TransactionVariant, TrieReader,
@@ -510,7 +508,9 @@ where
         trace!(target: "engine::tree", "invoked new payload");
         self.metrics.engine.new_payload_messages.increment(1);
 
-        use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
+        use reth_node_metrics::transaction_trace_xlayer::{
+            get_global_tracer, TransactionProcessId,
+        };
         let block_number = payload.block_number();
         let start = Instant::now();
 
@@ -577,11 +577,7 @@ where
 
         // X Layer: Log block receive end
         if let Some(tracer) = get_global_tracer() {
-            tracer.log_block(
-                block_hash,
-                block_number,
-                TransactionProcessId::RpcBlockReceiveEnd,
-            );
+            tracer.log_block(block_hash, block_number, TransactionProcessId::RpcBlockReceiveEnd);
         }
 
         Ok(outcome)
@@ -2522,10 +2518,12 @@ where
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         // X Layer: Log block insertion end
-        use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
+        use reth_node_metrics::transaction_trace_xlayer::{
+            get_global_tracer, TransactionProcessId,
+        };
         if let Some(tracer) = get_global_tracer() {
             let is_canonical = !is_fork;
-            
+
             if is_canonical {
                 let block_hash = executed.recovered_block().hash();
                 let block_number = executed.recovered_block().number();

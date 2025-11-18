@@ -9,19 +9,21 @@ use reth_ethereum_forks::{EthereumHardfork, Hardfork};
 use reth_optimism_forks::{OpHardfork, XLAYER_MAINNET_HARDFORKS};
 use reth_primitives_traits::SealedHeader;
 
-use crate::{LazyLock, OpChainSpec, make_op_genesis_header};
+use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
 
 /// X Layer Mainnet genesis hash
 ///
 /// Computed from the genesis block header.
 /// This value is hardcoded to avoid expensive computation on every startup.
-pub(crate) const XLAYER_MAINNET_GENESIS_HASH: B256 = b256!("dc33d8c0ec9de14fc2c21bd6077309a0a856df22821bd092a2513426e096a789");
+pub(crate) const XLAYER_MAINNET_GENESIS_HASH: B256 =
+    b256!("dc33d8c0ec9de14fc2c21bd6077309a0a856df22821bd092a2513426e096a789");
 
 /// X Layer Mainnet genesis state root
 ///
 /// The Merkle Patricia Trie root of all 1,866,483 accounts in the genesis alloc.
 /// This value is hardcoded to avoid expensive computation on every startup.
-pub(crate) const XLAYER_MAINNET_STATE_ROOT: B256 = b256!("5d335834cb1c1c20a1f44f964b16cd409aa5d10891d5c6cf26f1f2c26726efcf");
+pub(crate) const XLAYER_MAINNET_STATE_ROOT: B256 =
+    b256!("5d335834cb1c1c20a1f44f964b16cd409aa5d10891d5c6cf26f1f2c26726efcf");
 
 /// X Layer mainnet chain id as specified in the published `genesis.json`.
 const XLAYER_MAINNET_CHAIN_ID: u64 = 196;
@@ -36,10 +38,8 @@ const XLAYER_MAINNET_BASE_FEE_DENOMINATOR: u128 = 100_000_000;
 const XLAYER_MAINNET_BASE_FEE_ELASTICITY: u128 = 1;
 
 /// X Layer mainnet base fee params (same for London and Canyon forks).
-const XLAYER_MAINNET_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams::new(
-    XLAYER_MAINNET_BASE_FEE_DENOMINATOR,
-    XLAYER_MAINNET_BASE_FEE_ELASTICITY,
-);
+const XLAYER_MAINNET_BASE_FEE_PARAMS: BaseFeeParams =
+    BaseFeeParams::new(XLAYER_MAINNET_BASE_FEE_DENOMINATOR, XLAYER_MAINNET_BASE_FEE_ELASTICITY);
 
 /// The X Layer mainnet spec
 pub static XLAYER_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
@@ -105,7 +105,10 @@ mod tests {
     fn test_xlayer_mainnet_base_fee_params() {
         assert_eq!(
             XLAYER_MAINNET.base_fee_params_at_timestamp(0),
-            BaseFeeParams::new(XLAYER_MAINNET_BASE_FEE_DENOMINATOR, XLAYER_MAINNET_BASE_FEE_ELASTICITY)
+            BaseFeeParams::new(
+                XLAYER_MAINNET_BASE_FEE_DENOMINATOR,
+                XLAYER_MAINNET_BASE_FEE_ELASTICITY
+            )
         );
     }
 
@@ -130,8 +133,10 @@ mod tests {
 
     #[test]
     fn test_xlayer_mainnet_expected_values() {
-        let expected_hash = b256!("dc33d8c0ec9de14fc2c21bd6077309a0a856df22821bd092a2513426e096a789");
-        let expected_root = b256!("5d335834cb1c1c20a1f44f964b16cd409aa5d10891d5c6cf26f1f2c26726efcf");
+        let expected_hash =
+            b256!("dc33d8c0ec9de14fc2c21bd6077309a0a856df22821bd092a2513426e096a789");
+        let expected_root =
+            b256!("5d335834cb1c1c20a1f44f964b16cd409aa5d10891d5c6cf26f1f2c26726efcf");
         assert_eq!(XLAYER_MAINNET_GENESIS_HASH, expected_hash);
         assert_eq!(XLAYER_MAINNET_STATE_ROOT, expected_root);
     }
@@ -183,7 +188,10 @@ mod tests {
         assert_eq!(XLAYER_MAINNET.chain().id(), XLAYER_MAINNET_CHAIN_ID);
         assert_eq!(
             XLAYER_MAINNET.base_fee_params_at_timestamp(0),
-            BaseFeeParams::new(XLAYER_MAINNET_BASE_FEE_DENOMINATOR, XLAYER_MAINNET_BASE_FEE_ELASTICITY)
+            BaseFeeParams::new(
+                XLAYER_MAINNET_BASE_FEE_DENOMINATOR,
+                XLAYER_MAINNET_BASE_FEE_ELASTICITY
+            )
         );
     }
 
@@ -199,7 +207,10 @@ mod tests {
         assert_eq!(genesis.nonce, 0);
         assert_eq!(genesis.mix_hash, B256::ZERO);
         assert_eq!(genesis.coinbase.to_string(), "0x4200000000000000000000000000000000000011");
-        assert_eq!(genesis.parent_hash, Some(b256!("651b8e585c6af2eab2b0aeecb3996e2560f7fafad9892a164706c9c560d795aa")));
+        assert_eq!(
+            genesis.parent_hash,
+            Some(b256!("651b8e585c6af2eab2b0aeecb3996e2560f7fafad9892a164706c9c560d795aa"))
+        );
         assert_eq!(genesis.base_fee_per_gas.map(|fee| fee as u64), Some(0x5fc01c5u64));
         assert_eq!(genesis.excess_blob_gas, Some(0));
         assert_eq!(genesis.blob_gas_used, Some(0));
@@ -209,16 +220,28 @@ mod tests {
     fn test_xlayer_mainnet_json_optimism_config() {
         let genesis = parse_genesis();
         let cfg = genesis.config.extra_fields.get("optimism").expect("optimism config must exist");
-        assert_eq!(cfg.get("eip1559Elasticity").and_then(|v| v.as_u64()).unwrap() as u128, XLAYER_MAINNET_BASE_FEE_ELASTICITY);
-        assert_eq!(cfg.get("eip1559Denominator").and_then(|v| v.as_u64()).unwrap() as u128, XLAYER_MAINNET_BASE_FEE_DENOMINATOR);
-        assert_eq!(cfg.get("eip1559DenominatorCanyon").and_then(|v| v.as_u64()).unwrap() as u128, XLAYER_MAINNET_BASE_FEE_DENOMINATOR);
+        assert_eq!(
+            cfg.get("eip1559Elasticity").and_then(|v| v.as_u64()).unwrap() as u128,
+            XLAYER_MAINNET_BASE_FEE_ELASTICITY
+        );
+        assert_eq!(
+            cfg.get("eip1559Denominator").and_then(|v| v.as_u64()).unwrap() as u128,
+            XLAYER_MAINNET_BASE_FEE_DENOMINATOR
+        );
+        assert_eq!(
+            cfg.get("eip1559DenominatorCanyon").and_then(|v| v.as_u64()).unwrap() as u128,
+            XLAYER_MAINNET_BASE_FEE_DENOMINATOR
+        );
     }
 
     #[test]
     fn test_xlayer_mainnet_json_hardforks_warning() {
         let genesis = parse_genesis();
         // WARNING: Hardfork times in JSON are overridden by XLAYER_MAINNET_HARDFORKS
-        assert_eq!(genesis.config.extra_fields.get("legacyXLayerBlock").and_then(|v| v.as_u64()), Some(42810021));
+        assert_eq!(
+            genesis.config.extra_fields.get("legacyXLayerBlock").and_then(|v| v.as_u64()),
+            Some(42810021)
+        );
         assert_eq!(genesis.config.shanghai_time, Some(0));
         assert_eq!(genesis.config.cancun_time, Some(0));
     }

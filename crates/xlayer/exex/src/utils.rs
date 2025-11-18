@@ -1,5 +1,4 @@
-use alloy_consensus::Transaction;
-use alloy_consensus::{transaction::TxHashRef, TxReceipt};
+use alloy_consensus::{transaction::TxHashRef, Transaction, TxReceipt};
 use alloy_evm::block::BlockExecutor;
 use alloy_rlp::encode;
 use eyre::Result;

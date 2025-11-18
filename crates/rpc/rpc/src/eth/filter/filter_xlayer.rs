@@ -101,10 +101,9 @@ where
 
             // Query both in parallel
             let (legacy_result, local_result): (Result<Vec<Log>, _>, Result<Vec<Log>, _>) =
-                tokio::join!(
-                    async { legacy_client.get_logs(legacy_filter).await },
-                    async { self.logs_for_filter(local_filter, self.inner.query_limits).await }
-                );
+                tokio::join!(async { legacy_client.get_logs(legacy_filter).await }, async {
+                    self.logs_for_filter(local_filter, self.inner.query_limits).await
+                });
 
             let mut legacy_logs = match legacy_result.map_err(|e| internal_rpc_err(e)) {
                 Ok(logs) => logs,
@@ -279,8 +278,7 @@ mod tests {
 
         // Simulate legacy filter (from_block unchanged, to_block = cutoff - 1)
         let mut legacy_filter = original_filter.clone();
-        legacy_filter =
-            legacy_filter.to_block(BlockNumberOrTag::Number(cutoff_block - 1));
+        legacy_filter = legacy_filter.to_block(BlockNumberOrTag::Number(cutoff_block - 1));
 
         // Simulate local filter (from_block = cutoff, to_block unchanged)
         let mut local_filter = original_filter.clone();
@@ -369,15 +367,9 @@ mod tests {
     #[test]
     fn test_log_merge_maintains_order() {
         // Test that appending and sorting works correctly
-        let mut legacy_logs = vec![
-            create_test_log(100, 0, 0),
-            create_test_log(200, 0, 0),
-        ];
+        let mut legacy_logs = vec![create_test_log(100, 0, 0), create_test_log(200, 0, 0)];
 
-        let mut local_logs = vec![
-            create_test_log(1000, 0, 0),
-            create_test_log(1100, 0, 0),
-        ];
+        let mut local_logs = vec![create_test_log(1000, 0, 0), create_test_log(1100, 0, 0)];
 
         legacy_logs.append(&mut local_logs);
         legacy_logs.sort_by(|a, b| {

@@ -93,7 +93,8 @@ where
             Ok(None) => {
                 route_by_condition!(
                     "eth_getInternalTransactions",
-                    self.backend.legacy_rpc_client().is_some(), tx_hash,
+                    self.backend.legacy_rpc_client().is_some(),
+                    tx_hash,
                     self.backend.legacy_rpc_client().unwrap().get_internal_transactions(tx_hash)
                 );
                 return Err(ErrorObjectOwned::owned(-32000, "Transaction not found", None::<()>));
@@ -143,15 +144,19 @@ where
         // XLayer: Route to legacy RPC if block number is below cutoff
         route_by_condition!(
             "eth_getBlockInternalTransactions",
-            should_route_to_legacy(self.backend.legacy_rpc_client(), block_number), block_number,
+            should_route_to_legacy(self.backend.legacy_rpc_client(), block_number),
+            block_number,
             self.backend.legacy_rpc_client().unwrap().get_block_internal_transactions(block_number)
         );
 
-        let hash: FixedBytes<32> = match self.backend.provider().block_hash_for_id(block_number.into()) {
-            Ok(Some(hash)) => hash,
-            Ok(None) => return Err(ErrorObjectOwned::owned(-32000, "Block not found", None::<()>)),
-            Err(_) => return Err(ErrorObjectOwned::owned(-32603, "Internal error", None::<()>)),
-        };
+        let hash: FixedBytes<32> =
+            match self.backend.provider().block_hash_for_id(block_number.into()) {
+                Ok(Some(hash)) => hash,
+                Ok(None) => {
+                    return Err(ErrorObjectOwned::owned(-32000, "Block not found", None::<()>))
+                }
+                Err(_) => return Err(ErrorObjectOwned::owned(-32603, "Internal error", None::<()>)),
+            };
 
         let deadline = Instant::now() + Duration::from_secs(TIMEOUT_DURATION_S);
         let mut tick = interval(Duration::from_millis(INTERVAL_DELAY_MS));

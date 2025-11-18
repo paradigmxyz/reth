@@ -42,7 +42,9 @@ where
 
     Ok(match block_id {
         Some(BlockId::Number(number)) => should_route_to_legacy(legacy_client, *number),
-        Some(BlockId::Hash(hash)) => !provider.block_number(hash.block_hash).map_err(internal_rpc_err)?.is_some(),
+        Some(BlockId::Hash(hash)) => {
+            !provider.block_number(hash.block_hash).map_err(internal_rpc_err)?.is_some()
+        }
         None => false,
     })
 }
@@ -362,22 +364,38 @@ mod tests {
 
         // BlockId::Number below cutoff
         let block_id = BlockId::Number(BlockNumberOrTag::Number(100));
-        assert!(should_route_block_id_to_legacy(Some(&client), &provider_missing, Some(&block_id)).unwrap());
+        assert!(should_route_block_id_to_legacy(Some(&client), &provider_missing, Some(&block_id))
+            .unwrap());
 
         // BlockId::Number above cutoff
         let block_id = BlockId::Number(BlockNumberOrTag::Number(1000001));
-        assert!(!should_route_block_id_to_legacy(Some(&client), &provider_missing, Some(&block_id)).unwrap());
+        assert!(!should_route_block_id_to_legacy(
+            Some(&client),
+            &provider_missing,
+            Some(&block_id)
+        )
+        .unwrap());
 
         // BlockId::Hash - routes if missing locally
         let missing_hash = BlockId::Hash(B256::from([1u8; 32]).into());
-        assert!(should_route_block_id_to_legacy(Some(&client), &provider_missing, Some(&missing_hash)).unwrap());
+        assert!(should_route_block_id_to_legacy(
+            Some(&client),
+            &provider_missing,
+            Some(&missing_hash)
+        )
+        .unwrap());
 
         // BlockId::Hash - stays local if present
         let present_hash_value = B256::from([2u8; 32]);
         let mut provider_present = MockBlockProvider::default();
         provider_present.insert_hash(present_hash_value, 0);
         let present_hash = BlockId::Hash(present_hash_value.into());
-        assert!(!should_route_block_id_to_legacy(Some(&client), &provider_present, Some(&present_hash)).unwrap());
+        assert!(!should_route_block_id_to_legacy(
+            Some(&client),
+            &provider_present,
+            Some(&present_hash)
+        )
+        .unwrap());
 
         // None - should NOT route
         assert!(!should_route_block_id_to_legacy(Some(&client), &provider_missing, None).unwrap());
@@ -409,11 +427,7 @@ mod tests {
             Ok(None)
         }
 
-        fn canonical_hashes_range(
-            &self,
-            _start: u64,
-            _end: u64,
-        ) -> ProviderResult<Vec<B256>> {
+        fn canonical_hashes_range(&self, _start: u64, _end: u64) -> ProviderResult<Vec<B256>> {
             Ok(Vec::new())
         }
     }
@@ -434,7 +448,6 @@ mod tests {
         fn block_number(&self, hash: B256) -> ProviderResult<Option<u64>> {
             Ok(self.hashes.get(&hash).copied())
         }
-
     }
 
     #[test]
@@ -504,10 +517,8 @@ mod tests {
         // Test error propagation with timing
         let result = exec_legacy("test_method", async {
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-            Err::<u64, _>(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Test error",
-            )) as Box<dyn std::error::Error + Send + Sync>)
+            Err::<u64, _>(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Test error"))
+                as Box<dyn std::error::Error + Send + Sync>)
         })
         .await;
 

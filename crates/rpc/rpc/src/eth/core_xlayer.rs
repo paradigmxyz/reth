@@ -29,4 +29,3 @@ where
         self.inner.legacy_rpc_client()
     }
 }
-

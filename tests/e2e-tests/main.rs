@@ -1,28 +1,25 @@
 //! Integration tests for e2e operations
 //!
 //! Run all tests with: `cargo test -p xlayer-e2e-test -- --nocapture --test-threads=1`
-//! or run a specific test with: `cargo test -p xlayer-e2e-test <test_name> -- --nocapture --test-threads=1`
+//! or run a specific test with: `cargo test -p xlayer-e2e-test <test_name> -- --nocapture
+//! --test-threads=1`
 
-use xlayer_e2e_test::operations;
 use alloy_primitives::U256;
-
+use xlayer_e2e_test::operations;
 
 #[tokio::test]
 async fn test_send_transaction() {
     use alloy_primitives::U256;
-    
+
     // Transfer 1 ETH to test account 1
     let amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH in wei
     let to_address = operations::manager::DEFAULT_L2_NEW_ACC1_ADDRESS;
-    
-    let tx_hash = operations::transfer_token(
-        operations::manager::DEFAULT_L2_NETWORK_URL,
-        amount,
-        to_address,
-    )
-    .await
-    .expect("Failed to transfer tokens");
-    
+
+    let tx_hash =
+        operations::transfer_token(operations::manager::DEFAULT_L2_NETWORK_URL, amount, to_address)
+            .await
+            .expect("Failed to transfer tokens");
+
     println!("Transaction hash: {}", tx_hash);
     assert!(tx_hash.starts_with("0x"));
 }
@@ -40,21 +37,18 @@ async fn test_send_transaction() {
 async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
     let client = operations::create_test_client();
     let test_address = operations::manager::DEFAULT_RICH_ADDRESS;
-    
+
     match test_name {
         "EthChainId" => {
-            let chain_id = operations::eth_chain_id(&client)
-                .await
-                .expect("Failed to get chain ID");
-            
+            let chain_id = operations::eth_chain_id(&client).await.expect("Failed to get chain ID");
+
             assert_eq!(chain_id, operations::manager::DEFAULT_L2_CHAIN_ID);
             println!("EthChainId result: {}", chain_id);
         }
         "EthSyncing" => {
-            let syncing = operations::eth_syncing(&client)
-                .await
-                .expect("Failed to get syncing status");
-            
+            let syncing =
+                operations::eth_syncing(&client).await.expect("Failed to get syncing status");
+
             println!("EthSyncing result: {:?}", syncing);
             // The result can be either false (not syncing) or an object with sync info
         }
@@ -62,7 +56,7 @@ async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
             let balance = operations::get_balance(&client, test_address)
                 .await
                 .expect("Failed to get balance");
-            
+
             println!("EthGetBalance result for test address: {}", balance);
             assert!(balance > U256::ZERO, "Balance should be greater than 0");
         }
@@ -70,16 +64,15 @@ async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
             let code = operations::eth_get_code(&client, test_address, "latest")
                 .await
                 .expect("Failed to get code");
-            
+
             println!("EthGetCode result length: {}", code.len());
             // Code should be a valid hex string (at least "0x")
             assert!(code.starts_with("0x"), "Code should start with 0x");
         }
         "EthGetBlockNumber" => {
-            let block_number = operations::eth_block_number(&client)
-                .await
-                .expect("Failed to get block number");
-            
+            let block_number =
+                operations::eth_block_number(&client).await.expect("Failed to get block number");
+
             assert!(block_number > 0, "Block number should be greater than 0");
             println!("EthBlockNumber result: {}", block_number);
         }
@@ -87,15 +80,14 @@ async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
             let tx_count = operations::eth_get_transaction_count(&client, test_address, "latest")
                 .await
                 .expect("Failed to get transaction count");
-            
+
             println!("EthGetTransactionCount result: {}", tx_count);
             // Transaction count should be >= 0 (it can be 0 for new addresses)
         }
         "EthGasPrice" => {
-            let gas_price = operations::eth_gas_price(&client)
-                .await
-                .expect("Failed to get gas price");
-            
+            let gas_price =
+                operations::eth_gas_price(&client).await.expect("Failed to get gas price");
+
             assert!(gas_price > U256::ZERO, "Gas price should be greater than 0");
             println!("EthGasPrice result: {}", gas_price);
         }
@@ -103,7 +95,7 @@ async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
             let storage = operations::eth_get_storage_at(&client, test_address, "0x0", "latest")
                 .await
                 .expect("Failed to get storage");
-            
+
             println!("EthGetStorageAt result: {}", storage);
             // Storage should be a valid hex string
             assert!(storage.starts_with("0x"), "Storage should start with 0x");
@@ -119,29 +111,27 @@ async fn test_ethereum_basic_rpc(#[case] test_name: &str) {
 #[tokio::test]
 async fn test_debug_trace_rpc(#[case] test_name: &str) {
     let client = operations::create_test_client();
-    
+
     // Wait for blocks to be mined
     let block_number = operations::wait_for_blocks(&client, 3).await;
     assert!(block_number > 0, "Block number should be greater than 0");
-    
+
     match test_name {
         "DebugTraceBlockByHash" => {
             // Get block by number to extract hash
             let block = operations::eth_get_block_by_number(&client, block_number, false)
                 .await
                 .expect("Failed to get block");
-            
-            let block_hash = block["hash"]
-                .as_str()
-                .expect("Block hash should not be empty");
-            
+
+            let block_hash = block["hash"].as_str().expect("Block hash should not be empty");
+
             assert_ne!(block_hash, "", "Block hash should not be empty");
-            
+
             // Test debug_traceBlockByHash
             let trace_result = operations::debug_trace_block_by_hash(&client, block_hash)
                 .await
                 .expect("Failed to trace block by hash");
-            
+
             assert!(!trace_result.is_null(), "Trace result should not be null");
         }
         "DebugTraceBlockByNumber" => {
@@ -149,7 +139,7 @@ async fn test_debug_trace_rpc(#[case] test_name: &str) {
             let trace_result = operations::debug_trace_block_by_number(&client, block_number)
                 .await
                 .expect("Failed to trace block by number");
-            
+
             assert!(!trace_result.is_null(), "Trace result should not be null");
         }
         "DebugTraceTransaction" => {
@@ -157,35 +147,33 @@ async fn test_debug_trace_rpc(#[case] test_name: &str) {
             let block = operations::eth_get_block_by_number(&client, block_number, false)
                 .await
                 .expect("Failed to get block");
-            
-            let block_hash = block["hash"]
-                .as_str()
-                .expect("Block hash should not be empty");
-            
+
+            let block_hash = block["hash"].as_str().expect("Block hash should not be empty");
+
             // Get block by hash with full transaction details
             let block_info = operations::eth_get_block_by_hash(&client, block_hash, true)
                 .await
                 .expect("Failed to get block by hash");
-            
+
             // Extract transactions array
             let transactions = block_info["transactions"]
                 .as_array()
                 .expect("Transactions field not found in block data");
-            
+
             assert!(!transactions.is_empty(), "No transactions found in block");
-            
+
             // Get the first transaction's hash
             let tx_hash = transactions[0]["hash"]
                 .as_str()
                 .expect("Transaction hash not found in transaction data");
-            
+
             assert_ne!(tx_hash, "", "Transaction hash should not be empty");
-            
+
             // Test debug_traceTransaction
             let trace_result = operations::debug_trace_transaction(&client, tx_hash)
                 .await
                 .expect("Failed to trace transaction");
-            
+
             assert!(!trace_result.is_null(), "Trace result should not be null");
         }
         _ => panic!("Unknown test case: {}", test_name),
@@ -203,78 +191,90 @@ async fn test_debug_trace_rpc(#[case] test_name: &str) {
 #[tokio::test]
 async fn test_eth_block_rpc(#[case] test_name: &str) {
     let client = operations::create_test_client();
-    
+
     // Setup test environment
     let (block_hash, block_number) = operations::setup_test_environment(&client)
         .await
         .expect("Failed to setup test environment");
-    
+
     println!("Using block #{} with hash: {}", block_number, block_hash);
-    
+
     match test_name {
         "EthGetBlockByHash" => {
             let block = operations::eth_get_block_by_hash(&client, &block_hash, true)
                 .await
                 .expect("Failed to get block by hash");
-            
+
             assert!(!block.is_null(), "Block should not be null");
         }
         "EthGetBlockByNumber" => {
             let block = operations::eth_get_block_by_number(&client, block_number, true)
                 .await
                 .expect("Failed to get block by number");
-            
+
             assert!(!block.is_null(), "Block should not be null");
         }
         "EthGetBlockTransactionCountByHash" => {
-            let tx_count = operations::eth_get_block_transaction_count_by_hash(&client, &block_hash)
-                .await
-                .expect("Failed to get block transaction count by hash");
-            
+            let tx_count =
+                operations::eth_get_block_transaction_count_by_hash(&client, &block_hash)
+                    .await
+                    .expect("Failed to get block transaction count by hash");
+
             println!("EthGetBlockTransactionCountByHash result: {}", tx_count);
         }
         "EthGetBlockTransactionCountByNumber" => {
-            let tx_count = operations::eth_get_block_transaction_count_by_number(&client, block_number)
-                .await
-                .expect("Failed to get block transaction count by number");
-            
+            let tx_count =
+                operations::eth_get_block_transaction_count_by_number(&client, block_number)
+                    .await
+                    .expect("Failed to get block transaction count by number");
+
             println!("EthGetBlockTransactionCountByNumber result: {}", tx_count);
         }
         "EthGetTransactionByBlockHashAndIndex" => {
-            let tx = operations::eth_get_transaction_by_block_hash_and_index(&client, &block_hash, "0x0")
-                .await
-                .expect("Failed to get transaction by block hash and index");
-            
+            let tx = operations::eth_get_transaction_by_block_hash_and_index(
+                &client,
+                &block_hash,
+                "0x0",
+            )
+            .await
+            .expect("Failed to get transaction by block hash and index");
+
             println!("EthGetTransactionByBlockHashAndIndex result: {:?}", tx);
         }
         "EthGetTransactionByBlockNumberAndIndex" => {
-            let tx = operations::eth_get_transaction_by_block_number_and_index(&client, block_number, "0x0")
-                .await
-                .expect("Failed to get transaction by block number and index");
-            
+            let tx = operations::eth_get_transaction_by_block_number_and_index(
+                &client,
+                block_number,
+                "0x0",
+            )
+            .await
+            .expect("Failed to get transaction by block number and index");
+
             println!("EthGetTransactionByBlockNumberAndIndex result: {:?}", tx);
         }
         "EthGetBlockReceipts" => {
             let client = operations::create_test_client();
 
             // Deploy contracts and get ERC20 address
-            let contracts = operations::ensure_contracts_deployed()
-                .await
-                .expect("Failed to deploy contracts");
+            let contracts =
+                operations::ensure_contracts_deployed().await.expect("Failed to deploy contracts");
 
             println!("ERC20 contract at: {:#x}", contracts.erc20);
             println!("Deployment address (token holder): {:#x}", contracts.deployment_address);
 
-            let batch_size = 10; 
+            let batch_size = 10;
             let amount = U256::from(100u128) * U256::from(10u128).pow(U256::from(18u128)); // 100 tokens per transfer
             let to_address = operations::manager::DEFAULT_L2_NEW_ACC1_ADDRESS;
 
             println!("Performing batch transfer of {} transactions", batch_size);
-            println!("Amount per transfer: {} tokens", amount / U256::from(10u128).pow(U256::from(18u128)));
+            println!(
+                "Amount per transfer: {} tokens",
+                amount / U256::from(10u128).pow(U256::from(18u128))
+            );
             println!("Recipient: {}", to_address);
 
             // Perform batch ERC20 token transfers
-            let (tx_hashes, target_block_number, target_block_hash) = 
+            let (tx_hashes, target_block_number, target_block_hash) =
                 operations::transfer_erc20_token_batch(
                     operations::manager::DEFAULT_L2_NETWORK_URL,
                     contracts.erc20,
@@ -285,13 +285,16 @@ async fn test_eth_block_rpc(#[case] test_name: &str) {
                 .await
                 .expect("Failed to perform batch ERC20 transfers");
 
-            println!("Batch transfers completed in block #{} ({})", target_block_number, target_block_hash);
+            println!(
+                "Batch transfers completed in block #{} ({})",
+                target_block_number, target_block_hash
+            );
             println!("Number of transactions: {}", tx_hashes.len());
 
             // Test getting block receipts by block number
             let receipts_by_number = operations::eth_get_block_receipts(
-                &client, 
-                operations::BlockId::Number(target_block_number)
+                &client,
+                operations::BlockId::Number(target_block_number),
             )
             .await
             .expect("Failed to get block receipts by number");
@@ -300,16 +303,19 @@ async fn test_eth_block_rpc(#[case] test_name: &str) {
 
             if let Some(receipts_array) = receipts_by_number.as_array() {
                 println!("Number of receipts in block: {}", receipts_array.len());
-                assert!(receipts_array.len() >= batch_size, 
-                    "Should have at least {} receipts in the block", batch_size);
+                assert!(
+                    receipts_array.len() >= batch_size,
+                    "Should have at least {} receipts in the block",
+                    batch_size
+                );
             } else {
                 panic!("Block receipts should be an array");
             }
 
             // Test getting block receipts by block hash
             let receipts_by_hash = operations::eth_get_block_receipts(
-                &client, 
-                operations::BlockId::Hash(target_block_hash.clone())
+                &client,
+                operations::BlockId::Hash(target_block_hash.clone()),
             )
             .await
             .expect("Failed to get block receipts by hash");
@@ -318,8 +324,11 @@ async fn test_eth_block_rpc(#[case] test_name: &str) {
 
             if let Some(receipts_array) = receipts_by_hash.as_array() {
                 println!("Number of receipts in block (by hash): {}", receipts_array.len());
-                assert!(receipts_array.len() >= batch_size, 
-                    "Should have at least {} receipts in the block", batch_size);
+                assert!(
+                    receipts_array.len() >= batch_size,
+                    "Should have at least {} receipts in the block",
+                    batch_size
+                );
             } else {
                 panic!("Block receipts by hash should be an array");
             }
@@ -338,16 +347,15 @@ async fn test_eth_block_rpc(#[case] test_name: &str) {
 #[case::get_transaction_receipt("EthGetTransactionReceipt")]
 #[tokio::test]
 async fn test_eth_transaction_rpc(#[case] test_name: &str) {
-    use alloy_sol_types::{sol, SolCall};
     use alloy_primitives::hex;
-    
+    use alloy_sol_types::{sol, SolCall};
+
     let client = operations::create_test_client();
-    
+
     // Setup: Ensure contracts are deployed
-    let contracts = operations::ensure_contracts_deployed()
-        .await
-        .expect("Failed to deploy contracts");
-    
+    let contracts =
+        operations::ensure_contracts_deployed().await.expect("Failed to deploy contracts");
+
     // Setup: Send a transaction to test with
     let tx_hash = operations::transfer_token(
         operations::manager::DEFAULT_L2_NETWORK_URL,
@@ -356,17 +364,18 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
     )
     .await
     .expect("Failed to send transaction");
-    
+
     println!("Test transaction hash: {}", tx_hash);
-    
+
     match test_name {
         "EthEstimateGasSimpleTransfer" => {
             // Check balance first
-            let balance = operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS)
-                .await
-                .expect("Failed to get balance");
+            let balance =
+                operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS)
+                    .await
+                    .expect("Failed to get balance");
             assert!(balance > U256::ZERO, "From address should have balance");
-            
+
             let transfer_amount = U256::from(1_000_000_000_000_000u128); // 0.001 ETH
             let gas = operations::estimate_gas(
                 &client,
@@ -374,11 +383,11 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
                     "from": operations::manager::DEFAULT_RICH_ADDRESS,
                     "to": operations::manager::DEFAULT_L2_NEW_ACC1_ADDRESS,
                     "value": format!("{:#x}", transfer_amount),
-                }))
+                })),
             )
             .await
             .expect("Failed to estimate gas for simple transfer");
-            
+
             assert_eq!(gas, 21000, "Simple transfer should use exactly 21000 gas");
             println!("EthEstimateGas SimpleTransfer result: {} gas", gas);
         }
@@ -388,69 +397,72 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
             }
             let call = triggerCallCall {};
             let calldata = call.abi_encode();
-            
+
             let gas = operations::estimate_gas(
                 &client,
                 Some(serde_json::json!({
                     "from": operations::manager::DEFAULT_RICH_ADDRESS,
                     "to": format!("{:#x}", contracts.contract_a),
                     "data": format!("0x{}", hex::encode(&calldata)),
-                }))
+                })),
             )
             .await
             .expect("Failed to estimate gas for contract call");
-            
+
             assert!(gas > 21000, "Contract call should use more than 21000 gas");
             println!("EthEstimateGas ContractCall result: {} gas", gas);
         }
         "EthCall" => {
-            let balance_before = operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS)
-                .await
-                .expect("Failed to get balance before call");
+            let balance_before =
+                operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS)
+                    .await
+                    .expect("Failed to get balance before call");
             assert!(balance_before > U256::ZERO, "From address should have balance");
-            
+
             sol! {
                 function getValue() external view returns (uint256);
             }
             let get_value_call = getValueCall {};
             let calldata = get_value_call.abi_encode();
-            
+
             let result = operations::eth_call(
                 &client,
                 Some(serde_json::json!({
                     "from": operations::manager::DEFAULT_RICH_ADDRESS,
                     "to": format!("{:#x}", contracts.contract_c),
                     "data": format!("0x{}", hex::encode(&calldata)),
-                }))
+                })),
             )
             .await
             .expect("Failed to execute eth_call");
-            
+
             assert!(result.starts_with("0x"), "Call result should start with 0x");
             println!("EthCall result: {}", result);
-            
-            let balance_after = operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS)
-                .await
-                .expect("Failed to get balance after call");
-            assert_eq!(balance_before, balance_after, "Balance should remain unchanged after eth_call");
+
+            let balance_after =
+                operations::get_balance(&client, operations::manager::DEFAULT_RICH_ADDRESS)
+                    .await
+                    .expect("Failed to get balance after call");
+            assert_eq!(
+                balance_before, balance_after,
+                "Balance should remain unchanged after eth_call"
+            );
             println!("Balance unchanged after eth_call ✓");
         }
         "EthGetTransactionByHash" => {
             let tx_data = operations::eth_get_transaction_by_hash(&client, &tx_hash)
                 .await
                 .expect("Failed to get transaction by hash");
-            
+
             assert!(!tx_data.is_null(), "Transaction data should not be null");
-            
-            let tx_hash_from_data = tx_data["hash"]
-                .as_str()
-                .expect("Transaction should have hash field");
+
+            let tx_hash_from_data =
+                tx_data["hash"].as_str().expect("Transaction should have hash field");
             assert_eq!(tx_hash, tx_hash_from_data, "Transaction hash should match");
             println!("Transaction hash matches: {}", tx_hash_from_data);
-            
-            let from_addr_str = tx_data["from"]
-                .as_str()
-                .expect("Transaction should have from field");
+
+            let from_addr_str =
+                tx_data["from"].as_str().expect("Transaction should have from field");
             assert_eq!(
                 from_addr_str.to_lowercase(),
                 operations::manager::DEFAULT_RICH_ADDRESS.to_lowercase(),
@@ -462,46 +474,40 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
             let receipt = operations::eth_get_transaction_receipt(&client, &tx_hash)
                 .await
                 .expect("Failed to get transaction receipt");
-            
+
             assert!(!receipt.is_null(), "Receipt should not be null");
-            
-            let from_receipt = receipt["from"]
-                .as_str()
-                .expect("Receipt should have from field");
+
+            let from_receipt = receipt["from"].as_str().expect("Receipt should have from field");
             assert_eq!(
                 from_receipt.to_lowercase(),
                 operations::manager::DEFAULT_RICH_ADDRESS.to_lowercase(),
                 "From address should match sender"
             );
             println!("Receipt from address: {}", from_receipt);
-            
-            let status = receipt["status"]
-                .as_str()
-                .expect("Receipt should have status field");
+
+            let status = receipt["status"].as_str().expect("Receipt should have status field");
             assert_eq!(status, "0x1", "Status should be 0x1 for successful transaction");
             println!("Transaction status: {} (successful)", status);
-            
-            let to_receipt = receipt["to"]
-                .as_str()
-                .expect("Receipt should have to field");
+
+            let to_receipt = receipt["to"].as_str().expect("Receipt should have to field");
             assert_eq!(
                 to_receipt.to_lowercase(),
                 operations::manager::DEFAULT_L2_NEW_ACC1_ADDRESS.to_lowercase(),
                 "To address should match recipient"
             );
             println!("Receipt to address: {}", to_receipt);
-            
+
             let tx_hash_from_receipt = receipt["transactionHash"]
                 .as_str()
                 .expect("Receipt should have transactionHash field");
             assert_eq!(tx_hash, tx_hash_from_receipt, "Transaction hash should match");
             println!("Transaction hash from receipt matches: {}", tx_hash_from_receipt);
-            
+
             // Verify transaction index matches between transaction and receipt
             let tx_data = operations::eth_get_transaction_by_hash(&client, &tx_hash)
                 .await
                 .expect("Failed to get transaction by hash");
-            
+
             let tx_index_from_tx = tx_data["transactionIndex"]
                 .as_str()
                 .expect("Transaction should have transactionIndex field");
@@ -553,25 +559,25 @@ async fn test_txpool_rpc(#[case] test_name: &str) {
     match test_name {
         "TxPoolContent" => {
             // Test txpool_content - This might return a large object, so only log type
-            let content = operations::txpool_content(&client)
-                .await
-                .expect("Failed to get tx pool content");
+            let content =
+                operations::txpool_content(&client).await.expect("Failed to get tx pool content");
 
             assert!(!content.is_null(), "TxPool content should not be null");
             println!("TxPoolContent result: {}", content);
 
             // The result should be an object with "pending" and "queued" fields
             if let Some(obj) = content.as_object() {
-                assert!(obj.contains_key("pending") || obj.contains_key("queued"), 
-                    "TxPool content should have pending or queued fields");
+                assert!(
+                    obj.contains_key("pending") || obj.contains_key("queued"),
+                    "TxPool content should have pending or queued fields"
+                );
                 println!("TxPool has {} top-level keys", obj.len());
             }
         }
         "TxPoolStatus" => {
             // Test txpool_status
-            let status = operations::txpool_status(&client)
-                .await
-                .expect("Failed to get tx pool status");
+            let status =
+                operations::txpool_status(&client).await.expect("Failed to get tx pool status");
 
             assert!(!status.is_null(), "TxPool status should not be null");
             println!("TxPoolStatus result: {}", status);
@@ -602,7 +608,7 @@ async fn test_txpool_rpc(#[case] test_name: &str) {
 #[tokio::test]
 async fn test_new_transaction_types(#[case] test_name: &str) {
     use alloy_network::TransactionBuilder;
-    use alloy_primitives::{Address, B256, Bytes, U256, hex};
+    use alloy_primitives::{hex, Address, Bytes, B256, U256};
     use alloy_rpc_types_eth::{AccessList, AccessListItem, TransactionRequest};
     use alloy_signer_local::PrivateKeySigner;
     use alloy_sol_types::{sol, SolCall};
@@ -615,13 +621,12 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
 
     match test_name {
         "Eip1559SimpleTransfer" => {
-            operations::ensure_contracts_deployed()
-                .await
-                .expect("Failed to deploy contracts");
+            operations::ensure_contracts_deployed().await.expect("Failed to deploy contracts");
 
             let signer = PrivateKeySigner::from_str(private_key).expect("Invalid private key");
             let from_address = signer.address();
-            let to_address = Address::from_str("0x1111111111111111111111111111111111111111").unwrap();
+            let to_address =
+                Address::from_str("0x1111111111111111111111111111111111111111").unwrap();
 
             let funding_amount = U256::from(10_000_000_000_000_000_000u128); // 10 ETH
             operations::transfer_token(
@@ -671,9 +676,8 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
         }
         "Eip1559ContractCall" => {
             // Test for EIP-1559 contract call
-            let contracts = operations::ensure_contracts_deployed()
-                .await
-                .expect("Failed to deploy contracts");
+            let contracts =
+                operations::ensure_contracts_deployed().await.expect("Failed to deploy contracts");
 
             let signer = PrivateKeySigner::from_str(private_key).expect("Invalid private key");
             let from_address = signer.address();
@@ -722,9 +726,8 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
         }
         "EthFeeHistory" => {
             // Test for eth_feeHistory RPC
-            let contracts = operations::ensure_contracts_deployed()
-                .await
-                .expect("Failed to deploy contracts");
+            let contracts =
+                operations::ensure_contracts_deployed().await.expect("Failed to deploy contracts");
 
             // Perform batch transfers to generate blocks
             let batch_size = 10;
@@ -752,18 +755,21 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
                 .expect("Failed to call eth_feeHistory");
 
             assert!(!result.is_null(), "Fee history should not be null");
-            
+
             let oldest_block = result["oldestBlock"]
                 .as_str()
                 .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
                 .expect("Should have oldestBlock");
 
-            let base_fees = result["baseFeePerGas"]
-                .as_array()
-                .expect("Should have baseFeePerGas array");
+            let base_fees =
+                result["baseFeePerGas"].as_array().expect("Should have baseFeePerGas array");
 
-            println!("Fee history oldest block: {}, blocks returned: {}, requested: {}", 
-                     oldest_block, base_fees.len(), block_count);
+            println!(
+                "Fee history oldest block: {}, blocks returned: {}, requested: {}",
+                oldest_block,
+                base_fees.len(),
+                block_count
+            );
 
             for i in 0..block_count {
                 let block_num = oldest_block + i;
@@ -771,9 +777,11 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
                     .await
                     .expect("Failed to get block");
 
-                let history_base_fee = base_fees[i as usize].as_str().expect("Base fee should be string");
-                let block_base_fee = block["baseFeePerGas"].as_str().expect("Block should have baseFeePerGas");
-                
+                let history_base_fee =
+                    base_fees[i as usize].as_str().expect("Base fee should be string");
+                let block_base_fee =
+                    block["baseFeePerGas"].as_str().expect("Block should have baseFeePerGas");
+
                 assert_eq!(
                     history_base_fee, block_base_fee,
                     "Base fee should match between fee history and block header for block {}",
@@ -787,7 +795,8 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
             // Test for EIP-2930 transactions (Type 1: Access list transactions)
             let signer = PrivateKeySigner::from_str(private_key).expect("Invalid private key");
             let from_address = signer.address();
-            let to_address = Address::from_str("0x1111111111111111111111111111111111111111").unwrap();
+            let to_address =
+                Address::from_str("0x1111111111111111111111111111111111111111").unwrap();
 
             let funding_amount = U256::from(10_000_000_000_000_000_000u128);
             operations::transfer_token(
@@ -799,9 +808,8 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
             .expect("Failed to fund test address");
 
             // Get gas price
-            let gas_price = operations::eth_gas_price(&client)
-                .await
-                .expect("Failed to get gas price");
+            let gas_price =
+                operations::eth_gas_price(&client).await.expect("Failed to get gas price");
 
             // Create access list
             let access_list = AccessList(vec![AccessListItem {
@@ -852,9 +860,10 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
             println!("BASEFEE opcode result: {}", result);
 
             // Verify latest block has base fee
-            let latest_block = operations::eth_get_block_by_number(&client, 
-                operations::eth_block_number(&client).await.unwrap(), 
-                false
+            let latest_block = operations::eth_get_block_by_number(
+                &client,
+                operations::eth_block_number(&client).await.unwrap(),
+                false,
             )
             .await
             .expect("Failed to get latest block");
@@ -897,18 +906,21 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
             .await
             .expect("Failed to deploy self-destructing contract");
 
-            let contract_address = receipt["contractAddress"]
-                .as_str()
-                .expect("Should have contract address");
+            let contract_address =
+                receipt["contractAddress"].as_str().expect("Should have contract address");
 
-            println!("Contract address (self-destructed): {}, tx hash: {}", contract_address, tx_hash);
+            println!(
+                "Contract address (self-destructed): {}, tx hash: {}",
+                contract_address, tx_hash
+            );
 
             // Trace the transaction to get refund counter
             let trace_result = operations::debug_trace_transaction(&client, &tx_hash)
                 .await
                 .expect("Failed to trace transaction");
 
-            let refund_counter = operations::get_refund_counter_from_trace(&trace_result, "SELFDESTRUCT");
+            let refund_counter =
+                operations::get_refund_counter_from_trace(&trace_result, "SELFDESTRUCT");
             println!("Refund counter after SELFDESTRUCT: {}", refund_counter);
 
             assert_eq!(refund_counter, 0, "SELFDESTRUCT refund should be 0 with EIP-3529");
@@ -918,7 +930,7 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
                 .as_str()
                 .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
                 .unwrap();
-            
+
             let code = operations::eth_get_code(
                 &client,
                 contract_address,
@@ -941,13 +953,11 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
 
             // OP Stack disables EIP-4844 blob transactions on Layer 2
             // So we check if blob fields are present in block data
-            let blob_gas_used = block["blobGasUsed"]
-                .as_str()
-                .expect("Block should have blobGasUsed field");
+            let blob_gas_used =
+                block["blobGasUsed"].as_str().expect("Block should have blobGasUsed field");
 
-            let excess_blob_gas = block["excessBlobGas"]
-                .as_str()
-                .expect("Block should have excessBlobGas field");
+            let excess_blob_gas =
+                block["excessBlobGas"].as_str().expect("Block should have excessBlobGas field");
 
             println!("Block blobGasUsed: {}", blob_gas_used);
             println!("Block excessBlobGas: {}", excess_blob_gas);

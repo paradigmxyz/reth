@@ -1,7 +1,7 @@
 //! Transaction utilities for testing
 
 use alloy_network::{EthereumWallet, TransactionBuilder};
-use alloy_primitives::{Address, Bytes, U256, hex};
+use alloy_primitives::{hex, Address, Bytes, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer_local::PrivateKeySigner;
@@ -10,16 +10,17 @@ use serde_json;
 use std::str::FromStr;
 use tokio::time::{sleep, Duration};
 
-use super::manager::{DEFAULT_RICH_PRIVATE_KEY, DEFAULT_TIMEOUT_TX_TO_BE_MINED};
-use super::HttpClient;
+use super::{
+    manager::{DEFAULT_RICH_PRIVATE_KEY, DEFAULT_TIMEOUT_TX_TO_BE_MINED},
+    HttpClient,
+};
 
-const TMP_SENDER_PRIVATE_KEY : &str = "363ea277eec54278af051fb574931aec751258450a286edce9e1f64401f3b9c8";
+const TMP_SENDER_PRIVATE_KEY: &str =
+    "363ea277eec54278af051fb574931aec751258450a286edce9e1f64401f3b9c8";
 
 /// Creates an HTTP client for the local test RPC endpoint
 pub fn create_test_client() -> HttpClient {
-    HttpClient::builder()
-        .build("http://localhost:8124")
-        .expect("Failed to create HTTP client")
+    HttpClient::builder().build("http://localhost:8124").expect("Failed to create HTTP client")
 }
 
 /// Transfers tokens from a specific private key to an address
@@ -46,41 +47,32 @@ pub async fn transfer_token_with_from(
 
     let wallet = EthereumWallet::from(signer);
 
-    let provider = ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_http(rpc_url.parse()?);
+    let provider = ProviderBuilder::new().wallet(wallet).connect_http(rpc_url.parse()?);
 
     let to = Address::from_str(to_address)
         .map_err(|e| eyre!("Failed to parse recipient address: {}", e))?;
 
-    let chain_id = provider
-        .get_chain_id()
-        .await
-        .map_err(|e| eyre!("Failed to get chain ID: {}", e))?;
+    let chain_id =
+        provider.get_chain_id().await.map_err(|e| eyre!("Failed to get chain ID: {}", e))?;
 
     let nonce = provider
         .get_transaction_count(from_address)
         .pending()
         .await
         .map_err(|e| eyre!("Failed to get nonce: {}", e))?;
-    
-    println!("Sending transaction: from={:#x}, to={:#x}, amount={}, nonce={}", 
-             from_address, to, amount, nonce);
+
+    println!(
+        "Sending transaction: from={:#x}, to={:#x}, amount={}, nonce={}",
+        from_address, to, amount, nonce
+    );
 
     let gas_estimate = provider
-        .estimate_gas(
-            TransactionRequest::default()
-                .from(from_address)
-                .to(to)
-                .value(amount),
-        )
+        .estimate_gas(TransactionRequest::default().from(from_address).to(to).value(amount))
         .await
         .map_err(|e| eyre!("Failed to estimate gas: {}", e))?;
 
-    let gas_price = provider
-        .get_gas_price()
-        .await
-        .map_err(|e| eyre!("Failed to get gas price: {}", e))?;
+    let gas_price =
+        provider.get_gas_price().await.map_err(|e| eyre!("Failed to get gas price: {}", e))?;
 
     let tx = TransactionRequest::default()
         .with_from(from_address)
@@ -213,8 +205,10 @@ pub async fn ensure_contracts_deployed() -> Result<&'static DeployedContracts> {
         return Ok(contracts);
     }
 
-    use super::constants_xlayer::*;
-    use super::manager::{DEFAULT_L2_NETWORK_URL, DEFAULT_RICH_PRIVATE_KEY};
+    use super::{
+        constants_xlayer::*,
+        manager::{DEFAULT_L2_NETWORK_URL, DEFAULT_RICH_PRIVATE_KEY},
+    };
     use alloy_sol_types::SolValue;
 
     println!("=== Starting contract deployment ===");
@@ -222,15 +216,15 @@ pub async fn ensure_contracts_deployed() -> Result<&'static DeployedContracts> {
     // Get deployment address from TmpSenderPrivateKey
     let deployment_signer = PrivateKeySigner::from_str(TMP_SENDER_PRIVATE_KEY)?;
     let deployment_address = deployment_signer.address();
-    
+
     println!("Deployment address: {:#x}", deployment_address);
 
     // Check if deployment address already has sufficient funds
     let provider = ProviderBuilder::new().connect_http(DEFAULT_L2_NETWORK_URL.parse()?);
-    
+
     let current_balance = provider.get_balance(deployment_address).await?;
     let min_required_balance = U256::from(1_000_000_000_000_000_000u128); // 1 ETH minimum
-    
+
     if current_balance < min_required_balance {
         // Fund deployment address with 5 ETH
         let funding_amount = U256::from(5_000_000_000_000_000_000u128); // 5 ETH
@@ -243,7 +237,10 @@ pub async fn ensure_contracts_deployed() -> Result<&'static DeployedContracts> {
         )
         .await?;
     } else {
-        println!("Deployment address already has sufficient funds ({} wei), skipping funding", current_balance);
+        println!(
+            "Deployment address already has sufficient funds ({} wei), skipping funding",
+            current_balance
+        );
     }
 
     println!("\n=== Deploying contracts ===");
@@ -295,13 +292,9 @@ pub async fn ensure_contracts_deployed() -> Result<&'static DeployedContracts> {
 
     // Deploy ERC20 (no constructor args)
     println!("Deploying ERC20...");
-    let erc20 = deploy_contract(
-        DEFAULT_L2_NETWORK_URL,
-        TMP_SENDER_PRIVATE_KEY,
-        ERC20_BYTECODE_STR,
-        None,
-    )
-    .await?;
+    let erc20 =
+        deploy_contract(DEFAULT_L2_NETWORK_URL, TMP_SENDER_PRIVATE_KEY, ERC20_BYTECODE_STR, None)
+            .await?;
     println!("ERC20 deployed at: {:#x}", erc20);
 
     // Store deployed contract addresses in global state
@@ -315,8 +308,7 @@ pub async fn ensure_contracts_deployed() -> Result<&'static DeployedContracts> {
     };
 
     // Cache the deployed contracts (marks ContractsDeployed = true)
-    DEPLOYED_CONTRACTS.set(contracts)
-        .map_err(|_| eyre!("Failed to cache deployed contracts"))?;
+    DEPLOYED_CONTRACTS.set(contracts).map_err(|_| eyre!("Failed to cache deployed contracts"))?;
 
     println!("\n=== All contracts deployed successfully! ===");
     println!("ContractA: {:#x}", contract_a);
@@ -326,7 +318,7 @@ pub async fn ensure_contracts_deployed() -> Result<&'static DeployedContracts> {
     println!("ERC20: {:#x}", erc20);
     println!("Deployment address: {:#x}", deployment_address);
     println!("ContractsDeployed: true");
-    
+
     Ok(DEPLOYED_CONTRACTS.get().unwrap())
 }
 
@@ -368,7 +360,6 @@ pub async fn setup_test_environment(
         return Err(eyre!("Block data should not be null"));
     }
 
-
     // Extract block hash from the returned data
     let block_hash = if let Some(hash_value) = block_data.get("hash") {
         if let Some(hash_str) = hash_value.as_str() {
@@ -388,7 +379,9 @@ pub async fn setup_test_environment(
         return Err(eyre!("No hash field found in block data"));
     };
 
-    if block_hash.is_empty() || block_hash == "0x0000000000000000000000000000000000000000000000000000000000000000" {
+    if block_hash.is_empty() ||
+        block_hash == "0x0000000000000000000000000000000000000000000000000000000000000000"
+    {
         return Err(eyre!("Block hash should not be empty or zero"));
     }
 
@@ -433,22 +426,14 @@ pub async fn erc20_transfer_tx(
     let wallet = EthereumWallet::from(signer);
 
     // Build provider with wallet
-    let provider = ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_http(rpc_url.parse()?);
+    let provider = ProviderBuilder::new().wallet(wallet).connect_http(rpc_url.parse()?);
 
     // Get gas price if not provided
-    let final_gas_price = if let Some(gp) = gas_price {
-        gp
-    } else {
-        provider.get_gas_price().await?
-    };
+    let final_gas_price =
+        if let Some(gp) = gas_price { gp } else { provider.get_gas_price().await? };
 
     // Encode the transfer function call
-    let call = transferCall {
-        to: to_address,
-        amount,
-    };
+    let call = transferCall { to: to_address, amount };
     let calldata = call.abi_encode();
 
     // Get chain ID
@@ -501,9 +486,7 @@ pub async fn transfer_erc20_token_batch(
     let from_address = signer.address();
 
     let wallet = EthereumWallet::from(signer.clone());
-    let provider = ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_http(rpc_url.parse()?);
+    let provider = ProviderBuilder::new().wallet(wallet).connect_http(rpc_url.parse()?);
 
     // Get gas price
     let gas_price = provider.get_gas_price().await?;
@@ -592,21 +575,17 @@ async fn wait_for_transaction_receipt(
 }
 
 /// Gets a transaction receipt
-async fn get_transaction_receipt(
-    rpc_url: &str,
-    tx_hash: &str,
-) -> Result<serde_json::Value> {
+async fn get_transaction_receipt(rpc_url: &str, tx_hash: &str) -> Result<serde_json::Value> {
     // Create HTTP client
-    let client = jsonrpsee::http_client::HttpClientBuilder::default()
-        .build(rpc_url)?;
-    
+    let client = jsonrpsee::http_client::HttpClientBuilder::default().build(rpc_url)?;
+
     // Use the eth_get_transaction_receipt function from rpc_all
     let result = super::rpc_all::eth_get_transaction_receipt(&client, tx_hash).await?;
-    
+
     if result.is_null() {
         return Err(eyre!("Transaction receipt not found"));
     }
-    
+
     Ok(result)
 }
 
@@ -630,9 +609,7 @@ pub async fn sign_and_send_transaction(
 
     let wallet = EthereumWallet::from(signer);
 
-    let provider = ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_http(rpc_url.parse()?);
+    let provider = ProviderBuilder::new().wallet(wallet).connect_http(rpc_url.parse()?);
 
     let pending_tx = provider
         .send_transaction(tx_request)
@@ -642,14 +619,17 @@ pub async fn sign_and_send_transaction(
     let tx_hash = *pending_tx.tx_hash();
     println!("tx sent: {:#x}", tx_hash);
 
-    wait_for_transaction_receipt(rpc_url, &format!("{:#x}", tx_hash), DEFAULT_TIMEOUT_TX_TO_BE_MINED).await?;
+    wait_for_transaction_receipt(
+        rpc_url,
+        &format!("{:#x}", tx_hash),
+        DEFAULT_TIMEOUT_TX_TO_BE_MINED,
+    )
+    .await?;
 
     let receipt = get_transaction_receipt(rpc_url, &format!("{:#x}", tx_hash)).await?;
 
-    let status = receipt["status"]
-        .as_str()
-        .ok_or_else(|| eyre!("Receipt missing status field"))?;
-    
+    let status = receipt["status"].as_str().ok_or_else(|| eyre!("Receipt missing status field"))?;
+
     if status != "0x1" {
         return Err(eyre!("Transaction failed with status: {}", status));
     }

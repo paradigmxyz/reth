@@ -1,9 +1,9 @@
 //! OP-Reth `eth_` endpoint implementation.
 
 pub mod ext;
+pub mod ext_xlayer;
 pub mod receipt;
 pub mod transaction;
-pub mod ext_xlayer;
 
 mod block;
 mod call;
@@ -37,8 +37,7 @@ use reth_rpc_eth_api::{
     RpcNodeCoreExt, RpcTypes,
 };
 use reth_rpc_eth_types::{
-    EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock,
-    LegacyRpcClient,
+    EthStateCache, FeeHistoryCache, GasPriceOracle, LegacyRpcClient, PendingBlock,
 };
 use reth_storage_api::{BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{

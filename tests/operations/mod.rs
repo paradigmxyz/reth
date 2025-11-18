@@ -1,10 +1,10 @@
 //! RPC operations for testing
 
-mod rpc_all;
-mod test_utils_xlayer;
-pub mod manager;
 /// Contract bytecode and ABI constants
 pub mod constants_xlayer;
+pub mod manager;
+mod rpc_all;
+mod test_utils_xlayer;
 
 pub use rpc_all::{
     debug_trace_block_by_hash, debug_trace_block_by_number, debug_trace_transaction, estimate_gas,

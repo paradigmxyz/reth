@@ -60,7 +60,7 @@ impl NodeType {
 pub enum TransactionProcessId {
     /// RPC node: Transaction received and ready to forward
     RpcReceiveTxEnd = 15010,
-    
+
     /// Sequencer node: Transaction received and added to pool
     SeqReceiveTxEnd = 15030,
 
@@ -78,7 +78,7 @@ pub enum TransactionProcessId {
 
     /// RPC node: Block received from sequencer
     RpcBlockReceiveEnd = 15060,
-    
+
     /// RPC node: Block insertion completed
     RpcBlockInsertEnd = 15062,
 }
@@ -102,20 +102,19 @@ impl TransactionProcessId {
     pub fn service_name(&self) -> &'static str {
         match self {
             // RPC-related process IDs
-            TransactionProcessId::RpcReceiveTxEnd
-            | TransactionProcessId::RpcBlockReceiveEnd
-            | TransactionProcessId::RpcBlockInsertEnd => RPC_SERVICE_NAME,
-            
+            TransactionProcessId::RpcReceiveTxEnd |
+            TransactionProcessId::RpcBlockReceiveEnd |
+            TransactionProcessId::RpcBlockInsertEnd => RPC_SERVICE_NAME,
+
             // Sequencer-related process IDs
-            TransactionProcessId::SeqReceiveTxEnd
-            | TransactionProcessId::SeqBlockBuildStart
-            | TransactionProcessId::SeqTxExecutionEnd
-            | TransactionProcessId::SeqBlockBuildEnd
-            | TransactionProcessId::SeqBlockSendStart => SEQ_SERVICE_NAME,
+            TransactionProcessId::SeqReceiveTxEnd |
+            TransactionProcessId::SeqBlockBuildStart |
+            TransactionProcessId::SeqTxExecutionEnd |
+            TransactionProcessId::SeqBlockBuildEnd |
+            TransactionProcessId::SeqBlockSendStart => SEQ_SERVICE_NAME,
         }
     }
 }
-
 
 /// Transaction tracer for monitoring transaction lifecycle
 #[derive(Clone, Debug)]
@@ -137,7 +136,9 @@ impl TransactionTracer {
     /// Create a new transaction tracer
     pub fn new(enabled: bool, output_path: Option<PathBuf>, node_type: NodeType) -> Self {
         let output_file = if let Some(ref path) = output_path {
-            let file_path = if path.to_string_lossy().ends_with('/') || path.to_string_lossy().ends_with('\\') {
+            let file_path = if path.to_string_lossy().ends_with('/') ||
+                path.to_string_lossy().ends_with('\\')
+            {
                 path.join("trace.log")
             } else if path.extension().is_none() && !path.exists() {
                 path.join("trace.log")
@@ -155,11 +156,7 @@ impl TransactionTracer {
                 }
             }
 
-            match OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&file_path)
-            {
+            match OpenOptions::new().create(true).append(true).open(&file_path) {
                 Ok(file) => {
                     tracing::info!(
                         target: "tx_trace",
@@ -211,20 +208,22 @@ impl TransactionTracer {
                         );
                     } else {
                         let count = self.inner.write_count.fetch_add(1, Ordering::Relaxed) + 1;
-                        
+
                         let should_flush = {
                             let mut last_flush = self.inner.last_flush_time.lock().unwrap();
                             let now = Instant::now();
                             let time_since_flush = now.duration_since(*last_flush);
-                            
-                            if count % FLUSH_INTERVAL_WRITES == 0 || time_since_flush.as_secs() >= FLUSH_INTERVAL_SECONDS {
+
+                            if count % FLUSH_INTERVAL_WRITES == 0 ||
+                                time_since_flush.as_secs() >= FLUSH_INTERVAL_SECONDS
+                            {
                                 *last_flush = now;
                                 true
                             } else {
                                 false
                             }
                         };
-                        
+
                         if should_flush {
                             if let Err(e) = file.flush() {
                                 tracing::warn!(
@@ -246,7 +245,7 @@ impl TransactionTracer {
             }
         }
     }
-    
+
     /// Force flush the trace file
     pub fn flush(&self) {
         match self.inner.output_file.lock() {
@@ -303,7 +302,8 @@ impl TransactionTracer {
         let referld = "";
         let contract_address = "";
         let block_height = block_number.map(|n| n.to_string()).unwrap_or_default();
-        let block_hash_str = block_hash.map(|h| format!("{:#x}", h).to_lowercase()).unwrap_or_default();
+        let block_hash_str =
+            block_hash.map(|h| format!("{:#x}", h).to_lowercase()).unwrap_or_default();
         let block_time = "";
         let deposit_confirm_height = "";
         let token_id = "";
@@ -311,15 +311,32 @@ impl TransactionTracer {
         let business_hash = "";
         let transaction_type = "";
         let ext_json = "";
-        
+
         format!(
             "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
-            escape_csv(chain), escape_csv(&trace_hash), escape_csv(status_str), escape_csv(service_name),
-            escape_csv(business), escape_csv(client), escape_csv(chainld), escape_csv(&process_str),
-            escape_csv(process_word_str), escape_csv(index), escape_csv(inner_index), escape_csv(&current_time_str),
-            escape_csv(referld), escape_csv(contract_address), escape_csv(&block_height), escape_csv(&block_hash_str),
-            escape_csv(block_time), escape_csv(deposit_confirm_height), escape_csv(token_id), escape_csv(mev_supplier),
-            escape_csv(business_hash), escape_csv(transaction_type), escape_csv(ext_json)
+            escape_csv(chain),
+            escape_csv(&trace_hash),
+            escape_csv(status_str),
+            escape_csv(service_name),
+            escape_csv(business),
+            escape_csv(client),
+            escape_csv(chainld),
+            escape_csv(&process_str),
+            escape_csv(process_word_str),
+            escape_csv(index),
+            escape_csv(inner_index),
+            escape_csv(&current_time_str),
+            escape_csv(referld),
+            escape_csv(contract_address),
+            escape_csv(&block_height),
+            escape_csv(&block_hash_str),
+            escape_csv(block_time),
+            escape_csv(deposit_confirm_height),
+            escape_csv(token_id),
+            escape_csv(mev_supplier),
+            escape_csv(business_hash),
+            escape_csv(transaction_type),
+            escape_csv(ext_json)
         )
     }
 
@@ -334,23 +351,16 @@ impl TransactionTracer {
             return;
         }
 
-        let timestamp_duration = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
+        let timestamp_duration =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
         let timestamp_ms = timestamp_duration.as_millis();
         let trace_hash = format!("{:#x}", tx_hash);
-        
-        let csv_line = self.format_csv_line(
-            &trace_hash,
-            process_id,
-            timestamp_ms,
-            None,
-            block_number,
-        );
-        
+
+        let csv_line =
+            self.format_csv_line(&trace_hash, process_id, timestamp_ms, None, block_number);
+
         self.write_to_file(&csv_line);
     }
-
 }
 
 impl Default for TransactionTracer {
@@ -383,22 +393,16 @@ pub fn flush_global_tracer() {
 /// Block tracing functions for monitoring block lifecycle
 impl TransactionTracer {
     /// Log block event at current time point
-    pub fn log_block(
-        &self,
-        block_hash: B256,
-        block_number: u64,
-        process_id: TransactionProcessId,
-    ) {
+    pub fn log_block(&self, block_hash: B256, block_number: u64, process_id: TransactionProcessId) {
         if !self.inner.enabled {
             return;
         }
 
-        let timestamp_duration = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
+        let timestamp_duration =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
         let timestamp_ms = timestamp_duration.as_millis();
         let trace_hash = format!("{:#x}", block_hash);
-        
+
         let csv_line = self.format_csv_line(
             &trace_hash,
             process_id,
@@ -406,18 +410,18 @@ impl TransactionTracer {
             Some(block_hash),
             Some(block_number),
         );
-        
+
         self.write_to_file(&csv_line);
     }
 
     /// Log block event with a specific timestamp
-    /// 
+    ///
     /// This method is used when we need to log a block event with a timestamp
     /// that was saved earlier (e.g., when block building started but block hash
     /// was not yet available).
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `block_hash` - The hash of the block
     /// * `block_number` - The number of the block
     /// * `process_id` - The process ID for this event
@@ -434,7 +438,7 @@ impl TransactionTracer {
         }
 
         let trace_hash = format!("{:#x}", block_hash);
-        
+
         let csv_line = self.format_csv_line(
             &trace_hash,
             process_id,
@@ -442,23 +446,16 @@ impl TransactionTracer {
             Some(block_hash),
             Some(block_number),
         );
-        
+
         self.write_to_file(&csv_line);
     }
-
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use std::{
-        fs,
-        io::Read,
-        sync::Arc,
-        thread,
-    };
+    use std::{fs, io::Read, sync::Arc, thread};
     use tempfile::TempDir;
 
     fn create_test_tracer() -> (TransactionTracer, TempDir) {
@@ -488,12 +485,12 @@ mod tests {
         assert!(trace_file.exists());
 
         let mut contents = String::new();
-        fs::File::open(&trace_file)
-            .unwrap()
-            .read_to_string(&mut contents)
-            .unwrap();
+        fs::File::open(&trace_file).unwrap().read_to_string(&mut contents).unwrap();
 
-        // CSV format: chain,trace,status,serviceName,business,client,chainld,process,processWord,index,innerIndex,currentTime,referld,contractAddress,blockHeight,blockHash,blockTime,depositConfirmHeight,tokenID,mevSupplier,businessHash,transactionType,extJson
+        // CSV format:
+        // chain,trace,status,serviceName,business,client,chainld,process,processWord,index,
+        // innerIndex,currentTime,referld,contractAddress,blockHeight,blockHash,blockTime,
+        // depositConfirmHeight,tokenID,mevSupplier,businessHash,transactionType,extJson
         assert!(contents.contains(","));
         let tx_hash_lower = format!("{:#x}", tx_hash).to_lowercase();
         assert!(contents.contains(&tx_hash_lower));
@@ -509,12 +506,12 @@ mod tests {
 
         let trace_file = temp_dir.path().join("trace.log");
         let mut contents = String::new();
-        fs::File::open(&trace_file)
-            .unwrap()
-            .read_to_string(&mut contents)
-            .unwrap();
+        fs::File::open(&trace_file).unwrap().read_to_string(&mut contents).unwrap();
 
-        // CSV format: chain,trace,status,serviceName,business,client,chainld,process,processWord,index,innerIndex,currentTime,referld,contractAddress,blockHeight,blockHash,blockTime,depositConfirmHeight,tokenID,mevSupplier,businessHash,transactionType,extJson
+        // CSV format:
+        // chain,trace,status,serviceName,business,client,chainld,process,processWord,index,
+        // innerIndex,currentTime,referld,contractAddress,blockHeight,blockHash,blockTime,
+        // depositConfirmHeight,tokenID,mevSupplier,businessHash,transactionType,extJson
         assert!(contents.contains(","));
         let block_hash_lower = format!("{:#x}", block_hash).to_lowercase();
         assert!(contents.contains(&block_hash_lower));
@@ -548,10 +545,7 @@ mod tests {
         }
 
         let mut contents = String::new();
-        fs::File::open(&trace_file)
-            .unwrap()
-            .read_to_string(&mut contents)
-            .unwrap();
+        fs::File::open(&trace_file).unwrap().read_to_string(&mut contents).unwrap();
 
         let lines: Vec<&str> = contents.lines().collect();
         assert_eq!(lines.len(), num_threads * writes_per_thread);
@@ -562,7 +556,6 @@ mod tests {
             assert!(fields.len() >= 23, "CSV line should have at least 23 fields");
         }
     }
-
 
     #[test]
     fn test_concurrent_write_with_different_hashes() {
@@ -581,7 +574,11 @@ mod tests {
                 let tx_hash = B256::from(hash_bytes);
 
                 for _ in 0..50 {
-                    tracer_clone.log_transaction(tx_hash, TransactionProcessId::SeqTxExecutionEnd, None);
+                    tracer_clone.log_transaction(
+                        tx_hash,
+                        TransactionProcessId::SeqTxExecutionEnd,
+                        None,
+                    );
                 }
             });
             handles.push(handle);
@@ -592,15 +589,9 @@ mod tests {
         }
 
         let mut contents = String::new();
-        fs::File::open(&trace_file)
-            .unwrap()
-            .read_to_string(&mut contents)
-            .unwrap();
+        fs::File::open(&trace_file).unwrap().read_to_string(&mut contents).unwrap();
 
-        let log_lines: Vec<&str> = contents
-            .lines()
-            .filter(|line| !line.is_empty())
-            .collect();
+        let log_lines: Vec<&str> = contents.lines().filter(|line| !line.is_empty()).collect();
 
         // Each thread writes 50 transactions, so total should be num_threads * 50
         assert_eq!(log_lines.len(), num_threads * 50);

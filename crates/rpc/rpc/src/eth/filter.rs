@@ -327,7 +327,12 @@ where
 #[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt + LoadReceipt + EthBlocks + reth_rpc_eth_api::helpers::LegacyRpc + 'static,
+    Eth: FullEthApiTypes
+        + RpcNodeCoreExt
+        + LoadReceipt
+        + EthBlocks
+        + reth_rpc_eth_api::helpers::LegacyRpc
+        + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {

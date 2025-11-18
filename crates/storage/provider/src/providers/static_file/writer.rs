@@ -321,8 +321,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             .as_ref()
             .map(|block_range| block_range.end())
             .or_else(|| {
-                (self.writer.user_header().expected_block_start() > self.reader().get_genesis_block_number())
-                    .then(|| self.writer.user_header().expected_block_start() - 1)
+                (self.writer.user_header().expected_block_start() >
+                    self.reader().get_genesis_block_number())
+                .then(|| self.writer.user_header().expected_block_start() - 1)
             });
 
         self.reader().update_index(self.writer.user_header().segment(), segment_max_block)

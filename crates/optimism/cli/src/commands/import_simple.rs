@@ -102,4 +102,3 @@ impl<C: ChainSpecParser> ImportCommand<C> {
         Some(&self.env.chain)
     }
 }
-

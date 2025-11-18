@@ -1,13 +1,11 @@
 //! Apollo configuration client for dynamic configuration management.
 
-use crate::types::ConfigValue;
-use crate::types::{ApolloConfig, ApolloError};
+use crate::types::{ApolloConfig, ApolloError, ConfigValue};
 use apollo_sdk::client::apollo_config_client::ApolloConfigClient;
 use async_once_cell::OnceCell;
 use moka::sync::Cache;
 use serde_json::Value as JsonValue;
-use std::time::Duration;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
@@ -75,9 +73,9 @@ impl ApolloService {
     /// Create new instance
     async fn try_new_instance(config: ApolloConfig) -> Result<ApolloService, ApolloError> {
         // Validate configuration
-        if config.app_id.is_empty()
-            || config.meta_server.is_empty()
-            || config.cluster_name.is_empty()
+        if config.app_id.is_empty() ||
+            config.meta_server.is_empty() ||
+            config.cluster_name.is_empty()
         {
             return Err(ApolloError::ClientInit(
                 "apollo enabled but config is not valid".to_string(),

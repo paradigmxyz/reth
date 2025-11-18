@@ -371,7 +371,8 @@ where
         async move {
             let header = self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
             let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
-            let default_suggested_fee = self.gas_oracle().config().default_suggested_fee.unwrap_or_default();
+            let default_suggested_fee =
+                self.gas_oracle().config().default_suggested_fee.unwrap_or_default();
             Ok(U256::from(base_fee) + default_suggested_fee)
         }
     }

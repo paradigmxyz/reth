@@ -289,7 +289,7 @@ mod tests {
         let mut entries: Vec<_> =
             (0..10_000).map(|id| (TxHash::random(), id as TxNumber)).collect();
 
-        let mut collector = Collector::new(1<<14, None);
+        let mut collector = Collector::new(1 << 14, None);
         assert!(collector.dir.is_none());
 
         for (k, v) in entries.clone() {

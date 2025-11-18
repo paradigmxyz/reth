@@ -259,7 +259,12 @@ pub struct RpcServerArgs {
     pub legacy_rpc_url: Option<String>,
 
     /// XLayer: Timeout for legacy RPC requests
-    #[arg(long = "rpc.legacy-timeout", value_name = "DURATION", default_value = "30s", requires = "legacy_rpc_url")]
+    #[arg(
+        long = "rpc.legacy-timeout",
+        value_name = "DURATION",
+        default_value = "30s",
+        requires = "legacy_rpc_url"
+    )]
     pub legacy_rpc_timeout: Option<String>,
 
     /// XLayer: Cutoff block (auto-derived from genesis, internal use only)

@@ -13,22 +13,15 @@ pub struct TransactionTraceArgs {
 
     /// Path to write transaction trace output file
     ///
-    /// If the path ends with a directory separator or has no extension, `trace.log` will be appended.
-    /// Otherwise, the path is used directly as the output file.
-    #[arg(
-        long = "tx-trace.output-path",
-        help_heading = "Transaction Trace",
-        value_name = "PATH"
-    )]
+    /// If the path ends with a directory separator or has no extension, `trace.log` will be
+    /// appended. Otherwise, the path is used directly as the output file.
+    #[arg(long = "tx-trace.output-path", help_heading = "Transaction Trace", value_name = "PATH")]
     pub output_path: Option<PathBuf>,
 }
 
 impl Default for TransactionTraceArgs {
     fn default() -> Self {
-        Self {
-            enable: false,
-            output_path: None,
-        }
+        Self { enable: false, output_path: None }
     }
 }
 
@@ -53,11 +46,8 @@ mod tests {
 
     #[test]
     fn transaction_trace_parse_enable() {
-        let args = CommandParser::<TransactionTraceArgs>::parse_from([
-            "reth",
-            "--tx-trace.enable",
-        ])
-        .args;
+        let args =
+            CommandParser::<TransactionTraceArgs>::parse_from(["reth", "--tx-trace.enable"]).args;
         assert!(args.enable);
     }
 
@@ -85,4 +75,3 @@ mod tests {
         assert_eq!(args.output_path, Some(PathBuf::from("/tmp/tx-traces")));
     }
 }
-

@@ -9,8 +9,9 @@ use reth_db::init_db;
 use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, NetworkArgs,
-        MetricArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, TransactionTraceArgs, TxPoolArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, MetricArgs,
+        NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, TransactionTraceArgs,
+        TxPoolArgs,
     },
     node_config::NodeConfig,
     version,

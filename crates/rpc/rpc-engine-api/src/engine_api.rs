@@ -197,17 +197,15 @@ where
         payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         // X Layer: Log block send start
-        use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
+        use reth_node_metrics::transaction_trace_xlayer::{
+            get_global_tracer, TransactionProcessId,
+        };
         let block_hash = payload.block_hash();
         let block_number = payload.block_number();
         if let Some(tracer) = get_global_tracer() {
-            tracer.log_block(
-                block_hash,
-                block_number,
-                TransactionProcessId::SeqBlockSendStart,
-            );
+            tracer.log_block(block_hash, block_number, TransactionProcessId::SeqBlockSendStart);
         }
-        
+
         let start = Instant::now();
         let gas_used = payload.gas_used();
 
@@ -246,17 +244,15 @@ where
         payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         // X Layer: Log block send start
-        use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
+        use reth_node_metrics::transaction_trace_xlayer::{
+            get_global_tracer, TransactionProcessId,
+        };
         let block_hash = payload.block_hash();
         let block_number = payload.block_number();
         if let Some(tracer) = get_global_tracer() {
-            tracer.log_block(
-                block_hash,
-                block_number,
-                TransactionProcessId::SeqBlockSendStart,
-            );
+            tracer.log_block(block_hash, block_number, TransactionProcessId::SeqBlockSendStart);
         }
-        
+
         let start = Instant::now();
         let gas_used = payload.gas_used();
 
@@ -295,17 +291,15 @@ where
         payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         // X Layer: Log block send start
-        use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
+        use reth_node_metrics::transaction_trace_xlayer::{
+            get_global_tracer, TransactionProcessId,
+        };
         let block_hash = payload.block_hash();
         let block_number = payload.block_number();
         if let Some(tracer) = get_global_tracer() {
-            tracer.log_block(
-                block_hash,
-                block_number,
-                TransactionProcessId::SeqBlockSendStart,
-            );
+            tracer.log_block(block_hash, block_number, TransactionProcessId::SeqBlockSendStart);
         }
-        
+
         let start = Instant::now();
         let gas_used = payload.gas_used();
 
