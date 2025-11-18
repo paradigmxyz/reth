@@ -1230,7 +1230,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                 queued_limit  => (queued_pool, queued_transactions_evicted),
             ]
         );
-        self.update_size_metrics();
         removed
     }
 
