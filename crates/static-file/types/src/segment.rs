@@ -6,7 +6,7 @@ use core::{
     str::FromStr,
 };
 use derive_more::Display;
-use serde::{de::Visitor, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Visitor};
 use strum::{EnumIs, EnumString};
 
 #[derive(
@@ -212,6 +212,7 @@ pub struct SegmentHeader {
     /// Segment type
     segment: StaticFileSegment,
     /// List of offsets, for where each block's changeset starts.
+    #[serde(skip_serializing_if = "Option::is_none")]
     changeset_offsets: Option<Vec<ChangesetOffset>>,
 }
 
@@ -244,7 +245,7 @@ impl<'de> Visitor<'de> for SegmentHeaderVisitor {
         // Try to read the 5th field (changeset_offsets)
         // If it doesn't exist (old format), this will return None
         let changeset_offsets = match seq.next_element()? {
-            Some(Some(offsets)) => Some(offsets), // New format with Some(vec)
+            Some(Some(offsets)) => Some(offsets),
             Some(None) | None => None,
         };
 
@@ -272,6 +273,24 @@ impl<'de> Deserialize<'de> for SegmentHeader {
         deserializer.deserialize_struct("YourStruct", FIELDS, SegmentHeaderVisitor)
     }
 }
+
+// impl Serialize for SegmentHeader {
+//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//         where
+//             S: Serializer {
+//         // There are four fields we always serialize, we don't serialize changeset offsets if they
+//         // don't exist
+//         let len = if self.changeset_offsets.is_some() {
+//             5
+//         } else {
+//             4
+//         };
+
+//         let mut state = serializer.serialize_struct("SegmentHeader", len)?;
+//         state.serialize_field("expected_block_range", self.expected_block_range);
+//         state.serialize_field("")
+//     }
+// }
 
 impl SegmentHeader {
     /// Returns [`SegmentHeader`].
