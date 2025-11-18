@@ -775,5 +775,3 @@ ipnet = "2.11"
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
 
-[patch.crates-io]
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "cbf97c9947f02e07dbe0c5e27e32fbb3d205114d" }
