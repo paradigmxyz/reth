@@ -80,7 +80,7 @@ impl ValueEncoder for StorageValueEncoder {
 /// An account value encoder that synchronously computes storage roots.
 ///
 /// This encoder contains a provider that can create trie and hashed cursors. Storage roots are
-/// computed synchronously within the deferred encoder using a [`StorageProofCalculator`].
+/// computed synchronously within the deferred encoder using a `StorageProofCalculator`.
 #[derive(Debug, Clone)]
 pub struct SyncAccountValueEncoder<P> {
     /// Provider for creating trie and hashed cursors.
@@ -157,7 +157,7 @@ where
         hashed_address: B256,
         account: Self::Value,
     ) -> Self::DeferredEncoder {
-        // Return a deferred enocder that will synchronously compute the storage root when encode()
+        // Return a deferred encoder that will synchronously compute the storage root when encode()
         // is called.
         SyncAccountDeferredValueEncoder { provider: self.provider.clone(), hashed_address, account }
     }
