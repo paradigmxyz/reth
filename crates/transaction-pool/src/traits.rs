@@ -177,16 +177,6 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         transactions: Vec<Self::Transaction>,
     ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
 
-    /// Adds multiple _unvalidated_ transactions with individual origins.
-    ///
-    /// Each transaction can have its own [`TransactionOrigin`].
-    ///
-    /// Consumer: RPC
-    fn add_transactions_with_origins(
-        &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
-
     /// Submit a consensus transaction directly to the pool
     fn add_consensus_transaction(
         &self,
