@@ -457,6 +457,8 @@ where
                 .with_hashed_cursor_metrics(hashed_cursor_metrics)
                 .storage_multiproof(target_slots)
                 .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+        trie_cursor_metrics.record_span_fields("trie_cursor_metrics", &span);
+        hashed_cursor_metrics.record_span_fields("hashed_cursor_metrics", &span);
 
         // Decode proof into DecodedStorageMultiProof
         let decoded_result = raw_proof_result.and_then(|raw_proof| {
@@ -1156,6 +1158,7 @@ where
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
         let proof_cursor_metrics = tracker.cursor_metrics;
+        proof_cursor_metrics.record_span_fields(&span);
 
         let stats = tracker.finish();
         let result = result.map(|proof| ProofResult::AccountMultiproof { proof, stats });

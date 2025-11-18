@@ -3,6 +3,7 @@ use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use std::time::{Duration, Instant};
+use tracing::Span;
 
 #[cfg(feature = "metrics")]
 use crate::TrieType;
@@ -103,6 +104,17 @@ impl TrieCursorMetricsCache {
         self.seek_count += other.seek_count;
         self.seek_exact_count += other.seek_exact_count;
         self.total_duration += other.total_duration;
+    }
+
+    /// Record the metrics in the given span as fields.
+    pub fn record_span_fields(&self, prefix: &'static str, span: &Span) {
+        span.record(format!("{}.next_count", prefix).as_str(), self.next_count);
+        span.record(format!("{}.seek_count", prefix).as_str(), self.seek_count);
+        span.record(format!("{}.seek_exact_count", prefix).as_str(), self.seek_exact_count);
+        span.record(
+            format!("{}.total_duration", prefix).as_str(),
+            self.total_duration.as_secs_f64(),
+        );
     }
 }
 
