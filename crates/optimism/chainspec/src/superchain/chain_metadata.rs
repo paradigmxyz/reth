@@ -85,7 +85,9 @@ impl From<&OptimismConfig> for ChainConfigExtraFieldsOptimism {
 
 /// Returns a [`ChainConfig`] filled from [`ChainMetadata`] with extra fields and handling
 /// special case for Optimism chain.
-// Mimic the behavior from https://github.com/ethereum-optimism/op-geth/blob/35e2c852/params/superchain.go#L26
+///
+/// This function mimics the behavior from op-geth's superchain configuration.
+/// See: <https://github.com/ethereum-optimism/op-geth/blob/35e2c852/params/superchain.go#L26>
 pub(crate) fn to_genesis_chain_config(chain_config: &ChainMetadata) -> ChainConfig {
     let mut res = ChainConfig {
         chain_id: chain_config.chain_id,
@@ -116,13 +118,18 @@ pub(crate) fn to_genesis_chain_config(chain_config: &ChainMetadata) -> ChainConf
         ..Default::default()
     };
 
-    // Special case for Optimism chain
+    // Special case for Optimism Mainnet: it has a different hardfork history than other L2 chains.
+    // Unlike other chains where most hardforks activate at block 0, Optimism Mainnet had:
+    // - Berlin activated at block 3_950_000 (historical activation on the live network)
+    // - London, ArrowGlacier, GrayGlacier, and Paris all activated simultaneously at block
+    //   105_235_063 (the Bedrock migration block). See also:
+    //   `reth_optimism_primitives::bedrock::BEDROCK_HEADER`
     if chain_config.chain_id == NamedChain::Optimism as ChainId {
-        res.berlin_block = Some(3950000);
-        res.london_block = Some(105235063);
-        res.arrow_glacier_block = Some(105235063);
-        res.gray_glacier_block = Some(105235063);
-        res.merge_netsplit_block = Some(105235063);
+        res.berlin_block = Some(3_950_000);
+        res.london_block = Some(105_235_063);
+        res.arrow_glacier_block = Some(105_235_063);
+        res.gray_glacier_block = Some(105_235_063);
+        res.merge_netsplit_block = Some(105_235_063);
     }
 
     // Add extra fields for ChainConfig from Genesis
