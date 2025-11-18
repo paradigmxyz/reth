@@ -147,48 +147,15 @@ impl NodeState {
 
                     let message = if done { "Finished stage" } else { "Committed stage progress" };
 
-                    match (stage_progress, stage_eta) {
-                        (Some(stage_progress), Some(stage_eta)) => {
-                            info!(
-                                pipeline_stages = %pipeline_stages_progress,
-                                stage = %stage_id,
-                                checkpoint = %checkpoint.block_number,
-                                %target,
-                                %stage_progress,
-                                %stage_eta,
-                                "{message}",
-                            )
-                        }
-                        (Some(stage_progress), None) => {
-                            info!(
-                                pipeline_stages = %pipeline_stages_progress,
-                                stage = %stage_id,
-                                checkpoint = %checkpoint.block_number,
-                                %target,
-                                %stage_progress,
-                                "{message}",
-                            )
-                        }
-                        (None, Some(stage_eta)) => {
-                            info!(
-                                pipeline_stages = %pipeline_stages_progress,
-                                stage = %stage_id,
-                                checkpoint = %checkpoint.block_number,
-                                %target,
-                                %stage_eta,
-                                "{message}",
-                            )
-                        }
-                        (None, None) => {
-                            info!(
-                                pipeline_stages = %pipeline_stages_progress,
-                                stage = %stage_id,
-                                checkpoint = %checkpoint.block_number,
-                                %target,
-                                "{message}",
-                            )
-                        }
-                    }
+                    info!(
+                        pipeline_stages = %pipeline_stages_progress,
+                        stage = %stage_id,
+                        checkpoint = %checkpoint.block_number,
+                        %target,
+                        stage_progress = %OptionalField(stage_progress),
+                        stage_eta = %OptionalField(stage_eta),
+                        "{message}",
+                    );
                 }
 
                 if done {
@@ -408,52 +375,16 @@ where
                     entities_checkpoint.and_then(|entities| entities.fmt_percentage());
                 let stage_eta = eta.fmt_for_stage(*stage_id);
 
-                match (stage_progress, stage_eta) {
-                    (Some(stage_progress), Some(stage_eta)) => {
-                        info!(
-                            target: "reth::cli",
-                            connected_peers = this.state.num_connected_peers(),
-                            stage = %stage_id,
-                            checkpoint = checkpoint.block_number,
-                            target = %OptionalField(*target),
-                            %stage_progress,
-                            %stage_eta,
-                            "Status"
-                        )
-                    }
-                    (Some(stage_progress), None) => {
-                        info!(
-                            target: "reth::cli",
-                            connected_peers = this.state.num_connected_peers(),
-                            stage = %stage_id,
-                            checkpoint = checkpoint.block_number,
-                            target = %OptionalField(*target),
-                            %stage_progress,
-                            "Status"
-                        )
-                    }
-                    (None, Some(stage_eta)) => {
-                        info!(
-                            target: "reth::cli",
-                            connected_peers = this.state.num_connected_peers(),
-                            stage = %stage_id,
-                            checkpoint = checkpoint.block_number,
-                            target = %OptionalField(*target),
-                            %stage_eta,
-                            "Status"
-                        )
-                    }
-                    (None, None) => {
-                        info!(
-                            target: "reth::cli",
-                            connected_peers = this.state.num_connected_peers(),
-                            stage = %stage_id,
-                            checkpoint = checkpoint.block_number,
-                            target = %OptionalField(*target),
-                            "Status"
-                        )
-                    }
-                }
+                info!(
+                    target: "reth::cli",
+                    connected_peers = this.state.num_connected_peers(),
+                    stage = %stage_id,
+                    checkpoint = checkpoint.block_number,
+                    target = %OptionalField(*target),
+                    stage_progress = %OptionalField(stage_progress),
+                    stage_eta = %OptionalField(stage_eta),
+                    "Status"
+                );
             } else {
                 let now =
                     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
