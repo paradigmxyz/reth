@@ -457,6 +457,41 @@ where
             cleared_sparse_trie.lock().replace(cleared_trie);
         });
     }
+
+    /// Updates the execution cache with the post-execution state from an inserted block.
+    ///
+    /// This is used when blocks are inserted directly (e.g., locally built blocks by sequencers)
+    /// to ensure the cache remains warm for subsequent block execution.
+    ///
+    /// The cache enables subsequent blocks to reuse account, storage, and bytecode data without
+    /// hitting the database, maintaining performance consistency.
+    pub(crate) fn on_inserted_executed_block(&self, block_hash: B256, bundle_state: &BundleState) {
+        debug!(target: "engine::caching", block_hash=?block_hash, "Updating execution cache for inserted block");
+
+        self.execution_cache.update_with_guard(|cached| {
+            // Take existing cache (if any) or create fresh caches
+            let (caches, cache_metrics) = if let Some(existing) = cached.take() {
+                existing.split()
+            } else {
+                (
+                    ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size),
+                    CachedStateMetrics::zeroed(),
+                )
+            };
+
+            // Insert the block's bundle state into cache
+            let new_cache = SavedCache::new(block_hash, caches, cache_metrics);
+            if new_cache.cache().insert_state(bundle_state).is_err() {
+                *cached = None;
+                debug!(target: "engine::caching", "cleared execution cache on update error");
+                return;
+            }
+            new_cache.update_metrics();
+
+            // Replace with the updated cache
+            *cached = Some(new_cache);
+        });
+    }
 }
 
 /// Handle to all the spawned tasks.
@@ -707,6 +742,7 @@ mod tests {
         test_utils::create_test_provider_factory_with_chain_spec,
         ChainSpecProvider, HashingWriter,
     };
+    use reth_revm::db::BundleState;
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
@@ -782,6 +818,30 @@ mod tests {
 
         let new_checkout = execution_cache.get_cache_for(updated);
         assert!(new_checkout.is_some(), "new checkout should succeed after release and update");
+    }
+
+    #[test]
+    fn on_inserted_executed_block_populates_cache() {
+        let payload_processor = PayloadProcessor::new(
+            WorkloadExecutor::default(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+
+        let block_hash = B256::from([10u8; 32]);
+        let bundle_state = BundleState::default();
+
+        // Cache should be empty initially
+        assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
+
+        // Update cache with inserted block
+        payload_processor.on_inserted_executed_block(block_hash, &bundle_state);
+
+        // Cache should now exist for the block hash
+        let cached = payload_processor.execution_cache.get_cache_for(block_hash);
+        assert!(cached.is_some());
+        assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
     }
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
