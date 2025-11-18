@@ -3,7 +3,9 @@ use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::address;
 use alloy_provider::ext::DebugApi;
 use alloy_rpc_types_eth::{Transaction, TransactionRequest};
-use alloy_rpc_types_trace::geth::{AccountState, GethDebugTracingOptions, PreStateConfig, PreStateFrame};
+use alloy_rpc_types_trace::geth::{
+    AccountState, GethDebugTracingOptions, PreStateConfig, PreStateFrame,
+};
 use eyre::{eyre, Result};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_node_builder::{NodeBuilder, NodeHandle};
