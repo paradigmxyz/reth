@@ -141,6 +141,7 @@ impl core::fmt::Display for StageId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::ToString;
 
     #[test]
     fn stage_id_as_string() {
