@@ -733,11 +733,19 @@ where
 
                 let mut witness_record = ExecutionWitnessRecord::default();
 
-                let _ = block_executor
+                let output = block_executor
                     .execute_with_state_closure(&block, |statedb: &State<_>| {
                         witness_record.record_executed_state(statedb);
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
+
+                reth_ethereum_consensus::validate_block_post_execution(
+                    &block,
+                    &this.provider().chain_spec(),
+                    &output.receipts,
+                    &output.requests,
+                )
+                .map_err(|e| EthApiError::Internal(e.into()))?;
 
                 let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
                     witness_record;
