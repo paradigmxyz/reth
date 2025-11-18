@@ -973,7 +973,12 @@ where
         );
 
         let eth_config = config.rpc.eth_config().max_batch_size(config.txpool.max_batch_size());
-        let ctx = EthApiCtx { components: &node, config: eth_config, cache };
+        let ctx = EthApiCtx {
+            components: &node,
+            config: eth_config,
+            cache,
+            engine_handle: beacon_engine_handle.clone(),
+        };
         let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
@@ -1137,6 +1142,8 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     pub config: EthConfig,
     /// Cache for eth state
     pub cache: EthStateCache<PrimitivesTy<N::Types>>,
+    /// Handle to the beacon consensus engine
+    pub engine_handle: ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
 }
 
 impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>>

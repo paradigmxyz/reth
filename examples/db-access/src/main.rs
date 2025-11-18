@@ -98,9 +98,6 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
     let id = provider.transaction_id(*tx.tx_hash())?.ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(id, txid);
 
-    // Can find the block of a transaction given its key
-    let _block = provider.transaction_block(txid)?;
-
     // Can query the txs in the range [100, 200)
     let _txs_by_tx_range = provider.transactions_by_tx_range(100..200)?;
     // Can query the txs in the _block_ range [100, 200)]

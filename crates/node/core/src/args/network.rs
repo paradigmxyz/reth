@@ -1,5 +1,6 @@
 //! clap [Args](clap::Args) for network related arguments.
 
+use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
@@ -10,16 +11,18 @@ use std::{
 use crate::version::version_metadata;
 use clap::Args;
 use reth_chainspec::EthChainSpec;
+use reth_cli_util::{get_secret_key, load_secret_key::SecretKeyError};
 use reth_config::Config;
 use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
     discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
+use reth_net_banlist::IpFilter;
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
-        config::TransactionPropagationKind,
+        config::{TransactionIngressPolicy, TransactionPropagationKind},
         constants::{
             tx_fetcher::{
                 DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
@@ -37,6 +40,7 @@ use reth_network::{
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
+use std::str::FromStr;
 use tracing::error;
 
 /// Parameters for configuring the network more granularity via CLI
@@ -81,8 +85,15 @@ pub struct NetworkArgs {
     ///
     /// This will also deterministically set the peer ID. If not specified, it will be set in the
     /// data dir for the chain being used.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", conflicts_with = "p2p_secret_key_hex")]
     pub p2p_secret_key: Option<PathBuf>,
+
+    /// Hex encoded secret key to use for this node.
+    ///
+    /// This will also deterministically set the peer ID. Cannot be used together with
+    /// `--p2p-secret-key`.
+    #[arg(long, value_name = "HEX", conflicts_with = "p2p_secret_key")]
+    pub p2p_secret_key_hex: Option<B256>,
 
     /// Do not persist peers.
     #[arg(long, verbatim_doc_comment)]
@@ -162,6 +173,12 @@ pub struct NetworkArgs {
     #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
     pub tx_propagation_policy: TransactionPropagationKind,
 
+    /// Transaction ingress policy
+    ///
+    /// Determines which peers' transactions are accepted over P2P.
+    #[arg(long = "tx-ingress-policy", default_value_t = TransactionIngressPolicy::All)]
+    pub tx_ingress_policy: TransactionIngressPolicy,
+
     /// Disable transaction pool gossip
     ///
     /// Disables gossiping of transactions in the mempool to peers. This can be omitted for
@@ -180,14 +197,24 @@ pub struct NetworkArgs {
     )]
     pub propagation_mode: TransactionPropagationMode,
 
-    /// Comma separated list of required block hashes.
+    /// Comma separated list of required block hashes or block number=hash pairs.
     /// Peers that don't have these blocks will be filtered out.
-    #[arg(long = "required-block-hashes", value_delimiter = ',')]
-    pub required_block_hashes: Vec<B256>,
+    /// Format: hash or `block_number=hash` (e.g., 23115201=0x1234...)
+    #[arg(long = "required-block-hashes", value_delimiter = ',', value_parser = parse_block_num_hash)]
+    pub required_block_hashes: Vec<BlockNumHash>,
 
     /// Optional network ID to override the chain specification's network ID for P2P connections
     #[arg(long)]
     pub network_id: Option<u64>,
+
+    /// Restrict network communication to the given IP networks (CIDR masks).
+    ///
+    /// Comma separated list of CIDR network specifications.
+    /// Only peers with IP addresses within these ranges will be allowed to connect.
+    ///
+    /// Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
+    #[arg(long, value_name = "NETRESTRICT")]
+    pub netrestrict: Option<String>,
 }
 
 impl NetworkArgs {
@@ -230,6 +257,7 @@ impl NetworkArgs {
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             propagation_mode: self.propagation_mode,
+            ingress_policy: self.tx_ingress_policy,
         }
     }
 
@@ -258,11 +286,13 @@ impl NetworkArgs {
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
+        let ip_filter = self.ip_filter().unwrap_or_default();
         let peers_config = config
             .peers
             .clone()
             .with_max_inbound_opt(self.max_inbound_peers)
-            .with_max_outbound_opt(self.max_outbound_peers);
+            .with_max_outbound_opt(self.max_outbound_peers)
+            .with_ip_filter(ip_filter);
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key)
@@ -344,6 +374,36 @@ impl NetworkArgs {
         )
         .await
     }
+
+    /// Load the p2p secret key from the provided options.
+    ///
+    /// If `p2p_secret_key_hex` is provided, it will be used directly.
+    /// If `p2p_secret_key` is provided, it will be loaded from the file.
+    /// If neither is provided, the `default_secret_key_path` will be used.
+    pub fn secret_key(
+        &self,
+        default_secret_key_path: PathBuf,
+    ) -> Result<SecretKey, SecretKeyError> {
+        if let Some(b256) = &self.p2p_secret_key_hex {
+            // Use the B256 value directly (already validated as 32 bytes)
+            SecretKey::from_slice(b256.as_slice()).map_err(SecretKeyError::SecretKeyDecodeError)
+        } else {
+            // Load from file (either provided path or default)
+            let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
+            get_secret_key(&secret_key_path)
+        }
+    }
+
+    /// Creates an IP filter from the netrestrict argument.
+    ///
+    /// Returns an error if the CIDR format is invalid.
+    pub fn ip_filter(&self) -> Result<IpFilter, ipnet::AddrParseError> {
+        if let Some(netrestrict) = &self.netrestrict {
+            IpFilter::from_cidr_string(netrestrict)
+        } else {
+            Ok(IpFilter::allow_all())
+        }
+    }
 }
 
 impl Default for NetworkArgs {
@@ -357,6 +417,7 @@ impl Default for NetworkArgs {
             peers_file: None,
             identity: version_metadata().p2p_client_version.to_string(),
             p2p_secret_key: None,
+            p2p_secret_key_hex: None,
             no_persist_peers: false,
             nat: NatResolver::Any,
             addr: DEFAULT_DISCOVERY_ADDR,
@@ -373,10 +434,12 @@ impl Default for NetworkArgs {
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
             tx_propagation_policy: TransactionPropagationKind::default(),
+            tx_ingress_policy: TransactionIngressPolicy::default(),
             disable_tx_gossip: false,
             propagation_mode: TransactionPropagationMode::Sqrt,
             required_block_hashes: vec![],
             network_id: None,
+            netrestrict: None,
         }
     }
 }
@@ -576,6 +639,19 @@ impl Default for DiscoveryArgs {
     }
 }
 
+/// Parse a block number=hash pair or just a hash into `BlockNumHash`
+fn parse_block_num_hash(s: &str) -> Result<BlockNumHash, String> {
+    if let Some((num_str, hash_str)) = s.split_once('=') {
+        let number = num_str.parse().map_err(|_| format!("Invalid block number: {}", num_str))?;
+        let hash = B256::from_str(hash_str).map_err(|_| format!("Invalid hash: {}", hash_str))?;
+        Ok(BlockNumHash::new(number, hash))
+    } else {
+        // For backward compatibility, treat as hash-only with number 0
+        let hash = B256::from_str(s).map_err(|_| format!("Invalid hash: {}", s))?;
+        Ok(BlockNumHash::new(0, hash))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -670,17 +746,21 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from([
             "reth",
             "--required-block-hashes",
-            "0x1111111111111111111111111111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222222222222222222222222222",
+            "0x1111111111111111111111111111111111111111111111111111111111111111,23115201=0x2222222222222222222222222222222222222222222222222222222222222222",
         ])
         .args;
 
         assert_eq!(args.required_block_hashes.len(), 2);
+        // First hash without block number (should default to 0)
+        assert_eq!(args.required_block_hashes[0].number, 0);
         assert_eq!(
-            args.required_block_hashes[0].to_string(),
+            args.required_block_hashes[0].hash.to_string(),
             "0x1111111111111111111111111111111111111111111111111111111111111111"
         );
+        // Second with block number=hash format
+        assert_eq!(args.required_block_hashes[1].number, 23115201);
         assert_eq!(
-            args.required_block_hashes[1].to_string(),
+            args.required_block_hashes[1].hash.to_string(),
             "0x2222222222222222222222222222222222222222222222222222222222222222"
         );
     }
@@ -689,5 +769,142 @@ mod tests {
     fn parse_empty_required_block_hashes() {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
         assert!(args.required_block_hashes.is_empty());
+    }
+
+    #[test]
+    fn test_parse_block_num_hash() {
+        // Test hash only format
+        let result = parse_block_num_hash(
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().number, 0);
+
+        // Test block_number=hash format
+        let result = parse_block_num_hash(
+            "23115201=0x2222222222222222222222222222222222222222222222222222222222222222",
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().number, 23115201);
+
+        // Test invalid formats
+        assert!(parse_block_num_hash("invalid").is_err());
+        assert!(parse_block_num_hash(
+            "abc=0x1111111111111111111111111111111111111111111111111111111111111111"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn parse_p2p_secret_key_hex() {
+        let hex = "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
+        let expected: B256 = hex.parse().unwrap();
+        assert_eq!(args.p2p_secret_key_hex, Some(expected));
+        assert_eq!(args.p2p_secret_key, None);
+    }
+
+    #[test]
+    fn parse_p2p_secret_key_hex_with_0x_prefix() {
+        let hex = "0x4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
+        let expected: B256 = hex.parse().unwrap();
+        assert_eq!(args.p2p_secret_key_hex, Some(expected));
+        assert_eq!(args.p2p_secret_key, None);
+    }
+
+    #[test]
+    fn test_p2p_secret_key_and_hex_are_mutually_exclusive() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--p2p-secret-key",
+            "/path/to/key",
+            "--p2p-secret-key-hex",
+            "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f",
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_secret_key_method_with_hex() {
+        let hex = "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
+        let temp_dir = std::env::temp_dir();
+        let default_path = temp_dir.join("default_key");
+        let secret_key = args.secret_key(default_path).unwrap();
+
+        // Verify the secret key matches the hex input
+        assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), hex);
+    }
+
+    #[test]
+    fn parse_netrestrict_single_network() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "192.168.0.0/16"])
+                .args;
+
+        assert_eq!(args.netrestrict, Some("192.168.0.0/16".to_string()));
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn parse_netrestrict_multiple_networks() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--netrestrict",
+            "192.168.0.0/16,10.0.0.0/8",
+        ])
+        .args;
+
+        assert_eq!(args.netrestrict, Some("192.168.0.0/16,10.0.0.0/8".to_string()));
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(ip_filter.is_allowed(&"10.5.10.20".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"172.16.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn parse_netrestrict_ipv6() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "2001:db8::/32"])
+                .args;
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"2001:db8::1".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"2001:db9::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn netrestrict_not_set() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.netrestrict, None);
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(!ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn netrestrict_invalid_cidr() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "invalid-cidr"])
+                .args;
+
+        assert!(args.ip_filter().is_err());
     }
 }

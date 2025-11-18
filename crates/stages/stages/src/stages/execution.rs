@@ -11,9 +11,9 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
-    StaticFileProviderFactory, StatsReader, TransactionVariant,
+    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -185,11 +185,15 @@ where
         unwind_to: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
+        Provider: StaticFileProviderFactory
+            + DBProvider
+            + BlockReader
+            + HeaderProvider
+            + StorageSettingsCache,
     {
-        // If there's any receipts pruning configured, receipts are written directly to database and
-        // inconsistencies are expected.
-        if provider.prune_modes_ref().has_receipts_pruning() {
+        // On old nodes, if there's any receipts pruning configured, receipts are written directly
+        // to database and inconsistencies are expected.
+        if EitherWriter::receipts_destination(provider).is_database() {
             return Ok(())
         }
 
@@ -259,7 +263,8 @@ where
             Primitives: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
         > + StatsReader
         + BlockHashReader
-        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>,
+        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
+        + StorageSettingsCache,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -660,7 +665,7 @@ where
 mod tests {
     use super::*;
     use crate::{stages::MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD, test_utils::TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, B256, U256};
+    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
@@ -677,7 +682,9 @@ mod tests {
         DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory,
     };
     use reth_prune::PruneModes;
+    use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
     use reth_stages_api::StageUnitCheckpoint;
+    use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthEvmConfig> {
         let evm_config =
@@ -894,10 +901,19 @@ mod tests {
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
         let modes = [None, Some(PruneModes::default())];
+        let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
+            Address::random(),
+            PruneMode::Distance(100000),
+        )]));
 
         // Tests node with database and node with static files
-        for mode in modes {
+        for mut mode in modes {
             let mut provider = factory.database_provider_rw().unwrap();
+
+            if let Some(mode) = &mut mode {
+                // Simulating a full node where we write receipts to database
+                mode.receipts_log_filter = random_filter.clone();
+            }
 
             let mut execution_stage = stage();
             provider.set_prune_modes(mode.clone().unwrap_or_default());
@@ -1022,9 +1038,18 @@ mod tests {
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
         let modes = [None, Some(PruneModes::default())];
+        let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
+            Address::random(),
+            PruneMode::Before(100000),
+        )]));
 
         // Tests node with database and node with static files
-        for mode in modes {
+        for mut mode in modes {
+            if let Some(mode) = &mut mode {
+                // Simulating a full node where we write receipts to database
+                mode.receipts_log_filter = random_filter.clone();
+            }
+
             // Test Execution
             let mut execution_stage = stage();
             provider.set_prune_modes(mode.clone().unwrap_or_default());

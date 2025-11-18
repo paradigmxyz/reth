@@ -24,6 +24,7 @@ reth-primitives-traits.workspace = true
 reth-static-file-types.workspace = true
 
 # ethereum
+alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
 # metrics

@@ -2,7 +2,9 @@
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
+use reth_static_file_types::StaticFileSegment;
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -29,11 +31,14 @@ pub struct Config {
     pub peers: PeersConfig,
     /// Configuration for peer sessions.
     pub sessions: SessionsConfig,
+    /// Configuration for static files.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub static_files: StaticFilesConfig,
 }
 
 impl Config {
     /// Sets the pruning configuration.
-    pub const fn set_prune_config(&mut self, prune_config: PruneConfig) {
+    pub fn set_prune_config(&mut self, prune_config: PruneConfig) {
         self.prune = prune_config;
     }
 }
@@ -411,6 +416,68 @@ impl EtlConfig {
     }
 }
 
+/// Static files configuration.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct StaticFilesConfig {
+    /// Number of blocks per file for each segment.
+    pub blocks_per_file: BlocksPerFileConfig,
+}
+
+/// Configuration for the number of blocks per file for each segment.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct BlocksPerFileConfig {
+    /// Number of blocks per file for the headers segment.
+    pub headers: Option<u64>,
+    /// Number of blocks per file for the transactions segment.
+    pub transactions: Option<u64>,
+    /// Number of blocks per file for the receipts segment.
+    pub receipts: Option<u64>,
+}
+
+impl StaticFilesConfig {
+    /// Validates the static files configuration.
+    ///
+    /// Returns an error if any blocks per file value is zero.
+    pub fn validate(&self) -> eyre::Result<()> {
+        let BlocksPerFileConfig { headers, transactions, receipts } = self.blocks_per_file;
+        eyre::ensure!(headers != Some(0), "Headers segment blocks per file must be greater than 0");
+        eyre::ensure!(
+            transactions != Some(0),
+            "Transactions segment blocks per file must be greater than 0"
+        );
+        eyre::ensure!(
+            receipts != Some(0),
+            "Receipts segment blocks per file must be greater than 0"
+        );
+        Ok(())
+    }
+
+    /// Converts the blocks per file configuration into a [`HashMap`] per segment.
+    pub fn as_blocks_per_file_map(&self) -> HashMap<StaticFileSegment, u64> {
+        let BlocksPerFileConfig { headers, transactions, receipts } = self.blocks_per_file;
+
+        let mut map = HashMap::new();
+        // Iterating over all possible segments allows us to do an exhaustive match here,
+        // to not forget to configure new segments in the future.
+        for segment in StaticFileSegment::iter() {
+            let blocks_per_file = match segment {
+                StaticFileSegment::Headers => headers,
+                StaticFileSegment::Transactions => transactions,
+                StaticFileSegment::Receipts => receipts,
+            };
+
+            if let Some(blocks_per_file) = blocks_per_file {
+                map.insert(segment, blocks_per_file);
+            }
+        }
+        map
+    }
+}
+
 /// History stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -451,14 +518,13 @@ impl PruneConfig {
     }
 
     /// Returns whether there is any kind of receipt pruning configuration.
-    pub const fn has_receipts_pruning(&self) -> bool {
-        self.segments.receipts.is_some()
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
     }
 
     /// Merges another `PruneConfig` into this one, taking values from the other config if and only
     /// if the corresponding value in this config is not set.
     pub fn merge(&mut self, other: Self) {
-        #[expect(deprecated)]
         let Self {
             block_interval,
             segments:
@@ -470,7 +536,7 @@ impl PruneConfig {
                     storage_history,
                     bodies_history,
                     merkle_changesets,
-                    receipts_log_filter: (),
+                    receipts_log_filter,
                 },
         } = other;
 
@@ -488,6 +554,10 @@ impl PruneConfig {
         self.segments.bodies_history = self.segments.bodies_history.or(bodies_history);
         // Merkle changesets is not optional, so we just replace it if provided
         self.segments.merkle_changesets = merkle_changesets;
+
+        if self.segments.receipts_log_filter.0.is_empty() && !receipts_log_filter.0.is_empty() {
+            self.segments.receipts_log_filter = receipts_log_filter;
+        }
     }
 }
 
@@ -514,9 +584,10 @@ where
 mod tests {
     use super::{Config, EXTENSION};
     use crate::PruneConfig;
+    use alloy_primitives::Address;
     use reth_network_peers::TrustedPeer;
-    use reth_prune_types::{PruneMode, PruneModes};
-    use std::{path::Path, str::FromStr, time::Duration};
+    use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig};
+    use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1005,8 +1076,10 @@ receipts = 'full'
                 storage_history: Some(PruneMode::Before(5000)),
                 bodies_history: None,
                 merkle_changesets: PruneMode::Before(0),
-                #[expect(deprecated)]
-                receipts_log_filter: (),
+                receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
+                    Address::random(),
+                    PruneMode::Full,
+                )])),
             },
         };
 
@@ -1020,11 +1093,14 @@ receipts = 'full'
                 storage_history: Some(PruneMode::Distance(3000)),
                 bodies_history: None,
                 merkle_changesets: PruneMode::Distance(10000),
-                #[expect(deprecated)]
-                receipts_log_filter: (),
+                receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([
+                    (Address::random(), PruneMode::Distance(1000)),
+                    (Address::random(), PruneMode::Before(2000)),
+                ])),
             },
         };
 
+        let original_filter = config1.segments.receipts_log_filter.clone();
         config1.merge(config2);
 
         // Check that the configuration has been merged. Any configuration present in config1
@@ -1036,6 +1112,7 @@ receipts = 'full'
         assert_eq!(config1.segments.account_history, Some(PruneMode::Distance(2000)));
         assert_eq!(config1.segments.storage_history, Some(PruneMode::Before(5000)));
         assert_eq!(config1.segments.merkle_changesets, PruneMode::Distance(10000));
+        assert_eq!(config1.segments.receipts_log_filter, original_filter);
     }
 
     #[test]

@@ -675,6 +675,7 @@ pub async fn lookup(
 
 #[cfg(test)]
 mod test {
+    #![allow(deprecated)]
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
     use rand_08::thread_rng;

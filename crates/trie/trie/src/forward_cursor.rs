@@ -41,7 +41,7 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
 
     /// Resets the cursor to the beginning of the collection.
     #[inline]
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.idx = 0;
     }
 

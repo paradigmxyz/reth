@@ -416,8 +416,28 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
-            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
+            parent_beacon_block_root: parent.parent_beacon_block_root(),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::B256;
+    use reth_primitives_traits::SealedHeader;
+
+    #[test]
+    fn pending_env_keeps_parent_beacon_root() {
+        let mut header = Header::default();
+        let beacon_root = B256::repeat_byte(0x42);
+        header.parent_beacon_block_root = Some(beacon_root);
+        let sealed = SealedHeader::new(header, B256::ZERO);
+
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
+
+        assert_eq!(attrs.parent_beacon_block_root, Some(beacon_root));
     }
 }

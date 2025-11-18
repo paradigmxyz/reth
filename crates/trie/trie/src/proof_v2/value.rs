@@ -7,14 +7,11 @@ use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::Account;
-use reth_trie_common::RlpNode;
+use reth_trie_common::Nibbles;
 use std::rc::Rc;
 
-/// A trait for deferred encoding of proof values.
-///
-/// This trait is implemented by types that can encode themselves into a buffer
-/// on demand, allowing for lazy computation of storage roots and other deferred work.
-pub trait ValueEncoderFut {
+/// A trait for deferred RLP-encoding of leaf values.
+pub trait DeferredValueEncoder {
     /// RLP encodes the value into the provided buffer.
     ///
     /// # Arguments
@@ -23,29 +20,32 @@ pub trait ValueEncoderFut {
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError>;
 }
 
-/// A trait for encoding values for proof calculation.
+/// A trait for RLP-encoding values for proof calculation. This trait is designed to allow the lazy
+/// computation of leaf values in a generic way.
 ///
-/// This trait allows for lazy evaluation of encoding, enabling deferred
-/// computation of storage roots and other expensive operations.
+/// When calculating a leaf value in a storage trie the [`DeferredValueEncoder`] simply holds onto
+/// the slot value, and the `encode` method synchronously RLP-encodes it.
 ///
-/// The encoder takes a reference to itself and a value, returning a future-like
-/// type that will perform the encoding when needed.
+/// When calculating a leaf value in the accounts trie we create a [`DeferredValueEncoder`] to
+/// initiate any asynchronous computation of the account's storage root we want to do. Later we call
+/// [`DeferredValueEncoder::encode`] to obtain the result of that computation and RLP-encode it.
 pub trait ValueEncoder {
     /// The type of value being encoded (e.g., U256 for storage, Account for accounts).
     type Value;
 
     /// The type that will compute and encode the value when needed.
-    type Fut: ValueEncoderFut;
+    type DeferredEncoder: DeferredValueEncoder;
 
-    /// Returns a future-like value that will encode the value when called.
+    /// Returns a future-like value that will RLP-encode the value when called.
     ///
     /// # Arguments
     ///
+    /// * `key` - The key the value was stored at in the DB
     /// * `value` - The value to encode
     ///
-    /// The returned future will be called as late as possible in the algorithm to maximize
-    /// the time available for parallel computation (e.g., storage root calculation).
-    fn encoder_fut(&self, value: Self::Value) -> Self::Fut;
+    /// The returned deferred encoder will be called as late as possible in the algorithm to
+    /// maximize the time available for parallel computation (e.g., storage root calculation).
+    fn deferred_encoder(&self, key: B256, value: Self::Value) -> Self::DeferredEncoder;
 }
 
 /// An encoder for storage slot values.
@@ -54,13 +54,12 @@ pub trait ValueEncoder {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StorageValueEncoder;
 
-/// The encoding future for a storage slot value.
+/// The deferred encoder for a storage slot value.
 #[derive(Debug, Clone, Copy)]
-pub struct StorageValueEncoderFut(U256);
+pub struct StorageDeferredValueEncoder(U256);
 
-impl ValueEncoderFut for StorageValueEncoderFut {
+impl DeferredValueEncoder for StorageDeferredValueEncoder {
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
-        buf.clear();
         self.0.encode(buf);
         Ok(())
     }
@@ -68,18 +67,17 @@ impl ValueEncoderFut for StorageValueEncoderFut {
 
 impl ValueEncoder for StorageValueEncoder {
     type Value = U256;
-    type Fut = StorageValueEncoderFut;
+    type DeferredEncoder = StorageDeferredValueEncoder;
 
-    fn encoder_fut(&self, value: Self::Value) -> Self::Fut {
-        StorageValueEncoderFut(value)
+    fn deferred_encoder(&self, _key: B256, value: Self::Value) -> Self::DeferredEncoder {
+        StorageDeferredValueEncoder(value)
     }
 }
 
 /// An account value encoder that synchronously computes storage roots.
 ///
-/// This encoder contains a provider that can create trie and hashed cursors.
-/// Storage roots are computed lazily within the RLP encoding future by creating
-/// a storage proof calculator on demand.
+/// This encoder contains a provider that can create trie and hashed cursors. Storage roots are
+/// computed synchronously within the deferred encoder using a `StorageProofCalculator`.
 #[derive(Debug, Clone)]
 pub struct SyncAccountValueEncoder<P> {
     /// Provider for creating trie and hashed cursors.
@@ -93,18 +91,20 @@ impl<P> SyncAccountValueEncoder<P> {
     }
 }
 
-/// The encoding future for an account value with synchronous storage root calculation.
+/// The deferred encoder for an account value with synchronous storage root calculation.
 #[derive(Debug, Clone)]
-pub struct SyncAccountValueEncoderFut<P> {
+pub struct SyncAccountDeferredValueEncoder<P> {
     provider: Rc<P>,
     hashed_address: B256,
     account: Account,
 }
 
-impl<P> ValueEncoderFut for SyncAccountValueEncoderFut<P>
+impl<P> DeferredValueEncoder for SyncAccountDeferredValueEncoder<P>
 where
     P: TrieCursorFactory + HashedCursorFactory,
 {
+    // Synchronously computes the storage root for this account and RLP-encodes the resulting
+    // `TrieAccount` into `buf`
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
         // Create cursors for storage proof calculation
         let provider = &*self.provider;
@@ -114,29 +114,28 @@ where
         // Create storage proof calculator with StorageValueEncoder
         let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
-        // Compute storage root by calling storage_proof with empty targets
-        // This returns just the root node of the storage trie
+        // Compute storage root by calling storage_proof with the root path as a target.
+        // This returns just the root node of the storage trie.
         let storage_root = storage_proof_calculator
-            .storage_proof(self.hashed_address, std::iter::empty())
+            .storage_proof(self.hashed_address, [Nibbles::new()])
             .map(|nodes| {
-                // Encode the root node to RLP
+                // Encode the root node to RLP and hash it
                 let root_node =
                     nodes.first().expect("storage_proof always returns at least the root");
-                buf.clear();
                 root_node.node.encode(buf);
 
-                // Hash the encoded node (RlpNode::from_rlp handles hashing for nodes >= 32 bytes)
-                let rlp_node = RlpNode::from_rlp(buf);
+                let storage_root = alloy_primitives::keccak256(buf.as_slice());
 
-                // Extract the hash - if it's a short node, it won't have a hash, so compute one
-                rlp_node.as_hash().unwrap_or_else(|| alloy_primitives::keccak256(&*buf))
+                // Clear the buffer so we can re-use it to encode the TrieAccount
+                buf.clear();
+
+                storage_root
             })?;
 
         // Combine account with storage root to create TrieAccount
         let trie_account = self.account.into_trie_account(storage_root);
 
         // Encode the trie account
-        buf.clear();
         trie_account.encode(buf);
 
         Ok(())
@@ -147,13 +146,16 @@ impl<P> ValueEncoder for SyncAccountValueEncoder<P>
 where
     P: TrieCursorFactory + HashedCursorFactory,
 {
-    type Value = (B256, Account);
-    type Fut = SyncAccountValueEncoderFut<P>;
+    type Value = Account;
+    type DeferredEncoder = SyncAccountDeferredValueEncoder<P>;
 
-    fn encoder_fut(&self, value: Self::Value) -> Self::Fut {
-        let (hashed_address, account) = value;
-
-        // Return a future that will compute the storage root when encode() is called
-        SyncAccountValueEncoderFut { provider: self.provider.clone(), hashed_address, account }
+    fn deferred_encoder(
+        &self,
+        hashed_address: B256,
+        account: Self::Value,
+    ) -> Self::DeferredEncoder {
+        // Return a deferred encoder that will synchronously compute the storage root when encode()
+        // is called.
+        SyncAccountDeferredValueEncoder { provider: self.provider.clone(), hashed_address, account }
     }
 }

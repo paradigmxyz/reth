@@ -54,7 +54,7 @@ pub struct ProofCalculator<TC, HC, VE: ValueEncoder> {
     /// and so on. When a branch is removed from `branch_stack` its children are removed from this
     /// one, and the branch's [`RlpNode`] is pushed onto this stack in their place (see
     /// [`Self::pop_branch`].
-    child_stack: Vec<ProofTrieBranchChild<VE::Fut>>,
+    child_stack: Vec<ProofTrieBranchChild<VE::DeferredEncoder>>,
     /// Free-list of re-usable buffers of [`RlpNode`]s, used for encoding branch nodes to RLP.
     ///
     /// We are generally able to re-use these buffers across different branch nodes for the
@@ -84,7 +84,7 @@ impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
     TC: TrieCursor,
     HC: HashedCursor,
-    VE: ValueEncoder<Value = (B256, HC::Value)>,
+    VE: ValueEncoder<Value = HC::Value>,
 {
     /// Takes a re-usable `RlpNode` buffer from the internal free-list, or allocates a new one if
     /// the free-list is empty.
@@ -106,7 +106,7 @@ where
     /// This method expects that there already exists a child on the `child_stack`, and that that
     /// child has a non-zero short key. The new branch is constructed based on the top child from
     /// the `child_stack` and the given leaf.
-    fn push_new_branch(&mut self, leaf_key: Nibbles, leaf_val: VE::Fut) {
+    fn push_new_branch(&mut self, leaf_key: Nibbles, leaf_val: VE::DeferredEncoder) {
         // First determine the new leaf's shortkey relative to the current branch. If there is no
         // current branch then the short key is the full key.
         let leaf_short_key = if self.branch_stack.is_empty() {
@@ -243,7 +243,7 @@ where
 
     /// Adds a single leaf for a key to the stack, possibly collapsing an existing branch and/or
     /// creating a new one depending on the path of the key.
-    fn add_leaf(&mut self, key: Nibbles, val: VE::Fut) -> Result<(), StateProofError> {
+    fn add_leaf(&mut self, key: Nibbles, val: VE::DeferredEncoder) -> Result<(), StateProofError> {
         loop {
             // Get the branch currently being built. If there are no branches on the stack then it
             // means either the trie is empty or only a single leaf has been added previously.
@@ -309,12 +309,12 @@ where
     fn proof_inner(
         &mut self,
         value_encoder: &VE,
-        targets: impl IntoIterator<Item = B256>,
+        targets: impl IntoIterator<Item = Nibbles>,
     ) -> Result<Vec<SparseTrieNode>, StateProofError> {
         // In debug builds, verify that targets are sorted
         #[cfg(debug_assertions)]
         let targets = {
-            let mut prev: Option<B256> = None;
+            let mut prev: Option<Nibbles> = None;
             targets.into_iter().inspect(move |target| {
                 if let Some(prev) = prev {
                     debug_assert!(
@@ -343,13 +343,13 @@ where
         let mut proof_nodes = Vec::new();
         loop {
             // Fetch the next leaf from the hashed cursor, converting the key to Nibbles and
-            // immediately creating the ValueEncoderFut so that encoding of the leaf value can begin
-            // ASAP.
-            let Some((key, val)) = self.hashed_cursor.next()?.map(|(key, val)| {
-                debug_assert_eq!(key.len(), 32);
+            // immediately creating the DeferredValueEncoder so that encoding of the leaf value can
+            // begin ASAP.
+            let Some((key, val)) = self.hashed_cursor.next()?.map(|(key_b256, val)| {
+                debug_assert_eq!(key_b256.len(), 32);
                 // SAFETY: key is a B256 and so is exactly 32-bytes.
-                let key = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
-                let val = value_encoder.encoder_fut((key, val));
+                let key = unsafe { Nibbles::unpack_unchecked(key_b256.as_slice()) };
+                let val = value_encoder.deferred_encoder(key_b256, val);
                 (key, val)
             }) else {
                 break
@@ -395,14 +395,12 @@ impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
     TC: TrieCursor,
     HC: HashedCursor,
-    VE: ValueEncoder<Value = (B256, HC::Value)>,
+    VE: ValueEncoder<Value = HC::Value>,
 {
     /// Generate a proof for the given targets.
     ///
-    /// Given target keys sorted lexicographically, returns proof nodes
-    /// for all targets sorted lexicographically by path.
-    ///
-    /// If given zero targets, returns just the root.
+    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
+    /// target. The returned nodes will be sorted lexicographically by path.
     ///
     /// # Panics
     ///
@@ -410,7 +408,7 @@ where
     pub fn proof(
         &mut self,
         value_encoder: &VE,
-        targets: impl IntoIterator<Item = B256>,
+        targets: impl IntoIterator<Item = Nibbles>,
     ) -> Result<Vec<SparseTrieNode>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
@@ -436,10 +434,8 @@ where
 
     /// Generate a proof for a storage trie at the given hashed address.
     ///
-    /// Given target keys sorted lexicographically, returns proof nodes
-    /// for all targets sorted lexicographically by path.
-    ///
-    /// If given zero targets, returns just the root.
+    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
+    /// target. The returned nodes will be sorted lexicographically by path.
     ///
     /// # Panics
     ///
@@ -447,7 +443,7 @@ where
     pub fn storage_proof(
         &mut self,
         hashed_address: B256,
-        targets: impl IntoIterator<Item = B256>,
+        targets: impl IntoIterator<Item = Nibbles>,
     ) -> Result<Vec<SparseTrieNode>, StateProofError> {
         self.hashed_cursor.set_hashed_address(hashed_address);
 
@@ -483,7 +479,7 @@ mod tests {
     use reth_trie_common::{HashedPostState, MultiProofTargets};
     use std::{collections::BTreeMap, rc::Rc};
 
-    /// A combined provider that implements both TrieCursorFactory and HashedCursorFactory.
+    /// A combined provider that implements both `TrieCursorFactory` and `HashedCursorFactory`.
     ///
     /// This is used to provide cursors for the value encoder during proof calculation.
     #[derive(Clone)]
@@ -542,21 +538,21 @@ mod tests {
         }
     }
 
-    /// A test harness for comparing ProofCalculator and Proof implementations.
+    /// A test harness for comparing `ProofCalculator` and legacy `Proof` implementations.
     ///
-    /// This harness creates mock cursor factories from a HashedPostState and provides
+    /// This harness creates mock cursor factories from a `HashedPostState` and provides
     /// a method to test that both proof implementations produce equivalent results.
     struct ProofTestHarness {
         /// Mock factory for trie cursors (empty by default for leaf-only tests)
         trie_cursor_factory: MockTrieCursorFactory,
-        /// Mock factory for hashed cursors, populated from HashedPostState
+        /// Mock factory for hashed cursors, populated from `HashedPostState`
         hashed_cursor_factory: MockHashedCursorFactory,
     }
 
     impl ProofTestHarness {
-        /// Creates a new test harness from a HashedPostState.
+        /// Creates a new test harness from a `HashedPostState`.
         ///
-        /// The HashedPostState is used to populate the mock hashed cursor factory directly.
+        /// The `HashedPostState` is used to populate the mock hashed cursor factory directly.
         /// The trie cursor factory is empty by default, suitable for testing the leaf-only
         /// proof calculator.
         fn new(post_state: HashedPostState) -> Self {
@@ -593,7 +589,8 @@ mod tests {
             Self { trie_cursor_factory, hashed_cursor_factory }
         }
 
-        /// Asserts that ProofCalculator and Proof produce equivalent results for account proofs.
+        /// Asserts that `ProofCalculator` and legacy `Proof` produce equivalent results for account
+        /// proofs.
         ///
         /// This method calls both implementations with the given account targets and compares
         /// the results. For now, it performs a basic comparison by checking that both succeed
@@ -616,7 +613,11 @@ mod tests {
             let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
 
             // Call ProofCalculator::proof with account targets
-            let targets_vec: Vec<B256> = targets.clone().into_iter().collect();
+            let targets_vec: Vec<Nibbles> = targets
+                .clone()
+                .into_iter()
+                .map(|hashed_address| Nibbles::unpack(hashed_address))
+                .collect();
             let proof_v2_result = proof_calculator.proof(&value_encoder, targets_vec)?;
 
             // Create Proof (old implementation)

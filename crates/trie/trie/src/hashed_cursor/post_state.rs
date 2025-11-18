@@ -151,19 +151,14 @@ where
         }
     }
 
-    /// Sets the post state overlay to use based on the `hashed_address`.
-    /// Returns the forward cursor and a boolean indicating if the storage was wiped.
+    /// Returns the storage overlay for `hashed_address` and whether it was wiped.
     fn get_storage_overlay(
         post_state: &'a HashedPostStateSorted,
         hashed_address: B256,
     ) -> (ForwardInMemoryCursor<'a, B256, U256>, bool) {
-        // Update the post state cursor to use the storage for the new address
-        static EMPTY_UPDATES: Vec<(B256, U256)> = Vec::new();
-
         let post_state_storage = post_state.storages.get(&hashed_address);
         let cursor_wiped = post_state_storage.is_some_and(|u| u.is_wiped());
-        let storage_slots =
-            post_state_storage.map(|u| u.storage_slots_ref()).unwrap_or(&EMPTY_UPDATES);
+        let storage_slots = post_state_storage.map(|u| u.storage_slots_ref()).unwrap_or(&[]);
 
         (ForwardInMemoryCursor::new(storage_slots), cursor_wiped)
     }
@@ -324,14 +319,23 @@ where
     }
 
     fn reset(&mut self) {
-        // Reset the cursors
-        self.cursor.reset();
-        self.post_state_cursor.reset();
+        let Self {
+            cursor,
+            cursor_wiped,
+            cursor_entry,
+            post_state_cursor,
+            last_key,
+            seeked,
+            post_state: _,
+        } = self;
 
-        // Reset cursor state
-        self.cursor_entry = None;
-        self.last_key = None;
-        self.seeked = false;
+        cursor.reset();
+        post_state_cursor.reset();
+
+        *cursor_wiped = false;
+        *cursor_entry = None;
+        *last_key = None;
+        *seeked = false;
     }
 }
 
@@ -479,7 +483,7 @@ mod tests {
                 // Create a HashedPostStateSorted with the storage data
                 let hashed_address = B256::ZERO;
                 let storage_sorted = reth_trie_common::HashedStorageSorted {
-                    storage_slots: post_state_nodes.clone(),
+                    storage_slots: post_state_nodes,
                     wiped: false,
                 };
                 let mut storages = alloy_primitives::map::B256Map::default();

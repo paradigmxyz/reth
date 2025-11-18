@@ -105,19 +105,14 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         }
     }
 
-    /// Sets the in-memory overlay to use based on the `hashed_address`.
-    /// Returns the forward cursor and a boolean indicating if the storage was wiped.
+    /// Returns the storage overlay for `hashed_address` and whether it was deleted.
     fn get_storage_overlay(
         trie_updates: &'a TrieUpdatesSorted,
         hashed_address: B256,
     ) -> (ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>, bool) {
-        // Update the in-memory cursor to use the storage trie for the new address
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
-
         let storage_trie_updates = trie_updates.storage_tries_ref().get(&hashed_address);
         let cursor_wiped = storage_trie_updates.is_some_and(|u| u.is_deleted());
-        let storage_nodes =
-            storage_trie_updates.map(|u| u.storage_nodes_ref()).unwrap_or(&EMPTY_UPDATES);
+        let storage_nodes = storage_trie_updates.map(|u| u.storage_nodes_ref()).unwrap_or(&[]);
 
         (ForwardInMemoryCursor::new(storage_nodes), cursor_wiped)
     }
@@ -280,14 +275,23 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
     }
 
     fn reset(&mut self) {
-        // Reset the cursors
-        self.cursor.reset();
-        self.in_memory_cursor.reset();
+        let Self {
+            cursor,
+            cursor_wiped,
+            cursor_entry,
+            in_memory_cursor,
+            last_key,
+            seeked,
+            trie_updates: _,
+        } = self;
 
-        // Reset cursor state
-        self.cursor_entry = None;
-        self.last_key = None;
-        self.seeked = false;
+        cursor.reset();
+        in_memory_cursor.reset();
+
+        *cursor_wiped = false;
+        *cursor_entry = None;
+        *last_key = None;
+        *seeked = false;
     }
 }
 
@@ -821,7 +825,7 @@ mod tests {
                 let db_nodes_arc = Arc::new(db_nodes_map);
                 let visited_keys = Arc::new(Mutex::new(Vec::new()));
                 let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
-                let trie_updates = TrieUpdatesSorted::new(in_memory_nodes.clone(), Default::default());
+                let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
                 let mut test_cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
                 // Test: seek to the beginning first

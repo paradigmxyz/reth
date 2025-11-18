@@ -1,4 +1,4 @@
-use crate::proof_v2::ValueEncoderFut;
+use crate::proof_v2::DeferredValueEncoder;
 use alloy_rlp::Encodable;
 use alloy_trie::nodes::ExtensionNodeRef;
 use reth_execution_errors::trie::StateProofError;
@@ -13,7 +13,7 @@ pub(crate) enum ProofTrieBranchChild<RF> {
     Leaf {
         /// The short key of the leaf.
         short_key: Nibbles,
-        /// The [`ValueEncoderFut`] which will encode the leaf's value.
+        /// The [`DeferredValueEncoder`] which will encode the leaf's value.
         value: RF,
     },
     /// An extension node whose child branch has not yet been converted to an [`RlpNode`]
@@ -27,7 +27,7 @@ pub(crate) enum ProofTrieBranchChild<RF> {
     Branch(BranchNode),
 }
 
-impl<RF: ValueEncoderFut> ProofTrieBranchChild<RF> {
+impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     /// Converts this child into its RLP node representation. This potentially also returns an
     /// `RlpNode` buffer which can be re-used for other `ProofTrieBranchChild`s.
     pub(crate) fn into_rlp(
