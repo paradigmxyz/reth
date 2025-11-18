@@ -2,17 +2,19 @@ use alloy_eips::BlockId;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_provider::ext::DebugApi;
 use alloy_rpc_types_eth::{Transaction, TransactionRequest};
-use alloy_rpc_types_trace::geth::{
-    AccountState, GethDebugTracingOptions, PreStateConfig, PreStateFrame, PreStateMode,
-};
-use eyre::Result;
+use alloy_rpc_types_trace::geth::{AccountState, GethDebugTracingOptions, PreStateConfig, PreStateFrame};
+use eyre::{eyre, Result};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
+use serde::Deserialize;
 use std::sync::Arc;
+
+const PRESTATE_SNAPSHOT: &str =
+    include_str!("../../../../../testing/prestate/0x391f4b6a382d3bcc3120adc2ea8c62003e604e487d97281129156fd284a1a89d.json");
 
 /// Replays the selfdestruct transaction via `debug_traceCall` and ensures Reth's prestate matches
 /// Geth's captured snapshot.
@@ -21,18 +23,23 @@ use std::sync::Arc;
 async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    const PRESTATE_SNAPSHOT: &str =
-        include_str!("../../../../../testing/prestate/0x391f4b6a382d3bcc3120adc2ea8c62003e604e487d97281129156fd284a1a89d.json");
-
     let mut genesis: Genesis = MAINNET.genesis().clone();
 
     let exec = TaskManager::current();
     let exec = exec.executor();
 
-    let prestate = serde_json::from_str::<PreStateMode>(PRESTATE_SNAPSHOT).unwrap();
+    let expected_frame = expected_snapshot_frame()?;
+    let prestate_mode = match &expected_frame {
+        PreStateFrame::Default(mode) => mode.clone(),
+        _ => return Err(eyre!("snapshot must contain default prestate frame")),
+    };
 
     genesis.alloc.extend(
-        prestate.clone().0.into_iter().map(|(addr, state)| (addr, account_state_to_genesis(state))),
+        prestate_mode
+            .0
+            .clone()
+            .into_iter()
+            .map(|(addr, state)| (addr, account_state_to_genesis(state))),
     );
 
     let chain_spec = Arc::new(
@@ -93,9 +100,19 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
         )
         .await?;
 
-    similar_asserts::assert_eq!(trace, PreStateFrame::Default(prestate));
+    similar_asserts::assert_eq!(trace, expected_frame);
 
     Ok(())
+}
+
+fn expected_snapshot_frame() -> Result<PreStateFrame> {
+    #[derive(Deserialize)]
+    struct Snapshot {
+        result: serde_json::Value,
+    }
+
+    let snapshot: Snapshot = serde_json::from_str(PRESTATE_SNAPSHOT)?;
+    Ok(serde_json::from_value(snapshot.result)?)
 }
 
 fn account_state_to_genesis(value: AccountState) -> GenesisAccount {
