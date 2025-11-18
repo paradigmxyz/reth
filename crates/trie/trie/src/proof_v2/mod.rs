@@ -21,7 +21,6 @@ pub use value::*;
 /// The calculator:
 /// - Accepts one or more B256 proof targets sorted lexicographically
 /// - Returns proof nodes sorted lexicographically by path
-/// - Returns only the root when given zero targets
 /// - Automatically resets after each calculation
 /// - Re-uses cursors from one calculation to the next
 #[derive(Debug)]
@@ -52,12 +51,12 @@ where
     fn proof_inner(
         &self,
         _value_encoder: &VE,
-        targets: impl IntoIterator<Item = B256>,
+        targets: impl IntoIterator<Item = Nibbles>,
     ) -> Result<Vec<SparseTrieNode>, StateProofError> {
         // In debug builds, verify that targets are sorted
         #[cfg(debug_assertions)]
         let targets = {
-            let mut prev: Option<B256> = None;
+            let mut prev: Option<Nibbles> = None;
             targets.into_iter().inspect(move |target| {
                 if let Some(prev) = prev {
                     debug_assert!(
@@ -89,10 +88,8 @@ where
 {
     /// Generate a proof for the given targets.
     ///
-    /// Given target keys sorted lexicographically, returns proof nodes
-    /// for all targets sorted lexicographically by path.
-    ///
-    /// If given zero targets, returns just the root.
+    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
+    /// target. The returned nodes will be sorted lexicographically by path.
     ///
     /// # Panics
     ///
@@ -100,7 +97,7 @@ where
     pub fn proof(
         &mut self,
         value_encoder: &VE,
-        targets: impl IntoIterator<Item = B256>,
+        targets: impl IntoIterator<Item = Nibbles>,
     ) -> Result<Vec<SparseTrieNode>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
@@ -123,10 +120,8 @@ where
 
     /// Generate a proof for a storage trie at the given hashed address.
     ///
-    /// Given target keys sorted lexicographically, returns proof nodes
-    /// for all targets sorted lexicographically by path.
-    ///
-    /// If given zero targets, returns just the root.
+    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
+    /// target. The returned nodes will be sorted lexicographically by path.
     ///
     /// # Panics
     ///
@@ -134,7 +129,7 @@ where
     pub fn storage_proof(
         &mut self,
         hashed_address: B256,
-        targets: impl IntoIterator<Item = B256>,
+        targets: impl IntoIterator<Item = Nibbles>,
     ) -> Result<Vec<SparseTrieNode>, StateProofError> {
         /// Static storage value encoder instance used by all storage proofs.
         static STORAGE_VALUE_ENCODER: StorageValueEncoder = StorageValueEncoder;

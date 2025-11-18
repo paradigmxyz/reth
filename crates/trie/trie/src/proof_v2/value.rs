@@ -7,9 +7,10 @@ use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::Account;
+use reth_trie_common::Nibbles;
 use std::rc::Rc;
 
-/// A trait for deferred encoding of leaf values.
+/// A trait for deferred RLP-encoding of leaf values.
 pub trait DeferredValueEncoder {
     /// RLP encodes the value into the provided buffer.
     ///
@@ -19,19 +20,15 @@ pub trait DeferredValueEncoder {
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError>;
 }
 
-/// A trait for encoding values for proof calculation.
+/// A trait for RLP-encoding values for proof calculation. This trait is designed to allow the lazy
+/// computation of leaf values in a generic way.
 ///
-/// This trait is used to allow the lazy computation of leaf values in a generic way.
+/// When calculating a leaf value in a storage trie the [`DeferredValueEncoder`] simply holds onto
+/// the slot value, and the `encode` method synchronously RLP-encodes it.
 ///
 /// When calculating a leaf value in the accounts trie we create a [`DeferredValueEncoder`] to
 /// initiate any asynchronous computation of the account's storage root we want to do. Later we call
-/// [`DeferredValueEncoder::encode`] to obtain the result of that computation.
-///
-/// When calculating a leaf value in a storage trie the [`DeferredValueEncoder`] simply holds onto
-/// the slot value, and the `encode` method synchronously encodes it.
-///
-/// The encoder takes a reference to itself and a value, returning a future-like type that will
-/// perform the encoding when needed.
+/// [`DeferredValueEncoder::encode`] to obtain the result of that computation and RLP-encode it.
 pub trait ValueEncoder {
     /// The type of value being encoded (e.g., U256 for storage, Account for accounts).
     type Value;
@@ -39,7 +36,7 @@ pub trait ValueEncoder {
     /// The type that will compute and encode the value when needed.
     type DeferredEncoder: DeferredValueEncoder;
 
-    /// Returns a future-like value that will encode the value when called.
+    /// Returns a future-like value that will RLP-encode the value when called.
     ///
     /// # Arguments
     ///
@@ -117,10 +114,10 @@ where
         // Create storage proof calculator with StorageValueEncoder
         let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
-        // Compute storage root by calling storage_proof with empty targets
-        // This returns just the root node of the storage trie
+        // Compute storage root by calling storage_proof with the root path as a target.
+        // This returns just the root node of the storage trie.
         let storage_root = storage_proof_calculator
-            .storage_proof(self.hashed_address, std::iter::empty())
+            .storage_proof(self.hashed_address, [Nibbles::new()])
             .map(|nodes| {
                 // Encode the root node to RLP and hash it
                 let root_node =
