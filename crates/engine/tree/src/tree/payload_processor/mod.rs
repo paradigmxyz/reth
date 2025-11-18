@@ -13,6 +13,7 @@ use crate::tree::{
     sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
+use alloy_eips::eip1898::BlockWithParent;
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
 use crossbeam_channel::Sender as CrossbeamSender;
@@ -465,22 +466,39 @@ where
     ///
     /// The cache enables subsequent blocks to reuse account, storage, and bytecode data without
     /// hitting the database, maintaining performance consistency.
-    pub(crate) fn on_inserted_executed_block(&self, block_hash: B256, bundle_state: &BundleState) {
-        debug!(target: "engine::caching", block_hash=?block_hash, "Updating execution cache for inserted block");
+    pub(crate) fn on_inserted_executed_block(
+        &self,
+        block_with_parent: BlockWithParent,
+        bundle_state: &BundleState,
+    ) {
+        debug!(target: "engine::caching", ?block_with_parent, "Updating execution cache for inserted block");
 
         self.execution_cache.update_with_guard(|cached| {
             // Take existing cache (if any) or create fresh caches
-            let (caches, cache_metrics) = if let Some(existing) = cached.take() {
-                existing.split()
-            } else {
-                (
+            let (caches, cache_metrics) = match cached.take() {
+                Some(existing) => {
+                    // Check if existing cache matches parent - if not, restore and skip
+                    if existing.executed_block_hash() != block_with_parent.parent {
+                        warn!(
+                            target: "engine::caching",
+                            cache_hash = %existing.executed_block_hash(),
+                            parent_hash = %block_with_parent.parent,
+                            "Cache parent mismatch for inserted block, skipping cache update"
+                        );
+                        // Restore the cache since we're not updating it
+                        *cached = Some(existing);
+                        return;
+                    }
+                    existing.split()
+                }
+                None => (
                     ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size),
                     CachedStateMetrics::zeroed(),
-                )
+                ),
             };
 
             // Insert the block's bundle state into cache
-            let new_cache = SavedCache::new(block_hash, caches, cache_metrics);
+            let new_cache = SavedCache::new(block_with_parent.block.hash, caches, cache_metrics);
             if new_cache.cache().insert_state(bundle_state).is_err() {
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
@@ -729,6 +747,7 @@ mod tests {
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
+    use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_evm::block::StateChangeSource;
     use rand::Rng;
     use reth_chainspec::ChainSpec;
@@ -829,19 +848,59 @@ mod tests {
             PrecompileCacheMap::default(),
         );
 
+        let parent_hash = B256::from([1u8; 32]);
         let block_hash = B256::from([10u8; 32]);
+        let block_with_parent = BlockWithParent {
+            block: BlockNumHash { hash: block_hash, number: 1 },
+            parent: parent_hash,
+        };
         let bundle_state = BundleState::default();
 
         // Cache should be empty initially
         assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
 
         // Update cache with inserted block
-        payload_processor.on_inserted_executed_block(block_hash, &bundle_state);
+        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
         // Cache should now exist for the block hash
         let cached = payload_processor.execution_cache.get_cache_for(block_hash);
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
+    }
+
+    #[test]
+    fn on_inserted_executed_block_skips_on_parent_mismatch() {
+        let payload_processor = PayloadProcessor::new(
+            WorkloadExecutor::default(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+
+        // Setup: populate cache with block 1
+        let block1_hash = B256::from([1u8; 32]);
+        payload_processor
+            .execution_cache
+            .update_with_guard(|slot| *slot = Some(make_saved_cache(block1_hash)));
+
+        // Try to insert block 3 with wrong parent (should skip and keep block 1's cache)
+        let wrong_parent = B256::from([99u8; 32]);
+        let block3_hash = B256::from([3u8; 32]);
+        let block_with_parent = BlockWithParent {
+            block: BlockNumHash { hash: block3_hash, number: 3 },
+            parent: wrong_parent,
+        };
+        let bundle_state = BundleState::default();
+
+        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+
+        // Cache should still be for block 1 (unchanged)
+        let cached = payload_processor.execution_cache.get_cache_for(block1_hash);
+        assert!(cached.is_some(), "Original cache should be preserved");
+
+        // Cache for block 3 should not exist
+        let cached3 = payload_processor.execution_cache.get_cache_for(block3_hash);
+        assert!(cached3.is_none(), "New block cache should not be created on mismatch");
     }
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {

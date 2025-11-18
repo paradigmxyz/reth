@@ -1050,7 +1050,7 @@ where
 
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>) {
         self.payload_processor.on_inserted_executed_block(
-            block.recovered_block.hash(),
+            block.recovered_block.block_with_parent(),
             block.execution_output.state(),
         );
     }
