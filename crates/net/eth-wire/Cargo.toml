@@ -1,6 +1,6 @@
 [package]
 name = "reth-eth-wire"
-description = "Implements the eth/64 and eth/65 P2P protocols"
+description = "Implements the Ethereum eth wire protocol (eth/66-eth/69)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
