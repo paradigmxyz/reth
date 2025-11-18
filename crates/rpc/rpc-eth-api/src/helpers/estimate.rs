@@ -10,17 +10,20 @@ use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_revm::{
+    database::{EvmStateProvider, StateProviderDatabase},
+    db::State,
+};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     error::{api::FromEvmHalt, FromEvmError},
     EthApiError, RevertError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
-use reth_storage_api::StateProvider;
 use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Transaction},
+    primitives::KECCAK_EMPTY,
 };
 use tracing::trace;
 
@@ -45,7 +48,7 @@ pub trait EstimateCall: Call {
         state_override: Option<StateOverride>,
     ) -> Result<U256, Self::Error>
     where
-        S: StateProvider,
+        S: EvmStateProvider,
     {
         // Disabled because eth_estimateGas is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
@@ -92,10 +95,14 @@ pub trait EstimateCall: Call {
 
         // Check if this is a basic transfer (no input data to account with no code)
         let is_basic_transfer = if tx_env.input().is_empty() &&
-            let TxKind::Call(to) = tx_env.kind() &&
-            let Ok(code) = db.database.account_code(&to)
+            let TxKind::Call(to) = tx_env.kind()
         {
-            code.map(|code| code.is_empty()).unwrap_or(true)
+            match db.database.basic_account(&to) {
+                Ok(Some(account)) => {
+                    account.bytecode_hash.is_none() || account.bytecode_hash == Some(KECCAK_EMPTY)
+                }
+                _ => true,
+            }
         } else {
             false
         };
