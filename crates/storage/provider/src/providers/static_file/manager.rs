@@ -1001,12 +1001,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         for segment in StaticFileSegment::iter() {
+            debug!(target: "reth::providers::static_file", ?segment, "Checking consistency for segment");
             match segment {
                 StaticFileSegment::Headers | StaticFileSegment::Transactions => {}
                 StaticFileSegment::Receipts => {
                     if EitherWriter::receipts_destination(provider).is_database() {
                         // Old pruned nodes (including full node) do not store receipts as static
                         // files.
+                        debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts consistency check: receipts stored in database");
                         continue
                     }
 
@@ -1016,12 +1018,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         // Gnosis and Chiado's historical import is broken and does not work with
                         // this check. They are importing receipts along
                         // with importing headers/bodies.
+                        debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts consistency check: broken historical import for gnosis/chiado");
                         continue;
                     }
                 }
             }
 
             let initial_highest_block = self.get_highest_static_file_block(segment);
+            debug!(target: "reth::providers::static_file", ?segment, ?initial_highest_block, "Initial highest block for segment");
 
             //  File consistency is broken if:
             //
@@ -1032,8 +1036,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             //   we are expected to still have. We need to check the Database and unwind everything
             //   accordingly.
             if self.access.is_read_only() {
+                debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency (read-only)");
                 self.check_segment_consistency(segment)?;
             } else {
+                debug!(target: "reth::providers::static_file", ?segment, "Fetching latest writer which might heal any potential inconsistency");
                 // Fetching the writer will attempt to heal any file level inconsistency.
                 self.latest_writer(segment)?;
             }
@@ -1060,20 +1066,25 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             // from a pruning interruption might have decreased the number of transactions without
             // being able to update the last block of the static file segment.
             let highest_tx = self.get_highest_static_file_tx(segment);
+            debug!(target: "reth::providers::static_file", ?segment, ?highest_tx, ?highest_block, "Highest transaction for segment");
             if let Some(highest_tx) = highest_tx {
                 let mut last_block = highest_block.unwrap_or_default();
+                debug!(target: "reth::providers::static_file", ?segment, last_block, highest_tx, "Verifying last transaction matches last block indices");
                 loop {
                     if let Some(indices) = provider.block_body_indices(last_block)? {
+                        debug!(target: "reth::providers::static_file", ?segment, last_block, last_tx_num = indices.last_tx_num(), highest_tx, "Found block body indices");
                         if indices.last_tx_num() <= highest_tx {
                             break
                         }
                     } else {
+                        debug!(target: "reth::providers::static_file", ?segment, last_block, "Block body indices not found, static files ahead of database");
                         // If the block body indices can not be found, then it means that static
                         // files is ahead of database, and the `ensure_invariants` check will fix
                         // it by comparing with stage checkpoints.
                         break
                     }
                     if last_block == 0 {
+                        debug!(target: "reth::providers::static_file", ?segment, "Reached block 0 in verification loop");
                         break
                     }
                     last_block -= 1;
@@ -1090,6 +1101,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
             }
 
+            debug!(target: "reth::providers::static_file", ?segment, "Ensuring invariants for segment");
             if let Some(unwind) = match segment {
                 StaticFileSegment::Headers => self
                     .ensure_invariants::<_, tables::Headers<N::BlockHeader>>(
@@ -1113,7 +1125,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         highest_block,
                     )?,
             } {
+                debug!(target: "reth::providers::static_file", ?segment, unwind_target=unwind, "Invariants check returned unwind target");
                 update_unwind_target(unwind);
+            } else {
+                debug!(target: "reth::providers::static_file", ?segment, "Invariants check completed, no unwind needed");
             }
         }
 
@@ -1123,14 +1138,20 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Checks consistency of the latest static file segment and throws an error if at fault.
     /// Read-only.
     pub fn check_segment_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
+        debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency");
         if let Some(latest_block) = self.get_highest_static_file_block(segment) {
             let file_path = self
                 .directory()
                 .join(segment.filename(&self.find_fixed_range(segment, latest_block)));
+            debug!(target: "reth::providers::static_file", ?segment, ?file_path, latest_block, "Loading NippyJar for consistency check");
 
             let jar = NippyJar::<SegmentHeader>::load(&file_path).map_err(ProviderError::other)?;
+            debug!(target: "reth::providers::static_file", ?segment, "NippyJar loaded, checking consistency");
 
             NippyJarChecker::new(jar).check_consistency().map_err(ProviderError::other)?;
+            debug!(target: "reth::providers::static_file", ?segment, "NippyJar consistency check passed");
+        } else {
+            debug!(target: "reth::providers::static_file", ?segment, "No static file block found, skipping consistency check");
         }
         Ok(())
     }
@@ -1159,9 +1180,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     where
         Provider: DBProvider + BlockReader + StageCheckpointReader,
     {
+        debug!(target: "reth::providers::static_file", ?segment, ?highest_static_file_entry, ?highest_static_file_block, "Ensuring invariants");
         let mut db_cursor = provider.tx_ref().cursor_read::<T>()?;
 
         if let Some((db_first_entry, _)) = db_cursor.first()? {
+            debug!(target: "reth::providers::static_file", ?segment, db_first_entry, "Found first database entry");
             if let (Some(highest_entry), Some(highest_block)) =
                 (highest_static_file_entry, highest_static_file_block)
             {
@@ -1185,8 +1208,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 highest_static_file_entry
                     .is_none_or(|highest_entry| db_last_entry > highest_entry)
             {
+                debug!(target: "reth::providers::static_file", ?segment, db_last_entry, ?highest_static_file_entry, "Database has entries beyond static files, no unwind needed");
                 return Ok(None)
             }
+        } else {
+            debug!(target: "reth::providers::static_file", ?segment, "No database entries found");
         }
 
         let highest_static_file_entry = highest_static_file_entry.unwrap_or_default();
@@ -1194,14 +1220,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         // If static file entry is ahead of the database entries, then ensure the checkpoint block
         // number matches.
-        let checkpoint_block_number = provider
-            .get_stage_checkpoint(match segment {
-                StaticFileSegment::Headers => StageId::Headers,
-                StaticFileSegment::Transactions => StageId::Bodies,
-                StaticFileSegment::Receipts => StageId::Execution,
-            })?
-            .unwrap_or_default()
-            .block_number;
+        let stage_id = match segment {
+            StaticFileSegment::Headers => StageId::Headers,
+            StaticFileSegment::Transactions => StageId::Bodies,
+            StaticFileSegment::Receipts => StageId::Execution,
+        };
+        let checkpoint_block_number =
+            provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
+        debug!(target: "reth::providers::static_file", ?segment, ?stage_id, checkpoint_block_number, highest_static_file_block, "Retrieved stage checkpoint");
 
         // If the checkpoint is ahead, then we lost static file data. May be data corruption.
         if checkpoint_block_number > highest_static_file_block {
@@ -1229,12 +1255,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let mut writer = self.latest_writer(segment)?;
             match segment {
                 StaticFileSegment::Headers => {
+                    let prune_count = highest_static_file_block - checkpoint_block_number;
+                    debug!(target: "reth::providers::static_file", ?segment, prune_count, "Pruning headers");
                     // TODO(joshie): is_block_meta
-                    writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
+                    writer.prune_headers(prune_count)?;
                 }
                 StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
                     if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
                         let number = highest_static_file_entry - block.last_tx_num();
+                        debug!(target: "reth::providers::static_file", ?segment, prune_count = number, checkpoint_block_number, "Pruning transaction based segment");
 
                         match segment {
                             StaticFileSegment::Transactions => {
@@ -1245,12 +1274,17 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                             }
                             StaticFileSegment::Headers => unreachable!(),
                         }
+                    } else {
+                        debug!(target: "reth::providers::static_file", ?segment, checkpoint_block_number, "No block body indices found for checkpoint block");
                     }
                 }
             }
+            debug!(target: "reth::providers::static_file", ?segment, "Committing writer after pruning");
             writer.commit()?;
+            debug!(target: "reth::providers::static_file", ?segment, "Writer committed successfully");
         }
 
+        debug!(target: "reth::providers::static_file", ?segment, "Invariants ensured, returning None");
         Ok(None)
     }
 
