@@ -186,8 +186,8 @@ fn receipts_provider_example<
     let indexed_to = Address::random();
     let transfer_signature = keccak256("Transfer(address,address,uint256)");
 
-    // This matches ERC-20 Transfer events emitted by contract_addr where both indexed addresses are fixed.
-    // If your event declares a third indexed parameter, continue with topic3(...).
+    // This matches ERC-20 Transfer events emitted by contract_addr where both indexed addresses are
+    // fixed. If your event declares a third indexed parameter, continue with topic3(...).
     let filter = Filter::new()
         .address(contract_addr)
         .event_signature(transfer_signature)
