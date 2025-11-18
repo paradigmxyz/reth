@@ -1676,7 +1676,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.remove_auths(&internal);
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
-        self.update_size_metrics();
         Some((tx, internal.subpool))
     }
 
@@ -1692,7 +1691,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.remove_auths(&internal);
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
-        self.update_size_metrics();
         Some((tx, internal.subpool))
     }
 
@@ -1742,7 +1740,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
             self.by_hash.remove(internal.transaction.hash()).map(|tx| (tx, internal.subpool));
 
         self.remove_auths(&internal);
-        self.update_size_metrics();
         result
     }
 
