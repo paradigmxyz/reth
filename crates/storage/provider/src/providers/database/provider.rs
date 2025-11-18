@@ -863,12 +863,13 @@ impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeSet<Address>> {
-        // TODO: changeset metadata
         let highest_static_block = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
-        if let Some(highest) = highest_static_block {
+        if let Some(highest) = highest_static_block &&
+            self.cached_storage_settings().account_changesets_in_static_files
+        {
             let start = *range.start();
             let static_end = (*range.end()).min(highest + 1);
 
@@ -909,12 +910,13 @@ impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<Address, Vec<u64>>> {
-        // TODO: changeset metadata
         let highest_static_block = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
-        if let Some(highest) = highest_static_block {
+        if let Some(highest) = highest_static_block &&
+            self.cached_storage_settings().account_changesets_in_static_files
+        {
             let start = *range.start();
             let static_end = (*range.end()).min(highest + 1);
 
@@ -1012,17 +1014,31 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         range: core::ops::Range<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
-        // Use the static file provider's helper method that handles both sources
-        self.static_file_provider.get_account_changesets_range(range, |db_range| {
-            // Fetch from database for blocks not in static files
-            let mut result = Vec::new();
-            let mut cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
-            for entry in cursor.walk_range(db_range)? {
-                let (block_num, account_before) = entry?;
-                result.push((block_num, account_before));
+        let mut changesets = Vec::new();
+        if self.cached_storage_settings().account_changesets_in_static_files &&
+            let Some(highest) = self
+                .static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
+        {
+            let static_end = range.end.min(highest + 1);
+            if range.start < static_end {
+                for block in range.start..static_end {
+                    let block_changesets = self.account_block_changeset(block)?;
+                    for changeset in block_changesets {
+                        changesets.push((block, changeset));
+                    }
+                }
             }
-            Ok(result)
-        })
+        } else {
+            // Fetch from database for blocks not in static files
+            let mut cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+            for entry in cursor.walk_range(range)? {
+                let (block_num, account_before) = entry?;
+                changesets.push((block_num, account_before));
+            }
+        }
+
+        Ok(changesets)
     }
 
     fn account_changeset_count(&self) -> ProviderResult<usize> {
@@ -2134,11 +2150,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
         // if there are static files for this segment, prune them.
-        // TODO: changeset metadata
         let highest_changeset_block = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
-        let account_changeset = if let Some(highest_block) = highest_changeset_block {
+        let account_changeset = if let Some(highest_block) = highest_changeset_block &&
+            self.cached_storage_settings().account_changesets_in_static_files
+        {
             // TODO: add a `take` method that removes and returns the items instead of doing this
             let changesets = self.account_changesets_range(block + 1..highest_block + 1)?;
             let mut changeset_writer =

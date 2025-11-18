@@ -1645,41 +1645,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .map(|index| &index.expected_block_ranges_by_max_block)
             .cloned()
     }
-
-    /// Get account changesets for a range of blocks, fetching from static files if they exist, and
-    /// otherwise fetching from the database.
-    pub fn get_account_changesets_range<FD>(
-        &self,
-        block_range: Range<BlockNumber>,
-        mut fetch_from_database: FD,
-    ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>>
-    where
-        FD: FnMut(
-            Range<BlockNumber>,
-        ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>>,
-    {
-        let mut changesets = Vec::new();
-        // TODO: changeset metadata
-        let highest_static_block =
-            self.get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
-
-        if let Some(highest) = highest_static_block {
-            let static_end = block_range.end.min(highest + 1);
-            if block_range.start < static_end {
-                for block in block_range.start..static_end {
-                    let block_changesets = self.account_block_changeset(block)?;
-                    for changeset in block_changesets {
-                        changesets.push((block, changeset));
-                    }
-                }
-            }
-        } else {
-            // All from database
-            changesets = fetch_from_database(block_range)?;
-        }
-
-        Ok(changesets)
-    }
 }
 
 #[derive(Debug)]
