@@ -3,7 +3,7 @@ use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use std::time::{Duration, Instant};
-use tracing::Span;
+use tracing::debug_span;
 
 #[cfg(feature = "metrics")]
 use crate::TrieType;
@@ -106,25 +106,18 @@ impl TrieCursorMetricsCache {
         self.total_duration += other.total_duration;
     }
 
-    fn record_span_field(&self, span: &Span, name: &str, value: impl tracing::Value) {
-        debug_assert!(span.has_field(name), "span should have field {name}");
-        span.record(name, value);
-    }
-
-    /// Record the metrics in the given span as fields.
-    pub fn record_span_fields(&self, span: &Span, prefix: &'static str) {
-        self.record_span_field(span, format!("{}.next_count", prefix).as_str(), self.next_count);
-        self.record_span_field(span, format!("{}.seek_count", prefix).as_str(), self.seek_count);
-        self.record_span_field(
-            span,
-            format!("{}.seek_exact_count", prefix).as_str(),
-            self.seek_exact_count,
-        );
-        self.record_span_field(
-            span,
-            format!("{}.total_duration", prefix).as_str(),
-            self.total_duration.as_secs_f64(),
-        );
+    /// Record the span for metrics.
+    pub fn record_span(&self, name: &'static str) {
+        let _span = debug_span!(
+            target: "trie::trie_cursor",
+            "Trie cursor metrics",
+            name,
+            next_count = self.next_count,
+            seek_count = self.seek_count,
+            seek_exact_count = self.seek_exact_count,
+            total_duration = self.total_duration.as_secs_f64(),
+        )
+        .entered();
     }
 }
 

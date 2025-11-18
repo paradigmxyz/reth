@@ -4,7 +4,6 @@ use reth_trie::{
     trie_cursor::{TrieCursorMetrics, TrieCursorMetricsCache},
     TrieType,
 };
-use tracing::Span;
 
 /// Metrics for the proof task.
 #[derive(Clone, Metrics)]
@@ -103,11 +102,11 @@ impl ProofTaskCursorMetricsCache {
         self.storage_hashed_cursor.reset();
     }
 
-    /// Record the metrics in the given span as fields.
-    pub fn record_span_fields(&self, span: &Span) {
-        self.account_trie_cursor.record_span_fields(span, "account_trie_cursor");
-        self.account_hashed_cursor.record_span_fields(span, "account_hashed_cursor");
-        self.storage_trie_cursor.record_span_fields(span, "storage_trie_cursor");
-        self.storage_hashed_cursor.record_span_fields(span, "storage_hashed_cursor");
+    /// Record the spans for metrics.
+    pub fn record_spans(&self) {
+        self.account_trie_cursor.record_span("account_trie_cursor");
+        self.account_hashed_cursor.record_span("account_hashed_cursor");
+        self.storage_trie_cursor.record_span("storage_trie_cursor");
+        self.storage_hashed_cursor.record_span("storage_hashed_cursor");
     }
 }
