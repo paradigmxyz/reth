@@ -1,5 +1,6 @@
 use alloy_eips::BlockId;
 use alloy_genesis::{Genesis, GenesisAccount};
+use alloy_primitives::address;
 use alloy_provider::ext::DebugApi;
 use alloy_rpc_types_eth::{Transaction, TransactionRequest};
 use alloy_rpc_types_trace::geth::{AccountState, GethDebugTracingOptions, PreStateConfig, PreStateFrame};
@@ -24,6 +25,7 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let mut genesis: Genesis = MAINNET.genesis().clone();
+    genesis.coinbase = address!("0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5");
 
     let exec = TaskManager::current();
     let exec = exec.executor();
