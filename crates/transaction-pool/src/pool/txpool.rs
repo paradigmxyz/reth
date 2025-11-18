@@ -699,6 +699,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.blob_pool_transactions.set(stats.blob as f64);
         self.metrics.blob_pool_size_bytes.set(stats.blob_size as f64);
         self.metrics.total_transactions.set(stats.total as f64);
+        self.all_transactions.update_size_metrics();
     }
 
     /// Updates transaction type metrics for the entire pool.
@@ -1229,7 +1230,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 queued_limit  => (queued_pool, queued_transactions_evicted),
             ]
         );
-
+        self.update_size_metrics();
         removed
     }
 
@@ -1675,6 +1676,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.remove_auths(&internal);
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
+        self.update_size_metrics();
         Some((tx, internal.subpool))
     }
 
@@ -1690,6 +1692,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.remove_auths(&internal);
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
+        self.update_size_metrics();
         Some((tx, internal.subpool))
     }
 
@@ -1739,7 +1742,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             self.by_hash.remove(internal.transaction.hash()).map(|tx| (tx, internal.subpool));
 
         self.remove_auths(&internal);
-
+        self.update_size_metrics();
         result
     }
 
@@ -4522,5 +4525,53 @@ mod tests {
             tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK),
             "Non-4844 tx should gain ENOUGH_FEE_CAP_BLOCK bit after basefee decrease"
         );
+    }
+
+    #[test]
+    fn test_all_transactions_metrics_update_on_remove_by_hash() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx1 = MockTransaction::eip1559().inc_price().inc_limit();
+        let tx2 = tx1.next();
+
+        let v1 = f.validated(tx1);
+        let v2 = f.validated(tx2);
+
+        pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce, None).unwrap();
+        pool.add_transaction(v2, on_chain_balance, on_chain_nonce, None).unwrap();
+
+        assert_eq!(pool.all_transactions.txs.len(), 2);
+        assert_eq!(pool.all_transactions.by_hash.len(), 2);
+
+        pool.remove_transaction_by_hash(v1.hash());
+
+        assert_eq!(pool.all_transactions.txs.len(), 1);
+        assert_eq!(pool.all_transactions.by_hash.len(), 1);
+    }
+
+    #[test]
+    fn test_all_transactions_metrics_update_on_discard_worst() {
+        let mut f = MockTransactionFactory::default();
+        let queued_limit = SubPoolLimit::new(1000, 2);
+        let mut pool =
+            TxPool::new(MockOrdering::default(), PoolConfig { queued_limit, ..Default::default() });
+
+        for _ in 0..3 {
+            let tx = MockTransaction::eip1559().inc_nonce().inc_price_by(10);
+            let v = f.validated(tx);
+            pool.add_transaction(v, U256::from(1_000), 0, None).unwrap();
+        }
+
+        assert!(pool.size().queued >= 2);
+        let before_total = pool.all_transactions.txs.len();
+
+        let removed = pool.discard_worst();
+        assert!(!removed.is_empty());
+
+        let after_total = pool.all_transactions.txs.len();
+        assert!(after_total < before_total);
     }
 }
