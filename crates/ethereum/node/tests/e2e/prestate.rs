@@ -17,7 +17,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 
 const PRESTATE_SNAPSHOT: &str =
-    include_str!("../../../../../testing/prestate/0x391f4b6a382d3bcc3120adc2ea8c62003e604e487d97281129156fd284a1a89d.json");
+    include_str!("../../../../../testing/prestate/tx-selfdestruct-prestate.json");
 
 /// Replays the selfdestruct transaction via `debug_traceCall` and ensures Reth's prestate matches
 /// Geth's captured snapshot.
