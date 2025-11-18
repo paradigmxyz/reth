@@ -105,9 +105,9 @@ impl ProofTaskCursorMetricsCache {
 
     /// Record the metrics in the given span as fields.
     pub fn record_span_fields(&self, span: &Span) {
-        self.account_trie_cursor.record_span_fields("account_trie_cursor", span);
-        self.account_hashed_cursor.record_span_fields("account_hashed_cursor", span);
-        self.storage_trie_cursor.record_span_fields("storage_trie_cursor", span);
-        self.storage_hashed_cursor.record_span_fields("storage_hashed_cursor", span);
+        self.account_trie_cursor.record_span_fields(span, "account_trie_cursor");
+        self.account_hashed_cursor.record_span_fields(span, "account_hashed_cursor");
+        self.storage_trie_cursor.record_span_fields(span, "storage_trie_cursor");
+        self.storage_hashed_cursor.record_span_fields(span, "storage_hashed_cursor");
     }
 }

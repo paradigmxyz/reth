@@ -110,15 +110,22 @@ impl HashedCursorMetricsCache {
         self.total_duration += other.total_duration;
     }
 
+    fn record_span_field(&self, span: &Span, name: &str, value: impl tracing::Value) {
+        debug_assert!(span.has_field(name), "span should have field {name}");
+        span.record(name, value);
+    }
+
     /// Record the span fields for the metrics.
-    pub fn record_span_fields(&self, prefix: &'static str, span: &Span) {
-        span.record(format!("{}.next_count", prefix).as_str(), self.next_count);
-        span.record(format!("{}.seek_count", prefix).as_str(), self.seek_count);
-        span.record(
+    pub fn record_span_fields(&self, span: &Span, prefix: &'static str) {
+        self.record_span_field(span, format!("{}.next_count", prefix).as_str(), self.next_count);
+        self.record_span_field(span, format!("{}.seek_count", prefix).as_str(), self.seek_count);
+        self.record_span_field(
+            span,
             format!("{}.is_storage_empty_count", prefix).as_str(),
             self.is_storage_empty_count,
         );
-        span.record(
+        self.record_span_field(
+            span,
             format!("{}.total_duration", prefix).as_str(),
             self.total_duration.as_secs_f64(),
         );
