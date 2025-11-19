@@ -14,6 +14,7 @@ mod diff;
 mod get;
 mod list;
 mod repair_trie;
+mod settings;
 mod static_file_header;
 mod stats;
 /// DB List TUI
@@ -58,6 +59,8 @@ pub enum Subcommands {
     Version,
     /// Returns the full database path
     Path,
+    /// Manage storage settings
+    Settings(settings::Command),
 }
 
 /// Initializes a provider factory with specified access rights, and then execute with the provided
@@ -177,6 +180,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             Subcommands::Path => {
                 println!("{}", db_path.display());
+            }
+            Subcommands::Settings(command) => {
+                db_exec!(self.env, tool, N, command.access_rights(), {
+                    command.execute(&tool)?;
+                });
             }
         }
 
