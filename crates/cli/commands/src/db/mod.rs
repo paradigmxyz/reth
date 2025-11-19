@@ -14,6 +14,7 @@ mod diff;
 mod get;
 mod list;
 mod repair_trie;
+mod settings;
 mod static_file_header;
 mod stats;
 /// DB List TUI
@@ -26,12 +27,12 @@ pub struct Command<C: ChainSpecParser> {
     env: EnvironmentArgs<C>,
 
     #[command(subcommand)]
-    command: Subcommands,
+    command: Subcommands<C>,
 }
 
 #[derive(Subcommand, Debug)]
 /// `reth db` subcommands
-pub enum Subcommands {
+pub enum Subcommands<C: ChainSpecParser> {
     /// Lists all the tables, their entry count and their size
     Stats(stats::Command),
     /// Lists the contents of a table
@@ -58,6 +59,8 @@ pub enum Subcommands {
     Version,
     /// Returns the full database path
     Path,
+    /// Manage storage settings
+    Settings(settings::Command<C>),
 }
 
 /// `db_ro_exec` opens a database in read-only mode, and then execute with the provided command
@@ -165,6 +168,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             Subcommands::Path => {
                 println!("{}", db_path.display());
+            }
+            Subcommands::Settings(command) => {
+                command.execute::<N>().await?;
             }
         }
 

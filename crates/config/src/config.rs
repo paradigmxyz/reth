@@ -423,10 +423,6 @@ impl EtlConfig {
 pub struct StaticFilesConfig {
     /// Number of blocks per file for each segment.
     pub blocks_per_file: BlocksPerFileConfig,
-    /// Store receipts in static files instead of the database.
-    ///
-    /// When enabled, receipts are written to static files instead of the database.
-    pub receipts: Option<bool>,
 }
 
 /// Configuration for the number of blocks per file for each segment.

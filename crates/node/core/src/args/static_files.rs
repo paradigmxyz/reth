@@ -2,7 +2,7 @@
 
 use clap::Args;
 use reth_config::config::{BlocksPerFileConfig, StaticFilesConfig};
-use reth_provider::StorageSettings;
+use reth_storage_api::StorageSettings;
 
 /// Parameters for static files configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
@@ -22,12 +22,12 @@ pub struct StaticFilesArgs {
 
     /// Store receipts in static files instead of the database.
     ///
-    /// When enabled, receipts are written to static files instead of the database.
+    /// When enabled, receipts will be written to static files on disk instead of the database.
     ///
-    /// Note: changing this setting on an existing node with non-empty receipts can result in
-    /// unexpected behavior.
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
     #[arg(long = "static-files.receipts")]
-    pub receipts: Option<bool>,
+    pub receipts: bool,
 }
 
 impl StaticFilesArgs {
@@ -42,12 +42,11 @@ impl StaticFilesArgs {
                     .or(config.blocks_per_file.transactions),
                 receipts: self.blocks_per_file_receipts.or(config.blocks_per_file.receipts),
             },
-            receipts: self.receipts.or(config.receipts),
         }
     }
 
     /// Converts the static files arguments into [`StorageSettings`].
     pub const fn to_settings(&self) -> StorageSettings {
-        StorageSettings::legacy().with_receipts_in_static_files_opt(self.receipts)
+        StorageSettings::legacy().with_receipts_in_static_files_opt(Some(self.receipts))
     }
 }
