@@ -20,7 +20,7 @@ mod tests {
 
     impl PartialEq<AccessList> for RethAccessList {
         fn eq(&self, other: &AccessList) -> bool {
-            self.0.iter().zip(other.iter()).all(|(a, b)| a == b)
+            self.0.iter().eq(other.iter())
         }
     }
 
