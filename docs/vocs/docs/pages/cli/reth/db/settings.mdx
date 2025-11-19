@@ -1,12 +1,17 @@
-# reth stage drop
+# reth db settings
 
-Drop a stage's tables from the database
+Manage storage settings
 
 ```bash
-$ reth stage drop --help
+$ reth db settings --help
 ```
 ```txt
-Usage: reth stage drop [OPTIONS] <STAGE>
+Usage: reth db settings [OPTIONS] <COMMAND>
+
+Commands:
+  get   Get current storage settings from database
+  set   Set storage settings in database
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
@@ -102,21 +107,6 @@ Static Files:
           When enabled, receipts will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-  <STAGE>
-          Possible values:
-          - headers:           The headers stage within the pipeline
-          - bodies:            The bodies stage within the pipeline
-          - senders:           The senders stage within the pipeline
-          - execution:         The execution stage within the pipeline
-          - account-hashing:   The account hashing stage within the pipeline
-          - storage-hashing:   The storage hashing stage within the pipeline
-          - hashing:           The account and storage hashing stages within the pipeline
-          - merkle:            The merkle stage within the pipeline
-          - merkle-changesets: The merkle changesets stage within the pipeline
-          - tx-lookup:         The transaction lookup stage within the pipeline
-          - account-history:   The account history stage within the pipeline
-          - storage-history:   The storage history stage within the pipeline
 
 Logging:
       --log.stdout.format <FORMAT>
