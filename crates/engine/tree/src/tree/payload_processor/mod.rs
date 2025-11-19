@@ -368,9 +368,7 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let span = debug_span!(target: "engine::tree::payload_processor", "prewarm task");
             self.executor.spawn_blocking(move || {
-                let _enter = span.entered();
                 prewarm_task.run(transactions, to_prewarm_task);
             });
         }

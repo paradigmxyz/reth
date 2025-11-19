@@ -40,7 +40,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, trace, warn};
+use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 /// A wrapper for transactions that includes their index in the block.
 #[derive(Clone)]
@@ -87,6 +87,8 @@ where
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
+    /// Parent span for tracing
+    parent_span: Span,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -122,6 +124,7 @@ where
                 transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
+                parent_span: Span::current(),
             },
             actions_tx,
         )
@@ -140,7 +143,7 @@ where
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
         let transaction_count_hint = self.transaction_count_hint;
-        let span = tracing::Span::current();
+        let span = Span::current();
 
         self.executor.spawn_blocking(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
@@ -284,6 +287,7 @@ where
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
     #[instrument(
+        parent = &self.parent_span,
         level = "debug",
         target = "engine::tree::payload_processor::prewarm",
         name = "prewarm",
