@@ -1,4 +1,15 @@
-# Reth for Developers
+use reth_ethereum::node::{EthereumNode, NodeBuilder};
+ 
+// Build a custom node with modified components
+let node = NodeBuilder::new(config)
+     // install the ethereum specific node primitives
+    .with_types::<EthereumNode>()
+    .with_components(|components| {
+        // Customize components here
+        components
+    })
+    .build()
+    .await?; Reth for Developers
 
 Reth can be used as a library to build custom Ethereum nodes, interact with blockchain data, or create specialized tools for blockchain analysis and indexing.
 
