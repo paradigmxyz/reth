@@ -64,7 +64,7 @@ impl Command {
         match storage_settings {
             Some(settings) => {
                 println!("Current storage settings:");
-                println!("{:#?}", settings);
+                println!("{settings:#?}");
             }
             None => {
                 println!("No storage settings found.");
