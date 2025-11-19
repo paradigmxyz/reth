@@ -27,12 +27,12 @@ pub struct Command<C: ChainSpecParser> {
     env: EnvironmentArgs<C>,
 
     #[command(subcommand)]
-    command: Subcommands<C>,
+    command: Subcommands,
 }
 
 #[derive(Subcommand, Debug)]
 /// `reth db` subcommands
-pub enum Subcommands<C: ChainSpecParser> {
+pub enum Subcommands {
     /// Lists all the tables, their entry count and their size
     Stats(stats::Command),
     /// Lists the contents of a table
@@ -60,7 +60,7 @@ pub enum Subcommands<C: ChainSpecParser> {
     /// Returns the full database path
     Path,
     /// Manage storage settings
-    Settings(settings::Command<C>),
+    Settings(settings::Command),
 }
 
 /// Initializes a provider factory with specified access rights, and then execute with the provided
@@ -182,7 +182,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 println!("{}", db_path.display());
             }
             Subcommands::Settings(command) => {
-                command.execute::<N>().await?;
+                db_exec!(self.env, tool, N, command.access_rights(), {
+                    command.execute(&tool)?;
+                });
             }
         }
 
