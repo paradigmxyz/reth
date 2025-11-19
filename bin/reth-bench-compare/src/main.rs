@@ -34,12 +34,14 @@ fn main() -> Result<()> {
         }
     }
 
-    let args = Args::parse();
+    let mut args = Args::parse();
 
-    // Initialize tracing
-    let _guard = args.init_tracing()?;
+    // Create runtime first (needed for OTLP gRPC initialization)
+    let runner = CliRunner::try_default_runtime()?;
+
+    // Initialize tracing (including OTLP if requested)
+    let _guard = args.init_tracing(&runner)?;
 
     // Run until either exit or sigint or sigterm
-    let runner = CliRunner::try_default_runtime()?;
     runner.run_command_until_exit(|ctx| run_comparison(args, ctx))
 }
