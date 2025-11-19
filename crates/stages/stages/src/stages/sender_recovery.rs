@@ -80,19 +80,17 @@ where
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let range_output =
-            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
-        let end_block = *range_output.block_range.end();
-
-        // No transactions to walk over
-        if range_output.tx_range.is_empty() {
-            info!(target: "sync::stages::sender_recovery", tx_range = ?range_output.tx_range, "Target transaction already reached");
+        let Some(range_output) =
+            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?
+        else {
+            info!(target: "sync::stages::sender_recovery", "No transaction senders to recover");
             return Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new(end_block)
+                checkpoint: StageCheckpoint::new(input.target())
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-                done: range_output.is_final_range,
+                done: true,
             })
-        }
+        };
+        let end_block = *range_output.block_range.end();
 
         // Acquire the cursor for inserting elements
         let mut senders_cursor = provider.tx_ref().cursor_write::<tables::TransactionSenders>()?;

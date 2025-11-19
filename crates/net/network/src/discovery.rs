@@ -25,7 +25,7 @@ use std::{
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// Default max capacity for cache of discovered peers.
 ///
@@ -95,12 +95,15 @@ impl Discovery {
             // spawn the service
             let discv4_service = discv4_service.spawn();
 
+            debug!(target:"net", ?discovery_v4_addr, "started discovery v4");
+
             Ok((Some(discv4), Some(discv4_updates), Some(discv4_service)))
         };
 
         let discv5_future = async {
             let Some(config) = discv5_config else { return Ok::<_, NetworkError>((None, None)) };
-            let (discv5, discv5_updates, _local_enr_discv5) = Discv5::start(&sk, config).await?;
+            let (discv5, discv5_updates) = Discv5::start(&sk, config).await?;
+            debug!(target:"net", discovery_v5_enr=? discv5.local_enr(), "started discovery v5");
             Ok((Some(discv5), Some(discv5_updates.into())))
         };
 
