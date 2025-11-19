@@ -17,6 +17,7 @@ pub struct StorageSettings {
     pub receipts_in_static_files: bool,
 
     /// Whether this node should read and write account changesets from static files.
+    #[serde(default)]
     pub account_changesets_in_static_files: bool,
 }
 

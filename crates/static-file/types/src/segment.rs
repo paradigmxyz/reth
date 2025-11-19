@@ -6,7 +6,7 @@ use core::{
     str::FromStr,
 };
 use derive_more::Display;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Visitor};
+use serde::{de::Visitor, Deserialize, Deserializer, Serialize};
 use strum::{EnumIs, EnumString};
 
 #[derive(
@@ -242,11 +242,15 @@ impl<'de> Visitor<'de> for SegmentHeaderVisitor {
         let segment =
             seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
 
-        // Try to read the 5th field (changeset_offsets)
-        // If it doesn't exist (old format), this will return None
-        let changeset_offsets = match seq.next_element()? {
-            Some(Some(offsets)) => Some(offsets),
-            Some(None) | None => None,
+        let changeset_offsets = if segment == StaticFileSegment::AccountChangeSets {
+            // Try to read the 5th field (changeset_offsets)
+            // If it doesn't exist (old format), this will return None
+            match seq.next_element()? {
+                Some(Some(offsets)) => Some(offsets),
+                Some(None) | None => None,
+            }
+        } else {
+            None
         };
 
         Ok(SegmentHeader {
@@ -273,24 +277,6 @@ impl<'de> Deserialize<'de> for SegmentHeader {
         deserializer.deserialize_struct("YourStruct", FIELDS, SegmentHeaderVisitor)
     }
 }
-
-// impl Serialize for SegmentHeader {
-//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-//         where
-//             S: Serializer {
-//         // There are four fields we always serialize, we don't serialize changeset offsets if they
-//         // don't exist
-//         let len = if self.changeset_offsets.is_some() {
-//             5
-//         } else {
-//             4
-//         };
-
-//         let mut state = serializer.serialize_struct("SegmentHeader", len)?;
-//         state.serialize_field("expected_block_range", self.expected_block_range);
-//         state.serialize_field("")
-//     }
-// }
 
 impl SegmentHeader {
     /// Returns [`SegmentHeader`].
