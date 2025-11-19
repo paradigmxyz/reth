@@ -7,7 +7,7 @@
 //! - Writing the data back to a new file
 //! - Confirming that all original data is preserved throughout the process
 
-use alloy_consensus::{BlockBody, BlockHeader, Header, ReceiptWithBloom};
+use alloy_consensus::{BlockBody, BlockHeader, Header, ReceiptEnvelope};
 use rand::{prelude::IndexedRandom, rng};
 use reth_era::{
     common::file_ops::{EraFileFormat, StreamReader, StreamWriter},
@@ -153,9 +153,9 @@ async fn test_file_roundtrip(
 
         // Decode receipts
         let original_receipts_decoded =
-            original_block.receipts.decode::<Vec<ReceiptWithBloom>>()?;
+            original_block.receipts.decode::<Vec<ReceiptEnvelope>>()?;
         let roundtrip_receipts_decoded =
-            roundtrip_block.receipts.decode::<Vec<ReceiptWithBloom>>()?;
+            roundtrip_block.receipts.decode::<Vec<ReceiptEnvelope>>()?;
 
         assert_eq!(
             original_receipts_decoded, roundtrip_receipts_decoded,
