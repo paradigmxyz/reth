@@ -37,7 +37,7 @@ pub use receipt::LoadReceipt;
 pub use signer::EthSigner;
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
-pub use trace::Trace;
+pub use trace::{EthAddresses, Trace};
 pub use transaction::{EthTransactions, LoadTransaction};
 
 use crate::FullEthApiTypes;
@@ -60,6 +60,7 @@ pub trait FullEthApi:
     + EthFees
     + Trace
     + LoadReceipt
+    + EthAddresses
 {
 }
 
@@ -73,5 +74,6 @@ impl<T> FullEthApi for T where
         + EthFees
         + Trace
         + LoadReceipt
+        + EthAddresses
 {
 }

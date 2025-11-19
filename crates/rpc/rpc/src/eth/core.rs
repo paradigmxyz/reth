@@ -1,6 +1,7 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
+use reth_evm::{execute::Executor, ConfigureEvm};
 use std::{sync::Arc, time::Duration};
 
 use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
@@ -14,9 +15,10 @@ use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
+use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_rpc_convert::{RpcConvert, RpcConverter};
 use reth_rpc_eth_api::{
-    helpers::{pending_block::PendingEnvBuilder, spec::SignersForRpc, SpawnBlocking},
+    helpers::{pending_block::PendingEnvBuilder, spec::SignersForRpc, Call, SpawnBlocking},
     node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
     EthApiTypes, RpcNodeCore,
 };
@@ -178,6 +180,150 @@ where
         );
 
         Self { inner: Arc::new(inner) }
+    }
+}
+
+impl<N, Rpc> EthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    EthApiError: reth_rpc_eth_api::FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError, Evm = N::Evm>,
+{
+    /// Returns the list of addresses that appeared in the given block.
+    ///
+    /// This includes addresses from:
+    /// - Block miner
+    /// - Transaction senders and recipients
+    /// - Withdrawals (post-Shanghai)
+    /// - Log emitter contracts
+    /// - Address-like values in log topics
+    /// - Accounts accessed during execution
+    pub async fn collect_addresses_in_block(
+        &self,
+        block_id: alloy_eips::BlockId,
+    ) -> Result<Vec<alloy_primitives::Address>, reth_rpc_eth_types::EthApiError> {
+        use alloy_consensus::{Transaction, TxReceipt};
+        use alloy_primitives::Address;
+        use reth_primitives_traits::BlockBody;
+        use reth_storage_api::{BlockIdReader, ReceiptProviderIdExt};
+        use std::collections::BTreeSet;
+
+        if block_id.is_pending() {
+            return Ok(Vec::new());
+        }
+
+        let block_hash = match self
+            .provider()
+            .block_hash_for_id(block_id)
+            .map_err(|e| reth_rpc_eth_types::EthApiError::Internal(e.into()))?
+        {
+            Some(hash) => hash,
+            None => return Ok(Vec::new()),
+        };
+
+        let block = match self
+            .cache()
+            .get_recovered_block(block_hash)
+            .await
+            .map_err(|e| reth_rpc_eth_types::EthApiError::Internal(e.into()))?
+        {
+            Some(block) => block,
+            None => return Ok(Vec::new()),
+        };
+
+        let mut set: BTreeSet<Address> = BTreeSet::new();
+
+        set.insert(block.header().beneficiary());
+        if let Some(withdrawals) = block.body().withdrawals() {
+            for withdrawal in withdrawals {
+                set.insert(withdrawal.address);
+            }
+        }
+
+        use reth_primitives_traits::SignerRecoverable;
+        for tx in block.body().transactions() {
+            if let Ok(signer) = tx.recover_signer() {
+                set.insert(signer);
+            }
+            if let Some(to) = tx.to() {
+                set.insert(Address::from(*to));
+            }
+            // Add addresses from access list (EIP-2930)
+            if let Some(access_list) = tx.access_list() {
+                for item in &access_list.0 {
+                    set.insert(item.address);
+                }
+            }
+        }
+
+        let this = self.clone();
+        let block_for_execution = block.clone();
+        let witness_record = self
+            .spawn_with_state_at_block(
+                block_for_execution.parent_hash().into(),
+                move |state_provider| {
+                    let db = StateProviderDatabase::new(&state_provider);
+                    let block_executor = this.evm_config().executor(db);
+
+                    let mut record = ExecutionWitnessRecord::default();
+                    block_executor
+                        .execute_with_state_closure(&block_for_execution, |statedb| {
+                            record.record_executed_state(statedb);
+                        })
+                        .map_err(|e| EthApiError::Internal(e.into()))?;
+
+                    Ok::<_, EthApiError>(record)
+                },
+            )
+            .await?;
+
+        use alloy_primitives::keccak256;
+        for key_bytes in &witness_record.keys {
+            // Only consider 20-byte entries as potential addresses
+            if key_bytes.len() == 20 &&
+                let Ok(address_bytes) = <[u8; 20]>::try_from(&key_bytes[..])
+            {
+                let address = Address::from(address_bytes);
+                let hashed_addr = keccak256(address.as_slice());
+                let hash_b256 = alloy_primitives::B256::from(hashed_addr);
+
+                // Validate this is actually an account by checking if its hash exists in
+                // hashed_state This removes false positives while not
+                // relying on private fields
+                if witness_record.hashed_state.accounts.contains_key(&hash_b256) {
+                    set.insert(address);
+                }
+            }
+        }
+
+        let Some(receipts) = self
+            .provider()
+            .receipts_by_block_id(block_id)
+            .map_err(|e| reth_rpc_eth_types::EthApiError::Internal(e.into()))?
+        else {
+            return Ok(set.into_iter().collect());
+        };
+
+        for receipt in &receipts {
+            for log in receipt.logs() {
+                set.insert(log.address);
+
+                for topic in log.topics() {
+                    let t = topic.as_slice();
+                    if t.len() == 32 &&
+                        t[..12] == [0u8; 12] &&
+                        let Ok(bytes20) = <[u8; 20]>::try_from(&t[12..32])
+                    {
+                        let addr = Address::from(bytes20);
+                        if addr != Address::ZERO {
+                            set.insert(addr);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(set.into_iter().collect())
     }
 }
 
