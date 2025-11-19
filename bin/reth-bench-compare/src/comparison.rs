@@ -449,9 +449,18 @@ impl ComparisonGenerator {
         let summary = &report.comparison_summary;
 
         println!("Performance Changes:");
-        println!("  NewPayload Latency: {:+.2}%", summary.new_payload_latency_change_percent);
-        println!("  Gas/Second:         {:+.2}%", summary.gas_per_second_change_percent);
-        println!("  Blocks/Second:      {:+.2}%", summary.blocks_per_second_change_percent);
+        println!(
+            "  NewPayload Latency: {:+.2}% (total avg change)",
+            summary.new_payload_latency_change_percent
+        );
+        println!(
+            "  Gas/Second:         {:+.2}% (total avg change)",
+            summary.gas_per_second_change_percent
+        );
+        println!(
+            "  Blocks/Second:      {:+.2}% (total avg change)",
+            summary.blocks_per_second_change_percent
+        );
         println!();
 
         println!("Baseline Summary:");

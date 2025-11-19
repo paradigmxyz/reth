@@ -1,8 +1,5 @@
 use crate::{BlockNumber, Compression};
-use alloc::{
-    format,
-    string::{String, ToString},
-};
+use alloc::{format, string::String};
 use alloy_primitives::TxNumber;
 use core::{ops::RangeInclusive, str::FromStr};
 use serde::{Deserialize, Serialize};
@@ -88,7 +85,7 @@ impl StaticFileSegment {
     ) -> String {
         let prefix = self.filename(block_range);
 
-        let filters_name = "none".to_string();
+        let filters_name = "none";
 
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`.]

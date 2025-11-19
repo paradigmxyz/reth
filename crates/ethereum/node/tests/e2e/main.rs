@@ -5,6 +5,7 @@ mod dev;
 mod eth;
 mod p2p;
 mod pool;
+mod prestate;
 mod rpc;
 mod utils;
 
