@@ -519,71 +519,11 @@ mod tests {
     use alloy_primitives::map::B256Map;
     use alloy_rlp::Decodable;
     use itertools::Itertools;
-    use reth_storage_errors::db::DatabaseError;
     use reth_trie_common::{HashedPostState, MultiProofTargets};
-    use std::{collections::BTreeMap, rc::Rc};
+    use std::collections::BTreeMap;
 
     /// Target to use with the `tracing` crate.
     static TRACE_TARGET: &str = "trie::proof_v2::tests";
-
-    /// A combined provider that implements both `TrieCursorFactory` and `HashedCursorFactory`.
-    ///
-    /// This is used to provide cursors for the value encoder during proof calculation.
-    #[derive(Clone)]
-    struct CombinedProvider<T, H> {
-        trie_cursor_factory: T,
-        hashed_cursor_factory: H,
-    }
-
-    impl<T, H> CombinedProvider<T, H> {
-        fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Self {
-            Self { trie_cursor_factory, hashed_cursor_factory }
-        }
-    }
-
-    impl<T: TrieCursorFactory, H> TrieCursorFactory for CombinedProvider<T, H> {
-        type AccountTrieCursor<'a>
-            = T::AccountTrieCursor<'a>
-        where
-            Self: 'a;
-        type StorageTrieCursor<'a>
-            = T::StorageTrieCursor<'a>
-        where
-            Self: 'a;
-
-        fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-            self.trie_cursor_factory.account_trie_cursor()
-        }
-
-        fn storage_trie_cursor(
-            &self,
-            hashed_address: B256,
-        ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-            self.trie_cursor_factory.storage_trie_cursor(hashed_address)
-        }
-    }
-
-    impl<T, H: HashedCursorFactory> HashedCursorFactory for CombinedProvider<T, H> {
-        type AccountCursor<'a>
-            = H::AccountCursor<'a>
-        where
-            Self: 'a;
-        type StorageCursor<'a>
-            = H::StorageCursor<'a>
-        where
-            Self: 'a;
-
-        fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-            self.hashed_cursor_factory.hashed_account_cursor()
-        }
-
-        fn hashed_storage_cursor(
-            &self,
-            hashed_address: B256,
-        ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-            self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)
-        }
-    }
 
     /// A test harness for comparing `ProofCalculator` and legacy `Proof` implementations.
     ///
@@ -661,14 +601,11 @@ mod tests {
             let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
             let hashed_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
 
-            // Create combined provider for SyncAccountValueEncoder
-            let provider = Rc::new(CombinedProvider::new(
+            // Call ProofCalculator::proof with account targets
+            let value_encoder = SyncAccountValueEncoder::new(
                 self.trie_cursor_factory.clone(),
                 self.hashed_cursor_factory.clone(),
-            ));
-
-            // Call ProofCalculator::proof with account targets
-            let value_encoder = SyncAccountValueEncoder::new(provider);
+            );
             let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
             let proof_v2_result = proof_calculator.proof(&value_encoder, [Nibbles::new()])?;
 
