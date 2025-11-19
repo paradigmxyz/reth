@@ -27,12 +27,6 @@ impl TrustedPeersResolver {
         Self { trusted_peers, interval: resolve_interval, pending: FuturesUnordered::new() }
     }
 
-    /// Update the resolution interval (useful for testing purposes)
-    #[allow(dead_code)]
-    pub fn set_interval(&mut self, interval: Interval) {
-        self.interval = interval;
-    }
-
     /// Poll the resolver.
     /// When the interval ticks, new resolution futures for each trusted peer are spawned.
     /// If a future completes successfully, it returns the resolved (`PeerId`, `NodeRecord`).
