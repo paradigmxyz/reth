@@ -29,14 +29,14 @@ pub trait DeferredValueEncoder {
 /// When calculating a leaf value in the accounts trie we create a [`DeferredValueEncoder`] to
 /// initiate any asynchronous computation of the account's storage root we want to do. Later we call
 /// [`DeferredValueEncoder::encode`] to obtain the result of that computation and RLP-encode it.
-pub trait ValueEncoder {
+pub trait LeafValueEncoder {
     /// The type of value being encoded (e.g., U256 for storage, Account for accounts).
     type Value;
 
     /// The type that will compute and encode the value when needed.
     type DeferredEncoder: DeferredValueEncoder;
 
-    /// Returns a future-like value that will RLP-encode the value when called.
+    /// Returns an encoder that will RLP-encode the value when its `encode` method is called.
     ///
     /// # Arguments
     ///
@@ -65,7 +65,7 @@ impl DeferredValueEncoder for StorageDeferredValueEncoder {
     }
 }
 
-impl ValueEncoder for StorageValueEncoder {
+impl LeafValueEncoder for StorageValueEncoder {
     type Value = U256;
     type DeferredEncoder = StorageDeferredValueEncoder;
 
@@ -142,7 +142,7 @@ where
     }
 }
 
-impl<P> ValueEncoder for SyncAccountValueEncoder<P>
+impl<P> LeafValueEncoder for SyncAccountValueEncoder<P>
 where
     P: TrieCursorFactory + HashedCursorFactory,
 {

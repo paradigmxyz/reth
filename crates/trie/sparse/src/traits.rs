@@ -9,7 +9,7 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{Nibbles, SparseTrieNode, TrieMasks, TrieNode};
+use reth_trie_common::{Nibbles, ProofTrieNode, TrieMasks, TrieNode};
 
 use crate::provider::TrieNodeProvider;
 
@@ -74,7 +74,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
-        self.reveal_nodes(vec![SparseTrieNode { path, node, masks }])
+        self.reveal_nodes(vec![ProofTrieNode { path, node, masks }])
     }
 
     /// Reveals one or more trie nodes if they have not been revealed before.
@@ -91,7 +91,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if any of the nodes was not revealed.
-    fn reveal_nodes(&mut self, nodes: Vec<SparseTrieNode>) -> SparseTrieResult<()>;
+    fn reveal_nodes(&mut self, nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()>;
 
     /// Updates the value of a leaf node at the specified path.
     ///
