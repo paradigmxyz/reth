@@ -8584,6 +8584,7 @@ dependencies = [
  "derive_more",
  "futures-util",
  "metrics",
+ "rayon",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-execution-errors",
