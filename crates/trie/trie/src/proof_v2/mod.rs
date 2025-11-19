@@ -31,7 +31,6 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// The calculator:
 /// - Accepts one or more B256 proof targets sorted lexicographically
 /// - Returns proof nodes sorted lexicographically by path
-/// - Returns only the root when given zero targets
 /// - Automatically resets after each calculation
 /// - Re-uses cursors from one calculation to the next
 #[derive(Debug)]
@@ -53,8 +52,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     ///
     /// The children for the bottom branch in `branch_stack` are found at the bottom of this stack,
     /// and so on. When a branch is removed from `branch_stack` its children are removed from this
-    /// one, and the branch's [`RlpNode`] is pushed onto this stack in their place (see
-    /// [`Self::pop_branch`].
+    /// one, and the branch is pushed onto this stack in their place (see [`Self::pop_branch`].
     child_stack: Vec<ProofTrieBranchChild<VE::DeferredEncoder>>,
     /// Free-list of re-usable buffers of [`RlpNode`]s, used for encoding branch nodes to RLP.
     ///
