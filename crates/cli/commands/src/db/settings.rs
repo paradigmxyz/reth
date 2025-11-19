@@ -96,7 +96,9 @@ where
 
         // Read existing settings
         let provider_rw = provider_factory.database_provider_rw()?;
-        let mut settings = provider_rw.storage_settings()?.unwrap_or_default();
+        // Destruct settings struct to not miss adding support for new fields
+        let mut settings @ StorageSettings { receipts_in_static_files: _ } =
+            provider_rw.storage_settings()?.unwrap_or_default();
 
         // Update the setting based on the key
         match cmd {
