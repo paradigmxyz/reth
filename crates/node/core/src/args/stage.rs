@@ -38,6 +38,11 @@ pub enum StageEnum {
     ///
     /// Handles Merkle tree-related computations and data processing.
     Merkle,
+    /// The merkle changesets stage within the pipeline.
+    ///
+    /// Handles Merkle trie changesets for storage and accounts.
+    #[value(name = "merkle-changesets")]
+    MerkleChangeSets,
     /// The transaction lookup stage within the pipeline.
     ///
     /// Deals with the retrieval and processing of transactions.

@@ -120,6 +120,11 @@
             rustNightly.rustfmt
             pkgs.cargo-nextest
           ];
+
+          # Remove the hardening added by nix to fix jmalloc compilation error.
+          # More info: https://github.com/tikv/jemallocator/issues/108
+          hardeningDisable = [ "fortify" ];
+
         } overrides);
       }
     );

@@ -129,7 +129,11 @@ mod tests {
 
         // Test for a scenario where there are no minimum blocks and Full can be used
         assert_eq!(
-            PruneMode::Full.prune_target_block(tip, PruneSegment::Transactions, PrunePurpose::User),
+            PruneMode::Full.prune_target_block(
+                tip,
+                PruneSegment::TransactionLookup,
+                PrunePurpose::User
+            ),
             Ok(Some((tip, PruneMode::Full))),
         );
     }

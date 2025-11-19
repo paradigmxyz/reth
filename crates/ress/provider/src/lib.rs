@@ -11,9 +11,7 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Bytes, B256};
 use parking_lot::Mutex;
-use reth_chain_state::{
-    ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates, MemoryOverlayStateProvider,
-};
+use reth_chain_state::{ExecutedBlock, MemoryOverlayStateProvider};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -125,10 +123,8 @@ where
                             self.pending_state.invalid_recovered_block(&ancestor_hash)
                     {
                         trace!(target: "reth::ress_provider", %block_hash, %ancestor_hash, "Using invalid ancestor block for witness construction");
-                        executed = Some(ExecutedBlockWithTrieUpdates {
-                            block: ExecutedBlock { recovered_block: invalid, ..Default::default() },
-                            trie: ExecutedTrieUpdates::empty(),
-                        });
+                        executed =
+                            Some(ExecutedBlock { recovered_block: invalid, ..Default::default() });
                     }
 
                     let Some(executed) = executed else {
@@ -162,14 +158,8 @@ where
         let witness_state_provider = self.provider.state_by_block_hash(ancestor_hash)?;
         let mut trie_input = TrieInput::default();
         for block in executed_ancestors.into_iter().rev() {
-            if let Some(trie_updates) = block.trie.as_ref() {
-                trie_input.append_cached_ref(trie_updates, &block.hashed_state);
-            } else {
-                trace!(target: "reth::ress_provider", ancestor = ?block.recovered_block().num_hash(), "Missing trie updates for ancestor block");
-                return Err(ProviderError::TrieWitnessError(
-                    "missing trie updates for ancestor".to_owned(),
-                ));
-            }
+            let trie_updates = block.trie_updates.as_ref();
+            trie_input.append_cached_ref(trie_updates, &block.hashed_state);
         }
         let mut hashed_state = db.into_state();
         hashed_state.extend(record.hashed_state);

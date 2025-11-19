@@ -3,10 +3,11 @@ use crate::{
     persistence::PersistenceAction,
     tree::{
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
+        persistence_state::CurrentPersistenceAction,
         TreeConfig,
     },
 };
-use alloy_consensus::Header;
+
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -26,7 +27,7 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
-use reth_trie::HashedPostState;
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -148,7 +149,7 @@ struct TestHarness {
     >,
     to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
-    blocks: Vec<ExecutedBlockWithTrieUpdates>,
+    blocks: Vec<ExecutedBlock>,
     action_rx: Receiver<PersistenceAction>,
     block_builder: TestBlockBuilder,
     provider: MockEthProvider,
@@ -228,7 +229,7 @@ impl TestHarness {
         }
     }
 
-    fn with_blocks(mut self, blocks: Vec<ExecutedBlockWithTrieUpdates>) -> Self {
+    fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
         let mut blocks_by_hash = HashMap::default();
         let mut blocks_by_number = BTreeMap::new();
         let mut state_by_hash = HashMap::default();
@@ -253,7 +254,6 @@ impl TestHarness {
             blocks_by_number,
             current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
             parent_to_child,
-            persisted_trie_updates: HashMap::default(),
             engine_kind: EngineApiKind::Ethereum,
         };
 
@@ -336,15 +336,12 @@ impl TestHarness {
 
     fn persist_blocks(&self, blocks: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>) {
         let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
-        let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
 
         for block in &blocks {
             block_data.push((block.hash(), block.clone_block()));
-            headers_data.push((block.hash(), block.header().clone()));
         }
 
         self.provider.extend_blocks(block_data);
-        self.provider.extend_headers(headers_data);
     }
 }
 
@@ -403,9 +400,8 @@ impl ValidatorTestHarness {
         Self { harness, validator, metrics: TestMetrics::default() }
     }
 
-    /// Configure `PersistenceState` for specific `PersistingKind` scenarios
+    /// Configure `PersistenceState` for specific persistence scenarios
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
-        use crate::tree::persistence_state::CurrentPersistenceAction;
         use tokio::sync::oneshot;
 
         // Create a dummy receiver for testing - it will never receive a value
@@ -433,7 +429,6 @@ impl ValidatorTestHarness {
     ) -> ValidationOutcome<EthPrimitives> {
         let ctx = TreeCtx::new(
             &mut self.harness.tree.state,
-            &self.harness.tree.persistence_state,
             &self.harness.tree.canonical_in_memory_state,
         );
         let result = self.validator.validate_block(block, ctx);
@@ -828,25 +823,21 @@ fn test_tree_state_on_new_head_deep_fork() {
     let chain_b = test_block_builder.create_fork(&last_block, 10);
 
     for block in &chain_a {
-        test_harness.tree.state.tree_state.insert_executed(ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(block.clone()),
-                execution_output: Arc::new(ExecutionOutcome::default()),
-                hashed_state: Arc::new(HashedPostState::default()),
-            },
-            trie: ExecutedTrieUpdates::empty(),
+        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
+            recovered_block: Arc::new(block.clone()),
+            execution_output: Arc::new(ExecutionOutcome::default()),
+            hashed_state: Arc::new(HashedPostState::default()),
+            trie_updates: Arc::new(TrieUpdates::default()),
         });
     }
     test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
 
     for block in &chain_b {
-        test_harness.tree.state.tree_state.insert_executed(ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(block.clone()),
-                execution_output: Arc::new(ExecutionOutcome::default()),
-                hashed_state: Arc::new(HashedPostState::default()),
-            },
-            trie: ExecutedTrieUpdates::empty(),
+        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
+            recovered_block: Arc::new(block.clone()),
+            execution_output: Arc::new(ExecutionOutcome::default()),
+            hashed_state: Arc::new(HashedPostState::default()),
+            trie_updates: Arc::new(TrieUpdates::default()),
         });
     }
 
@@ -1396,13 +1387,8 @@ fn test_validate_block_synchronous_strategy_during_persistence() {
     let genesis_hash = MAINNET.genesis_hash();
     let valid_block = block_factory.create_valid_block(genesis_hash);
 
-    // Call validate_block_with_state directly
-    // This should execute the Synchronous strategy logic during active persistence
-    let result = test_harness.validate_block_direct(valid_block);
-
-    // Verify validation was attempted (may fail due to test environment limitations)
-    // The key test is that the Synchronous strategy path is executed during persistence
-    assert!(result.is_ok() || result.is_err(), "Validation should complete")
+    // Test that Synchronous strategy executes during active persistence without panicking
+    let _result = test_harness.validate_block_direct(valid_block);
 }
 
 /// Test multiple validation scenarios including valid, consensus-invalid, and execution-invalid
@@ -1416,15 +1402,9 @@ fn test_validate_block_multiple_scenarios() {
     let mut block_factory = TestBlockFactory::new(MAINNET.as_ref().clone());
     let genesis_hash = MAINNET.genesis_hash();
 
-    // Scenario 1: Valid block validation (may fail due to test environment limitations)
+    // Scenario 1: Valid block validation (test execution, not result)
     let valid_block = block_factory.create_valid_block(genesis_hash);
-    let result1 = test_harness.validate_block_direct(valid_block);
-    // Note: Valid blocks might fail in test environment due to missing provider data,
-    // but the important thing is that the validation logic executes without panicking
-    assert!(
-        result1.is_ok() || result1.is_err(),
-        "Valid block validation should complete (may fail due to test environment)"
-    );
+    let _result1 = test_harness.validate_block_direct(valid_block);
 
     // Scenario 2: Block with consensus issues should be rejected
     let consensus_invalid = block_factory.create_invalid_consensus_block(genesis_hash);
@@ -1711,7 +1691,6 @@ mod payload_execution_tests {
 #[cfg(test)]
 mod forkchoice_updated_tests {
     use super::*;
-    use alloy_primitives::Address;
 
     /// Test that validates the forkchoice state pre-validation logic
     #[tokio::test]
@@ -1929,33 +1908,6 @@ mod forkchoice_updated_tests {
             .unwrap();
         let fcu_result = result.outcome.await.unwrap();
         assert!(fcu_result.payload_status.is_syncing(), "Should return syncing during backfill");
-    }
-
-    /// Test metrics recording in forkchoice updated
-    #[tokio::test]
-    async fn test_record_forkchoice_metrics() {
-        let chain_spec = MAINNET.clone();
-        let test_harness = TestHarness::new(chain_spec);
-
-        // Get initial metrics state by checking if metrics are recorded
-        // We can't directly get counter values, but we can verify the methods are called
-
-        // Test without attributes
-        let attrs_none = None;
-        test_harness.tree.record_forkchoice_metrics(&attrs_none);
-
-        // Test with attributes
-        let attrs_some = Some(alloy_rpc_types_engine::PayloadAttributes {
-            timestamp: 1000,
-            prev_randao: B256::random(),
-            suggested_fee_recipient: Address::random(),
-            withdrawals: None,
-            parent_beacon_block_root: None,
-        });
-        test_harness.tree.record_forkchoice_metrics(&attrs_some);
-
-        // We can't directly verify counter values since they're private metrics
-        // But we can verify the methods don't panic and execute successfully
     }
 
     /// Test edge case: FCU with invalid ancestor

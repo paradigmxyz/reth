@@ -82,7 +82,7 @@ async fn txpool_listener_queued_event() {
     assert_matches!(events.next().await, Some(TransactionEvent::Queued));
 
     // The listener of all should receive queued event as well.
-    assert_matches!(all_tx_events.next().await, Some(FullTransactionEvent::Queued(hash)) if hash == *transaction.get_hash());
+    assert_matches!(all_tx_events.next().await, Some(FullTransactionEvent::Queued(hash,_ )) if hash == *transaction.get_hash());
 }
 
 #[tokio::test(flavor = "multi_thread")]

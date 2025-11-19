@@ -256,7 +256,7 @@ mod tests {
     use reth_ethereum_primitives::{Block, BlockBody, Transaction};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{
-        crypto::secp256k1::public_key_to_address, Block as _, FullNodePrimitives,
+        crypto::secp256k1::public_key_to_address, Block as _, NodePrimitives,
     };
     use reth_provider::{
         providers::{BlockchainProvider, ProviderNodeTypes},
@@ -395,7 +395,7 @@ mod tests {
     ) -> Result<()>
     where
         N: ProviderNodeTypes<
-            Primitives: FullNodePrimitives<
+            Primitives: NodePrimitives<
                 Block = reth_ethereum_primitives::Block,
                 BlockBody = reth_ethereum_primitives::BlockBody,
                 Receipt = reth_ethereum_primitives::Receipt,

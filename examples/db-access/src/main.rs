@@ -1,6 +1,6 @@
 #![warn(unused_crate_dependencies)]
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{keccak256, Address, B256};
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     node::EthereumNode,
@@ -66,11 +66,6 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
         provider.header(sealed_header.hash())?.ok_or(eyre::eyre!("header by hash not found"))?;
     assert_eq!(sealed_header.header(), &header_by_hash);
 
-    // The header's total difficulty is stored in a separate table, so we have a separate call for
-    // it. This is not needed for post PoS transition chains.
-    let td = provider.header_td_by_number(number)?.ok_or(eyre::eyre!("header td not found"))?;
-    assert!(!td.is_zero());
-
     // Can query headers by range as well, already sealed!
     let headers = provider.sealed_headers_range(100..200)?;
     assert_eq!(headers.len(), 100);
@@ -102,9 +97,6 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
     // Can reverse lookup the key too
     let id = provider.transaction_id(*tx.tx_hash())?.ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(id, txid);
-
-    // Can find the block of a transaction given its key
-    let _block = provider.transaction_block(txid)?;
 
     // Can query the txs in the range [100, 200)
     let _txs_by_tx_range = provider.transactions_by_tx_range(100..200)?;
@@ -186,15 +178,21 @@ fn receipts_provider_example<
     let header = provider.header_by_number(header_num)?.unwrap();
     let bloom = header.logs_bloom();
 
-    // 2. Construct the address/topics filters
-    // For a hypothetical address, we'll want to filter down for a specific indexed topic (e.g.
-    // `from`).
-    let addr = Address::random();
-    let topic = B256::random();
+    // 2. Construct the address/topics filters. topic0 always refers to the event signature, so
+    // filter it with event_signature() (or use the .event() helper). The remaining helpers map to
+    // the indexed parameters in declaration order (topic1 -> first indexed param, etc).
+    let contract_addr = Address::random();
+    let indexed_from = Address::random();
+    let indexed_to = Address::random();
+    let transfer_signature = keccak256("Transfer(address,address,uint256)");
 
-    // TODO: Make it clearer how to choose between event_signature(topic0) (event name) and the
-    // other 3 indexed topics. This API is a bit clunky and not obvious to use at the moment.
-    let filter = Filter::new().address(addr).event_signature(topic);
+    // This matches ERC-20 Transfer events emitted by contract_addr where both indexed addresses are
+    // fixed. If your event declares a third indexed parameter, continue with topic3(...).
+    let filter = Filter::new()
+        .address(contract_addr)
+        .event_signature(transfer_signature)
+        .topic1(indexed_from)
+        .topic2(indexed_to);
 
     // 3. If the address & topics filters match do something. We use the outer check against the
     // bloom filter stored in the header to avoid having to query the receipts table when there

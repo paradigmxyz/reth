@@ -8,14 +8,14 @@ use reth_revm::{database::StateProviderDatabase, DatabaseRef};
 use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::{
-    database::{BundleState, CacheDB},
+    database::{BundleState, State},
     primitives::HashMap,
     state::{AccountInfo, Bytecode},
     Database, DatabaseCommit,
 };
 
-/// Helper alias type for the state's [`CacheDB`]
-pub type StateCacheDb<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'a>>>;
+/// Helper alias type for the state's [`State`]
+pub type StateCacheDb<'a> = State<StateProviderDatabase<StateProviderTraitObjWrapper<'a>>>;
 
 /// Hack to get around 'higher-ranked lifetime error', see
 /// <https://github.com/rust-lang/rust/issues/100013>

@@ -1,7 +1,7 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
@@ -140,9 +140,12 @@ where
 
     fn on_save_blocks(
         &self,
-        blocks: Vec<ExecutedBlockWithTrieUpdates<N::Primitives>>,
+        blocks: Vec<ExecutedBlock<N::Primitives>>,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
-        debug!(target: "engine::persistence", first=?blocks.first().map(|b| b.recovered_block.num_hash()), last=?blocks.last().map(|b| b.recovered_block.num_hash()), "Saving range of blocks");
+        let first_block_hash = blocks.first().map(|b| b.recovered_block.num_hash());
+        let last_block_hash = blocks.last().map(|b| b.recovered_block.num_hash());
+        debug!(target: "engine::persistence", first=?first_block_hash, last=?last_block_hash, "Saving range of blocks");
+
         let start_time = Instant::now();
         let last_block_hash_num = blocks.last().map(|block| BlockNumHash {
             hash: block.recovered_block().hash(),
@@ -155,6 +158,9 @@ where
             provider_rw.save_blocks(blocks)?;
             provider_rw.commit()?;
         }
+
+        debug!(target: "engine::persistence", first=?first_block_hash, last=?last_block_hash, "Saved range of blocks");
+
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
         Ok(last_block_hash_num)
     }
@@ -180,7 +186,7 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlockWithTrieUpdates<N>>, oneshot::Sender<Option<BlockNumHash>>),
+    SaveBlocks(Vec<ExecutedBlock<N>>, oneshot::Sender<Option<BlockNumHash>>),
 
     /// Removes block data above the given block number from the database.
     ///
@@ -257,7 +263,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// If there are no blocks to persist, then `None` is sent in the sender.
     pub fn save_blocks(
         &self,
-        blocks: Vec<ExecutedBlockWithTrieUpdates<T>>,
+        blocks: Vec<ExecutedBlock<T>>,
         tx: oneshot::Sender<Option<BlockNumHash>>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveBlocks(blocks, tx))

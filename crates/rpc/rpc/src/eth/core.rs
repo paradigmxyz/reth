@@ -30,8 +30,8 @@ use reth_tasks::{
     TaskSpawner, TokioTaskExecutor,
 };
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, AddedTransactionOutcome, BatchTxProcessor, BatchTxRequest,
-    TransactionPool,
+    blobstore::BlobSidecarConverter, noop::NoopTransactionPool, AddedTransactionOutcome,
+    BatchTxProcessor, BatchTxRequest, TransactionPool,
 };
 use tokio::sync::{broadcast, mpsc, Mutex};
 
@@ -155,6 +155,7 @@ where
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: ForwardConfig,
         send_raw_transaction_sync_timeout: Duration,
+        evm_memory_limit: u64,
     ) -> Self {
         let inner = EthApiInner::new(
             components,
@@ -173,6 +174,7 @@ where
             pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
             send_raw_transaction_sync_timeout,
+            evm_memory_limit,
         );
 
         Self { inner: Arc::new(inner) }
@@ -315,6 +317,12 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Timeout duration for `send_raw_transaction_sync` RPC method.
     send_raw_transaction_sync_timeout: Duration,
+
+    /// Blob sidecar converter
+    blob_sidecar_converter: BlobSidecarConverter,
+
+    /// Maximum memory the EVM can allocate per RPC request.
+    evm_memory_limit: u64,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -341,6 +349,7 @@ where
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: Option<RpcClient>,
         send_raw_transaction_sync_timeout: Duration,
+        evm_memory_limit: u64,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -382,6 +391,8 @@ where
             tx_batch_sender,
             pending_block_kind,
             send_raw_transaction_sync_timeout,
+            blob_sidecar_converter: BlobSidecarConverter::new(),
+            evm_memory_limit,
         }
     }
 }
@@ -553,6 +564,18 @@ where
     pub const fn send_raw_transaction_sync_timeout(&self) -> Duration {
         self.send_raw_transaction_sync_timeout
     }
+
+    /// Returns a handle to the blob sidecar converter.
+    #[inline]
+    pub const fn blob_sidecar_converter(&self) -> &BlobSidecarConverter {
+        &self.blob_sidecar_converter
+    }
+
+    /// Returns the EVM memory limit.
+    #[inline]
+    pub const fn evm_memory_limit(&self) -> u64 {
+        self.evm_memory_limit
+    }
 }
 
 #[cfg(test)]
@@ -701,7 +724,7 @@ mod tests {
     /// Invalid block range
     #[tokio::test]
     async fn test_fee_history_empty() {
-        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::fee_history(
             &build_test_eth_api(NoopProvider::default()),
             U64::from(1),
             BlockNumberOrTag::Latest,
@@ -723,7 +746,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(newest_block + 1),
             newest_block.into(),
@@ -746,7 +769,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(1),
             (newest_block + 1000).into(),
@@ -769,7 +792,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(0),
             newest_block.into(),

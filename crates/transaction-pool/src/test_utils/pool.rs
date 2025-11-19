@@ -188,7 +188,7 @@ pub(crate) enum Scenario {
     HigherNonce { onchain: u64, nonce: u64 },
     Multi {
         // Execute multiple test scenarios
-        scenario: Vec<Scenario>,
+        scenario: Vec<Self>,
     },
 }
 

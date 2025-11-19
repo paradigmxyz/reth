@@ -359,7 +359,7 @@ pub trait LoadPendingBlock:
             }
         }
 
-        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
+        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates } =
             builder.finish(NoopProvider::default()).map_err(Self::Error::from_eth_err)?;
 
         let execution_outcome = ExecutionOutcome::new(
@@ -373,6 +373,7 @@ pub trait LoadPendingBlock:
             recovered_block: block.into(),
             execution_output: Arc::new(execution_outcome),
             hashed_state: Arc::new(hashed_state),
+            trie_updates: Arc::new(trie_updates),
         })
     }
 }
@@ -415,8 +416,28 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
-            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
+            parent_beacon_block_root: parent.parent_beacon_block_root(),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::B256;
+    use reth_primitives_traits::SealedHeader;
+
+    #[test]
+    fn pending_env_keeps_parent_beacon_root() {
+        let mut header = Header::default();
+        let beacon_root = B256::repeat_byte(0x42);
+        header.parent_beacon_block_root = Some(beacon_root);
+        let sealed = SealedHeader::new(header, B256::ZERO);
+
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
+
+        assert_eq!(attrs.parent_beacon_block_root, Some(beacon_root));
     }
 }

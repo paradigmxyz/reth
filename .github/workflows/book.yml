@@ -20,6 +20,8 @@ jobs:
 
       - name: Install bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: v1.2.23
 
       - name: Install Playwright browsers
         # Required for rehype-mermaid to render Mermaid diagrams during build

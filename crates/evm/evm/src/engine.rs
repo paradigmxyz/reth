@@ -23,14 +23,14 @@ pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
     Iterator<Item = Result<Self::Tx, Self::Error>> + Send + 'static
 {
     /// The executable transaction type iterator yields.
-    type Tx: ExecutableTxFor<Evm> + Clone + Send + 'static;
+    type Tx: ExecutableTxFor<Evm> + Clone + Send + Sync + 'static;
     /// Errors that may occur while recovering or decoding transactions.
     type Error: core::error::Error + Send + Sync + 'static;
 }
 
 impl<Evm: ConfigureEvm, Tx, Err, T> ExecutableTxIterator<Evm> for T
 where
-    Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+    Tx: ExecutableTxFor<Evm> + Clone + Send + Sync + 'static,
     Err: core::error::Error + Send + Sync + 'static,
     T: Iterator<Item = Result<Tx, Err>> + Send + 'static,
 {

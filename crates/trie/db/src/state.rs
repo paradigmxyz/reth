@@ -20,7 +20,7 @@ use std::{
     collections::HashMap,
     ops::{RangeBounds, RangeInclusive},
 };
-use tracing::debug;
+use tracing::{debug, instrument};
 
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
 pub trait DatabaseStateRoot<'a, TX>: Sized {
@@ -226,6 +226,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
 }
 
 impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
+    #[instrument(target = "trie::db", skip(tx), fields(range))]
     fn from_reverts<KH: KeyHasher>(
         tx: &TX,
         range: impl RangeBounds<BlockNumber>,

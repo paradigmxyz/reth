@@ -31,6 +31,11 @@ where
     fn max_simulate_blocks(&self) -> u64 {
         self.inner.max_simulate_blocks()
     }
+
+    #[inline]
+    fn evm_memory_limit(&self) -> u64 {
+        self.inner.evm_memory_limit()
+    }
 }
 
 impl<N, Rpc> EstimateCall for EthApi<N, Rpc>

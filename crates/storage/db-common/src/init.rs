@@ -9,13 +9,15 @@ use reth_config::config::EtlConfig;
 use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_execution_errors::StateRootError;
-use reth_primitives_traits::{Account, Bytecode, GotExpected, NodePrimitives, StorageEntry};
+use reth_primitives_traits::{
+    Account, Bytecode, GotExpected, NodePrimitives, SealedHeader, StorageEntry,
+};
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
-    HashingWriter, HeaderProvider, HistoryWriter, OriginalValuesKnown, ProviderError, RevertsInit,
-    StageCheckpointReader, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
-    TrieWriter,
+    HashingWriter, HeaderProvider, HistoryWriter, MetadataWriter, OriginalValuesKnown,
+    ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriter,
+    StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -88,7 +90,8 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
         + ChainSpecProvider
         + StageCheckpointReader
-        + BlockHashReader,
+        + BlockHashReader
+        + StorageSettingsCache,
     PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
         + HistoryWriter
@@ -96,6 +99,33 @@ where
         + HashingWriter
         + StateWriter
         + TrieWriter
+        + MetadataWriter
+        + AsRef<PF::ProviderRW>,
+    PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
+{
+    init_genesis_with_settings(factory, StorageSettings::legacy())
+}
+
+/// Write the genesis block if it has not already been written with [`StorageSettings`].
+pub fn init_genesis_with_settings<PF>(
+    factory: &PF,
+    storage_settings: StorageSettings,
+) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + ChainSpecProvider
+        + StageCheckpointReader
+        + BlockHashReader
+        + StorageSettingsCache,
+    PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
+        + StageCheckpointWriter
+        + HistoryWriter
+        + HeaderProvider
+        + HashingWriter
+        + StateWriter
+        + TrieWriter
+        + MetadataWriter
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -159,9 +189,13 @@ where
     static_file_provider.latest_writer(StaticFileSegment::Receipts)?.increment_block(0)?;
     static_file_provider.latest_writer(StaticFileSegment::Transactions)?.increment_block(0)?;
 
+    // Behaviour reserved only for new nodes should be set here.
+    provider_rw.write_storage_settings(storage_settings)?;
+
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
     provider_rw.commit()?;
+    factory.set_storage_settings_cache(storage_settings);
 
     Ok(hash)
 }
@@ -345,9 +379,8 @@ where
 
     match static_file_provider.block_hash(0) {
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
-            let (difficulty, hash) = (header.difficulty(), block_hash);
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-            writer.append_header(header, difficulty, &hash)?;
+            writer.append_header(header, &block_hash)?;
         }
         Ok(Some(_)) => {}
         Err(e) => return Err(e),
@@ -389,13 +422,16 @@ where
     }
 
     let block = provider_rw.last_block_number()?;
+
     let hash = provider_rw
         .block_hash(block)?
         .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
-    let expected_state_root = provider_rw
+    let header = provider_rw
         .header_by_number(block)?
-        .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?
-        .state_root();
+        .map(SealedHeader::seal_slow)
+        .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?;
+
+    let expected_state_root = header.state_root();
 
     // first line can be state root
     let dump_state_root = parse_state_root(&mut reader)?;
@@ -403,6 +439,7 @@ where
         error!(target: "reth::cli",
             ?dump_state_root,
             ?expected_state_root,
+            header=?header.num_hash(),
             "State root from state dump does not match state root in current header."
         );
         return Err(InitStorageError::StateRootMismatch(GotExpected {
@@ -477,7 +514,8 @@ fn parse_accounts(
     let mut line = String::new();
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir);
 
-    while let Ok(n) = reader.read_line(&mut line) {
+    loop {
+        let n = reader.read_line(&mut line)?;
         if n == 0 {
             break
         }
@@ -602,7 +640,7 @@ where
 
         match state_root.root_with_progress()? {
             StateRootProgress::Progress(state, _, updates) => {
-                let updated_len = provider.write_trie_updates(&updates)?;
+                let updated_len = provider.write_trie_updates(updates)?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
@@ -622,7 +660,7 @@ where
                 }
             }
             StateRootProgress::Complete(root, _, updates) => {
-                let updated_len = provider.write_trie_updates(&updates)?;
+                let updated_len = provider.write_trie_updates(updates)?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
@@ -721,11 +759,14 @@ mod tests {
         init_genesis(&factory).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(&ProviderFactory::<MockNodeTypesWithDB>::new(
-            factory.into_db(),
-            MAINNET.clone(),
-            static_file_provider,
-        ));
+        let genesis_hash = init_genesis(
+            &ProviderFactory::<MockNodeTypesWithDB>::new(
+                factory.into_db(),
+                MAINNET.clone(),
+                static_file_provider,
+            )
+            .unwrap(),
+        );
 
         assert!(matches!(
             genesis_hash.unwrap_err(),
