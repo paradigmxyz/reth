@@ -81,11 +81,7 @@ impl TrieUpdates {
     /// [`StorageTrieUpdates::extend_from_sorted`].
     pub fn extend_from_sorted(&mut self, sorted: &TrieUpdatesSorted) {
         // Reserve capacity for account nodes
-        let new_nodes_count = sorted
-            .account_nodes
-            .iter()
-            .filter(|(nibbles, node)| !nibbles.is_empty() && node.is_some())
-            .count();
+        let new_nodes_count = sorted.account_nodes.len();
         self.account_nodes.reserve(new_nodes_count);
 
         // Insert account nodes from sorted (only non-None entries)
@@ -298,11 +294,7 @@ impl StorageTrieUpdates {
         self.is_deleted |= sorted.is_deleted;
 
         // Reserve capacity for storage nodes
-        let new_nodes_count = sorted
-            .storage_nodes
-            .iter()
-            .filter(|(nibbles, node)| !nibbles.is_empty() && node.is_some())
-            .count();
+        let new_nodes_count = sorted.storage_nodes.len();
         self.storage_nodes.reserve(new_nodes_count);
 
         // Remove nodes marked as removed and insert new nodes
