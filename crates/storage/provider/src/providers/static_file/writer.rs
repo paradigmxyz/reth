@@ -321,8 +321,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             .as_ref()
             .map(|block_range| block_range.end())
             .or_else(|| {
-                (self.writer.user_header().expected_block_start() > self.reader().get_genesis_block_number())
-                    .then(|| self.writer.user_header().expected_block_start() - 1)
+                (self.writer.user_header().expected_block_start() >
+                    self.reader().get_genesis_block_number())
+                .then(|| self.writer.user_header().expected_block_start() - 1)
             });
 
         self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
@@ -575,7 +576,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
-    /// Appends header to static file without calling increment_block.
+    /// Appends header to static file without calling `increment_block`.
     /// This is useful for genesis blocks with non-zero block numbers.
     pub fn append_header_direct(
         &mut self,

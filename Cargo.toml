@@ -177,7 +177,6 @@ members = [
     "testing/ef-tests/",
     "testing/testing-utils",
     "testing/runner",
-    "tests/",
     "crates/tracing-otlp",
     "crates/xlayer/db",
     "crates/xlayer/rpc",

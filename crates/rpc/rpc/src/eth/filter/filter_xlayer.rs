@@ -1,4 +1,4 @@
-//! XLayer-specific extensions for EthFilter
+//! XLayer-specific extensions for `EthFilter`
 
 use super::super::EthFilter;
 use alloy_rpc_types_eth::{Filter, Log};
@@ -12,7 +12,7 @@ use reth_storage_api::{BlockIdReader, BlockReader};
 use std::sync::Arc;
 use tracing::info;
 
-/// XLayer: Implement LegacyRpc trait for EthFilter to enable legacy RPC routing
+/// `XLayer`: Implement `LegacyRpc` trait for `EthFilter` to enable legacy RPC routing
 impl<Eth> LegacyRpc for EthFilter<Eth>
 where
     Eth: LegacyRpc + EthApiTypes,
@@ -22,7 +22,7 @@ where
     }
 }
 
-/// XLayer: Legacy RPC routing methods
+/// `XLayer`: Legacy RPC routing methods
 impl<Eth> EthFilter<Eth>
 where
     Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader>
@@ -33,7 +33,7 @@ where
         + 'static,
 {
     /// Parse block range from filter for legacy routing logic
-    pub(super) fn parse_block_range(&self, filter: &Filter) -> RpcResult<(u64, u64)> {
+    pub(super) const fn parse_block_range(&self, filter: &Filter) -> RpcResult<(u64, u64)> {
         let from = match filter.block_option.get_from_block() {
             Some(alloy_rpc_types_eth::BlockNumberOrTag::Number(n)) => *n,
             Some(alloy_rpc_types_eth::BlockNumberOrTag::Earliest) => 0,
@@ -53,7 +53,7 @@ where
         Ok((from, to))
     }
 
-    /// Check if eth_getLogs needs legacy RPC routing and handle accordingly
+    /// Check if `eth_getLogs` needs legacy RPC routing and handle accordingly
     ///
     /// Returns:
     /// - `Some(result)` if legacy/hybrid routing is used (query complete)
@@ -79,13 +79,13 @@ where
             )
             .await
             {
-                Ok(logs) => return Some(Ok(logs)),
-                Err(e) => return Some(Err(internal_rpc_err(e))),
+                Ok(logs) => Some(Ok(logs)),
+                Err(e) => Some(Err(internal_rpc_err(e))),
             }
         } else if from_block >= cutoff_block {
             // Pure local: all blocks are at or above cutoff
             // Return None to signal local processing
-            return None;
+            None
         } else {
             // Hybrid: spans both legacy and local ranges
             let start = std::time::Instant::now();
@@ -101,12 +101,11 @@ where
 
             // Query both in parallel
             let (legacy_result, local_result): (Result<Vec<Log>, _>, Result<Vec<Log>, _>) =
-                tokio::join!(
-                    async { legacy_client.get_logs(legacy_filter).await },
-                    async { self.logs_for_filter(local_filter, self.inner.query_limits).await }
-                );
+                tokio::join!(async { legacy_client.get_logs(legacy_filter).await }, async {
+                    self.logs_for_filter(local_filter, self.inner.query_limits).await
+                });
 
-            let mut legacy_logs = match legacy_result.map_err(|e| internal_rpc_err(e)) {
+            let mut legacy_logs = match legacy_result.map_err(internal_rpc_err) {
                 Ok(logs) => logs,
                 Err(e) => return Some(Err(e)),
             };
@@ -131,7 +130,7 @@ where
             info!(target: "rpc::eth::legacy", method = "eth_getLogs", elapsed_ms = %start.elapsed().as_millis(),
                   legacy_logs = legacy_count, local_logs = local_count, total = legacy_logs.len(), "← hybrid");
 
-            return Some(Ok(legacy_logs));
+            Some(Ok(legacy_logs))
         }
     }
 }
@@ -279,8 +278,7 @@ mod tests {
 
         // Simulate legacy filter (from_block unchanged, to_block = cutoff - 1)
         let mut legacy_filter = original_filter.clone();
-        legacy_filter =
-            legacy_filter.to_block(BlockNumberOrTag::Number(cutoff_block - 1));
+        legacy_filter = legacy_filter.to_block(BlockNumberOrTag::Number(cutoff_block - 1));
 
         // Simulate local filter (from_block = cutoff, to_block unchanged)
         let mut local_filter = original_filter.clone();
@@ -369,15 +367,9 @@ mod tests {
     #[test]
     fn test_log_merge_maintains_order() {
         // Test that appending and sorting works correctly
-        let mut legacy_logs = vec![
-            create_test_log(100, 0, 0),
-            create_test_log(200, 0, 0),
-        ];
+        let mut legacy_logs = vec![create_test_log(100, 0, 0), create_test_log(200, 0, 0)];
 
-        let mut local_logs = vec![
-            create_test_log(1000, 0, 0),
-            create_test_log(1100, 0, 0),
-        ];
+        let mut local_logs = vec![create_test_log(1000, 0, 0), create_test_log(1100, 0, 0)];
 
         legacy_logs.append(&mut local_logs);
         legacy_logs.sort_by(|a, b| {

@@ -274,8 +274,11 @@ where
             txn.gas_used = outcome.result.gas.spent();
             txn.output = outcome.result.output.clone();
             txn.is_error = !outcome.result.is_ok();
-            txn.error =
-                if txn.is_error { Self::format_error(&outcome.result.result) } else { String::new() };
+            txn.error = if txn.is_error {
+                Self::format_error(&outcome.result.result)
+            } else {
+                String::new()
+            };
             if txn.is_error {
                 for within in remainder {
                     within.is_error = txn.is_error;
@@ -317,8 +320,11 @@ where
             txn.gas_used = outcome.result.gas.spent();
             txn.output = outcome.result.output.clone();
             txn.is_error = !outcome.result.is_ok();
-            txn.error =
-                if txn.is_error { Self::format_error(&outcome.result.result) } else { String::new() };
+            txn.error = if txn.is_error {
+                Self::format_error(&outcome.result.result)
+            } else {
+                String::new()
+            };
             if txn.is_error {
                 for within in remainder {
                     within.is_error = txn.is_error;

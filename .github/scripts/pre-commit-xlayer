@@ -1,0 +1,25 @@
+#!/bin/sh
+
+GIT_ROOT=$(git rev-parse --show-toplevel)
+
+# Get staged .rs files
+CHANGED_RS_FILES=$(git diff --cached --name-only -- '*.rs')
+if [ -z "$CHANGED_RS_FILES" ]; then
+    exit 0
+fi
+
+echo "Running make fmt on staged Rust files..."
+(
+    cd "$GIT_ROOT" || exit 1
+    FILES="$CHANGED_RS_FILES" make fmt
+)
+FMT_STATUS=$?
+
+if [ $FMT_STATUS -ne 0 ]; then
+    echo "make fmt failed. Commit aborted."
+    exit 1
+fi
+
+git add "$CHANGED_RS_FILES"
+echo "Finished make fmt, staged any formatted files."
+exit 0

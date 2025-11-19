@@ -7,22 +7,18 @@ use crate::{
     builder::{ExecutionInfo, OpPayloadBuilderCtx},
     intercept_bridge_transaction_if_need, OpAttributes, OpPayloadPrimitives,
 };
-use alloy_consensus::{Transaction, Typed2718, transaction::TxHashRef};
-use alloy_evm::{
-    block::CommitChanges,
-    Evm as AlloyEvm,
-};
-use alloy_primitives::{U256};
-use reth_chainspec::{EthChainSpec};
+use alloy_consensus::{transaction::TxHashRef, Transaction, Typed2718};
+use alloy_evm::{block::CommitChanges, Evm as AlloyEvm};
+use alloy_primitives::U256;
+use reth_chainspec::EthChainSpec;
 use reth_evm::{
-    execute::{
-        BlockBuilder, BlockExecutionError, BlockExecutor, BlockValidationError,
-    },
+    execute::{BlockBuilder, BlockExecutionError, BlockExecutor, BlockValidationError},
     op_revm::L1BlockInfo,
     ConfigureEvm, Database,
 };
+use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{transaction::OpTransaction};
+use reth_optimism_primitives::transaction::OpTransaction;
 use reth_optimism_txpool::{
     estimated_da_size::DataAvailabilitySized,
     interop::{is_valid_interop, MaybeInteropTransaction},
@@ -31,13 +27,10 @@ use reth_optimism_txpool::{
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::BuildNextEnv;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives_traits::{
-    HeaderTy, TxTy,
-};
+use reth_primitives_traits::{HeaderTy, TxTy};
 use reth_transaction_pool::PoolTransaction;
-use revm::context::{Block, result::ExecutionResult};
+use revm::context::{result::ExecutionResult, Block};
 use tracing::trace;
-use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
 
 impl<Evm, ChainSpec, Attrs> OpPayloadBuilderCtx<Evm, ChainSpec, Attrs>
 where
@@ -162,7 +155,11 @@ where
                 Ok(Some(gas_used)) => {
                     // X Layer: Log transaction execution end (success)
                     if let Some(tracer) = get_global_tracer() {
-                        tracer.log_transaction(tx_hash, TransactionProcessId::SeqTxExecutionEnd, Some(block_number));
+                        tracer.log_transaction(
+                            tx_hash,
+                            TransactionProcessId::SeqTxExecutionEnd,
+                            Some(block_number),
+                        );
                     }
                     gas_used
                 }
@@ -170,7 +167,11 @@ where
                     // Transaction was not committed (intercepted by bridge check)
                     // X Layer: Log transaction execution end (intercepted)
                     if let Some(tracer) = get_global_tracer() {
-                        tracer.log_transaction(tx_hash, TransactionProcessId::SeqTxExecutionEnd, Some(block_number));
+                        tracer.log_transaction(
+                            tx_hash,
+                            TransactionProcessId::SeqTxExecutionEnd,
+                            Some(block_number),
+                        );
                     }
                     trace!(target: "payload_builder", ?tx_hash, "bridge transaction intercepted, marking invalid");
                     best_txs.mark_invalid(signer, nonce);
@@ -182,7 +183,11 @@ where
                 })) => {
                     // X Layer: Log transaction execution end (failed)
                     if let Some(tracer) = get_global_tracer() {
-                        tracer.log_transaction(tx_hash, TransactionProcessId::SeqTxExecutionEnd, Some(block_number));
+                        tracer.log_transaction(
+                            tx_hash,
+                            TransactionProcessId::SeqTxExecutionEnd,
+                            Some(block_number),
+                        );
                     }
                     if error.is_nonce_too_low() {
                         // if the nonce is too low, we can skip this transaction
@@ -198,7 +203,11 @@ where
                 Err(err) => {
                     // X Layer: Log transaction execution end (fatal error)
                     if let Some(tracer) = get_global_tracer() {
-                        tracer.log_transaction(tx_hash, TransactionProcessId::SeqTxExecutionEnd, Some(block_number));
+                        tracer.log_transaction(
+                            tx_hash,
+                            TransactionProcessId::SeqTxExecutionEnd,
+                            Some(block_number),
+                        );
                     }
                     // this is an error that we should treat as fatal for this attempt
                     return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));

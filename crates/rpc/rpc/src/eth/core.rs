@@ -326,7 +326,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Maximum memory the EVM can allocate per RPC request.
     evm_memory_limit: u64,
 
-    /// XLayer: Optional legacy RPC client for routing historical data.
+    /// `XLayer`: Optional legacy RPC client for routing historical data.
     pub(crate) legacy_rpc_client: Option<Arc<reth_rpc_eth_types::LegacyRpcClient>>,
 }
 

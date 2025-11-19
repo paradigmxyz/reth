@@ -25,4 +25,3 @@ pub(crate) fn build_legacy_rpc_config(
         None
     }
 }
-

@@ -167,12 +167,16 @@ where
     // For genesis blocks with non-zero block numbers, we need to use get_writer() instead of
     // latest_writer() to ensure the genesis block is stored in the correct static file range.
     let segment = StaticFileSegment::Receipts;
-    static_file_provider.get_writer(genesis_block_number, segment)?
-        .user_header_mut().set_block_range(genesis_block_number, genesis_block_number);
+    static_file_provider
+        .get_writer(genesis_block_number, segment)?
+        .user_header_mut()
+        .set_block_range(genesis_block_number, genesis_block_number);
 
     let segment = StaticFileSegment::Transactions;
-    static_file_provider.get_writer(genesis_block_number, segment)?
-        .user_header_mut().set_block_range(genesis_block_number, genesis_block_number);
+    static_file_provider
+        .get_writer(genesis_block_number, segment)?
+        .user_header_mut()
+        .set_block_range(genesis_block_number, genesis_block_number);
 
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
@@ -371,11 +375,15 @@ where
             // For genesis blocks with non-zero block numbers, we need to ensure they are stored
             // in the correct static file range. We use get_writer() with the genesis block number
             // to ensure the genesis block is stored in the correct static file range.
-            let mut writer = static_file_provider.get_writer(genesis_block_number, StaticFileSegment::Headers)?;
+            let mut writer = static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::Headers)?;
 
-            // For non-zero genesis blocks, we need to set block range to genesis_block_number and append header without increment block
+            // For non-zero genesis blocks, we need to set block range to genesis_block_number and
+            // append header without increment block
             if genesis_block_number > 0 {
-                writer.user_header_mut().set_block_range(genesis_block_number, genesis_block_number);
+                writer
+                    .user_header_mut()
+                    .set_block_range(genesis_block_number, genesis_block_number);
                 writer.append_header_direct(header, difficulty, &hash)?;
             } else {
                 // For zero genesis blocks, use normal append_header

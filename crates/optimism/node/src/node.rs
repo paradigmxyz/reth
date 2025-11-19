@@ -57,7 +57,10 @@ use reth_optimism_txpool::{
     OpPooledTx,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions};
-use reth_rpc_api::{eth::{EthApiTypes, RpcTypes}, DebugApiServer, L2EthApiExtServer, XLayerEthApiExtServer};
+use reth_rpc_api::{
+    eth::{EthApiTypes, RpcTypes},
+    DebugApiServer, L2EthApiExtServer, XLayerEthApiExtServer,
+};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -527,7 +530,8 @@ where
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
     Attrs: OpAttributes<Transaction = TxTy<N::Types>, RpcPayloadAttributes: DeserializeOwned>,
-    <EthB::EthApi as EthApiTypes>::NetworkTypes: RpcTypes<TransactionRequest = OpTransactionRequest>,
+    <EthB::EthApi as EthApiTypes>::NetworkTypes:
+        RpcTypes<TransactionRequest = OpTransactionRequest>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -664,7 +668,8 @@ where
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
     Attrs: OpAttributes<Transaction = TxTy<N::Types>, RpcPayloadAttributes: DeserializeOwned>,
-    <EthB::EthApi as EthApiTypes>::NetworkTypes: RpcTypes<TransactionRequest = OpTransactionRequest>,
+    <EthB::EthApi as EthApiTypes>::NetworkTypes:
+        RpcTypes<TransactionRequest = OpTransactionRequest>,
 {
     type EthApi = EthB::EthApi;
 
@@ -1115,7 +1120,13 @@ impl<Txs> OpPayloadBuilder<Txs> {
     /// payload.
     pub fn with_transactions<T>(self, best_transactions: T) -> OpPayloadBuilder<T> {
         let Self { compute_pending_block, da_config, gas_limit_config, xlayer_args, .. } = self;
-        OpPayloadBuilder { compute_pending_block, best_transactions, da_config, gas_limit_config, xlayer_args }
+        OpPayloadBuilder {
+            compute_pending_block,
+            best_transactions,
+            da_config,
+            gas_limit_config,
+            xlayer_args,
+        }
     }
 }
 

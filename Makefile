@@ -525,3 +525,7 @@ check-features:
 
 build-docker:
 	docker build -t op-reth:latest -f DockerfileOp .
+
+xlayer:
+	cp .github/scripts/pre-commit-xlayer .git/hooks/pre-commit && \
+	chmod +x .git/hooks/pre-commit

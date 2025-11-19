@@ -97,8 +97,8 @@ pub mod eth;
 pub use eth::EthHandlers;
 
 // Rpc server metrics
-mod metrics;
 mod legacy_xlayer;
+mod metrics;
 use crate::middleware::RethRpcMiddleware;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
 use reth_chain_state::CanonStateSubscriptions;
@@ -333,7 +333,8 @@ where
         RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>,
     )
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + reth_rpc_eth_api::helpers::LegacyRpc,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>
+            + reth_rpc_eth_api::helpers::LegacyRpc,
     {
         let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
 
@@ -374,7 +375,8 @@ where
         eth: EthApi,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + reth_rpc_eth_api::helpers::LegacyRpc,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>
+            + reth_rpc_eth_api::helpers::LegacyRpc,
     {
         let mut modules = TransportRpcModules::default();
 

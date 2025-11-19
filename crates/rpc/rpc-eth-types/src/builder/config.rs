@@ -93,7 +93,7 @@ pub struct EthConfig {
     pub pending_block_kind: PendingBlockKind,
     /// The raw transaction forwarder.
     pub raw_tx_forwarder: ForwardConfig,
-    /// XLayer: Legacy RPC configuration for routing historical data
+    /// `XLayer`: Legacy RPC configuration for routing historical data
     pub legacy_rpc_config: Option<LegacyRpcConfig>,
     /// Timeout duration for `send_raw_transaction_sync` RPC method.
     pub send_raw_transaction_sync_timeout: Duration,

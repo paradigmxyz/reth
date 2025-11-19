@@ -5,7 +5,7 @@ use super::{
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
     ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt
+    TransactionsProviderExt,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -309,7 +309,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     }
 
     /// Get genesis block number
-    pub fn get_genesis_block_number(&self) -> u64 {
+    pub const fn get_genesis_block_number(&self) -> u64 {
         self.genesis_block_number
     }
 }
@@ -1437,7 +1437,10 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
         let genesis_number = self.0.as_ref().get_genesis_block_number();
-        self.get_writer(self.get_highest_static_file_block(segment).unwrap_or(genesis_number), segment)
+        self.get_writer(
+            self.get_highest_static_file_block(segment).unwrap_or(genesis_number),
+            segment,
+        )
     }
 
     fn commit(&self) -> ProviderResult<()> {

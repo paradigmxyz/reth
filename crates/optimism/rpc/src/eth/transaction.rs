@@ -43,7 +43,9 @@ where
     ///
     /// Returns the hash of the transaction.
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
-        use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
+        use reth_node_metrics::transaction_trace_xlayer::{
+            get_global_tracer, TransactionProcessId,
+        };
 
         let recovered = recover_raw_transaction(&tx)?;
 
@@ -57,12 +59,12 @@ where
         // blocks that it builds (RPC node forwarding to sequencer).
         if let Some(client) = self.raw_tx_forwarder().as_ref() {
             tracing::debug!(target: "rpc::eth", hash = %tx_hash, "forwarding raw transaction to sequencer");
-            
+
             // X Layer: Log RPC receive end
             if let Some(tracer) = get_global_tracer() {
                 tracer.log_transaction(tx_hash, TransactionProcessId::RpcReceiveTxEnd, None);
             }
-            
+
             let hash = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
                     tracing::debug!(target: "rpc::eth", %err, hash=%tx_hash, "failed to forward raw transaction");
                 })?;

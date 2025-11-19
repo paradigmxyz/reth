@@ -1,7 +1,7 @@
 //! Optimism payload builder implementation.
 use crate::{
-    config::OpBuilderConfig, error::OpPayloadBuilderError, payload::OpBuiltPayload, OpAttributes,
-    OpPayloadBuilderAttributes, OpPayloadPrimitives,intercept_xlayer::BridgeInterceptConfig,
+    config::OpBuilderConfig, error::OpPayloadBuilderError, intercept_xlayer::BridgeInterceptConfig,
+    payload::OpBuiltPayload, OpAttributes, OpPayloadBuilderAttributes, OpPayloadPrimitives,
 };
 use alloy_consensus::{BlockHeader, Transaction, Typed2718};
 use alloy_evm::Evm as AlloyEvm;
@@ -20,6 +20,7 @@ use reth_evm::{
     ConfigureEvm, Database,
 };
 use reth_execution_types::ExecutionOutcome;
+use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{transaction::OpTransaction, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
 use reth_optimism_txpool::{
@@ -42,7 +43,8 @@ use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, Transac
 use revm::context::{Block, BlockEnv};
 use std::{marker::PhantomData, sync::Arc};
 use tracing::{debug, trace, warn};
-use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
+use reth_node_metrics::block_timing::{BlockTimingMetrics, BuildTiming, DeliverTxsTiming, store_block_timing};
+use std::time::Instant;
 
 /// Optimism's payload builder
 #[derive(Debug)]
@@ -361,6 +363,10 @@ impl<Txs> OpBuilder<'_, Txs> {
             .unwrap_or_default()
             .as_millis();
 
+        // X Layer: Initialize timing metrics
+        let build_start = Instant::now();
+        let mut timing_metrics = BlockTimingMetrics::default();
+
         let mut db = State::builder().with_database(db).with_bundle_update().build();
 
         // Load the L1 block contract into the database cache. If the L1 block contract is not
@@ -371,20 +377,28 @@ impl<Txs> OpBuilder<'_, Txs> {
         let mut builder = ctx.block_builder(&mut db)?;
 
         // 1. apply pre-execution changes
+        let pre_exec_start = Instant::now();
         builder.apply_pre_execution_changes().map_err(|err| {
             warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
             PayloadBuilderError::Internal(err.into())
         })?;
+        timing_metrics.build.apply_pre_execution_changes = pre_exec_start.elapsed();
 
         // 2. execute sequencer transactions
+        let seq_txs_start = Instant::now();
         let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
+        let seq_txs_elapsed = seq_txs_start.elapsed();
+        timing_metrics.build.execute_sequencer_transactions = seq_txs_elapsed;
 
         // 3. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool() {
+            let mempool_txs_start = Instant::now();
             let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
             if ctx.execute_best_transactions_xlayer(&mut info, &mut builder, best_txs)?.is_some() {
                 return Ok(BuildOutcomeKind::Cancelled)
             }
+            let mempool_txs_elapsed = mempool_txs_start.elapsed();
+            timing_metrics.build.execute_mempool_transactions = mempool_txs_elapsed;
 
             // check if the new payload is even more valuable
             if !ctx.is_better_payload(info.total_fees) {
@@ -393,9 +407,13 @@ impl<Txs> OpBuilder<'_, Txs> {
             }
         }
 
+        let finish_start = Instant::now();
         let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, block } =
             builder.finish(state_provider)?;
-
+        timing_metrics.build.finish = finish_start.elapsed();
+        timing_metrics.build.total = build_start.elapsed();
+        // Calculate DeliverTxs total from BuildTiming to avoid duplication
+        timing_metrics.deliver_txs.total = timing_metrics.build.execute_sequencer_transactions + timing_metrics.build.execute_mempool_transactions;
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
@@ -421,6 +439,9 @@ impl<Txs> OpBuilder<'_, Txs> {
         let block_hash = sealed_block.hash();
         let block_number = sealed_block.number();
 
+        // X Layer: Store timing metrics for this block (will be updated with insert timing later)
+        store_block_timing(block_hash, timing_metrics.clone());
+
         let payload =
             OpBuiltPayload::new(ctx.payload_id(), sealed_block, info.total_fees, Some(executed));
         if let Some(tracer) = get_global_tracer() {
@@ -431,13 +452,9 @@ impl<Txs> OpBuilder<'_, Txs> {
                 TransactionProcessId::SeqBlockBuildStart,
                 build_start_timestamp,
             );
-            
+
             // Log block build end
-            tracer.log_block(
-                block_hash,
-                block_number,
-                TransactionProcessId::SeqBlockBuildEnd,
-            );
+            tracer.log_block(block_hash, block_number, TransactionProcessId::SeqBlockBuildEnd);
         }
 
         if no_tx_pool {
@@ -728,7 +745,6 @@ where
         Builder: BlockBuilder<Primitives = Evm::Primitives>,
         <<Builder::Executor as BlockExecutor>::Evm as AlloyEvm>::DB: Database,
     {
-
         let mut block_gas_limit = builder.evm_mut().block().gas_limit();
         if let Some(gas_limit_config) = self.builder_config.gas_limit_config.gas_limit() {
             // If a gas limit is configured, use that limit as target if it's smaller, otherwise use
@@ -793,7 +809,11 @@ where
                 Ok(gas_used) => {
                     // X Layer: Log transaction execution end (success)
                     if let Some(tracer) = get_global_tracer() {
-                        tracer.log_transaction(tx_hash, TransactionProcessId::SeqTxExecutionEnd, Some(block_number));
+                        tracer.log_transaction(
+                            tx_hash,
+                            TransactionProcessId::SeqTxExecutionEnd,
+                            Some(block_number),
+                        );
                     }
                     gas_used
                 }
@@ -803,7 +823,11 @@ where
                 })) => {
                     // X Layer: Log transaction execution end (failed)
                     if let Some(tracer) = get_global_tracer() {
-                        tracer.log_transaction(tx_hash, TransactionProcessId::SeqTxExecutionEnd, Some(block_number));
+                        tracer.log_transaction(
+                            tx_hash,
+                            TransactionProcessId::SeqTxExecutionEnd,
+                            Some(block_number),
+                        );
                     }
                     if error.is_nonce_too_low() {
                         // if the nonce is too low, we can skip this transaction
@@ -819,7 +843,11 @@ where
                 Err(err) => {
                     // X Layer: Log transaction execution end (fatal error)
                     if let Some(tracer) = get_global_tracer() {
-                        tracer.log_transaction(tx_hash, TransactionProcessId::SeqTxExecutionEnd, Some(block_number));
+                        tracer.log_transaction(
+                            tx_hash,
+                            TransactionProcessId::SeqTxExecutionEnd,
+                            Some(block_number),
+                        );
                     }
                     // this is an error that we should treat as fatal for this attempt
                     return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
