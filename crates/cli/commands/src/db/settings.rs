@@ -58,12 +58,18 @@ impl Command {
     fn get<N: ProviderNodeTypes>(&self, tool: &DbTool<N>) -> eyre::Result<()> {
         // Read storage settings
         let provider = tool.provider_factory.provider()?;
-        let StorageSettings { receipts_in_static_files } =
-            provider.storage_settings()?.unwrap_or_default();
+        let storage_settings = provider.storage_settings()?;
 
         // Display settings
-        println!("Current storage settings:");
-        println!("  receipts_in_static_files = {receipts_in_static_files}");
+        match storage_settings {
+            Some(settings) => {
+                println!("Current storage settings:");
+                println!("{:#?}", settings);
+            }
+            None => {
+                println!("No storage settings found.");
+            }
+        }
 
         Ok(())
     }
@@ -72,8 +78,13 @@ impl Command {
         // Read storage settings
         let provider_rw = tool.provider_factory.database_provider_rw()?;
         // Destruct settings struct to not miss adding support for new fields
+        let settings = provider_rw.storage_settings()?;
+        if settings.is_none() {
+            println!("No storage settings found, creating new settings.");
+        }
+
         let mut settings @ StorageSettings { receipts_in_static_files: _ } =
-            provider_rw.storage_settings()?.unwrap_or_default();
+            settings.unwrap_or_default();
 
         // Update the setting based on the key
         match cmd {
