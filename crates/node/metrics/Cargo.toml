@@ -26,6 +26,7 @@ reqwest.workspace = true
 tracing.workspace = true
 eyre.workspace = true
 alloy-primitives.workspace = true
+indexmap.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats"] }

@@ -228,6 +228,37 @@ impl OnStateHook for MeteredStateHook {
     }
 }
 
+/// Helper function to update block timing metrics for insert phase.
+///
+/// This function handles the common pattern of:
+/// 1. Getting existing timing metrics (if block was built locally)
+/// 2. Creating new metrics (if block was received from network)
+/// 3. Setting insert timing values
+/// 4. Calculating total as the sum of validate_and_execute + insert_to_tree
+/// 5. Storing the updated metrics
+fn update_insert_timing_metrics(
+    block_hash: B256,
+    validate_and_execute: std::time::Duration,
+    insert_to_tree: std::time::Duration,
+) {
+    use reth_node_metrics::block_timing::{get_block_timing, store_block_timing, BlockTimingMetrics};
+    
+    let mut timing_metrics = if let Some(existing) = get_block_timing(&block_hash) {
+        // Block was built locally, update insert timing
+        existing
+    } else {
+        // Block was received from network, create timing metrics with insert timing only
+        BlockTimingMetrics::default()
+    };
+    
+    timing_metrics.insert.validate_and_execute = validate_and_execute;
+    timing_metrics.insert.insert_to_tree = insert_to_tree;
+    // Total should be the sum of validate_and_execute + insert_to_tree
+    timing_metrics.insert.total = timing_metrics.insert.validate_and_execute + timing_metrics.insert.insert_to_tree;
+    
+    store_block_timing(block_hash, timing_metrics);
+}
+
 /// The engine API tree handler implementation.
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
@@ -1387,10 +1418,20 @@ where
                             self.canonical_in_memory_state.set_pending_block(block.clone());
                         }
 
+                        let insert_tree_start = Instant::now();
                         self.state.tree_state.insert_executed(block.clone());
+                        let insert_tree_elapsed = insert_tree_start.elapsed();
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
+                        let elapsed = now.elapsed();
+                        
+                        // X Layer: Update timing metrics for InsertExecutedBlock path
+                        // Note: validate_exec time is 0 because block was already executed during build
+                        use std::time::Duration;
+                        let block_hash = block.recovered_block().hash();
+                        update_insert_timing_metrics(block_hash, Duration::from_nanos(0), insert_tree_elapsed);
+                        
                         self.emit_event(EngineApiEvent::BeaconConsensus(
-                            ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
+                            ConsensusEngineEvent::CanonicalBlockAdded(block, elapsed),
                         ));
                     }
                     EngineApiRequest::Beacon(request) => {
@@ -2450,6 +2491,17 @@ where
                 // We now assume that we already have this block in the tree. However, we need to
                 // run the conversion to ensure that the block hash is valid.
                 convert_to_block(self, input)?;
+                
+                // X Layer: Even if block is already seen, update timing metrics if it was built locally
+                // Block was built locally but already exists in tree
+                // Set insert timing to 0 for now, will be updated in event handler if elapsed > 0
+                use reth_node_metrics::block_timing::get_block_timing;
+                use std::time::Duration;
+                let block_hash = block_num_hash.hash;
+                if get_block_timing(&block_hash).is_some() {
+                    update_insert_timing_metrics(block_hash, Duration::from_nanos(0), Duration::from_nanos(0));
+                }
+                
                 return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
             }
             _ => {}
@@ -2494,9 +2546,12 @@ where
 
         let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
 
+        // X Layer: Track insert timing
+        let validate_exec_start = Instant::now();
         let start = Instant::now();
 
         let executed = execute(&mut self.payload_validator, input, ctx)?;
+        let validate_exec_elapsed = validate_exec_start.elapsed();
 
         // if the parent is the canonical head, we can insert the block as the pending block
         if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
@@ -2505,11 +2560,17 @@ where
             self.canonical_in_memory_state.set_pending_block(executed.clone());
         }
 
+        let insert_tree_start = Instant::now();
         self.state.tree_state.insert_executed(executed.clone());
+        let insert_tree_elapsed = insert_tree_start.elapsed();
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event
         let elapsed = start.elapsed();
+        
+        // X Layer: Update timing metrics with insert timing
+        let block_hash = executed.recovered_block().hash();
+        update_insert_timing_metrics(block_hash, validate_exec_elapsed, insert_tree_elapsed);
         let engine_event = if is_fork {
             ConsensusEngineEvent::ForkBlockAdded(executed.clone(), elapsed)
         } else {
