@@ -152,8 +152,7 @@ async fn test_file_roundtrip(
         );
 
         // Decode receipts
-        let original_receipts_decoded =
-            original_block.receipts.decode::<Vec<ReceiptEnvelope>>()?;
+        let original_receipts_decoded = original_block.receipts.decode::<Vec<ReceiptEnvelope>>()?;
         let roundtrip_receipts_decoded =
             roundtrip_block.receipts.decode::<Vec<ReceiptEnvelope>>()?;
 
