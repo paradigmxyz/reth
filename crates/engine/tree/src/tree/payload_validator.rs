@@ -849,16 +849,14 @@ where
     }
 
     /// Determines the state root computation strategy based on configuration.
-    fn plan_state_root_computation(&self) -> StateRootStrategy {
-        let strategy = if self.config.state_root_fallback() {
+    const fn plan_state_root_computation(&self) -> StateRootStrategy {
+        if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
         } else if self.config.use_state_root_task() {
             StateRootStrategy::StateRootTask
         } else {
             StateRootStrategy::Parallel
-        };
-
-        strategy
+        }
     }
 
     /// Called when an invalid block is encountered during validation.
