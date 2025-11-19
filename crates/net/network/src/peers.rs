@@ -2905,9 +2905,7 @@ mod tests {
 
         let config = PeersConfig::test().with_trusted_nodes(vec![trusted.clone()]);
         let mut manager = PeersManager::new(config);
-        manager
-            .trusted_peers_resolver
-            .set_interval(tokio::time::interval(Duration::from_millis(1)));
+        manager.trusted_peers_resolver.interval = tokio::time::interval(Duration::from_millis(1));
 
         manager.peers.insert(
             peer_id,
