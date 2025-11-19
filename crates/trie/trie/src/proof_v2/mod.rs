@@ -15,6 +15,7 @@ use alloy_primitives::{B256, U256};
 use alloy_trie::TrieMask;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{BranchNode, Nibbles, RlpNode, SparseTrieNode, TrieMasks, TrieNode};
+use tracing::{instrument, trace};
 
 mod targets;
 pub use targets::*;
@@ -24,6 +25,9 @@ pub use value::*;
 
 mod node;
 use node::*;
+
+/// Target to use with the `tracing` crate.
+static TRACE_TARGET: &str = "trie::proof_v2";
 
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
@@ -117,6 +121,13 @@ where
             leaf_key.slice_unchecked(self.branch_path.len() + 1, leaf_key.len())
         };
 
+        trace!(
+            target: TRACE_TARGET,
+            ?leaf_short_key,
+            branch_path = ?self.branch_path,
+            "push_new_branch: called",
+        );
+
         // Get the new branch's first child, which is the child on the top of the stack with which
         // the new leaf shares the same nibble on the current branch.
         let first_child = self
@@ -168,8 +179,23 @@ where
         // the path of the previous branch, plus the nibble shared by each child, plus the parent
         // extension (denoted by a non-zero `ext_len`). Since the new branch's path is a prefix of
         // the original leaf_key we can just slice that.
-        self.branch_path =
-            leaf_key.slice_unchecked(0, self.branch_path.len() + 1 + common_prefix_len);
+        //
+        // If the branch is the first branch then we do not add the extra 1, as there is no nibble
+        // in a parent branch to account for.
+        let branch_path_len = self.branch_path.len() +
+            common_prefix_len +
+            if self.branch_stack.len() == 1 { 0 } else { 1 };
+        self.branch_path = leaf_key.slice_unchecked(0, branch_path_len);
+
+        trace!(
+            target: TRACE_TARGET,
+            ?leaf_short_key,
+            ?common_prefix_len,
+            new_branch = ?self.branch_stack.last().unwrap(),
+            ?branch_path_len,
+            branch_path = ?self.branch_path,
+            "push_new_branch: returning",
+        );
     }
 
     /// Pops the top branch off of the `branch_stack`, and hashes it (and its extension node as
@@ -185,6 +211,13 @@ where
         let mut rlp_nodes_buf = self.take_rlp_nodes_buf();
         let branch = self.branch_stack.pop().expect("branch_stack cannot be empty");
 
+        trace!(
+            target: TRACE_TARGET,
+            ?branch,
+            branch_path = ?self.branch_path,
+            "pop_branch: called",
+        );
+
         // Take the branch's children off the stack, using the state mask to determine how many
         // there are.
         let num_children = branch.state_mask.count_ones() as usize;
@@ -195,10 +228,21 @@ where
         );
         let children = self.child_stack.drain(self.child_stack.len() - num_children..);
 
-        // Update the branch_path, removing the nibble for this branch and any nibble's from its
-        // parent extension as well (if there is one).
-        debug_assert!(self.branch_path.len() > 1 + branch.ext_len as usize);
-        let new_path_len = self.branch_path.len() - 1 - branch.ext_len as usize;
+        // We will be pushing the branch onto the child stack, which will require its parent
+        // extension's short key (if it has a parent extension). Calculate this short key from the
+        // `branch_path` prior to modifying the `branch_path`.
+        let short_key = trim_nibbles_prefix(
+            &self.branch_path,
+            self.branch_path.len() - branch.ext_len as usize,
+        );
+
+        // Update the branch_path. If this branch is the only branch then only its extension needs
+        // to be trimmed, otherwise we also need to remove its nibble from its parent.
+        let new_path_len = self.branch_path.len() -
+            branch.ext_len as usize -
+            if self.branch_stack.is_empty() { 0 } else { 1 };
+
+        debug_assert!(self.branch_path.len() >= new_path_len);
         self.branch_path = self.branch_path.slice_unchecked(0, new_path_len);
 
         // From here we will be encoding the branch node and pushing it onto the child stack,
@@ -225,15 +269,11 @@ where
         let branch_node = BranchNode::new(rlp_nodes_buf, branch.state_mask);
 
         // Wrap the `BranchNode` so it can be pushed onto the child stack.
-        let branch_as_child = if branch.ext_len == 0 {
+        let branch_as_child = if short_key.is_empty() {
             // If there is no extension then push a branch node
             ProofTrieBranchChild::Branch(branch_node)
         } else {
-            // Otherwise compute the extension's short key and push an extension node
-            let short_key = trim_nibbles_prefix(
-                &self.branch_path,
-                self.branch_path.len() - branch.ext_len as usize,
-            );
+            // Otherwise push an extension node
             ProofTrieBranchChild::Extension { short_key, child: branch_node }
         };
 
@@ -274,8 +314,8 @@ where
             // current branch and the key.
             let common_prefix_len = self.branch_path.common_prefix_length(&key);
 
-            // If the current branch does not share all of its nibbles with the key then it is not
-            // the parent of the new key. In this case the current branch will have no more
+            // If the current branch does not share all of its nibbles with the new key then it is
+            // not the parent of the new key. In this case the current branch will have no more
             // children. We can pop it and loop back to the top to try again with its parent branch.
             if common_prefix_len < self.branch_path.len() {
                 self.pop_branch()?;
@@ -311,6 +351,8 @@ where
         value_encoder: &VE,
         targets: impl IntoIterator<Item = Nibbles>,
     ) -> Result<Vec<SparseTrieNode>, StateProofError> {
+        trace!(target: TRACE_TARGET, "proof_inner called");
+
         // In debug builds, verify that targets are sorted
         #[cfg(debug_assertions)]
         let targets = {
@@ -341,11 +383,14 @@ where
         let _ = targets;
 
         let mut proof_nodes = Vec::new();
+        let mut hashed_cursor_current = self.hashed_cursor.seek(B256::ZERO)?;
         loop {
+            trace!(target: TRACE_TARGET, ?hashed_cursor_current, "proof_inner loop");
+
             // Fetch the next leaf from the hashed cursor, converting the key to Nibbles and
             // immediately creating the DeferredValueEncoder so that encoding of the leaf value can
             // begin ASAP.
-            let Some((key, val)) = self.hashed_cursor.next()?.map(|(key_b256, val)| {
+            let Some((key, val)) = hashed_cursor_current.map(|(key_b256, val)| {
                 debug_assert_eq!(key_b256.len(), 32);
                 // SAFETY: key is a B256 and so is exactly 32-bytes.
                 let key = unsafe { Nibbles::unpack_unchecked(key_b256.as_slice()) };
@@ -356,6 +401,7 @@ where
             };
 
             self.add_leaf(key, val)?;
+            hashed_cursor_current = self.hashed_cursor.next()?;
         }
 
         // Once there's no more leafs we can pop the remaining branches, if any.
@@ -384,9 +430,6 @@ where
             masks: TrieMasks::none(),
         });
 
-        // Proofs will have been pushed in depth-first order, reverse them so that they are returned
-        // in depth-last (ie root-first) order.
-        proof_nodes.reverse();
         Ok(proof_nodes)
     }
 }
@@ -405,6 +448,7 @@ where
     /// # Panics
     ///
     /// In debug builds, panics if the targets are not sorted lexicographically.
+    #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     pub fn proof(
         &mut self,
         value_encoder: &VE,
@@ -440,6 +484,7 @@ where
     /// # Panics
     ///
     /// In debug builds, panics if the targets are not sorted lexicographically.
+    #[instrument(target = TRACE_TARGET, level = "trace", skip(self, targets))]
     pub fn storage_proof(
         &mut self,
         hashed_address: B256,
@@ -475,9 +520,14 @@ mod tests {
         trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
     };
     use alloy_primitives::map::B256Map;
+    use alloy_rlp::Decodable;
+    use itertools::Itertools;
     use reth_storage_errors::db::DatabaseError;
     use reth_trie_common::{HashedPostState, MultiProofTargets};
     use std::{collections::BTreeMap, rc::Rc};
+
+    /// Target to use with the `tracing` crate.
+    static TRACE_TARGET: &str = "trie::proof_v2::tests";
 
     /// A combined provider that implements both `TrieCursorFactory` and `HashedCursorFactory`.
     ///
@@ -556,6 +606,8 @@ mod tests {
         /// The trie cursor factory is empty by default, suitable for testing the leaf-only
         /// proof calculator.
         fn new(post_state: HashedPostState) -> Self {
+            trace!(target: TRACE_TARGET, ?post_state, "Creating ProofTestHarness");
+
             // Extract accounts from post state, filtering out None (deleted accounts)
             let hashed_accounts: BTreeMap<B256, _> = post_state
                 .accounts
@@ -578,13 +630,20 @@ mod tests {
                 })
                 .collect();
 
+            // Ensure that there's a storage trie dataset for every storage trie, even if empty.
+            let strorage_trie_nodes: B256Map<BTreeMap<_, _>> = hashed_storage_tries
+                .keys()
+                .copied()
+                .map(|addr| (addr, Default::default()))
+                .collect();
+
             // Create mock hashed cursor factory populated with the post state data
             let hashed_cursor_factory =
                 MockHashedCursorFactory::new(hashed_accounts, hashed_storage_tries);
 
             // Create empty trie cursor factory (leaf-only calculator doesn't need trie nodes)
             let trie_cursor_factory =
-                MockTrieCursorFactory::new(BTreeMap::new(), B256Map::default());
+                MockTrieCursorFactory::new(BTreeMap::new(), strorage_trie_nodes);
 
             Self { trie_cursor_factory, hashed_cursor_factory }
         }
@@ -610,29 +669,46 @@ mod tests {
                 self.trie_cursor_factory.clone(),
                 self.hashed_cursor_factory.clone(),
             ));
-            let value_encoder = SyncAccountValueEncoder::new(provider);
-
-            let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
 
             // Call ProofCalculator::proof with account targets
+            let value_encoder = SyncAccountValueEncoder::new(provider);
+            let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
             let proof_v2_result = proof_calculator.proof(&value_encoder, [Nibbles::new()])?;
 
-            // Create Proof (old implementation)
-            let proof =
-                Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone());
+            // Call Proof::multiproof (legacy implementation)
+            let proof_legacy_result =
+                Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
+                    .multiproof(MultiProofTargets::default())?;
 
-            // Call Proof::multiproof
-            let proof_v1_result = proof.multiproof(MultiProofTargets::default())?;
+            // Decode and sort legacy proof nodes
+            let proof_legacy_nodes = proof_legacy_result
+                .account_subtree
+                .iter()
+                .map(|(path, node_enc)| {
+                    let mut buf = node_enc.as_ref();
+                    let node = TrieNode::decode(&mut buf)
+                        .expect("legacy implementation should not produce malformed proof nodes");
 
-            // Basic comparison: both should succeed and produce non-empty results
-            assert!(!proof_v2_result.is_empty(), "ProofCalculator returned empty result");
-            assert!(
-                !proof_v1_result.account_subtree.is_empty(),
-                "Proof::multiproof returned empty result"
-            );
+                    SparseTrieNode {
+                        path: *path,
+                        node,
+                        masks: TrieMasks {
+                            hash_mask: proof_legacy_result
+                                .branch_node_hash_masks
+                                .get(path)
+                                .copied(),
+                            tree_mask: proof_legacy_result
+                                .branch_node_tree_masks
+                                .get(path)
+                                .copied(),
+                        },
+                    }
+                })
+                .sorted_by_key(|n| n.path)
+                .collect::<Vec<_>>();
 
-            // TODO: Add more detailed comparison logic here
-            // For now, we just verify both implementations succeed
+            // Basic comparison: both should succeed and produce identical results
+            assert_eq!(proof_legacy_nodes, proof_v2_result);
 
             Ok(())
         }
@@ -640,7 +716,7 @@ mod tests {
 
     mod proptest_tests {
         use super::*;
-        use alloy_primitives::U256;
+        use alloy_primitives::{map::B256Map, U256};
         use proptest::prelude::*;
         use reth_primitives_traits::Account;
         use reth_trie_common::HashedPostState;
@@ -663,14 +739,22 @@ mod tests {
                     let account_map = accounts
                         .into_iter()
                         .map(|(addr_bytes, account)| (B256::from(addr_bytes), Some(account)))
-                        .collect();
-                    HashedPostState { accounts: account_map, storages: Default::default() }
+                        .collect::<B256Map<_>>();
+
+                    // All accounts have empty storages.
+                    let storages = account_map
+                        .keys()
+                        .copied()
+                        .map(|addr| (addr, Default::default()))
+                        .collect::<B256Map<_>>();
+
+                    HashedPostState { accounts: account_map, storages }
                 },
             )
         }
 
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(100))]
+            #![proptest_config(ProptestConfig::with_cases(5000))]
 
             /// Tests that ProofCalculator produces valid proofs for randomly generated
             /// HashedPostState with empty target sets.
@@ -684,6 +768,7 @@ mod tests {
             fn proptest_proof_with_empty_targets(
                 post_state in hashed_post_state_strategy(),
             ) {
+                reth_tracing::init_test_tracing();
                 let harness = ProofTestHarness::new(post_state);
 
                 // Pass empty target set
