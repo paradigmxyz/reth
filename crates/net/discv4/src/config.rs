@@ -336,4 +336,25 @@ mod tests {
             .enable_lookup(true)
             .build();
     }
+
+    #[tokio::test]
+    async fn test_resolve_external_ip_interval_uses_interval_at() {
+        use reth_net_nat::NatResolver;
+        use std::net::{IpAddr, Ipv4Addr};
+
+        let ip_addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+
+        // Create a config with external IP resolver
+        let mut builder = Discv4Config::builder();
+        builder.external_ip_resolver(Some(NatResolver::ExternalIp(ip_addr.clone())));
+        builder.resolve_external_ip_interval(Some(Duration::from_secs(60 * 5)));
+        let config = builder.build();
+
+        // Get the ResolveNatInterval
+        let mut interval = config.resolve_external_ip_interval().expect("should have interval");
+
+        // Test that first tick returns immediately (interval_at behavior)
+        let ip = interval.tick().await;
+        assert_eq!(ip, Some(ip_addr));
+    }
 }
