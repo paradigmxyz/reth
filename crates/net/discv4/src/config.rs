@@ -101,7 +101,7 @@ impl Discv4Config {
     pub fn resolve_external_ip_interval(&self) -> Option<ResolveNatInterval> {
         let resolver = self.external_ip_resolver?;
         let interval = self.resolve_external_ip_interval?;
-        Some(ResolveNatInterval::interval(resolver, interval))
+        Some(ResolveNatInterval::interval_at(resolver, tokio::time::Instant::now(), interval))
     }
 }
 
