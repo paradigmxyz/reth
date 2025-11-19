@@ -20,6 +20,6 @@ if [ $FMT_STATUS -ne 0 ]; then
     exit 1
 fi
 
-git add "$CHANGED_RS_FILES"
+echo "$CHANGED_RS_FILES" | xargs git add
 echo "Finished make fmt, staged any formatted files."
 exit 0
