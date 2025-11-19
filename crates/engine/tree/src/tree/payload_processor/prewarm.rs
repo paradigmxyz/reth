@@ -290,7 +290,7 @@ where
         parent = &self.parent_span,
         level = "debug",
         target = "engine::tree::payload_processor::prewarm",
-        name = "prewarm",
+        name = "prewarm and caching",
         skip_all
     )]
     pub(super) fn run(
