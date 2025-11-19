@@ -69,16 +69,23 @@ impl<C: ChainSpecParser> Command<C> {
                     StaticFileSegment::Transactions => {
                         let to_delete = static_file_provider
                             .get_highest_static_file_tx(static_file_segment)
-                            .map(|tx| tx + 1)
+                            .map(|tx_num| tx_num + 1)
                             .unwrap_or_default();
                         writer.prune_transactions(to_delete, 0)?;
                     }
                     StaticFileSegment::Receipts => {
                         let to_delete = static_file_provider
                             .get_highest_static_file_tx(static_file_segment)
-                            .map(|receipt| receipt + 1)
+                            .map(|tx_num| tx_num + 1)
                             .unwrap_or_default();
                         writer.prune_receipts(to_delete, 0)?;
+                    }
+                    StaticFileSegment::TransactionSenders => {
+                        let to_delete = static_file_provider
+                            .get_highest_static_file_tx(static_file_segment)
+                            .map(|tx_num| tx_num + 1)
+                            .unwrap_or_default();
+                        writer.prune_transaction_senders(to_delete, 0)?;
                     }
                 }
             }

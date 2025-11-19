@@ -370,6 +370,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
     }
 
+    /// Ensures that the writer is positioned at the specified block number.
+    ///
+    /// If the writer is positioned at a greater block number than the specified one, the writer
+    /// will NOT be unwound and the error will be returned.
     pub fn ensure_at_block(&mut self, advance_to: BlockNumber) -> ProviderResult<()> {
         let current_block = if let Some(current_block_number) = self.current_block_number() {
             current_block_number
@@ -438,6 +442,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
+    /// Returns the current block number of the static file writer.
     pub fn current_block_number(&self) -> Option<u64> {
         self.writer.user_header().block_end()
     }
@@ -949,6 +954,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
+    /// Returns a [`StaticFileProvider`] associated with this writer.
     pub fn reader(&self) -> StaticFileProvider<N> {
         Self::upgrade_provider_to_strong_reference(&self.reader)
     }

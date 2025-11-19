@@ -61,7 +61,7 @@ mod tests {
         test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
-    use alloy_primitives::{map::HashMap, Address, BlockHash, Signature, TxNumber, B256, U160};
+    use alloy_primitives::{Address, BlockHash, Signature, TxNumber, B256, U160};
     use rand::seq::SliceRandom;
     use reth_db::test_utils::create_test_static_files_dir;
     use reth_db_api::{transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};

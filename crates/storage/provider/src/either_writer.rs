@@ -123,6 +123,12 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         }
     }
 
+    /// Ensures that the writer is positioned at the specified block number.
+    ///
+    /// If the writer is positioned at a greater block number than the specified one, the writer
+    /// will NOT be unwound and the error will be returned.
+    ///
+    /// Relevant only for [`Self::StaticFile`]. It is a no-op for [`Self::Database`].
     pub fn ensure_at_block(&mut self, block_number: BlockNumber) -> ProviderResult<()> {
         match self {
             Self::Database(_) => Ok(()),
@@ -157,6 +163,8 @@ where
         }
     }
 
+    /// Removes all transaction senders above the given transaction number, and stops at the given
+    /// block number.
     pub fn prune_senders(
         &mut self,
         unwind_tx_from: TxNumber,
