@@ -182,7 +182,7 @@ pub(crate) struct Args {
 
 impl Args {
     /// Initializes tracing with the configured options, including OTLP if requested.
-    /// Requires a CliRunner for OTLP gRPC initialization (which needs tokio runtime).
+    /// Requires a `CliRunner` for OTLP gRPC initialization (which needs tokio runtime).
     pub(crate) fn init_tracing(&mut self, runner: &CliRunner) -> Result<Option<FileWorkerGuard>> {
         use reth_tracing::Layers;
 
