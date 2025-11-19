@@ -744,24 +744,14 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // Update subtrie hashes in parallel
         {
             use rayon::iter::{IntoParallelIterator, ParallelIterator};
-            use tracing::debug_span;
 
             let (tx, rx) = mpsc::channel();
 
             let branch_node_tree_masks = &self.branch_node_tree_masks;
             let branch_node_hash_masks = &self.branch_node_hash_masks;
-            let span = tracing::Span::current();
             changed_subtries
                 .into_par_iter()
                 .map(|mut changed_subtrie| {
-                    let _enter = debug_span!(
-                        target: "trie::parallel_sparse",
-                        parent: span.clone(),
-                        "subtrie",
-                        index = changed_subtrie.index
-                    )
-                    .entered();
-
                     #[cfg(feature = "metrics")]
                     let start = std::time::Instant::now();
                     changed_subtrie.subtrie.update_hashes(
