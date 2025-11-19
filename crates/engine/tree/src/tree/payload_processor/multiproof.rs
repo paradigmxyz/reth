@@ -13,9 +13,8 @@ use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
 use reth_trie::{
-    added_removed_keys::MultiAddedRemovedKeys, prefix_set::TriePrefixSetsMut,
-    updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState, HashedPostStateSorted,
-    HashedStorage, MultiProofTargets, TrieInput,
+    added_removed_keys::MultiAddedRemovedKeys, DecodedMultiProof, HashedPostState, HashedStorage,
+    MultiProofTargets,
 };
 use reth_trie_parallel::{
     proof::ParallelProof,
@@ -57,35 +56,6 @@ impl SparseTrieUpdate {
     pub(super) fn extend(&mut self, other: Self) {
         self.state.extend(other.state);
         self.multiproof.extend(other.multiproof);
-    }
-}
-
-/// Common configuration for multi proof tasks
-#[derive(Debug, Clone, Default)]
-pub(crate) struct MultiProofConfig {
-    /// The sorted collection of cached in-memory intermediate trie nodes that
-    /// can be reused for computation.
-    pub nodes_sorted: Arc<TrieUpdatesSorted>,
-    /// The sorted in-memory overlay hashed state.
-    pub state_sorted: Arc<HashedPostStateSorted>,
-    /// The collection of prefix sets for the computation. Since the prefix sets _always_
-    /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
-    /// if we have cached nodes for them.
-    pub prefix_sets: Arc<TriePrefixSetsMut>,
-}
-
-impl MultiProofConfig {
-    /// Creates a new state root config from the trie input.
-    ///
-    /// This returns a cleared [`TrieInput`] so that we can reuse any allocated space in the
-    /// [`TrieInput`].
-    pub(crate) fn from_input(mut input: TrieInput) -> (TrieInput, Self) {
-        let config = Self {
-            nodes_sorted: Arc::new(input.nodes.drain_into_sorted()),
-            state_sorted: Arc::new(input.state.drain_into_sorted()),
-            prefix_sets: Arc::new(input.prefix_sets.clone()),
-        };
-        (input.cleared(), config)
     }
 }
 
