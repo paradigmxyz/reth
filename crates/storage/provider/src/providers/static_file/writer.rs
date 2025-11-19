@@ -288,7 +288,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             debug!(
                 target: "provider::static_file",
                 segment = ?self.writer.user_header().segment(),
-                to_delete,
                 "Pruning data on commit"
             );
             match strategy {

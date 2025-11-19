@@ -683,6 +683,13 @@ mod tests {
                 segment: StaticFileSegment::Receipts,
                 changeset_offsets: None,
             },
+            SegmentHeader {
+                expected_block_range: SegmentRangeInclusive::new(0, 200),
+                block_range: Some(SegmentRangeInclusive::new(0, 100)),
+                tx_range: Some(SegmentRangeInclusive::new(0, 300)),
+                segment: StaticFileSegment::AccountChangeSets,
+                changeset_offsets: Some(vec![ChangesetOffset { offset: 1, num_changes: 1 }; 100]),
+            },
         ];
         // Check that we test all segments
         assert_eq!(

@@ -1270,9 +1270,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let stage_id = match segment {
             StaticFileSegment::Headers => StageId::Headers,
             StaticFileSegment::Transactions => StageId::Bodies,
-                StaticFileSegment::Receipts | StaticFileSegment::AccountChangeSets => {
-                    StageId::Execution
-                }
+            StaticFileSegment::Receipts | StaticFileSegment::AccountChangeSets => {
+                StageId::Execution
+            }
         };
         let checkpoint_block_number =
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;

@@ -209,7 +209,7 @@ where
         provider: &F::Provider,
         db_tip_block: BlockNumber,
     ) -> ProviderResult<Overlay> {
-    //
+        //
         // Set up variables we'll use for recording metrics. There's two different code-paths here,
         // and we want to make sure both record metrics, so we do metrics recording after.
         let retrieve_trie_reverts_duration;
@@ -364,7 +364,11 @@ where
 impl<F> DatabaseProviderROFactory for OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: TrieReader + StageCheckpointReader + PruneCheckpointReader + BlockNumReader,
+    F::Provider: TrieReader
+        + StageCheckpointReader
+        + PruneCheckpointReader
+        + BlockNumReader
+        + ChangeSetReader,
 {
     type Provider = OverlayStateProvider<F::Provider>;
 
