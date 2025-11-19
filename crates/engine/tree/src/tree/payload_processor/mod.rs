@@ -481,7 +481,12 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor",
+        name = "await_state_root",
+        skip_all
+    )]
     pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.state_root
             .take()
