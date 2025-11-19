@@ -375,7 +375,7 @@ where
         debug!(
             target: "engine::tree::payload_validator",
             ?strategy,
-            "Deciding which state root algorithm to run"
+            "Decided which state root algorithm to run"
         );
 
         // use prewarming background task
@@ -849,7 +849,6 @@ where
     }
 
     /// Determines the state root computation strategy based on configuration.
-    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn plan_state_root_computation(&self) -> StateRootStrategy {
         let strategy = if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
@@ -858,12 +857,6 @@ where
         } else {
             StateRootStrategy::Parallel
         };
-
-        debug!(
-            target: "engine::tree::payload_validator",
-            ?strategy,
-            "Planned state root computation strategy"
-        );
 
         strategy
     }
