@@ -2458,10 +2458,9 @@ where
 
         // emit insert event
         let elapsed = start.elapsed();
-        // A block is considered a fork if its height is less than or equal to the current canonical
-        // head height
-        let is_fork =
-            executed.recovered_block().number() <= self.state.tree_state.canonical_block_number();
+        // A block is considered a fork if its parent hash does not match the canonical head hash
+        let is_fork = executed.recovered_block().parent_hash() !=
+            self.state.tree_state.canonical_block_hash();
         let engine_event = if is_fork {
             ConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
         } else {
