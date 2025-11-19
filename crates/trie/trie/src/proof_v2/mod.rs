@@ -401,7 +401,7 @@ where
             hashed_cursor_current = self.hashed_cursor.next()?;
         }
 
-        // Once there's no more leafs we can pop the remaining branches, if any.
+        // Once there's no more leaves we can pop the remaining branches, if any.
         while !self.branch_stack.is_empty() {
             self.pop_branch()?;
         }
@@ -628,7 +628,7 @@ mod tests {
                 .collect();
 
             // Ensure that there's a storage trie dataset for every storage trie, even if empty.
-            let strorage_trie_nodes: B256Map<BTreeMap<_, _>> = hashed_storage_tries
+            let storage_trie_nodes: B256Map<BTreeMap<_, _>> = hashed_storage_tries
                 .keys()
                 .copied()
                 .map(|addr| (addr, Default::default()))
@@ -640,7 +640,7 @@ mod tests {
 
             // Create empty trie cursor factory (leaf-only calculator doesn't need trie nodes)
             let trie_cursor_factory =
-                MockTrieCursorFactory::new(BTreeMap::new(), strorage_trie_nodes);
+                MockTrieCursorFactory::new(BTreeMap::new(), storage_trie_nodes);
 
             Self { trie_cursor_factory, hashed_cursor_factory }
         }
