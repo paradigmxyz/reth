@@ -1,14 +1,18 @@
 use crate::utils::eth_payload_attributes;
-use alloy_genesis::Genesis;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::{
-    node::NodeTestContext, setup, transaction::TransactionTestContext, wallet::Wallet,
-};
 use reth_node_builder::{NodeBuilder, NodeHandle};
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
+use reth_e2e_test_utils::{setup, transaction::TransactionTestContext};
 use reth_node_ethereum::EthereumNode;
-use reth_tasks::TaskManager;
 use std::sync::Arc;
+
+#[cfg(unix)]
+use alloy_genesis::Genesis;
+#[cfg(unix)]
+use reth_e2e_test_utils::{node::NodeTestContext, wallet::Wallet};
+#[cfg(unix)]
+use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
++#[cfg(unix)]
+use reth_tasks::TaskManager;
 
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {
