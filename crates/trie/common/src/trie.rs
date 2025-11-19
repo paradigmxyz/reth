@@ -35,7 +35,7 @@ impl TrieMasks {
 
 /// Carries all information needed by a sparse trie to reveal a particular node.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SparseTrieNode {
+pub struct ProofTrieNode {
     /// Path of the node.
     pub path: Nibbles,
     /// The node itself.

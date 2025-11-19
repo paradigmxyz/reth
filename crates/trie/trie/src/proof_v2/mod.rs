@@ -14,7 +14,7 @@ use crate::{
 use alloy_primitives::{B256, U256};
 use alloy_trie::TrieMask;
 use reth_execution_errors::trie::StateProofError;
-use reth_trie_common::{BranchNode, Nibbles, RlpNode, SparseTrieNode, TrieMasks, TrieNode};
+use reth_trie_common::{BranchNode, Nibbles, ProofTrieNode, RlpNode, TrieMasks, TrieNode};
 use tracing::{instrument, trace};
 
 mod targets;
@@ -63,7 +63,7 @@ pub struct ProofCalculator<TC, HC, VE: ValueEncoder> {
     ///
     /// We are generally able to re-use these buffers across different branch nodes for the
     /// duration of a proof calculation, but occasionally we will lose one when when a branch
-    /// node is returned as a `SparseTrieNode`.
+    /// node is returned as a `ProofTrieNode`.
     rlp_nodes_bufs: Vec<Vec<RlpNode>>,
     /// Re-usable byte buffer, used for RLP encoding.
     rlp_encode_buf: Vec<u8>,
@@ -350,7 +350,7 @@ where
         &mut self,
         value_encoder: &VE,
         targets: impl IntoIterator<Item = Nibbles>,
-    ) -> Result<Vec<SparseTrieNode>, StateProofError> {
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         trace!(target: TRACE_TARGET, "proof_inner called");
 
         // In debug builds, verify that targets are sorted
@@ -424,7 +424,7 @@ where
             TrieNode::EmptyRoot
         };
 
-        proof_nodes.push(SparseTrieNode {
+        proof_nodes.push(ProofTrieNode {
             path: Nibbles::new(), // root path
             node: root_node,
             masks: TrieMasks::none(),
@@ -453,7 +453,7 @@ where
         &mut self,
         value_encoder: &VE,
         targets: impl IntoIterator<Item = Nibbles>,
-    ) -> Result<Vec<SparseTrieNode>, StateProofError> {
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
         self.proof_inner(value_encoder, targets)
@@ -489,13 +489,13 @@ where
         &mut self,
         hashed_address: B256,
         targets: impl IntoIterator<Item = Nibbles>,
-    ) -> Result<Vec<SparseTrieNode>, StateProofError> {
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.hashed_cursor.set_hashed_address(hashed_address);
 
         // Shortcut: check if storage is empty
         if self.hashed_cursor.is_storage_empty()? {
             // Return a single EmptyRoot node at the root path
-            return Ok(vec![SparseTrieNode {
+            return Ok(vec![ProofTrieNode {
                 path: Nibbles::default(),
                 node: TrieNode::EmptyRoot,
                 masks: TrieMasks::none(),
@@ -689,7 +689,7 @@ mod tests {
                     let node = TrieNode::decode(&mut buf)
                         .expect("legacy implementation should not produce malformed proof nodes");
 
-                    SparseTrieNode {
+                    ProofTrieNode {
                         path: *path,
                         node,
                         masks: TrieMasks {

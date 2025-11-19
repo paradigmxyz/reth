@@ -657,9 +657,9 @@ where
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         let start = Instant::now();
-        let res = Self::get_payload_bodies_by_hash_v1(self, hashes);
+        let res = Self::get_payload_bodies_by_hash_v1(self, hashes).await;
         self.inner.metrics.latency.get_payload_bodies_by_hash_v1.record(start.elapsed());
-        res.await
+        res
     }
 
     /// Validates the `engine_forkchoiceUpdated` payload attributes and executes the forkchoice

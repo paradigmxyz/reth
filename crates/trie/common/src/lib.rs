@@ -17,7 +17,7 @@ pub use hashed_state::*;
 
 /// Input for trie computation.
 mod input;
-pub use input::TrieInput;
+pub use input::{TrieInput, TrieInputSorted};
 
 /// The implementation of hash builder.
 pub mod hash_builder;
@@ -42,7 +42,7 @@ mod subnode;
 pub use subnode::StoredSubNode;
 
 mod trie;
-pub use trie::{SparseTrieNode, TrieMasks};
+pub use trie::{ProofTrieNode, TrieMasks};
 
 /// The implementation of a container for storing intermediate changes to a trie.
 /// The container indicates when the trie has been modified.

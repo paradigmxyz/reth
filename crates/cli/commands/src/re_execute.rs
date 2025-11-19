@@ -9,6 +9,7 @@ use clap::Parser;
 use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
@@ -102,6 +103,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let skip_invalid_blocks = self.skip_invalid_blocks;
         let (stats_tx, mut stats_rx) = mpsc::unbounded_channel();
         let (info_tx, mut info_rx) = mpsc::unbounded_channel();
+        let cancellation = CancellationToken::new();
+        let _guard = cancellation.drop_guard();
 
         let mut tasks = JoinSet::new();
         for i in 0..self.num_tasks {
@@ -116,12 +119,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let db_at = db_at.clone();
             let stats_tx = stats_tx.clone();
             let info_tx = info_tx.clone();
+            let cancellation = cancellation.clone();
             tasks.spawn_blocking(move || {
                 let mut executor = evm_config.batch_executor(db_at(start_block - 1));
                 let mut executor_created = Instant::now();
                 let executor_lifetime = Duration::from_secs(120);
 
                 'blocks: for block in start_block..end_block {
+                    if cancellation.is_cancelled() {
+                        // exit if the program is being terminated
+                        break
+                    }
+
                     let block = provider_factory
                         .recovered_block(block.into(), TransactionVariant::NoHash)?
                         .unwrap();
@@ -221,7 +230,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         loop {
             tokio::select! {
                 Some(gas_used) = stats_rx.recv() => {
-                    interval.reset();
                     total_executed_blocks += 1;
                     total_executed_gas += gas_used;
                 }
@@ -263,6 +271,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             info!(
                 start_block = min_block,
                 end_block = max_block,
+                %total_executed_blocks,
                 throughput=?format_gas_throughput(total_executed_gas, instant.elapsed()),
                 "Re-executed successfully"
             );
@@ -270,6 +279,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             info!(
                 start_block = min_block,
                 end_block = max_block,
+                %total_executed_blocks,
                 invalid_block_count = invalid_blocks.len(),
                 ?invalid_blocks,
                 throughput=?format_gas_throughput(total_executed_gas, instant.elapsed()),

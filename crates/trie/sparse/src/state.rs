@@ -15,7 +15,7 @@ use reth_primitives_traits::Account;
 use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, RlpNode, SparseTrieNode,
+    DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, ProofTrieNode, RlpNode,
     StorageMultiProof, TrieAccount, TrieMask, TrieMasks, TrieNode, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
@@ -946,9 +946,9 @@ struct ProofNodesMetricValues {
 #[derive(Debug, PartialEq, Eq)]
 struct FilterMappedProofNodes {
     /// Root node which was pulled out of the original node set to be handled specially.
-    root_node: Option<SparseTrieNode>,
+    root_node: Option<ProofTrieNode>,
     /// Filtered, decoded and unsorted proof nodes. Root node is removed.
-    nodes: Vec<SparseTrieNode>,
+    nodes: Vec<ProofTrieNode>,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
     new_nodes: usize,
@@ -1007,7 +1007,7 @@ fn filter_map_revealed_nodes(
             _ => TrieMasks::none(),
         };
 
-        let node = SparseTrieNode { path, node: proof_node, masks };
+        let node = ProofTrieNode { path, node: proof_node, masks };
 
         if is_root {
             // Perform sanity check.
@@ -1383,12 +1383,12 @@ mod tests {
         assert_eq!(
             decoded,
             FilterMappedProofNodes {
-                root_node: Some(SparseTrieNode {
+                root_node: Some(ProofTrieNode {
                     path: Nibbles::default(),
                     node: branch,
                     masks: TrieMasks::none(),
                 }),
-                nodes: vec![SparseTrieNode {
+                nodes: vec![ProofTrieNode {
                     path: Nibbles::from_nibbles([0x1]),
                     node: leaf,
                     masks: TrieMasks::none(),

@@ -457,6 +457,8 @@ where
                 .with_hashed_cursor_metrics(hashed_cursor_metrics)
                 .storage_multiproof(target_slots)
                 .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+        trie_cursor_metrics.record_span("trie_cursor");
+        hashed_cursor_metrics.record_span("hashed_cursor");
 
         // Decode proof into DecodedStorageMultiProof
         let decoded_result = raw_proof_result.and_then(|raw_proof| {
@@ -1156,6 +1158,7 @@ where
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
         let proof_cursor_metrics = tracker.cursor_metrics;
+        proof_cursor_metrics.record_spans();
 
         let stats = tracker.finish();
         let result = result.map(|proof| ProofResult::AccountMultiproof { proof, stats });
@@ -1316,6 +1319,11 @@ where
             TrieElement::Leaf(hashed_address, account) => {
                 let root = match storage_proof_receivers.remove(&hashed_address) {
                     Some(receiver) => {
+                        let _guard = debug_span!(
+                            target: "trie::proof_task",
+                            "Waiting for storage proof",
+                            ?hashed_address,
+                        );
                         // Block on this specific storage proof receiver - enables interleaved
                         // parallelism
                         let proof_msg = receiver.recv().map_err(|_| {
@@ -1327,6 +1335,8 @@ where
                                 ),
                             )
                         })?;
+
+                        drop(_guard);
 
                         // Extract storage proof from the result
                         let proof = match proof_msg.result? {
@@ -1355,6 +1365,11 @@ where
                         match ctx.missed_leaves_storage_roots.entry(hashed_address) {
                             dashmap::Entry::Occupied(occ) => *occ.get(),
                             dashmap::Entry::Vacant(vac) => {
+                                let _guard = debug_span!(
+                                    target: "trie::proof_task",
+                                    "Waiting on missed leaf storage proof computation",
+                                    ?hashed_address,
+                                );
                                 let root =
                                     StorageProof::new_hashed(provider, provider, hashed_address)
                                         .with_prefix_set_mut(Default::default())
@@ -1398,6 +1413,11 @@ where
 
     // Consume remaining storage proof receivers for accounts not encountered during trie walk.
     for (hashed_address, receiver) in storage_proof_receivers {
+        let _guard = debug_span!(
+            target: "trie::proof_task",
+            "Blocking on final storage proof",
+            ?hashed_address,
+        );
         if let Ok(proof_msg) = receiver.recv() {
             // Extract storage proof from the result
             if let Ok(ProofResult::StorageProof { proof, .. }) = proof_msg.result {
