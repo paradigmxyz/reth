@@ -703,8 +703,8 @@ where
         // gather all blocks until new head number.
         while current_canonical_number > current_number {
             if let Some(block) = self.canonical_block_by_hash(old_hash)? {
-                old_chain.push(block.clone());
                 old_hash = block.recovered_block().parent_hash();
+                old_chain.push(block);
                 current_canonical_number -= 1;
             } else {
                 // This shouldn't happen as we're walking back the canonical chain
