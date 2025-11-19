@@ -24,6 +24,9 @@ cond_mod!(
     withdrawal
 );
 
+#[cfg(feature = "op")]
+pub mod optimism;
+
 pub mod transaction;
 
 #[cfg(test)]
