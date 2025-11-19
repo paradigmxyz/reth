@@ -20,6 +20,7 @@ Commands:
   static-file-header  Reads and displays the static file segment header
   version             Lists current and local database versions
   path                Returns the full database path
+  settings            Manage storage settings
   help                Print this message or the help of the given subcommand(s)
 
 Options:
@@ -113,14 +114,19 @@ Static Files:
       --static-files.blocks-per-file.transaction_senders <BLOCKS_PER_FILE_TRANSACTION_SENDERS>
           Number of blocks per file for the transaction senders segment
 
-      --static-files.receipts <RECEIPTS>
+      --static-files.receipts
           Store receipts in static files instead of the database.
 
-          When enabled, receipts are written to static files instead of the database.
+          When enabled, receipts will be written to static files on disk instead of the database.
 
-          Note: changing this setting on an existing node with non-empty receipts can result in unexpected behavior.
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-          [possible values: true, false]
+      --static-files.transaction-senders
+          Store transaction senders in static files instead of the database.
+
+          When enabled, transaction senders will be written to static files on disk instead of the database.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
 Logging:
       --log.stdout.format <FORMAT>

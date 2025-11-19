@@ -37,22 +37,15 @@ impl StorageSettings {
         Self { receipts_in_static_files: false, transaction_senders_in_static_files: false }
     }
 
-    /// Sets the `receipts_static_files` flag to specified value, if any.
-    pub const fn with_receipts_in_static_files_opt(mut self, value: Option<bool>) -> Self {
-        if let Some(value) = value {
-            self.receipts_in_static_files = value;
-        }
+    /// Sets the `receipts_static_files` flag to true.
+    pub const fn with_receipts_in_static_files(mut self) -> Self {
+        self.receipts_in_static_files = true;
         self
     }
 
-    /// Sets the `transaction_senders_in_static_files` flag to specified value, if any.
-    pub const fn with_transaction_senders_in_static_files_opt(
-        mut self,
-        value: Option<bool>,
-    ) -> Self {
-        if let Some(value) = value {
-            self.transaction_senders_in_static_files = value;
-        }
+    /// Sets the `transaction_senders_in_static_files` flag to true.
+    pub const fn with_transaction_senders_in_static_files(mut self) -> Self {
+        self.transaction_senders_in_static_files = true;
         self
     }
 }

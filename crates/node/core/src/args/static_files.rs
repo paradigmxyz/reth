@@ -26,21 +26,22 @@ pub struct StaticFilesArgs {
 
     /// Store receipts in static files instead of the database.
     ///
-    /// When enabled, receipts are written to static files instead of the database.
+    /// When enabled, receipts will be written to static files on disk instead of the database.
     ///
-    /// Note: changing this setting on an existing node with non-empty receipts can result in
-    /// unexpected behavior.
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
     #[arg(long = "static-files.receipts")]
-    pub receipts: Option<bool>,
+    pub receipts: bool,
 
     /// Store transaction senders in static files instead of the database.
     ///
-    /// When enabled, transaction senders are written to static files instead of the database.
+    /// When enabled, transaction senders will be written to static files on disk instead of the
+    /// database.
     ///
-    /// Note: changing this setting on an existing node with non-empty transaction senders can
-    /// result in unexpected behavior.
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
     #[arg(long = "static-files.transaction-senders")]
-    pub transaction_senders: Option<bool>,
+    pub transaction_senders: bool,
 }
 
 impl StaticFilesArgs {
@@ -58,13 +59,20 @@ impl StaticFilesArgs {
                     .blocks_per_file_transaction_senders
                     .or(config.blocks_per_file.transaction_senders),
             },
-            receipts: self.receipts.or(config.receipts),
-            transaction_senders: self.transaction_senders.or(config.transaction_senders),
         }
     }
 
     /// Converts the static files arguments into [`StorageSettings`].
     pub const fn to_settings(&self) -> StorageSettings {
-        StorageSettings::legacy().with_receipts_in_static_files_opt(self.receipts)
+        let mut settings = StorageSettings::legacy();
+
+        if self.receipts {
+            settings = settings.with_receipts_in_static_files();
+        }
+        if self.transaction_senders {
+            settings = settings.with_transaction_senders_in_static_files();
+        }
+
+        settings
     }
 }

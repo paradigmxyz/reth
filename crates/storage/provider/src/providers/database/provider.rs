@@ -325,12 +325,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             self.write_state(&execution_output, OriginalValuesKnown::No)?;
 
             // insert hashes and intermediate merkle nodes
-            self.write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
+            self.write_hashed_state(&hashed_state)?;
 
-            // sort trie updates and insert changesets
-            let trie_updates_sorted = (*trie_updates).clone().into_sorted();
-            self.write_trie_changesets(block_number, &trie_updates_sorted, None)?;
-            self.write_trie_updates_sorted(&trie_updates_sorted)?;
+            self.write_trie_changesets(block_number, &trie_updates, None)?;
+            self.write_trie_updates_sorted(&trie_updates)?;
         }
 
         // update history indices
@@ -4767,8 +4765,7 @@ mod tests {
         // Static files mode
         {
             let factory = create_test_provider_factory();
-            let storage_settings =
-                StorageSettings::legacy().with_receipts_in_static_files_opt(Some(true));
+            let storage_settings = StorageSettings::legacy().with_receipts_in_static_files();
             factory.set_storage_settings_cache(storage_settings);
             let factory = factory.with_prune_modes(PruneModes {
                 receipts: Some(PruneMode::Before(2)),
