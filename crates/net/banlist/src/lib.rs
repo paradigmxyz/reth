@@ -10,7 +10,7 @@
 
 type PeerId = alloy_primitives::B512;
 
-use std::{collections::HashMap, net::IpAddr, time::Instant};
+use std::{collections::HashMap, net::IpAddr, str::FromStr, time::Instant};
 
 /// Determines whether or not the IP is globally routable.
 /// Should be replaced with [`IpAddr::is_global`](std::net::IpAddr::is_global) once it is stable.
@@ -213,5 +213,163 @@ mod tests {
         ip = IpAddr::from([172, 16, 0, 0]);
         banlist.ban_ip(ip);
         assert!(!banlist.is_banned_ip(&ip));
+    }
+}
+
+/// IP filter for restricting network communication to specific IP ranges using CIDR notation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IpFilter {
+    /// List of allowed IP networks in CIDR notation.
+    /// If empty, all IPs are allowed.
+    allowed_networks: Vec<ipnet::IpNet>,
+}
+
+impl IpFilter {
+    /// Creates a new IP filter with the given CIDR networks.
+    ///
+    /// If the list is empty, all IPs will be allowed.
+    pub const fn new(allowed_networks: Vec<ipnet::IpNet>) -> Self {
+        Self { allowed_networks }
+    }
+
+    /// Creates an IP filter from a comma-separated list of CIDR networks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any of the CIDR strings cannot be parsed.
+    pub fn from_cidr_string(cidrs: &str) -> Result<Self, ipnet::AddrParseError> {
+        if cidrs.is_empty() {
+            return Ok(Self::allow_all())
+        }
+
+        let networks = cidrs
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(ipnet::IpNet::from_str)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self::new(networks))
+    }
+
+    /// Creates a filter that allows all IPs.
+    pub const fn allow_all() -> Self {
+        Self { allowed_networks: Vec::new() }
+    }
+
+    /// Checks if the given IP address is allowed by this filter.
+    ///
+    /// Returns `true` if the filter is empty (allows all) or if the IP is within
+    /// any of the allowed networks.
+    pub fn is_allowed(&self, ip: &IpAddr) -> bool {
+        // If no restrictions are set, allow all IPs
+        if self.allowed_networks.is_empty() {
+            return true
+        }
+
+        // Check if the IP is within any of the allowed networks
+        self.allowed_networks.iter().any(|net| net.contains(ip))
+    }
+
+    /// Returns `true` if this filter has restrictions (i.e., not allowing all IPs).
+    pub const fn has_restrictions(&self) -> bool {
+        !self.allowed_networks.is_empty()
+    }
+
+    /// Returns the list of allowed networks.
+    pub fn allowed_networks(&self) -> &[ipnet::IpNet] {
+        &self.allowed_networks
+    }
+}
+
+impl Default for IpFilter {
+    fn default() -> Self {
+        Self::allow_all()
+    }
+}
+
+#[cfg(test)]
+mod ip_filter_tests {
+    use super::*;
+
+    #[test]
+    fn test_allow_all_filter() {
+        let filter = IpFilter::allow_all();
+        assert!(filter.is_allowed(&IpAddr::from([192, 168, 1, 1])));
+        assert!(filter.is_allowed(&IpAddr::from([10, 0, 0, 1])));
+        assert!(filter.is_allowed(&IpAddr::from([8, 8, 8, 8])));
+        assert!(!filter.has_restrictions());
+    }
+
+    #[test]
+    fn test_single_network_filter() {
+        let filter = IpFilter::from_cidr_string("192.168.0.0/16").unwrap();
+        assert!(filter.is_allowed(&IpAddr::from([192, 168, 1, 1])));
+        assert!(filter.is_allowed(&IpAddr::from([192, 168, 255, 255])));
+        assert!(!filter.is_allowed(&IpAddr::from([192, 169, 1, 1])));
+        assert!(!filter.is_allowed(&IpAddr::from([10, 0, 0, 1])));
+        assert!(filter.has_restrictions());
+    }
+
+    #[test]
+    fn test_multiple_networks_filter() {
+        let filter = IpFilter::from_cidr_string("192.168.0.0/16,10.0.0.0/8").unwrap();
+        assert!(filter.is_allowed(&IpAddr::from([192, 168, 1, 1])));
+        assert!(filter.is_allowed(&IpAddr::from([10, 5, 10, 20])));
+        assert!(filter.is_allowed(&IpAddr::from([10, 255, 255, 255])));
+        assert!(!filter.is_allowed(&IpAddr::from([172, 16, 0, 1])));
+        assert!(!filter.is_allowed(&IpAddr::from([8, 8, 8, 8])));
+    }
+
+    #[test]
+    fn test_ipv6_filter() {
+        let filter = IpFilter::from_cidr_string("2001:db8::/32").unwrap();
+        let ipv6_in_range: IpAddr = "2001:db8::1".parse().unwrap();
+        let ipv6_out_range: IpAddr = "2001:db9::1".parse().unwrap();
+
+        assert!(filter.is_allowed(&ipv6_in_range));
+        assert!(!filter.is_allowed(&ipv6_out_range));
+    }
+
+    #[test]
+    fn test_mixed_ipv4_ipv6_filter() {
+        let filter = IpFilter::from_cidr_string("192.168.0.0/16,2001:db8::/32").unwrap();
+
+        assert!(filter.is_allowed(&IpAddr::from([192, 168, 1, 1])));
+        let ipv6_in_range: IpAddr = "2001:db8::1".parse().unwrap();
+        assert!(filter.is_allowed(&ipv6_in_range));
+
+        assert!(!filter.is_allowed(&IpAddr::from([10, 0, 0, 1])));
+        let ipv6_out_range: IpAddr = "2001:db9::1".parse().unwrap();
+        assert!(!filter.is_allowed(&ipv6_out_range));
+    }
+
+    #[test]
+    fn test_empty_string() {
+        let filter = IpFilter::from_cidr_string("").unwrap();
+        assert!(filter.is_allowed(&IpAddr::from([192, 168, 1, 1])));
+        assert!(!filter.has_restrictions());
+    }
+
+    #[test]
+    fn test_invalid_cidr() {
+        assert!(IpFilter::from_cidr_string("invalid").is_err());
+        assert!(IpFilter::from_cidr_string("192.168.0.0/33").is_err());
+        assert!(IpFilter::from_cidr_string("192.168.0.0,10.0.0.0").is_err());
+    }
+
+    #[test]
+    fn test_whitespace_handling() {
+        let filter = IpFilter::from_cidr_string(" 192.168.0.0/16 , 10.0.0.0/8 ").unwrap();
+        assert!(filter.is_allowed(&IpAddr::from([192, 168, 1, 1])));
+        assert!(filter.is_allowed(&IpAddr::from([10, 0, 0, 1])));
+        assert!(!filter.is_allowed(&IpAddr::from([172, 16, 0, 1])));
+    }
+
+    #[test]
+    fn test_single_ip_as_cidr() {
+        let filter = IpFilter::from_cidr_string("192.168.1.100/32").unwrap();
+        assert!(filter.is_allowed(&IpAddr::from([192, 168, 1, 100])));
+        assert!(!filter.is_allowed(&IpAddr::from([192, 168, 1, 101])));
     }
 }

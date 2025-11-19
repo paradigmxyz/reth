@@ -22,7 +22,7 @@ Now, as the node is running, you can `curl` the endpoint you provided to the `--
 curl 127.0.0.1:9001
 ```
 
-The response from this is quite descriptive, but it can be a bit verbose. Plus, it's just a static_file of the metrics at the time that you `curl`ed the endpoint.
+The response from this is quite descriptive, but it can be a bit verbose. Plus, it's just a static file of the metrics at the time that you `curl`ed the endpoint.
 
 You can run the following command in a separate terminal to periodically poll the endpoint, and just print the values (without the header text) to the terminal:
 
@@ -137,6 +137,34 @@ As this might be a point of confusion, `localhost:9001`, which we supplied to `-
 To configure the dashboard in Grafana, click on the squares icon in the upper left, and click on "New", then "Import". From there, click on "Upload JSON file", and select the example file in [`reth/etc/grafana/dashboards/overview.json`](https://github.com/paradigmxyz/reth/blob/main/etc/grafana/dashboards/overview.json). Finally, select the Prometheus data source you just created, and click "Import".
 
 And voilà, you should see your dashboard! If you're not yet connected to any peers, the dashboard will look like it's in an empty state, but once you are, you should see it start populating with data.
+
+## Observability with OTLP
+
+Reth supports OTLP via the `tracing` crate, meaning logs and traces can be exported to OpenTelemetry backends. For example, [Grafana Tempo](https://grafana.com/oss/tempo/) and [Jaeger Tracing](https://www.jaegertracing.io/) can be used to query and explore traces and logs from reth.
+
+If you already have a backend set up on your infrastructure, you can point reth to export its traces by providing the `--tracing-otlp` argument.
+
+To run Jaeger locally, you can read the [Jaeger setup docs](https://www.jaegertracing.io/docs/2.11/getting-started/).
+This should run Jaeger with the otlp port `4318` and the dashboard port `16686`:
+```bash
+docker run --rm --name jaeger \
+  -p 16686:16686 \
+  -p 4317:4317 \
+  -p 4318:4318 \
+  -p 5778:5778 \
+  -p 9411:9411 \
+  cr.jaegertracing.io/jaegertracing/jaeger:2.11.0
+```
+
+Now we can provide the `--tracing-otlp` argument with reth:
+
+```bash
+reth node --tracing-otlp=http://localhost:4317 --tracing-otlp-protocol grpc
+```
+
+The traces reth exported should now be searchable and viewable on http://localhost:16686.
+
+For environments where reth is processing a high number of transactions or blocks, it may be a good idea to bump `OTEL_BLRP_MAX_QUEUE_SIZE`, which has a default of `2048`. This controls how many log records can be recorded before batching and exporting. If this is set to too low of a value, spans and events may be dropped by the exporter.
 
 ## Conclusion
 

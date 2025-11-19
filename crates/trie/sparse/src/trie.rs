@@ -2416,9 +2416,9 @@ mod tests {
             .into_sorted();
         let mut node_iter = TrieNodeIter::state_trie(
             walker,
-            HashedPostStateCursor::new(
-                Option::<NoopHashedCursor<Account>>::None,
-                hashed_post_state.accounts(),
+            HashedPostStateCursor::new_account(
+                NoopHashedCursor::<Account>::default(),
+                &hashed_post_state,
             ),
         );
 

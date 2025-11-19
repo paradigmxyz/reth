@@ -1,11 +1,9 @@
 use crate::{
-    segments::{PruneInput, Segment},
+    segments::{self, PruneInput, Segment},
     PrunerError,
 };
 use reth_provider::{BlockReader, StaticFileProviderFactory};
-use reth_prune_types::{
-    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
-};
+use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 use reth_static_file_types::StaticFileSegment;
 
 /// Segment responsible for pruning transactions in static files.
@@ -40,26 +38,7 @@ where
     }
 
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
-        let deleted_headers = provider
-            .static_file_provider()
-            .delete_segment_below_block(StaticFileSegment::Transactions, input.to_block + 1)?;
-
-        if deleted_headers.is_empty() {
-            return Ok(SegmentOutput::done())
-        }
-
-        let tx_ranges = deleted_headers.iter().filter_map(|header| header.tx_range());
-
-        let pruned = tx_ranges.clone().map(|range| range.len()).sum::<u64>() as usize;
-
-        Ok(SegmentOutput {
-            progress: PruneProgress::Finished,
-            pruned,
-            checkpoint: Some(SegmentOutputCheckpoint {
-                block_number: Some(input.to_block),
-                tx_number: tx_ranges.map(|range| range.end()).max(),
-            }),
-        })
+        segments::prune_static_files(provider, input, StaticFileSegment::Transactions)
     }
 }
 
@@ -149,7 +128,7 @@ mod tests {
 
         let static_provider = factory.static_file_provider();
         assert_eq!(
-            static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+            static_provider.get_lowest_range_end(StaticFileSegment::Transactions),
             test_case.expected_lowest_block
         );
         assert_eq!(
@@ -279,7 +258,10 @@ mod tests {
             // Set up initial state if provided
             if let Some(initial_range) = initial_range {
                 *writer.user_header_mut() = SegmentHeader::new(
-                    initial_range,
+                    // Expected block range needs to have a fixed size that's determined by the
+                    // provider itself
+                    static_provider
+                        .find_fixed_range(StaticFileSegment::Transactions, initial_range.start()),
                     Some(initial_range),
                     Some(initial_range),
                     StaticFileSegment::Transactions,
@@ -291,25 +273,21 @@ mod tests {
 
             // Verify initial state
             assert_eq!(
-                static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+                static_provider.get_lowest_range_end(StaticFileSegment::Transactions),
                 expected_before_update,
                 "Test case {}: Initial min_block mismatch",
                 idx
             );
 
-            // Update to new range
-            *writer.user_header_mut() = SegmentHeader::new(
-                updated_range,
-                Some(updated_range),
-                Some(updated_range),
-                StaticFileSegment::Transactions,
-            );
+            // Update to new block and tx ranges
+            writer.user_header_mut().set_block_range(updated_range.start(), updated_range.end());
+            writer.user_header_mut().set_tx_range(updated_range.start(), updated_range.end());
             writer.inner().set_dirty();
             writer.commit().unwrap(); // update_index is called inside
 
             // Verify min_block was updated (not stuck at stale value)
             assert_eq!(
-                static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+                static_provider.get_lowest_range_end(StaticFileSegment::Transactions),
                 Some(expected_after_update),
                 "Test case {}: min_block should be updated to {} (not stuck at stale value)",
                 idx,

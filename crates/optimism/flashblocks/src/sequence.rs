@@ -1,9 +1,10 @@
-use crate::{ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx};
+use crate::{FlashBlock, FlashBlockCompleteSequenceRx};
 use alloy_eips::eip2718::WithEncoded;
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::PayloadId;
 use core::mem;
 use eyre::{bail, OptionExt};
+use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_primitives_traits::{Recovered, SignedTransaction};
 use std::{collections::BTreeMap, ops::Deref};
 use tokio::sync::broadcast;
@@ -12,18 +13,24 @@ use tracing::{debug, trace, warn};
 /// The size of the broadcast channel for completed flashblock sequences.
 const FLASHBLOCK_SEQUENCE_CHANNEL_SIZE: usize = 128;
 
+/// Outcome from executing a flashblock sequence.
+#[derive(Debug, Clone, Copy)]
+pub struct SequenceExecutionOutcome {
+    /// The block hash of the executed pending block
+    pub block_hash: B256,
+    /// Properly computed state root
+    pub state_root: B256,
+}
+
 /// An ordered B-tree keeping the track of a sequence of [`FlashBlock`]s by their indices.
 #[derive(Debug)]
 pub struct FlashBlockPendingSequence<T> {
     /// tracks the individual flashblocks in order
-    ///
-    /// With a blocktime of 2s and flashblock tick-rate of 200ms plus one extra flashblock per new
-    /// pending block, we expect 11 flashblocks per slot.
     inner: BTreeMap<u64, PreparedFlashBlock<T>>,
     /// Broadcasts flashblocks to subscribers.
     block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence>,
-    /// Optional properly computed state root for the current sequence.
-    state_root: Option<B256>,
+    /// Optional execution outcome from building the current sequence.
+    execution_outcome: Option<SequenceExecutionOutcome>,
 }
 
 impl<T> FlashBlockPendingSequence<T>
@@ -35,7 +42,7 @@ where
         // Note: if the channel is full, send will not block but rather overwrite the oldest
         // messages. Order is preserved.
         let (tx, _) = broadcast::channel(FLASHBLOCK_SEQUENCE_CHANNEL_SIZE);
-        Self { inner: BTreeMap::new(), block_broadcaster: tx, state_root: None }
+        Self { inner: BTreeMap::new(), block_broadcaster: tx, execution_outcome: None }
     }
 
     /// Returns the sender half of the [`FlashBlockCompleteSequence`] channel.
@@ -52,13 +59,18 @@ where
 
     // Clears the state and broadcasts the blocks produced to subscribers.
     fn clear_and_broadcast_blocks(&mut self) {
+        if self.inner.is_empty() {
+            return;
+        }
+
         let flashblocks = mem::take(&mut self.inner);
+        let execution_outcome = mem::take(&mut self.execution_outcome);
 
         // If there are any subscribers, send the flashblocks to them.
         if self.block_broadcaster.receiver_count() > 0 {
             let flashblocks = match FlashBlockCompleteSequence::new(
                 flashblocks.into_iter().map(|block| block.1.into()).collect(),
-                self.state_root,
+                execution_outcome,
             ) {
                 Ok(flashblocks) => flashblocks,
                 Err(err) => {
@@ -81,7 +93,7 @@ where
     /// A [`FlashBlock`] with index 0 resets the set.
     pub fn insert(&mut self, flashblock: FlashBlock) -> eyre::Result<()> {
         if flashblock.index == 0 {
-            trace!(number=%flashblock.block_number(), "Tracking new flashblock sequence");
+            trace!(target: "flashblocks", number=%flashblock.block_number(), "Tracking new flashblock sequence");
 
             // Flash block at index zero resets the whole state.
             self.clear_and_broadcast_blocks();
@@ -92,22 +104,25 @@ where
 
         // only insert if we previously received the same block and payload, assume we received
         // index 0
-        let same_block = self.block_number() == Some(flashblock.metadata.block_number);
+        let same_block = self.block_number() == Some(flashblock.block_number());
         let same_payload = self.payload_id() == Some(flashblock.payload_id);
 
         if same_block && same_payload {
-            trace!(number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len()  ,"Received followup flashblock");
+            trace!(target: "flashblocks", number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len()  ,"Received followup flashblock");
             self.inner.insert(flashblock.index, PreparedFlashBlock::new(flashblock)?);
         } else {
-            trace!(number=%flashblock.block_number(), index = %flashblock.index, current=?self.block_number()  ,"Ignoring untracked flashblock following");
+            trace!(target: "flashblocks", number=%flashblock.block_number(), index = %flashblock.index, current=?self.block_number()  ,"Ignoring untracked flashblock following");
         }
 
         Ok(())
     }
 
-    /// Set state root
-    pub const fn set_state_root(&mut self, state_root: Option<B256>) {
-        self.state_root = state_root;
+    /// Set execution outcome from building the flashblock sequence
+    pub const fn set_execution_outcome(
+        &mut self,
+        execution_outcome: Option<SequenceExecutionOutcome>,
+    ) {
+        self.execution_outcome = execution_outcome;
     }
 
     /// Iterator over sequence of executable transactions.
@@ -129,11 +144,11 @@ where
 
     /// Returns the first block number
     pub fn block_number(&self) -> Option<u64> {
-        Some(self.inner.values().next()?.block().metadata.block_number)
+        Some(self.inner.values().next()?.block().block_number())
     }
 
     /// Returns the payload base of the first tracked flashblock.
-    pub fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
+    pub fn payload_base(&self) -> Option<OpFlashblockPayloadBase> {
         self.inner.values().next()?.block().base.clone()
     }
 
@@ -170,12 +185,12 @@ where
 ///
 /// Ensures invariants of a complete flashblocks sequence.
 /// If this entire sequence of flashblocks was executed on top of latest block, this also includes
-/// the computed state root.
+/// the execution outcome with block hash and state root.
 #[derive(Debug, Clone)]
 pub struct FlashBlockCompleteSequence {
     inner: Vec<FlashBlock>,
-    /// Optional state root for the current sequence
-    state_root: Option<B256>,
+    /// Optional execution outcome from building the flashblock sequence
+    execution_outcome: Option<SequenceExecutionOutcome>,
 }
 
 impl FlashBlockCompleteSequence {
@@ -184,7 +199,10 @@ impl FlashBlockCompleteSequence {
     /// * vector is not empty
     /// * first flashblock have the base payload
     /// * sequence of flashblocks is sound (successive index from 0, same payload id, ...)
-    pub fn new(blocks: Vec<FlashBlock>, state_root: Option<B256>) -> eyre::Result<Self> {
+    pub fn new(
+        blocks: Vec<FlashBlock>,
+        execution_outcome: Option<SequenceExecutionOutcome>,
+    ) -> eyre::Result<Self> {
         let first_block = blocks.first().ok_or_eyre("No flashblocks in sequence")?;
 
         // Ensure that first flashblock have base
@@ -194,21 +212,21 @@ impl FlashBlockCompleteSequence {
         if !blocks.iter().enumerate().all(|(idx, block)| {
             idx == block.index as usize &&
                 block.payload_id == first_block.payload_id &&
-                block.metadata.block_number == first_block.metadata.block_number
+                block.block_number() == first_block.block_number()
         }) {
             bail!("Flashblock inconsistencies detected in sequence");
         }
 
-        Ok(Self { inner: blocks, state_root })
+        Ok(Self { inner: blocks, execution_outcome })
     }
 
     /// Returns the block number
     pub fn block_number(&self) -> u64 {
-        self.inner.first().unwrap().metadata.block_number
+        self.inner.first().unwrap().block_number()
     }
 
     /// Returns the payload base of the first flashblock.
-    pub fn payload_base(&self) -> &ExecutionPayloadBaseV1 {
+    pub fn payload_base(&self) -> &OpFlashblockPayloadBase {
         self.inner.first().unwrap().base.as_ref().unwrap()
     }
 
@@ -222,9 +240,14 @@ impl FlashBlockCompleteSequence {
         self.inner.last().unwrap()
     }
 
-    /// Returns the state root for the current sequence
-    pub const fn state_root(&self) -> Option<B256> {
-        self.state_root
+    /// Returns the execution outcome of the sequence.
+    pub const fn execution_outcome(&self) -> Option<SequenceExecutionOutcome> {
+        self.execution_outcome
+    }
+
+    /// Returns all transactions from all flashblocks in the sequence
+    pub fn all_transactions(&self) -> Vec<Bytes> {
+        self.inner.iter().flat_map(|fb| fb.diff.transactions.iter().cloned()).collect()
     }
 }
 
@@ -241,7 +264,7 @@ impl<T> TryFrom<FlashBlockPendingSequence<T>> for FlashBlockCompleteSequence {
     fn try_from(sequence: FlashBlockPendingSequence<T>) -> Result<Self, Self::Error> {
         Self::new(
             sequence.inner.into_values().map(|block| block.block().clone()).collect::<Vec<_>>(),
-            sequence.state_root,
+            sequence.execution_outcome,
         )
     }
 }
@@ -297,12 +320,14 @@ impl<T> Deref for PreparedFlashBlock<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ExecutionPayloadFlashblockDeltaV1;
     use alloy_consensus::{
         transaction::SignerRecoverable, EthereumTxEnvelope, EthereumTypedTransaction, TxEip1559,
     };
     use alloy_eips::Encodable2718;
     use alloy_primitives::{hex, Signature, TxKind, U256};
+    use op_alloy_rpc_types_engine::{
+        OpFlashblockPayload, OpFlashblockPayloadBase, OpFlashblockPayloadDelta,
+    };
 
     #[test]
     fn test_sequence_stops_before_gap() {
@@ -332,11 +357,11 @@ mod tests {
         let tx = Recovered::new_unchecked(tx.clone(), tx.recover_signer_unchecked().unwrap());
 
         sequence
-            .insert(FlashBlock {
+            .insert(OpFlashblockPayload {
                 payload_id: Default::default(),
                 index: 0,
                 base: None,
-                diff: ExecutionPayloadFlashblockDeltaV1 {
+                diff: OpFlashblockPayloadDelta {
                     transactions: vec![tx.encoded_2718().into()],
                     ..Default::default()
                 },
@@ -345,7 +370,7 @@ mod tests {
             .unwrap();
 
         sequence
-            .insert(FlashBlock {
+            .insert(OpFlashblockPayload {
                 payload_id: Default::default(),
                 index: 2,
                 base: None,
@@ -367,10 +392,10 @@ mod tests {
 
         for idx in 0..10 {
             sequence
-                .insert(FlashBlock {
+                .insert(OpFlashblockPayload {
                     payload_id: Default::default(),
                     index: idx,
-                    base: Some(ExecutionPayloadBaseV1::default()),
+                    base: Some(OpFlashblockPayloadBase::default()),
                     diff: Default::default(),
                     metadata: Default::default(),
                 })
@@ -385,10 +410,10 @@ mod tests {
 
         // Let's insert a new flashblock with index 0
         sequence
-            .insert(FlashBlock {
+            .insert(OpFlashblockPayload {
                 payload_id: Default::default(),
                 index: 0,
-                base: Some(ExecutionPayloadBaseV1::default()),
+                base: Some(OpFlashblockPayloadBase::default()),
                 diff: Default::default(),
                 metadata: Default::default(),
             })

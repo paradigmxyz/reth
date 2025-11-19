@@ -771,6 +771,11 @@ where
 
                 // Use state root task only if prefix sets are empty, otherwise proof generation is
                 // too expensive because it requires walking all paths in every proof.
+                self.metrics
+                    .block_validation
+                    .trie_input_duration
+                    .record(trie_input_start.elapsed().as_secs_f64());
+
                 let spawn_start = Instant::now();
                 let handle = self.payload_processor.spawn(
                     env,
