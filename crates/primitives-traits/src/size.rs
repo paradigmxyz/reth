@@ -151,7 +151,10 @@ mod op {
     impl InMemorySize for op_alloy_consensus::OpReceipt {
         fn size(&self) -> usize {
             match self {
-                Self::Legacy(receipt) | Self::Eip2930(receipt) | Self::Eip1559(receipt) | Self::Eip7702(receipt) => receipt.size(),
+                Self::Legacy(receipt) |
+                Self::Eip2930(receipt) |
+                Self::Eip1559(receipt) |
+                Self::Eip7702(receipt) => receipt.size(),
                 Self::Deposit(receipt) => receipt.size(),
             }
         }
