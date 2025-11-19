@@ -1557,7 +1557,7 @@ where
                     true
                 } else {
                     // try once more, because mostlikely the channel is now empty and the waker is
-                    // registered if this is pending, if we filled additional hashs, we poll again
+                    // registered if this is pending, if we filled additional hashes, we poll again
                     // on the next iteration
                     let limit =
                         SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE -
