@@ -2,7 +2,7 @@
 
 use clap::Args;
 use reth_config::config::{BlocksPerFileConfig, StaticFilesConfig};
-use reth_storage_api::StorageSettings;
+use reth_provider::StorageSettings;
 
 /// Parameters for static files configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
@@ -47,6 +47,10 @@ impl StaticFilesArgs {
 
     /// Converts the static files arguments into [`StorageSettings`].
     pub const fn to_settings(&self) -> StorageSettings {
-        StorageSettings::legacy().with_receipts_in_static_files_opt(Some(self.receipts))
+        if self.receipts {
+            StorageSettings::new().with_receipts_in_static_files()
+        } else {
+            StorageSettings::legacy()
+        }
     }
 }

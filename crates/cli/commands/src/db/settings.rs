@@ -31,7 +31,6 @@ enum Subcommands {
 #[derive(Debug, Clone, Copy, Subcommand)]
 pub enum SetCommand {
     /// Store receipts in static files instead of the database
-    #[clap(name = "receipts_in_static_files")]
     ReceiptsInStaticFiles {
         #[clap(action(ArgAction::Set))]
         value: bool,
