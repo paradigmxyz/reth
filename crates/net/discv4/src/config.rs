@@ -346,7 +346,7 @@ mod tests {
 
         // Create a config with external IP resolver
         let mut builder = Discv4Config::builder();
-        builder.external_ip_resolver(Some(NatResolver::ExternalIp(ip_addr.clone())));
+        builder.external_ip_resolver(Some(NatResolver::ExternalIp(ip_addr)));
         builder.resolve_external_ip_interval(Some(Duration::from_secs(60 * 5)));
         let config = builder.build();
 
