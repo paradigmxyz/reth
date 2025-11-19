@@ -17,9 +17,6 @@ use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{BranchNode, Nibbles, ProofTrieNode, RlpNode, TrieMasks, TrieNode};
 use tracing::{instrument, trace};
 
-mod targets;
-pub use targets::*;
-
 mod value;
 pub use value::*;
 
@@ -38,7 +35,7 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// - Automatically resets after each calculation
 /// - Re-uses cursors from one calculation to the next
 #[derive(Debug)]
-pub struct ProofCalculator<TC, HC, VE: ValueEncoder> {
+pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     /// Trie cursor for traversing stored branch nodes.
     trie_cursor: TC,
     /// Hashed cursor for iterating over leaf data.
@@ -69,7 +66,7 @@ pub struct ProofCalculator<TC, HC, VE: ValueEncoder> {
     rlp_encode_buf: Vec<u8>,
 }
 
-impl<TC, HC, VE: ValueEncoder> ProofCalculator<TC, HC, VE> {
+impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
     /// Create a new [`ProofCalculator`] instance for calculating account proofs.
     pub const fn new(trie_cursor: TC, hashed_cursor: HC) -> Self {
         Self {
@@ -88,7 +85,7 @@ impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
     TC: TrieCursor,
     HC: HashedCursor,
-    VE: ValueEncoder<Value = HC::Value>,
+    VE: LeafValueEncoder<Value = HC::Value>,
 {
     /// Takes a re-usable `RlpNode` buffer from the internal free-list, or allocates a new one if
     /// the free-list is empty.
@@ -438,7 +435,7 @@ impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
     TC: TrieCursor,
     HC: HashedCursor,
-    VE: ValueEncoder<Value = HC::Value>,
+    VE: LeafValueEncoder<Value = HC::Value>,
 {
     /// Generate a proof for the given targets.
     ///
@@ -462,9 +459,6 @@ where
 
 /// A proof calculator for storage tries.
 pub type StorageProofCalculator<TC, HC> = ProofCalculator<TC, HC, StorageValueEncoder>;
-
-/// Static storage value encoder instance used by all storage proofs.
-static STORAGE_VALUE_ENCODER: StorageValueEncoder = StorageValueEncoder;
 
 impl<TC, HC> StorageProofCalculator<TC, HC>
 where
@@ -490,6 +484,9 @@ where
         hashed_address: B256,
         targets: impl IntoIterator<Item = Nibbles>,
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
+        /// Static storage value encoder instance used by all storage proofs.
+        static STORAGE_VALUE_ENCODER: StorageValueEncoder = StorageValueEncoder;
+
         self.hashed_cursor.set_hashed_address(hashed_address);
 
         // Shortcut: check if storage is empty
