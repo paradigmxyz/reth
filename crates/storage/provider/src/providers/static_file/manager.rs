@@ -1056,9 +1056,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     }
                 }
                 StaticFileSegment::AccountChangeSets => {
-                    // Skip AccountChangeSets if no static files exist for it yet (backward
-                    // compatibility)
-                    if self.get_highest_static_file_block(segment).is_none() {
+                    if EitherWriter::account_changesets_destination(provider).is_database() {
+                        // Old pruned nodes (including full node) do not store receipts as static
+                        // files.
+                        debug!(target: "reth::providers::static_file", ?segment, "Skipping account changesets consistency check: receipts stored in database");
                         continue
                     }
                 }

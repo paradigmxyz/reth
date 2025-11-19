@@ -107,6 +107,19 @@ impl EitherWriter<'_, (), ()> {
             EitherWriterDestination::StaticFile
         }
     }
+
+    /// Returns the destination for writing account changesets.
+    ///
+    /// This determines the destination based solely on storage settings.
+    pub fn account_changesets_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        if provider.cached_storage_settings().account_changesets_in_static_files {
+            EitherWriterDestination::StaticFile
+        } else {
+            EitherWriterDestination::Database
+        }
+    }
 }
 
 #[derive(Debug, EnumIs)]

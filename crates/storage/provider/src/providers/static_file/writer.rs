@@ -1070,7 +1070,7 @@ fn create_jar(
 
     // Transaction and Receipt already have the compression scheme used natively in its encoding.
     // (zstd-dictionary)
-    if segment.is_headers() {
+    if segment.is_headers() || segment.is_account_change_sets() {
         jar = jar.with_lz4();
     }
 
