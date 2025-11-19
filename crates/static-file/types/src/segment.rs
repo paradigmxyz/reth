@@ -6,7 +6,7 @@ use core::{
     str::FromStr,
 };
 use derive_more::Display;
-use serde::{de::Visitor, Deserialize, Deserializer, Serialize};
+use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use strum::{EnumIs, EnumString};
 
 #[derive(
@@ -156,8 +156,8 @@ impl StaticFileSegment {
     /// Returns `true` if the segment is `StaticFileSegment::AccountChangeSets`
     pub const fn is_change_based(&self) -> bool {
         match self {
-            Self::AccountChangeSets => false,
-            Self::Receipts | Self::Transactions | Self::Headers => true,
+            Self::AccountChangeSets => true,
+            Self::Receipts | Self::Transactions | Self::Headers => false,
         }
     }
 
@@ -198,7 +198,7 @@ impl ChangesetOffset {
 }
 
 /// A segment header that contains information common to all segments. Used for storage.
-#[derive(Debug, Serialize, Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub struct SegmentHeader {
     /// Defines the expected block range for a static file segment. This attribute is crucial for
     /// scenarios where the file contains no data, allowing for a representation beyond a
@@ -212,7 +212,6 @@ pub struct SegmentHeader {
     /// Segment type
     segment: StaticFileSegment,
     /// List of offsets, for where each block's changeset starts.
-    #[serde(skip_serializing_if = "Option::is_none")]
     changeset_offsets: Option<Vec<ChangesetOffset>>,
 }
 
@@ -275,6 +274,28 @@ impl<'de> Deserialize<'de> for SegmentHeader {
             &["expected_block_range", "block_range", "tx_range", "segment", "changeset_offsets"];
 
         deserializer.deserialize_struct("YourStruct", FIELDS, SegmentHeaderVisitor)
+    }
+}
+
+impl Serialize for SegmentHeader {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // We serialize an extra field, the changeset offsets, for account changesets
+        let len = if self.segment.is_account_change_sets() { 5 } else { 4 };
+
+        let mut state = serializer.serialize_struct("SegmentHeader", len)?;
+        state.serialize_field("expected_block_range", &self.expected_block_range)?;
+        state.serialize_field("block_range", &self.block_range)?;
+        state.serialize_field("tx_range", &self.tx_range)?;
+        state.serialize_field("segment", &self.segment)?;
+
+        if self.segment.is_account_change_sets() {
+            state.serialize_field("changeset_offsets", &self.changeset_offsets)?;
+        }
+
+        state.end()
     }
 }
 
