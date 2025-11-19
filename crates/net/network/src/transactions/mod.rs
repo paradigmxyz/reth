@@ -1559,14 +1559,10 @@ where
                     // try once more, because mostlikely the channel is now empty and the waker is
                     // registered if this is pending, if we filled additional hashs, we poll again
                     // on the next iteration
-                    this.pending_transactions
-                        .poll_recv_many(
-                            cx,
-                            &mut new_txs,
-                            SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE -
-                                new_txs.len(),
-                        )
-                        .is_ready()
+                    let limit =
+                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE -
+                            new_txs.len();
+                    this.pending_transactions.poll_recv_many(cx, &mut new_txs, limit).is_ready()
                 }
             }
             Poll::Pending => false,
