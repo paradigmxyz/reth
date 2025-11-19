@@ -296,17 +296,24 @@ impl ComparisonGenerator {
 
         let total_duration_ms = total_gas_data.last().unwrap().time / 1000; // Convert microseconds to milliseconds
 
+        // Sum of all newPayload latencies (in microseconds)
+        let total_new_payload_latency_us: u128 =
+            combined_data.iter().map(|r| r.new_payload_latency).sum();
+
         let avg_new_payload_latency_ms: f64 =
             combined_data.iter().map(|r| r.new_payload_latency as f64 / 1000.0).sum::<f64>() /
                 total_blocks as f64;
 
-        let total_duration_seconds = total_duration_ms as f64 / 1000.0;
-        let gas_per_second = if total_duration_seconds > f64::EPSILON {
-            total_gas_used as f64 / total_duration_seconds
+        // Calculate gas/s based on actual newPayload processing time, not wall-clock time
+        let total_new_payload_duration_seconds = total_new_payload_latency_us as f64 / 1_000_000.0;
+        let gas_per_second = if total_new_payload_duration_seconds > f64::EPSILON {
+            total_gas_used as f64 / total_new_payload_duration_seconds
         } else {
             0.0
         };
 
+        // Calculate blocks/s based on wall-clock time (includes wait time between blocks)
+        let total_duration_seconds = total_duration_ms as f64 / 1000.0;
         let blocks_per_second = if total_duration_seconds > f64::EPSILON {
             total_blocks as f64 / total_duration_seconds
         } else {

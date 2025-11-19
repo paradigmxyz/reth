@@ -4,8 +4,8 @@ use alloy_provider::{Provider, ProviderBuilder};
 use clap::Parser;
 use eyre::{eyre, Result, WrapErr};
 use reth_chainspec::Chain;
-use reth_cli_runner::CliContext;
-use reth_node_core::args::{DatadirArgs, LogArgs, TraceArgs};
+use reth_cli_runner::{CliContext, CliRunner};
+use reth_node_core::args::{DatadirArgs, LogArgs, OtlpInitStatus, TraceArgs};
 use reth_tracing::FileWorkerGuard;
 use std::{net::TcpListener, path::PathBuf, str::FromStr};
 use tokio::process::Command;
@@ -181,9 +181,33 @@ pub(crate) struct Args {
 }
 
 impl Args {
-    /// Initializes tracing with the configured options.
-    pub(crate) fn init_tracing(&self) -> Result<Option<FileWorkerGuard>> {
-        let guard = self.logs.init_tracing()?;
+    /// Initializes tracing with the configured options, including OTLP if requested.
+    /// Requires a CliRunner for OTLP gRPC initialization (which needs tokio runtime).
+    pub(crate) fn init_tracing(&mut self, runner: &CliRunner) -> Result<Option<FileWorkerGuard>> {
+        use reth_tracing::Layers;
+
+        // Create layers for tracing
+        let mut layers = Layers::new();
+
+        // Initialize OTLP tracing (requires async context for gRPC)
+        let otlp_status = runner.block_on(self.traces.init_otlp_tracing(&mut layers))?;
+
+        // Initialize logging with all layers (including OTLP if configured)
+        let guard = self.logs.init_tracing_with_layers(layers)?;
+
+        // Log OTLP status
+        match otlp_status {
+            OtlpInitStatus::Started(endpoint) => {
+                info!("Started OTLP {:?} tracing export to {}", self.traces.protocol, endpoint);
+            }
+            OtlpInitStatus::Disabled => {
+                // No OTLP tracing requested
+            }
+            OtlpInitStatus::NoFeature => {
+                warn!("OTLP tracing arguments provided but 'otlp' feature not compiled");
+            }
+        }
+
         Ok(guard)
     }
 

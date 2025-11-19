@@ -114,6 +114,7 @@ impl Command {
         let mut results = Vec::new();
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
+        let mut total_sleep_time = Duration::ZERO;
 
         while let Some((block, head, safe, finalized)) = {
             let wait_start = Instant::now();
@@ -155,14 +156,17 @@ impl Command {
             };
 
             // current duration since the start of the benchmark minus the time
-            // waiting for blocks
-            let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
+            // waiting for blocks and the artificial sleep time
+            let current_duration =
+                total_benchmark_duration.elapsed() - total_wait_time - total_sleep_time;
 
             // convert gas used to gigagas, then compute gigagas per second
             info!(%combined_result);
 
             // wait before sending the next payload
+            let sleep_start = Instant::now();
             tokio::time::sleep(self.wait_time).await;
+            total_sleep_time += sleep_start.elapsed();
 
             // record the current result
             let gas_row =
