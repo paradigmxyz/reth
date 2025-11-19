@@ -753,14 +753,6 @@ impl SparseTrieInterface for ParallelSparseTrie {
             changed_subtries
                 .into_par_iter()
                 .map(|mut changed_subtrie| {
-                    let _enter = debug_span!(
-                        target: "trie::parallel_sparse",
-                        parent: span.clone(),
-                        "subtrie",
-                        index = changed_subtrie.index
-                    )
-                    .entered();
-
                     #[cfg(feature = "metrics")]
                     let start = std::time::Instant::now();
                     changed_subtrie.subtrie.update_hashes(
