@@ -55,6 +55,7 @@ impl Command {
     pub fn execute(
         &self,
         src_env: &DatabaseEnv,
+        src_path: &PathBuf,
         db_args: &reth_db::mdbx::DatabaseArguments,
     ) -> eyre::Result<()> {
         // Ensure destination doesn't exist
@@ -81,24 +82,35 @@ impl Command {
 
         if !self.quiet {
             info!(target: "reth::cli", "Copy completed in {:.2}s", elapsed.as_secs_f64());
-            
-            // Display size comparison
-            let src_size = src_env.info()?.map_size();
-            if let Ok(dst_metadata) = std::fs::metadata(&self.to.join("mdbx.dat")) {
+
+            // Display size comparison - compare actual file sizes
+            if let (Ok(src_metadata), Ok(dst_metadata)) = (
+                std::fs::metadata(src_path.join("mdbx.dat")),
+                std::fs::metadata(self.to.join("mdbx.dat"))
+            ) {
+                let src_size = src_metadata.len() as usize;
                 let dst_size = dst_metadata.len() as usize;
-                info!(target: "reth::cli", "Source database map size: {}", format_byte_size(src_size));
+                info!(target: "reth::cli", "Source database file size: {}", format_byte_size(src_size));
                 info!(target: "reth::cli", "Destination file size: {}", format_byte_size(dst_size));
-                
+
                 if dst_size < src_size {
                     let reduction = ((src_size - dst_size) as f64 / src_size as f64) * 100.0;
-                    info!(target: "reth::cli", 
+                    info!(target: "reth::cli",
                           "Size reduction: {} ({:.2}% smaller due to defragmentation)",
                           format_byte_size(src_size - dst_size),
                           reduction);
-                    info!(target: "reth::cli", 
+                    info!(target: "reth::cli",
                           "  Note: This is normal. The copy process eliminates fragmentation,");
-                    info!(target: "reth::cli", 
+                    info!(target: "reth::cli",
                           "  empty pages, and compacts the data structure.");
+                } else if dst_size > src_size {
+                    let increase = ((dst_size - src_size) as f64 / src_size as f64) * 100.0;
+                    info!(target: "reth::cli",
+                          "Size increase: {} ({:.2}% larger)",
+                          format_byte_size(dst_size - src_size),
+                          increase);
+                    info!(target: "reth::cli",
+                          "  Note: This may occur if page size or other database parameters differ.");
                 }
             }
         }
@@ -113,26 +125,26 @@ impl Command {
         base_db_args: &reth_db::mdbx::DatabaseArguments,
     ) -> eyre::Result<()> {
         use reth_db::tables::Tables;
-        
+
         // Get source database parameters for display
         let src_info = src_env.info()?;
         let src_stat = src_env.stat()?;
         let src_page_size = src_stat.page_size();
         let src_map_size = src_info.map_size();
-        
+
         // Start with system database arguments (includes log_level, exclusive, max_readers, etc.)
         // then override with user-specified parameters
         let mut dst_args = base_db_args.clone();
-        
+
         // Determine target parameters
         // Priority: user specified > source database
         let max_size_bytes = self.max_size.unwrap_or(src_map_size);
         let growth_step_bytes = self.growth_step;
-        
+
         dst_args = dst_args
             .with_geometry_max_size(Some(max_size_bytes))
             .with_growth_step(Some(growth_step_bytes));
-        
+
         // Override page size if user specified it
         if let Some(page_size) = self.page_size {
             dst_args = dst_args.with_page_size(Some(page_size));
@@ -167,15 +179,15 @@ impl Command {
             Tables::ALL.iter().map(|t| t.name().to_string()).collect()
         } else {
             // Validate table names
-            let valid_tables: std::collections::HashSet<&str> = 
+            let valid_tables: std::collections::HashSet<&str> =
                 Tables::ALL.iter().map(|t| t.name()).collect();
-            
+
             for table in &self.tables {
                 if !valid_tables.contains(table.as_str()) {
                     eyre::bail!("Unknown table: {}", table);
                 }
             }
-            
+
             self.tables.clone()
         };
 
@@ -193,7 +205,7 @@ impl Command {
                 info!(target: "reth::cli", "[{}/{}] Copying table: {}", 
                       idx + 1, total_tables, table_name);
             }
-            
+
             self.copy_table_generic(src_env, &dst_env, table_name)?;
         }
 
@@ -209,28 +221,28 @@ impl Command {
         table_name: &str,
     ) -> eyre::Result<usize> {
         let mut src_tx = src_env.tx()?;
-        
+
         // Disable timeout for long-running read transaction during copy
         // This is necessary because copying large tables can take a very long time
         src_tx.disable_long_read_transaction_safety();
-        
+
         let mut dst_tx = dst_env.tx_mut()?;
-        
+
         // Open the databases (tables) by name
         // Source: read-only, use open_db() - table must exist
         let src_db = src_tx.inner.open_db(Some(table_name))?;
         // Destination: tables are already created by init_db(), just open them
         let dst_db = dst_tx.inner.open_db(Some(table_name))?;
-        
+
         // Clear destination table before copying
         // This is necessary because:
         // 1. init_db() may have pre-populated some tables (e.g., VersionHistory)
         // 2. APPEND flag requires an empty table or strictly ordered keys
         dst_tx.inner.clear_db(dst_db.dbi())?;
-        
+
         // Get total number of entries for progress calculation
         let total_entries = src_tx.inner.db_stat(&src_db)?.entries();
-        
+
         if !self.quiet {
             info!(
                 target: "reth::cli",
@@ -239,38 +251,38 @@ impl Command {
                 total_entries
             );
         }
-        
+
         // Get cursor for source and destination
         let src_cursor = src_tx.inner.cursor(&src_db)?;
         let mut dst_cursor = dst_tx.inner.cursor(&dst_db)?;
-        
+
         let mut copied = 0usize;
         let mut batch_count = 0usize;
         let mut last_progress = Instant::now();
         let start_time = Instant::now();
-        
+
         // Iterate through all records as byte slices
         for item in src_cursor.iter_slices() {
             let (key, value) = item?;
-            
+
             // Insert into destination (convert Cow to slice)
             // Use APPEND flag for better performance (assumes ordered insert)
             dst_tx.inner.put(dst_db.dbi(), &key, &value, WriteFlags::APPEND)?;
             copied += 1;
             batch_count += 1;
-            
+
             // Periodic commit
             if batch_count >= self.commit_every {
                 drop(dst_cursor);
                 dst_tx.commit()?;
-                
+
                 // Start new transaction
                 dst_tx = dst_env.tx_mut()?;
                 // Re-open destination table (already created, but need handle in new transaction)
                 let dst_db = dst_tx.inner.open_db(Some(table_name))?;
                 dst_cursor = dst_tx.inner.cursor(&dst_db)?;
                 batch_count = 0;
-                
+
                 // Progress logging
                 if !self.quiet && last_progress.elapsed().as_secs() >= 5 {
                     let percentage = if total_entries > 0 {
@@ -289,13 +301,13 @@ impl Command {
                 }
             }
         }
-        
+
         // Final commit
         if batch_count > 0 {
             drop(dst_cursor);
             dst_tx.commit()?;
         }
-        
+
         // Log completion
         if !self.quiet {
             let elapsed = start_time.elapsed();
@@ -304,7 +316,7 @@ impl Command {
             } else {
                 copied as f64
             };
-            
+
             if copied == 0 {
                 info!(
                     target: "reth::cli",
@@ -322,7 +334,7 @@ impl Command {
                 );
             }
         }
-        
+
         Ok(copied)
     }
 }
