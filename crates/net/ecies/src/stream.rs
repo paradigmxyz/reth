@@ -67,8 +67,7 @@ where
         secret_key: SecretKey,
         remote_id: PeerId,
     ) -> Result<Self, ECIESError> {
-        let ecies = ECIESCodec::new_client(secret_key, remote_id)
-            .map_err(|_| io::Error::other("invalid handshake"))?;
+        let ecies = ECIESCodec::new_client(secret_key, remote_id)?;
 
         let mut transport = ecies.framed(transport);
 

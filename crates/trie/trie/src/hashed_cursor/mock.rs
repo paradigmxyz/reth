@@ -99,7 +99,11 @@ pub struct MockHashedCursor<T> {
 }
 
 impl<T> MockHashedCursor<T> {
-    fn new(values: Arc<BTreeMap<B256, T>>, visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>) -> Self {
+    /// Creates a new mock hashed cursor with the given values and key tracking.
+    pub fn new(
+        values: Arc<BTreeMap<B256, T>>,
+        visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>,
+    ) -> Self {
         Self { current_key: None, values, visited_keys }
     }
 }
@@ -141,11 +145,19 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
         });
         Ok(entry)
     }
+
+    fn reset(&mut self) {
+        self.current_key = None;
+    }
 }
 
 impl<T: Debug + Clone> HashedStorageCursor for MockHashedCursor<T> {
     #[instrument(level = "trace", skip(self), ret)]
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         Ok(self.values.is_empty())
+    }
+
+    fn set_hashed_address(&mut self, _hashed_address: B256) {
+        unimplemented!()
     }
 }

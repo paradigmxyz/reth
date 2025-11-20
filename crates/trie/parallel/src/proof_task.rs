@@ -42,14 +42,14 @@ use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
-use reth_provider::{DatabaseProviderROFactory, ProviderError};
+use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory,
+    hashed_cursor::{HashedCursorFactory, HashedCursorMetricsCache, InstrumentedHashedCursor},
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::{TriePrefixSets, TriePrefixSetsMut},
+    prefix_set::TriePrefixSets,
     proof::{ProofBlindedAccountProvider, ProofBlindedStorageProvider, StorageProof},
-    trie_cursor::TrieCursorFactory,
+    trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache},
     walker::TrieWalker,
     DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostState, MultiProofTargets,
     Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -72,7 +72,9 @@ use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, trace};
 
 #[cfg(feature = "metrics")]
-use crate::proof_task_metrics::ProofTaskTrieMetrics;
+use crate::proof_task_metrics::{
+    ProofTaskCursorMetrics, ProofTaskCursorMetricsCache, ProofTaskTrieMetrics,
+};
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
@@ -151,6 +153,8 @@ impl ProofWorkerHandle {
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
+                #[cfg(feature = "metrics")]
+                let cursor_metrics = ProofTaskCursorMetrics::new();
 
                 let _guard = span.enter();
                 let worker = StorageProofWorker::new(
@@ -160,14 +164,23 @@ impl ProofWorkerHandle {
                     storage_available_workers_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
+                    #[cfg(feature = "metrics")]
+                    cursor_metrics,
                 );
-                worker.run()
+                if let Err(error) = worker.run() {
+                    error!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        ?error,
+                        "Storage worker failed"
+                    );
+                }
             });
         }
         drop(parent_span);
 
         let parent_span =
-            debug_span!(target: "trie::proof_task", "account proof workers", ?storage_worker_count)
+            debug_span!(target: "trie::proof_task", "account proof workers", ?account_worker_count)
                 .entered();
         // Spawn account workers
         for worker_id in 0..account_worker_count {
@@ -180,6 +193,8 @@ impl ProofWorkerHandle {
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
+                #[cfg(feature = "metrics")]
+                let cursor_metrics = ProofTaskCursorMetrics::new();
 
                 let _guard = span.enter();
                 let worker = AccountProofWorker::new(
@@ -190,8 +205,17 @@ impl ProofWorkerHandle {
                     account_available_workers_clone,
                     #[cfg(feature = "metrics")]
                     metrics,
+                    #[cfg(feature = "metrics")]
+                    cursor_metrics,
                 );
-                worker.run()
+                if let Err(error) = worker.run() {
+                    error!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        ?error,
+                        "Account worker failed"
+                    );
+                }
             });
         }
         drop(parent_span);
@@ -358,16 +382,12 @@ impl ProofWorkerHandle {
 pub struct ProofTaskCtx<Factory> {
     /// The factory for creating state providers.
     factory: Factory,
-    /// The collection of prefix sets for the computation. Since the prefix sets _always_
-    /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
-    /// if we have cached nodes for them.
-    prefix_sets: Arc<TriePrefixSetsMut>,
 }
 
 impl<Factory> ProofTaskCtx<Factory> {
-    /// Creates a new [`ProofTaskCtx`] with the given factory and prefix sets.
-    pub const fn new(factory: Factory, prefix_sets: Arc<TriePrefixSetsMut>) -> Self {
-        Self { factory, prefix_sets }
+    /// Creates a new [`ProofTaskCtx`] with the given factory.
+    pub const fn new(factory: Factory) -> Self {
+        Self { factory }
     }
 }
 
@@ -377,17 +397,14 @@ pub struct ProofTaskTx<Provider> {
     /// The provider that implements `TrieCursorFactory` and `HashedCursorFactory`.
     provider: Provider,
 
-    /// The prefix sets for the computation.
-    prefix_sets: Arc<TriePrefixSetsMut>,
-
     /// Identifier for the worker within the worker pool, used only for tracing.
     id: usize,
 }
 
 impl<Provider> ProofTaskTx<Provider> {
-    /// Initializes a [`ProofTaskTx`] with the given provider, prefix sets, and ID.
-    const fn new(provider: Provider, prefix_sets: Arc<TriePrefixSetsMut>, id: usize) -> Self {
-        Self { provider, prefix_sets, id }
+    /// Initializes a [`ProofTaskTx`] with the given provider and ID.
+    const fn new(provider: Provider, id: usize) -> Self {
+        Self { provider, id }
     }
 }
 
@@ -399,7 +416,12 @@ where
     ///
     /// Used by storage workers in the worker pool to compute storage proofs.
     #[inline]
-    fn compute_storage_proof(&self, input: StorageProofInput) -> StorageProofResult {
+    fn compute_storage_proof(
+        &self,
+        input: StorageProofInput,
+        trie_cursor_metrics: &mut TrieCursorMetricsCache,
+        hashed_cursor_metrics: &mut HashedCursorMetricsCache,
+    ) -> StorageProofResult {
         // Consume the input so we can move large collections (e.g. target slots) without cloning.
         let StorageProofInput {
             hashed_address,
@@ -417,7 +439,8 @@ where
         let span = debug_span!(
             target: "trie::proof_task",
             "Storage proof calculation",
-            hashed_address = ?hashed_address,
+            ?hashed_address,
+            target_slots = ?target_slots.len(),
             worker_id = self.id,
         );
         let _span_guard = span.enter();
@@ -430,8 +453,12 @@ where
                 .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().copied()))
                 .with_branch_node_masks(with_branch_node_masks)
                 .with_added_removed_keys(added_removed_keys)
+                .with_trie_cursor_metrics(trie_cursor_metrics)
+                .with_hashed_cursor_metrics(hashed_cursor_metrics)
                 .storage_multiproof(target_slots)
                 .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+        trie_cursor_metrics.record_span("trie_cursor");
+        hashed_cursor_metrics.record_span("hashed_cursor");
 
         // Decode proof into DecodedStorageMultiProof
         let decoded_result = raw_proof_result.and_then(|raw_proof| {
@@ -462,12 +489,8 @@ where
         account: B256,
         path: &Nibbles,
     ) -> TrieNodeProviderResult {
-        let storage_node_provider = ProofBlindedStorageProvider::new(
-            &self.provider,
-            &self.provider,
-            self.prefix_sets.clone(),
-            account,
-        );
+        let storage_node_provider =
+            ProofBlindedStorageProvider::new(&self.provider, &self.provider, account);
         storage_node_provider.trie_node(path)
     }
 
@@ -475,11 +498,8 @@ where
     ///
     /// Used by account workers to retrieve blinded account trie nodes for proof construction.
     fn process_blinded_account_node(&self, path: &Nibbles) -> TrieNodeProviderResult {
-        let account_node_provider = ProofBlindedAccountProvider::new(
-            &self.provider,
-            &self.provider,
-            self.prefix_sets.clone(),
-        );
+        let account_node_provider =
+            ProofBlindedAccountProvider::new(&self.provider, &self.provider);
         account_node_provider.trie_node(path)
     }
 }
@@ -650,6 +670,9 @@ struct StorageProofWorker<Factory> {
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
+    /// Cursor metrics for this worker
+    #[cfg(feature = "metrics")]
+    cursor_metrics: ProofTaskCursorMetrics,
 }
 
 impl<Factory> StorageProofWorker<Factory>
@@ -663,6 +686,7 @@ where
         worker_id: usize,
         available_workers: Arc<AtomicUsize>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
+        #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
         Self {
             task_ctx,
@@ -671,6 +695,8 @@ where
             available_workers,
             #[cfg(feature = "metrics")]
             metrics,
+            #[cfg(feature = "metrics")]
+            cursor_metrics,
         }
     }
 
@@ -691,7 +717,7 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
-    fn run(self) {
+    fn run(mut self) -> ProviderResult<()> {
         let Self {
             task_ctx,
             work_rx,
@@ -699,14 +725,13 @@ where
             available_workers,
             #[cfg(feature = "metrics")]
             metrics,
+            #[cfg(feature = "metrics")]
+            ref mut cursor_metrics,
         } = self;
 
         // Create provider from factory
-        let provider = task_ctx
-            .factory
-            .database_provider_ro()
-            .expect("Storage worker failed to initialize: unable to create provider");
-        let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
+        let provider = task_ctx.factory.database_provider_ro()?;
+        let proof_tx = ProofTaskTx::new(provider, worker_id);
 
         trace!(
             target: "trie::proof_task",
@@ -716,6 +741,7 @@ where
 
         let mut storage_proofs_processed = 0u64;
         let mut storage_nodes_processed = 0u64;
+        let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
         // Initially mark this worker as available.
         available_workers.fetch_add(1, Ordering::Relaxed);
@@ -732,6 +758,7 @@ where
                         input,
                         proof_result_sender,
                         &mut storage_proofs_processed,
+                        &mut cursor_metrics_cache,
                     );
                 }
 
@@ -760,7 +787,12 @@ where
         );
 
         #[cfg(feature = "metrics")]
-        metrics.record_storage_nodes(storage_nodes_processed as usize);
+        {
+            metrics.record_storage_nodes(storage_nodes_processed as usize);
+            cursor_metrics.record(&mut cursor_metrics_cache);
+        }
+
+        Ok(())
     }
 
     /// Processes a storage proof request.
@@ -770,12 +802,16 @@ where
         input: StorageProofInput,
         proof_result_sender: ProofResultContext,
         storage_proofs_processed: &mut u64,
+        cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
         let hashed_address = input.hashed_address;
         let ProofResultContext { sender, sequence_number: seq, state, start_time } =
             proof_result_sender;
+
+        let mut trie_cursor_metrics = TrieCursorMetricsCache::default();
+        let mut hashed_cursor_metrics = HashedCursorMetricsCache::default();
 
         trace!(
             target: "trie::proof_task",
@@ -787,7 +823,11 @@ where
         );
 
         let proof_start = Instant::now();
-        let result = proof_tx.compute_storage_proof(input);
+        let result = proof_tx.compute_storage_proof(
+            input,
+            &mut trie_cursor_metrics,
+            &mut hashed_cursor_metrics,
+        );
 
         let proof_elapsed = proof_start.elapsed();
         *storage_proofs_processed += 1;
@@ -821,8 +861,24 @@ where
             hashed_address = ?hashed_address,
             proof_time_us = proof_elapsed.as_micros(),
             total_processed = storage_proofs_processed,
+            trie_cursor_duration_us = trie_cursor_metrics.total_duration.as_micros(),
+            hashed_cursor_duration_us = hashed_cursor_metrics.total_duration.as_micros(),
+            ?trie_cursor_metrics,
+            ?hashed_cursor_metrics,
             "Storage proof completed"
         );
+
+        #[cfg(feature = "metrics")]
+        {
+            // Accumulate per-proof metrics into the worker's cache
+            let per_proof_cache = ProofTaskCursorMetricsCache {
+                account_trie_cursor: TrieCursorMetricsCache::default(),
+                account_hashed_cursor: HashedCursorMetricsCache::default(),
+                storage_trie_cursor: trie_cursor_metrics,
+                storage_hashed_cursor: hashed_cursor_metrics,
+            };
+            cursor_metrics_cache.extend(&per_proof_cache);
+        }
     }
 
     /// Processes a blinded storage node lookup request.
@@ -891,6 +947,9 @@ struct AccountProofWorker<Factory> {
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
+    /// Cursor metrics for this worker
+    #[cfg(feature = "metrics")]
+    cursor_metrics: ProofTaskCursorMetrics,
 }
 
 impl<Factory> AccountProofWorker<Factory>
@@ -905,6 +964,7 @@ where
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         available_workers: Arc<AtomicUsize>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
+        #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
         Self {
             task_ctx,
@@ -914,6 +974,8 @@ where
             available_workers,
             #[cfg(feature = "metrics")]
             metrics,
+            #[cfg(feature = "metrics")]
+            cursor_metrics,
         }
     }
 
@@ -934,7 +996,7 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
-    fn run(self) {
+    fn run(mut self) -> ProviderResult<()> {
         let Self {
             task_ctx,
             work_rx,
@@ -943,14 +1005,13 @@ where
             available_workers,
             #[cfg(feature = "metrics")]
             metrics,
+            #[cfg(feature = "metrics")]
+            ref mut cursor_metrics,
         } = self;
 
         // Create provider from factory
-        let provider = task_ctx
-            .factory
-            .database_provider_ro()
-            .expect("Account worker failed to initialize: unable to create provider");
-        let proof_tx = ProofTaskTx::new(provider, task_ctx.prefix_sets, worker_id);
+        let provider = task_ctx.factory.database_provider_ro()?;
+        let proof_tx = ProofTaskTx::new(provider, worker_id);
 
         trace!(
             target: "trie::proof_task",
@@ -960,6 +1021,7 @@ where
 
         let mut account_proofs_processed = 0u64;
         let mut account_nodes_processed = 0u64;
+        let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
         // Count this worker as available only after successful initialization.
         available_workers.fetch_add(1, Ordering::Relaxed);
@@ -976,6 +1038,7 @@ where
                         storage_work_tx.clone(),
                         *input,
                         &mut account_proofs_processed,
+                        &mut cursor_metrics_cache,
                     );
                 }
 
@@ -1003,7 +1066,12 @@ where
         );
 
         #[cfg(feature = "metrics")]
-        metrics.record_account_nodes(account_nodes_processed as usize);
+        {
+            metrics.record_account_nodes(account_nodes_processed as usize);
+            cursor_metrics.record(&mut cursor_metrics_cache);
+        }
+
+        Ok(())
     }
 
     /// Processes an account multiproof request.
@@ -1013,6 +1081,7 @@ where
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
+        cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
@@ -1088,6 +1157,9 @@ where
 
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
+        let proof_cursor_metrics = tracker.cursor_metrics;
+        proof_cursor_metrics.record_spans();
+
         let stats = tracker.finish();
         let result = result.map(|proof| ProofResult::AccountMultiproof { proof, stats });
         *account_proofs_processed += 1;
@@ -1115,8 +1187,20 @@ where
             proof_time_us = proof_elapsed.as_micros(),
             total_elapsed_us = total_elapsed.as_micros(),
             total_processed = account_proofs_processed,
+            account_trie_cursor_duration_us = proof_cursor_metrics.account_trie_cursor.total_duration.as_micros(),
+            account_hashed_cursor_duration_us = proof_cursor_metrics.account_hashed_cursor.total_duration.as_micros(),
+            storage_trie_cursor_duration_us = proof_cursor_metrics.storage_trie_cursor.total_duration.as_micros(),
+            storage_hashed_cursor_duration_us = proof_cursor_metrics.storage_hashed_cursor.total_duration.as_micros(),
+            account_trie_cursor_metrics = ?proof_cursor_metrics.account_trie_cursor,
+            account_hashed_cursor_metrics = ?proof_cursor_metrics.account_hashed_cursor,
+            storage_trie_cursor_metrics = ?proof_cursor_metrics.storage_trie_cursor,
+            storage_hashed_cursor_metrics = ?proof_cursor_metrics.storage_hashed_cursor,
             "Account multiproof completed"
         );
+
+        #[cfg(feature = "metrics")]
+        // Accumulate per-proof metrics into the worker's cache
+        cursor_metrics_cache.extend(&proof_cursor_metrics);
     }
 
     /// Processes a blinded account node lookup request.
@@ -1185,13 +1269,20 @@ where
     let accounts_added_removed_keys =
         ctx.multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
 
+    // Create local metrics caches for account cursors. We can't directly use the metrics caches in
+    // the tracker due to the call to `inc_missed_leaves` which occurs on it.
+    let mut account_trie_cursor_metrics = TrieCursorMetricsCache::default();
+    let mut account_hashed_cursor_metrics = HashedCursorMetricsCache::default();
+
+    // Wrap account trie cursor with instrumented cursor
+    let account_trie_cursor = provider.account_trie_cursor().map_err(ProviderError::Database)?;
+    let account_trie_cursor =
+        InstrumentedTrieCursor::new(account_trie_cursor, &mut account_trie_cursor_metrics);
+
     // Create the walker.
-    let walker = TrieWalker::<_>::state_trie(
-        provider.account_trie_cursor().map_err(ProviderError::Database)?,
-        ctx.prefix_set,
-    )
-    .with_added_removed_keys(accounts_added_removed_keys)
-    .with_deletions_retained(true);
+    let walker = TrieWalker::<_>::state_trie(account_trie_cursor, ctx.prefix_set)
+        .with_added_removed_keys(accounts_added_removed_keys)
+        .with_deletions_retained(true);
 
     // Create a hash builder to rebuild the root node since it is not available in the database.
     let retainer = ctx
@@ -1209,10 +1300,14 @@ where
     let mut collected_decoded_storages: B256Map<DecodedStorageMultiProof> =
         B256Map::with_capacity_and_hasher(ctx.targets.len(), Default::default());
     let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
-    let mut account_node_iter = TrieNodeIter::state_trie(
-        walker,
-        provider.hashed_account_cursor().map_err(ProviderError::Database)?,
-    );
+
+    // Wrap account hashed cursor with instrumented cursor
+    let account_hashed_cursor =
+        provider.hashed_account_cursor().map_err(ProviderError::Database)?;
+    let account_hashed_cursor =
+        InstrumentedHashedCursor::new(account_hashed_cursor, &mut account_hashed_cursor_metrics);
+
+    let mut account_node_iter = TrieNodeIter::state_trie(walker, account_hashed_cursor);
 
     let mut storage_proof_receivers = ctx.storage_proof_receivers;
 
@@ -1224,6 +1319,11 @@ where
             TrieElement::Leaf(hashed_address, account) => {
                 let root = match storage_proof_receivers.remove(&hashed_address) {
                     Some(receiver) => {
+                        let _guard = debug_span!(
+                            target: "trie::proof_task",
+                            "Waiting for storage proof",
+                            ?hashed_address,
+                        );
                         // Block on this specific storage proof receiver - enables interleaved
                         // parallelism
                         let proof_msg = receiver.recv().map_err(|_| {
@@ -1235,6 +1335,8 @@ where
                                 ),
                             )
                         })?;
+
+                        drop(_guard);
 
                         // Extract storage proof from the result
                         let proof = match proof_msg.result? {
@@ -1263,9 +1365,20 @@ where
                         match ctx.missed_leaves_storage_roots.entry(hashed_address) {
                             dashmap::Entry::Occupied(occ) => *occ.get(),
                             dashmap::Entry::Vacant(vac) => {
+                                let _guard = debug_span!(
+                                    target: "trie::proof_task",
+                                    "Waiting on missed leaf storage proof computation",
+                                    ?hashed_address,
+                                );
                                 let root =
                                     StorageProof::new_hashed(provider, provider, hashed_address)
                                         .with_prefix_set_mut(Default::default())
+                                        .with_trie_cursor_metrics(
+                                            &mut tracker.cursor_metrics.storage_trie_cursor,
+                                        )
+                                        .with_hashed_cursor_metrics(
+                                            &mut tracker.cursor_metrics.storage_hashed_cursor,
+                                        )
                                         .storage_multiproof(
                                             ctx.targets
                                                 .get(&hashed_address)
@@ -1300,6 +1413,11 @@ where
 
     // Consume remaining storage proof receivers for accounts not encountered during trie walk.
     for (hashed_address, receiver) in storage_proof_receivers {
+        let _guard = debug_span!(
+            target: "trie::proof_task",
+            "Blocking on final storage proof",
+            ?hashed_address,
+        );
         if let Ok(proof_msg) = receiver.recv() {
             // Extract storage proof from the result
             if let Ok(ProofResult::StorageProof { proof, .. }) = proof_msg.result {
@@ -1322,6 +1440,10 @@ where
     } else {
         (Default::default(), Default::default())
     };
+
+    // Extend tracker with accumulated metrics from account cursors
+    tracker.cursor_metrics.account_trie_cursor.extend(&account_trie_cursor_metrics);
+    tracker.cursor_metrics.account_hashed_cursor.extend(&account_hashed_cursor_metrics);
 
     Ok(DecodedMultiProof {
         account_subtree: decoded_account_subtree,
@@ -1476,12 +1598,10 @@ enum AccountWorkerJob {
 mod tests {
     use super::*;
     use reth_provider::test_utils::create_test_provider_factory;
-    use reth_trie_common::prefix_set::TriePrefixSetsMut;
-    use std::sync::Arc;
     use tokio::{runtime::Builder, task};
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
-        ProofTaskCtx::new(factory, Arc::new(TriePrefixSetsMut::default()))
+        ProofTaskCtx::new(factory)
     }
 
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.

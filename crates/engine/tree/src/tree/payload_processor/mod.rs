@@ -28,10 +28,7 @@ use reth_evm::{
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
-    trie_cursor::TrieCursorFactory,
-};
+use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
@@ -49,7 +46,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, warn};
+use tracing::{debug, debug_span, instrument, warn, Span};
 
 mod configured_sparse_trie;
 pub mod executor;
@@ -204,10 +201,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
-    ) -> Result<
-        PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
-        (ParallelStateRootError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
-    >
+    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -215,17 +209,16 @@ where
             + Send
             + 'static,
     {
-        let span = tracing::Span::current();
+        let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
 
         // We rely on the cursor factory to provide whatever DB overlay is necessary to see a
         // consistent view of the database, including the trie tables. Because of this there is no
         // need for an overarching prefix set to invalidate any section of the trie tables, and so
         // we use an empty prefix set.
-        let prefix_sets = Arc::new(TriePrefixSetsMut::default());
 
         // Create and spawn the storage proof task
-        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory, prefix_sets);
+        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let proof_handle = ProofWorkerHandle::new(
@@ -256,8 +249,9 @@ where
         );
 
         // spawn multi-proof task
+        let parent_span = span.clone();
         self.executor.spawn_blocking(move || {
-            let _enter = span.entered();
+            let _enter = parent_span.entered();
             multi_proof_task.run();
         });
 
@@ -267,12 +261,13 @@ where
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
         self.spawn_sparse_trie_task(sparse_trie_rx, proof_handle, state_root_tx);
 
-        Ok(PayloadHandle {
+        PayloadHandle {
             to_multi_proof,
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
-        })
+            _span: span,
+        }
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
@@ -296,6 +291,7 @@ where
             prewarm_handle,
             state_root: None,
             transactions: execution_rx,
+            _span: Span::current(),
         }
     }
 
@@ -375,9 +371,7 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let span = debug_span!(target: "engine::tree::payload_processor", "prewarm task");
             self.executor.spawn_blocking(move || {
-                let _enter = span.entered();
                 prewarm_task.run(transactions, to_prewarm_task);
             });
         }
@@ -441,7 +435,7 @@ where
                 sparse_state_trie,
             );
 
-        let span = tracing::Span::current();
+        let span = Span::current();
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
 
@@ -473,10 +467,12 @@ pub struct PayloadHandle<Tx, Err> {
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle,
-    /// Receiver for the state root
-    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
     /// Stream of block transactions
     transactions: mpsc::Receiver<Result<Tx, Err>>,
+    /// Receiver for the state root
+    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    /// Span for tracing
+    _span: Span,
 }
 
 impl<Tx, Err> PayloadHandle<Tx, Err> {
@@ -485,7 +481,12 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor",
+        name = "await_state_root",
+        skip_all
+    )]
     pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.state_root
             .take()
@@ -895,19 +896,13 @@ mod tests {
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
 
-        let mut handle =
-            payload_processor
-                .spawn(
-                    Default::default(),
-                    core::iter::empty::<
-                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
-                    >(),
-                    StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-                    OverlayStateProviderFactory::new(provider_factory),
-                    &TreeConfig::default(),
-                )
-                .map_err(|(err, ..)| err)
-                .expect("failed to spawn payload processor");
+        let mut handle = payload_processor.spawn(
+            Default::default(),
+            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
+            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+            OverlayStateProviderFactory::new(provider_factory),
+            &TreeConfig::default(),
+        );
 
         let mut state_hook = handle.state_hook();
 

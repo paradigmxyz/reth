@@ -2,7 +2,7 @@ use parking_lot::{Mutex, MutexGuard};
 use std::{collections::BTreeMap, sync::Arc};
 use tracing::instrument;
 
-use super::{TrieCursor, TrieCursorFactory};
+use super::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
 use crate::{
     mock::{KeyVisit, KeyVisitType},
     BranchNodeCompact, Nibbles,
@@ -164,5 +164,15 @@ impl TrieCursor for MockTrieCursor {
     #[instrument(skip(self), ret(level = "trace"))]
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.current_key)
+    }
+
+    fn reset(&mut self) {
+        self.current_key = None;
+    }
+}
+
+impl TrieStorageCursor for MockTrieCursor {
+    fn set_hashed_address(&mut self, _hashed_address: B256) {
+        unimplemented!()
     }
 }
