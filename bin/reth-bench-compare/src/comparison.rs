@@ -96,16 +96,17 @@ pub(crate) struct RefInfo {
 /// Percent deltas are `(feature - baseline) / baseline * 100`:
 /// - `new_payload_latency_p50_change_percent` / p90 / p99: percent changes of the respective
 ///   per-block percentiles.
-/// - `new_payload_latency_mean_change_percent` is the percent change of the mean per-block latency.
 /// - `per_block_latency_change_mean_percent` / `per_block_latency_change_median_percent` are the
 ///   mean and median of per-block percent deltas (feature vs baseline), capturing block-level drift.
+/// - `new_payload_total_latency_change_percent` is the percent change of the total newPayload time
+///   across the run.
 ///
 /// Positive means slower/higher; negative means faster/lower.
 #[derive(Debug, Serialize)]
 pub(crate) struct ComparisonSummary {
-    pub new_payload_latency_mean_change_percent: f64,
     pub per_block_latency_change_mean_percent: f64,
     pub per_block_latency_change_median_percent: f64,
+    pub new_payload_total_latency_change_percent: f64,
     pub new_payload_latency_p50_change_percent: f64,
     pub new_payload_latency_p90_change_percent: f64,
     pub new_payload_latency_p99_change_percent: f64,
@@ -382,11 +383,6 @@ impl ComparisonGenerator {
             }
         };
 
-        let new_payload_latency_mean_change_percent = calc_percent_change(
-            baseline.mean_new_payload_latency_ms,
-            feature.mean_new_payload_latency_ms,
-        );
-
         let per_block_percent_changes: Vec<f64> =
             per_block_comparisons.iter().map(|c| c.new_payload_latency_change_percent).collect();
         let per_block_latency_change_mean_percent = if per_block_percent_changes.is_empty() {
@@ -402,10 +398,17 @@ impl ComparisonGenerator {
             percentile(&sorted, 0.5)
         };
 
+        let baseline_total_latency_ms =
+            baseline.mean_new_payload_latency_ms * baseline.total_blocks as f64;
+        let feature_total_latency_ms =
+            feature.mean_new_payload_latency_ms * feature.total_blocks as f64;
+        let new_payload_total_latency_change_percent =
+            calc_percent_change(baseline_total_latency_ms, feature_total_latency_ms);
+
         Ok(ComparisonSummary {
-            new_payload_latency_mean_change_percent,
             per_block_latency_change_mean_percent,
             per_block_latency_change_median_percent,
+            new_payload_total_latency_change_percent,
             new_payload_latency_p50_change_percent: calc_percent_change(
                 baseline.median_new_payload_latency_ms,
                 feature.median_new_payload_latency_ms,
@@ -521,16 +524,16 @@ impl ComparisonGenerator {
 
         println!("Performance Changes:");
         println!(
-            "  NewPayload Latency mean change:                   {:+.2}%",
-            summary.new_payload_latency_mean_change_percent
-        );
-        println!(
             "  NewPayload Latency per-block mean change:   {:+.2}%",
             summary.per_block_latency_change_mean_percent
         );
         println!(
             "  NewPayload Latency per-block median change: {:+.2}%",
             summary.per_block_latency_change_median_percent
+        );
+        println!(
+            "  Total newPayload time change:                {:+.2}%",
+            summary.new_payload_total_latency_change_percent
         );
         println!(
             "  NewPayload Latency p50:           {:+.2}%",
