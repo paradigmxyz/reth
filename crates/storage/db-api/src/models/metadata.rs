@@ -21,12 +21,6 @@ pub struct StorageSettings {
     pub transaction_senders_in_static_files: bool,
 }
 
-impl Default for StorageSettings {
-    fn default() -> Self {
-        Self::legacy()
-    }
-}
-
 impl StorageSettings {
     /// Creates `StorageSettings` for legacy nodes.
     ///
