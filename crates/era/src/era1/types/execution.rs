@@ -16,7 +16,7 @@
 //!
 //! ```rust
 //! use alloy_consensus::Header;
-//! use reth_era::{execution_types::CompressedHeader, DecodeCompressed};
+//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedHeader};
 //!
 //! let header = Header { number: 100, ..Default::default() };
 //! // Compress the header: rlp encoding and Snappy compression
@@ -24,7 +24,7 @@
 //! // Decompressed and decode typed compressed header
 //! let decoded_header: Header = compressed.decode_header()?;
 //! assert_eq!(decoded_header.number, 100);
-//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! # Ok::<(), reth_era::e2s::error::E2sError>(())
 //! ```
 //!
 //! ## [`CompressedBody`]
@@ -32,7 +32,7 @@
 //! ```rust
 //! use alloy_consensus::{BlockBody, Header};
 //! use alloy_primitives::Bytes;
-//! use reth_era::{execution_types::CompressedBody, DecodeCompressed};
+//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedBody};
 //! use reth_ethereum_primitives::TransactionSigned;
 //!
 //! let body: BlockBody<Bytes> = BlockBody {
@@ -46,34 +46,30 @@
 //! let decoded_body: alloy_consensus::BlockBody<alloy_primitives::Bytes> =
 //!     compressed_body.decode()?;
 //! assert_eq!(decoded_body.transactions.len(), 1);
-//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! # Ok::<(), reth_era::e2s::error::E2sError>(())
 //! ```
 //!
 //! ## [`CompressedReceipts`]
 //!
 //! ```rust
-//! use alloy_consensus::ReceiptWithBloom;
-//! use reth_era::{execution_types::CompressedReceipts, DecodeCompressed};
-//! use reth_ethereum_primitives::{Receipt, TxType};
+//! use alloy_consensus::{Eip658Value, Receipt, ReceiptEnvelope, ReceiptWithBloom};
+//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedReceipts};
 //!
-//! let receipt = Receipt {
-//!     tx_type: TxType::Legacy,
-//!     success: true,
-//!     cumulative_gas_used: 21000,
-//!     logs: vec![],
-//! };
-//! let receipt_with_bloom = ReceiptWithBloom { receipt, logs_bloom: Default::default() };
+//! let receipt =
+//!     Receipt { status: Eip658Value::Eip658(true), cumulative_gas_used: 21000, logs: vec![] };
+//! let receipt_with_bloom = ReceiptWithBloom::new(receipt, Default::default());
+//! let enveloped_receipt = ReceiptEnvelope::Legacy(receipt_with_bloom);
 //! // Compress the receipt: rlp encoding and snappy compression
-//! let compressed_receipt_data = CompressedReceipts::from_encodable(&receipt_with_bloom)?;
+//! let compressed_receipt_data = CompressedReceipts::from_encodable(&enveloped_receipt)?;
 //! // Get raw receipt by decoding and decompressing compressed and encoded receipt
-//! let decompressed_receipt = compressed_receipt_data.decode::<ReceiptWithBloom>()?;
-//! assert_eq!(decompressed_receipt.receipt.cumulative_gas_used, 21000);
-//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! let decompressed_receipt = compressed_receipt_data.decode::<ReceiptEnvelope>()?;
+//! assert_eq!(decompressed_receipt.cumulative_gas_used(), 21000);
+//! # Ok::<(), reth_era::e2s::error::E2sError>(())
 //! ``````
 
 use crate::{
-    e2s_types::{E2sError, Entry},
-    DecodeCompressed,
+    common::decode::DecodeCompressed,
+    e2s::{error::E2sError, types::Entry},
 };
 use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::{B256, U256};
@@ -697,8 +693,8 @@ mod tests {
             .expect("Failed to compress receipt list");
 
         // Decode the compressed receipts back
-        // Note: most likely the decoding for real era files will be done to reach
-        // `Vec<ReceiptWithBloom>``
+        // Note: For real ERA1 files, use `Vec<ReceiptWithBloom>` before Era ~1520 or use
+        // `Vec<ReceiptEnvelope>` after this era
         let decoded_receipts: Vec<Receipt> =
             compressed_receipts.decode().expect("Failed to decode compressed receipt list");
 

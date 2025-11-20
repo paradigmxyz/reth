@@ -61,11 +61,13 @@ services:
       - ./grafana/datasources:/etc/grafana/provisioning/datasources
       - ./grafana/dashboards:/etc/grafana/provisioning_temp/dashboards
     # 1. Copy dashboards from temp directory to prevent modifying original host files
-    # 2. Replace Prometheus datasource placeholder with the actual name
+    # 2. Replace Prometheus datasource placeholders with the actual name
     # 3. Run Grafana
     entrypoint: >
       sh -c "cp -r /etc/grafana/provisioning_temp/dashboards/. /etc/grafana/provisioning/dashboards &&
              find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
+             find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${datasource}/Prometheus/g' {} \+ &&
+             find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${VAR_INSTANCE_LABEL}/instance/g' {} \+ &&
              /run.sh"
 
 volumes:

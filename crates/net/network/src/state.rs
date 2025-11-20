@@ -161,6 +161,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             peer,
             status.blockhash,
             block_number,
+            Arc::clone(&capabilities),
             timeout,
             range_info,
         );

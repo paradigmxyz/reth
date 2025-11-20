@@ -126,14 +126,21 @@ where
         );
 
         loop {
-            let (tx_range, block_range, is_final_range) =
-                input.next_block_range_with_transaction_threshold(provider, self.chunk_size)?;
+            let Some(range_output) =
+                input.next_block_range_with_transaction_threshold(provider, self.chunk_size)?
+            else {
+                input.checkpoint = Some(
+                    StageCheckpoint::new(input.target())
+                        .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+                );
+                break;
+            };
 
-            let end_block = *block_range.end();
+            let end_block = *range_output.block_range.end();
 
-            info!(target: "sync::stages::transaction_lookup", ?tx_range, "Calculating transaction hashes");
+            info!(target: "sync::stages::transaction_lookup", tx_range = ?range_output.tx_range, "Calculating transaction hashes");
 
-            for (key, value) in provider.transaction_hashes_by_range(tx_range)? {
+            for (key, value) in provider.transaction_hashes_by_range(range_output.tx_range)? {
                 hash_collector.insert(key, value)?;
             }
 
@@ -142,7 +149,7 @@ where
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
             );
 
-            if is_final_range {
+            if range_output.is_final_range {
                 let append_only =
                     provider.count_entries::<tables::TransactionHashNumbers>()?.is_zero();
                 let mut txhash_cursor = provider

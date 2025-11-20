@@ -6,7 +6,7 @@ use alloy_consensus::{
     transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
     EthereumTxEnvelope, SignableTransaction,
 };
-use alloy_eips::eip2718::{Decodable2718, Encodable2718};
+use alloy_eips::eip2718::{Decodable2718, Encodable2718, IsTyped2718};
 use alloy_primitives::{keccak256, Address, Signature, B256};
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
@@ -46,6 +46,7 @@ pub trait SignedTransaction:
     + InMemorySize
     + SignerRecoverable
     + TxHashRef
+    + IsTyped2718
 {
     /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
     /// network.

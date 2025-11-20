@@ -32,7 +32,7 @@ impl HttpClient for ClientWithFakeIndex {
     ) -> eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin> {
         let url = url.into_url()?;
 
-        match url.to_string().as_str() {
+        match url.as_str() {
             ITHACA_ERA_INDEX_URL => {
                 // Create a static stream without boxing
                 let stream =

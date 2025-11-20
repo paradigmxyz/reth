@@ -5,8 +5,9 @@ use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory, StageCheckpointReader};
+use reth_provider::{providers::ProviderNodeTypes, StageCheckpointReader};
 use reth_stages::StageId;
 use reth_trie::{
     verify::{Output, Verifier},
@@ -29,23 +30,20 @@ pub struct Command {
 
 impl Command {
     /// Execute `db repair-trie` command
-    pub fn execute<N: ProviderNodeTypes>(
-        self,
-        provider_factory: ProviderFactory<N>,
-    ) -> eyre::Result<()> {
+    pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         if self.dry_run {
-            verify_only(provider_factory)?
+            verify_only(tool)?
         } else {
-            verify_and_repair(provider_factory)?
+            verify_and_repair(tool)?
         }
 
         Ok(())
     }
 }
 
-fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre::Result<()> {
+fn verify_only<N: NodeTypesWithDB>(tool: &DbTool<N>) -> eyre::Result<()> {
     // Get a database transaction directly from the database
-    let db = provider_factory.db_ref();
+    let db = tool.provider_factory.db_ref();
     let mut tx = db.tx()?;
     tx.disable_long_read_transaction_safety();
 
@@ -114,11 +112,9 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
     Ok(())
 }
 
-fn verify_and_repair<N: ProviderNodeTypes>(
-    provider_factory: ProviderFactory<N>,
-) -> eyre::Result<()> {
+fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
     // Get a read-write database provider
-    let mut provider_rw = provider_factory.provider_rw()?;
+    let mut provider_rw = tool.provider_factory.provider_rw()?;
 
     // Check that a pipeline sync isn't in progress.
     verify_checkpoints(provider_rw.as_ref())?;

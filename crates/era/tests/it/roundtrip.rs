@@ -7,23 +7,24 @@
 //! - Writing the data back to a new file
 //! - Confirming that all original data is preserved throughout the process
 
-use alloy_consensus::{BlockBody, BlockHeader, Header, ReceiptWithBloom};
-use rand::{prelude::IndexedRandom, rng};
+use alloy_consensus::{BlockBody, BlockHeader, Header, ReceiptEnvelope};
 use reth_era::{
-    e2s_types::IndexEntry,
-    era1_file::{Era1File, Era1Reader, Era1Writer},
-    era1_types::{Era1Group, Era1Id},
-    era_file_ops::{EraFileFormat, StreamReader, StreamWriter},
-    execution_types::{
-        BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+    common::file_ops::{EraFileFormat, StreamReader, StreamWriter},
+    e2s::types::IndexEntry,
+    era1::{
+        file::{Era1File, Era1Reader, Era1Writer},
+        types::{
+            execution::{
+                BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+            },
+            group::{Era1Group, Era1Id},
+        },
     },
 };
 use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;
 
-use crate::{
-    Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES, MAINNET, SEPOLIA,
-};
+use crate::{Era1TestDownloader, MAINNET, SEPOLIA};
 
 // Helper function to test roundtrip compression/encoding for a specific file
 async fn test_file_roundtrip(
@@ -148,10 +149,9 @@ async fn test_file_roundtrip(
         );
 
         // Decode receipts
-        let original_receipts_decoded =
-            original_block.receipts.decode::<Vec<ReceiptWithBloom>>()?;
+        let original_receipts_decoded = original_block.receipts.decode::<Vec<ReceiptEnvelope>>()?;
         let roundtrip_receipts_decoded =
-            roundtrip_block.receipts.decode::<Vec<ReceiptWithBloom>>()?;
+            roundtrip_block.receipts.decode::<Vec<ReceiptEnvelope>>()?;
 
         assert_eq!(
             original_receipts_decoded, roundtrip_receipts_decoded,
@@ -252,35 +252,27 @@ async fn test_file_roundtrip(
     Ok(())
 }
 
+#[test_case::test_case("mainnet-00000-5ec1ffb8.era1"; "era_mainnet_0")]
+#[test_case::test_case("mainnet-00151-e322efe1.era1"; "era_mainnet_151")]
+#[test_case::test_case("mainnet-01367-d7efc68f.era1"; "era_mainnet_1367")]
+#[test_case::test_case("mainnet-01895-3f81607c.era1"; "era_mainnet_1895")]
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]
-async fn test_roundtrip_compression_encoding_mainnet() -> eyre::Result<()> {
+async fn test_roundtrip_compression_encoding_mainnet(filename: &str) -> eyre::Result<()> {
     let downloader = Era1TestDownloader::new().await?;
-
-    let mut rng = rng();
-
-    // pick 4 random files from the mainnet list
-    let sample_files: Vec<&str> =
-        ERA1_MAINNET_FILES_NAMES.choose_multiple(&mut rng, 4).copied().collect();
-
-    println!("Testing {} randomly selected mainnet files", sample_files.len());
-
-    for &filename in &sample_files {
-        test_file_roundtrip(&downloader, filename, MAINNET).await?;
-    }
-
-    Ok(())
+    test_file_roundtrip(&downloader, filename, MAINNET).await
 }
 
+#[test_case::test_case("sepolia-00000-643a00f7.era1"; "era_sepolia_0")]
+#[test_case::test_case("sepolia-00074-0e81003c.era1"; "era_sepolia_74")]
+#[test_case::test_case("sepolia-00173-b6924da5.era1"; "era_sepolia_173")]
+#[test_case::test_case("sepolia-00182-a4f0a8a1.era1"; "era_sepolia_182")]
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]
-async fn test_roundtrip_compression_encoding_sepolia() -> eyre::Result<()> {
+async fn test_roundtrip_compression_encoding_sepolia(filename: &str) -> eyre::Result<()> {
     let downloader = Era1TestDownloader::new().await?;
 
-    // Test all Sepolia files
-    for &filename in &ERA1_SEPOLIA_FILES_NAMES {
-        test_file_roundtrip(&downloader, filename, SEPOLIA).await?;
-    }
+    test_file_roundtrip(&downloader, filename, SEPOLIA).await?;
 
     Ok(())
 }

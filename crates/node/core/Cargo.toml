@@ -19,6 +19,7 @@ reth-cli-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-storage-errors.workspace = true
 reth-storage-api = { workspace = true, features = ["std", "db-api"] }
+reth-provider.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-rpc-eth-types.workspace = true
@@ -30,6 +31,7 @@ reth-config = { workspace = true, features = ["serde"] }
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
+reth-net-banlist.workspace = true
 reth-network-peers.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
@@ -52,8 +54,9 @@ derive_more.workspace = true
 toml.workspace = true
 serde.workspace = true
 strum = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
 url.workspace = true
-
+ipnet.workspace = true
 # io
 dirs-next.workspace = true
 shellexpand.workspace = true

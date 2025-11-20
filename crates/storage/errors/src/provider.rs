@@ -103,7 +103,11 @@ pub enum ProviderError {
     /// Static File is not found at specified path.
     #[cfg(feature = "std")]
     #[error("not able to find {_0} static file at {_1:?}")]
-    MissingStaticFilePath(StaticFileSegment, std::path::PathBuf),
+    MissingStaticFileSegmentPath(StaticFileSegment, std::path::PathBuf),
+    /// Static File is not found at specified path.
+    #[cfg(feature = "std")]
+    #[error("not able to find static file at {_0:?}")]
+    MissingStaticFilePath(std::path::PathBuf),
     /// Static File is not found for requested block.
     #[error("not able to find {_0} static file for block number {_1}")]
     MissingStaticFileBlock(StaticFileSegment, BlockNumber),

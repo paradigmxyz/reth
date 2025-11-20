@@ -15,6 +15,7 @@ alloy-primitives.workspace = true
 
 # reth
 reth-fs-util.workspace = true
+reth-era.workspace = true
 
 # http
 bytes.workspace = true

@@ -1,8 +1,27 @@
 //! Commonly used code snippets
 
 use super::{EthApiError, EthResult};
+use alloy_consensus::TxReceipt;
 use reth_primitives_traits::{Recovered, SignedTransaction};
 use std::future::Future;
+
+/// Calculates the gas used and next log index for a transaction at the given index
+pub fn calculate_gas_used_and_next_log_index(
+    tx_index: u64,
+    all_receipts: &[impl TxReceipt],
+) -> (u64, usize) {
+    let mut gas_used = 0;
+    let mut next_log_index = 0;
+
+    if tx_index > 0 {
+        for receipt in all_receipts.iter().take(tx_index as usize) {
+            gas_used = receipt.cumulative_gas_used();
+            next_log_index += receipt.logs().len();
+        }
+    }
+
+    (gas_used, next_log_index)
+}
 
 /// Recovers a [`SignedTransaction`] from an enveloped encoded byte stream.
 ///

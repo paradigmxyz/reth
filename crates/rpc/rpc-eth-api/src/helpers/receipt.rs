@@ -6,26 +6,10 @@ use alloy_consensus::{transaction::TransactionMeta, TxReceipt};
 use futures::Future;
 use reth_primitives_traits::SignerRecoverable;
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert};
-use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
+use reth_rpc_eth_types::{
+    error::FromEthApiError, utils::calculate_gas_used_and_next_log_index, EthApiError,
+};
 use reth_storage_api::{ProviderReceipt, ProviderTx};
-
-/// Calculates the gas used and next log index for a transaction at the given index
-pub fn calculate_gas_used_and_next_log_index(
-    tx_index: u64,
-    all_receipts: &[impl TxReceipt],
-) -> (u64, usize) {
-    let mut gas_used = 0;
-    let mut next_log_index = 0;
-
-    if tx_index > 0 {
-        for receipt in all_receipts.iter().take(tx_index as usize) {
-            gas_used = receipt.cumulative_gas_used();
-            next_log_index += receipt.logs().len();
-        }
-    }
-
-    (gas_used, next_log_index)
-}
 
 /// Assembles transaction receipt data w.r.t to network.
 ///
