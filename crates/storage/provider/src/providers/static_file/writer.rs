@@ -467,7 +467,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
-    /// Truncates account changesets to the given block. It deletes and loads and older static file
+    /// Truncates account changesets to the given block. It deletes and loads an older static file
     /// if the block goes beyond the start of the current block range.
     ///
     /// # Note

@@ -698,7 +698,6 @@ mod tests {
 
                 let changeset = generate_test_changesets(block_num, addresses.clone());
 
-                // Increment block and write changeset
                 writer.append_account_changeset(changeset, block_num).unwrap();
             }
 
