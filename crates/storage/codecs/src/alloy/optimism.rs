@@ -5,11 +5,14 @@ use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::{Receipt, TxReceipt};
 use alloy_primitives::Log;
 use op_alloy_consensus::{OpDepositReceipt, OpReceipt, OpTxType};
+#[cfg(not(feature = "std"))]
+use reth_codecs_derive::Compact as CompactDerive;
+#[cfg(feature = "std")]
 use reth_codecs_derive::CompactZstd;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(CompactZstd))]
-#[cfg_attr(not(feature = "std"), derive(Compact))]
+#[cfg_attr(not(feature = "std"), derive(CompactDerive))]
 #[reth_codecs(crate = "crate")]
 #[cfg_attr(feature = "std", reth_zstd(
     compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
