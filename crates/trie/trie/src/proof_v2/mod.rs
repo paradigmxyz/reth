@@ -193,11 +193,9 @@ where
         );
     }
 
-    /// Pops the top branch off of the `branch_stack`, and hashes it (and its extension node as
-    /// well, if there is one). The `branch_path` field will be updated accordingly.
-    ///
-    /// If there remains another branch on the stack then that branch is updated. If not then a
-    /// single [`ProofTrieBranchChild::Hash`] is left on the `child_stack`.
+    /// Pops the top branch off of the `branch_stack`, hashes its children on the `child_stack`, and
+    /// replaces those children on the `child_stack`. The `branch_path` field will be updated
+    /// accordingly.
     ///
     /// # Panics
     ///
@@ -329,7 +327,8 @@ where
             } else {
                 curr_branch.state_mask.set_bit(nibble);
 
-                // Add this leaf as a new child of the current branch (no intermediate branch needed).
+                // Add this leaf as a new child of the current branch (no intermediate branch
+                // needed).
                 self.child_stack.push(ProofTrieBranchChild::Leaf {
                     short_key: key.slice_unchecked(common_prefix_len + 1, key.len()),
                     value: val,
