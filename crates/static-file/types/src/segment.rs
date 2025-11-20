@@ -220,7 +220,7 @@ struct SegmentHeaderVisitor;
 impl<'de> Visitor<'de> for SegmentHeaderVisitor {
     type Value = SegmentHeader;
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter.write_str("a header struct with 4 or 5 fields")
     }
 
