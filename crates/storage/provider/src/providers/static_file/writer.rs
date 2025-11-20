@@ -1007,9 +1007,10 @@ fn create_jar(
 
     // Transaction and Receipt already have the compression scheme used natively in its encoding.
     // (zstd-dictionary)
-    if segment.is_headers() {
-        jar = jar.with_lz4();
-    }
+    jar = match segment {
+        StaticFileSegment::Headers | StaticFileSegment::TransactionSenders => jar.with_lz4(),
+        StaticFileSegment::Transactions | StaticFileSegment::Receipts => jar,
+    };
 
     jar
 }
