@@ -168,7 +168,7 @@ impl SessionError for EthStreamError {
                     }
                     EthHandshakeError::InvalidFork(_) => {
                         // this can occur when the remote or our node is running an outdated client,
-                        // we shouldn't treat this as fatal, because the node can come back only
+                        // we shouldn't treat this as fatal, because the node can come back online
                         // with an updated version any time
                         false
                     }
