@@ -67,7 +67,7 @@ impl StoredBlockBodyIndices {
 
     /// Returns true if the block contains a transaction with the given number.
     pub const fn contains_tx(&self, tx_num: TxNumber) -> bool {
-        tx_num >= self.first_tx_num && tx_num <= self.next_tx_num()
+        tx_num >= self.first_tx_num && tx_num < self.next_tx_num()
     }
 }
 
