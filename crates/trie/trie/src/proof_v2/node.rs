@@ -29,7 +29,7 @@ pub(crate) enum ProofTrieBranchChild<RF> {
 
 impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     /// Converts this child into its RLP node representation. This potentially also returns an
-    /// `RlpNode` buffer which can be re-used for other `ProofTrieBranchChild`s.
+    /// `RlpNode` buffer which can be re-used for other [`ProofTrieBranchChild`]s.
     pub(crate) fn into_rlp(
         self,
         buf: &mut Vec<u8>,
