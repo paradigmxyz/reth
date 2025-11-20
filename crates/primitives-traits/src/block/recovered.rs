@@ -83,8 +83,8 @@ impl<B: Block> RecoveredBlock<B> {
     }
 
     /// Returns an iterator over the recovered senders.
-    pub fn senders_iter(&self) -> impl Iterator<Item = Address> {
-        self.senders.iter().copied()
+    pub fn senders_iter(&self) -> impl Iterator<Item = &Address> {
+        self.senders.iter()
     }
 
     /// Consumes the type and returns the inner block.

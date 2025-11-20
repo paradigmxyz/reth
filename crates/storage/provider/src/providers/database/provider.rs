@@ -2859,7 +2859,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
             let mut senders_writer = EitherWriter::new_senders(self, block.number())?;
             senders_writer.increment_block(block.number())?;
-            senders_writer.append_senders(tx_nums_iter.clone().zip(block.senders_iter()))?;
+            senders_writer
+                .append_senders(tx_nums_iter.clone().zip(block.senders_iter().copied()))?;
             durations_recorder.record_relative(metrics::Action::InsertTransactionSenders);
         }
 
