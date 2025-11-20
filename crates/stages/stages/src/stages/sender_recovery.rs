@@ -117,11 +117,14 @@ where
 
         let tx_batch_sender = setup_range_recovery(provider);
 
+        let start = Instant::now();
         let block_body_indices =
             provider.block_body_indices_range(range_output.block_range.clone())?;
+        let block_body_indices_elapsed = start.elapsed();
         let mut blocks_with_indices = range_output.block_range.zip(block_body_indices).peekable();
 
         for range in batch {
+            // Pair each transaction number with its block number
             let start = Instant::now();
             let block_numbers = range.clone().fold(Vec::new(), |mut block_numbers, tx| {
                 while let Some((block, index)) = blocks_with_indices.peek() {
@@ -133,8 +136,8 @@ where
                 }
                 block_numbers
             });
-            let elapsed = start.elapsed();
-            debug!(target: "sync::stages::sender_recovery", ?elapsed, len = block_numbers.len(), "Calculated block numbers");
+            let fold_elapsed = start.elapsed();
+            debug!(target: "sync::stages::sender_recovery", ?block_body_indices_elapsed, ?fold_elapsed, len = block_numbers.len(), "Calculated block numbers");
             recover_range(range, block_numbers, provider, tx_batch_sender.clone(), &mut writer)?;
         }
 
