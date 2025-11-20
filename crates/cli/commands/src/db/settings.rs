@@ -89,8 +89,10 @@ impl Command {
             println!("No storage settings found, creating new settings.");
         }
 
-        let mut settings @ StorageSettings { receipts_in_static_files: _, account_changesets_in_static_files: _ } =
-            settings.unwrap_or_default();
+        let mut settings @ StorageSettings {
+            receipts_in_static_files: _,
+            account_changesets_in_static_files: _,
+        } = settings.unwrap_or_default();
 
         // Update the setting based on the key
         match cmd {

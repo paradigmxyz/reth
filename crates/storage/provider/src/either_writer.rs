@@ -2,9 +2,12 @@
 
 use crate::{providers::StaticFileProviderRWRefMut, StaticFileProviderFactory};
 use alloy_primitives::{BlockNumber, TxNumber};
+use rayon::slice::ParallelSliceMut;
 use reth_db::{
+    cursor::DbDupCursorRW,
+    models::AccountBeforeTx,
     table::Value,
-    transaction::{CursorMutTy, DbTxMut},
+    transaction::{CursorMutTy, DbTxMut, DupCursorMutTy},
 };
 use reth_db_api::{cursor::DbCursorRW, tables};
 use reth_node_types::NodePrimitives;
@@ -13,6 +16,13 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use strum::EnumIs;
+
+/// Type alias for dup [`EitherWriter`] constructors.
+type DupEitherWriterTy<'a, P, T> = EitherWriter<
+    'a,
+    DupCursorMutTy<<P as DBProvider>::Tx, T>,
+    <P as NodePrimitivesProvider>::Primitives,
+>;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
@@ -55,6 +65,28 @@ impl<'a> EitherWriter<'a, (), ()> {
             ))
         }
     }
+
+    /// Creates a new [`EitherWriter`] for account changesets based on storage settings and prune
+    /// modes.
+    pub fn new_account_changesets<P>(
+        provider: &'a P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::AccountChangeSets>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().account_changesets_in_static_files {
+            Ok(EitherWriter::StaticFile(
+                provider
+                    .get_static_file_writer(block_number, StaticFileSegment::AccountChangeSets)?,
+            ))
+        } else {
+            Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?,
+            ))
+        }
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
@@ -80,6 +112,35 @@ where
             Self::Database(cursor) => Ok(cursor.append(tx_num, receipt)?),
             Self::StaticFile(writer) => writer.append_receipt(tx_num, receipt),
         }
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbDupCursorRW<tables::AccountChangeSets>,
+{
+    /// Append account changeset for a block.
+    ///
+    /// NOTE: This _sorts_ the changesets by address before appending
+    pub fn append_account_changeset(
+        &mut self,
+        block_number: BlockNumber,
+        mut changeset: Vec<AccountBeforeTx>,
+    ) -> ProviderResult<()> {
+        // First sort the changesets
+        changeset.par_sort_by_key(|a| a.address);
+        match self {
+            Self::Database(cursor) => {
+                for change in changeset {
+                    cursor.append_dup(block_number, change)?;
+                }
+            }
+            Self::StaticFile(writer) => {
+                writer.append_account_changeset(changeset, block_number)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
