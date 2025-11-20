@@ -21,7 +21,7 @@ pub struct StaticFilesArgs {
     pub blocks_per_file_receipts: Option<u64>,
 
     /// Number of blocks per file for the transaction senders segment.
-    #[arg(long = "static-files.blocks-per-file.transaction_senders")]
+    #[arg(long = "static-files.blocks-per-file.transaction-senders")]
     pub blocks_per_file_transaction_senders: Option<u64>,
 
     /// Store receipts in static files instead of the database.
