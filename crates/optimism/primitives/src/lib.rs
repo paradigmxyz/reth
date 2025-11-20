@@ -11,17 +11,6 @@
 #![allow(unused)]
 extern crate alloc;
 
-#[cfg(any(test, feature = "arbitrary"))]
-use arbitrary as _;
-#[cfg(feature = "reth-codec")]
-use bytes as _;
-#[cfg(feature = "reth-codec")]
-use modular_bitfield as _;
-#[cfg(any(test, feature = "reth-codec"))]
-use reth_codecs as _;
-#[cfg(feature = "reth-codec")]
-use reth_zstd_compressors as _;
-
 pub mod bedrock;
 
 pub mod predeploys;
