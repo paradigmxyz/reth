@@ -5,11 +5,16 @@
 #[cfg(any(test, feature = "file-client"))]
 use crate::{bodies::test_utils::create_raw_bodies, file_codec::BlockFileCodec};
 use alloy_primitives::B256;
+#[cfg(any(test, feature = "file-client"))]
 use futures::SinkExt;
 use reth_ethereum_primitives::BlockBody;
 use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-use std::{collections::HashMap, io::SeekFrom, ops::RangeInclusive};
+#[cfg(any(test, feature = "file-client"))]
+use std::io::SeekFrom;
+use std::{collections::HashMap, ops::RangeInclusive};
+#[cfg(any(test, feature = "file-client"))]
 use tokio::{fs::File, io::AsyncSeekExt};
+#[cfg(any(test, feature = "file-client"))]
 use tokio_util::codec::FramedWrite;
 
 mod bodies_client;
