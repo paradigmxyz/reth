@@ -3,7 +3,7 @@ use crate::{
     static_file::mask::{ColumnSelectorOne, ColumnSelectorTwo},
     HeaderTerminalDifficulties,
 };
-use alloy_primitives::BlockHash;
+use alloy_primitives::{Address, BlockHash};
 use reth_db_api::table::Table;
 
 // HEADER MASKS
@@ -46,5 +46,5 @@ add_static_file_mask! {
 // TRANSACTION SENDER MASKS
 add_static_file_mask! {
     #[doc = "Mask for selecting a single transaction sender from `TransactionSenders` static file segment"]
-    TransactionSenderMask, alloy_primitives::Address, 0b1
+    TransactionSenderMask, Address, 0b1
 }
