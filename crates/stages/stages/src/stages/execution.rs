@@ -653,8 +653,9 @@ where
         *range.start()..*range.end() + 1,
         |cursor, number| cursor.get_one::<HeaderMask<N::BlockHeader>>(number.into()),
     )? {
-        let entry = entry?;
-        gas_total += entry.gas_used();
+        if let Some(entry) = entry? {
+            gas_total += entry.gas_used();
+        }
     }
 
     let duration = start.elapsed();

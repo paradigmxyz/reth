@@ -1,19 +1,31 @@
-//! Generic writer abstraction for writing to either database tables or static files.
+//! Generic reader and writer abstractions for interactin with either database tables or static
+//! files.
 
-use crate::{providers::StaticFileProviderRWRefMut, StaticFileProviderFactory};
-use alloy_primitives::{Address, BlockNumber, TxNumber};
+use std::ops::Range;
+
+use crate::{
+    providers::{StaticFileProvider, StaticFileProviderRWRefMut},
+    StaticFileProviderFactory,
+};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxNumber};
 use reth_db::{
     cursor::DbCursorRO,
+    static_file::TransactionSenderMask,
     table::Value,
-    transaction::{CursorMutTy, DbTxMut},
+    transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut},
 };
 use reth_db_api::{cursor::DbCursorRW, tables};
+use reth_errors::ProviderError;
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::ReceiptTy;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
+
+/// Type alias for [`EitherReader`] constructors.
+type EitherReaderTy<P, T> =
+    EitherReader<CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
@@ -77,7 +89,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         }
     }
 
-    /// Creates a new [`EitherWriter`] for senders based on storage settings and prune modes.
+    /// Creates a new [`EitherWriter`] for senders based on storage settings.
     pub fn new_senders<P>(
         provider: &'a P,
         block_number: BlockNumber,
@@ -86,7 +98,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
-        if Self::senders_destination(provider).is_static_file() {
+        if EitherWriterDestination::senders(provider).is_static_file() {
             Ok(EitherWriter::StaticFile(
                 provider
                     .get_static_file_writer(block_number, StaticFileSegment::TransactionSenders)?,
@@ -95,19 +107,6 @@ impl<'a> EitherWriter<'a, (), ()> {
             Ok(EitherWriter::Database(
                 provider.tx_ref().cursor_write::<tables::TransactionSenders>()?,
             ))
-        }
-    }
-
-    /// Returns the destination for writing senders based on storage settings.
-    pub fn senders_destination<P>(provider: &P) -> EitherWriterDestination
-    where
-        P: StorageSettingsCache,
-    {
-        // Write senders to static files only if they're explicitly enabled
-        if provider.cached_storage_settings().transaction_senders_in_static_files {
-            EitherWriterDestination::StaticFile
-        } else {
-            EitherWriterDestination::Database
         }
     }
 }
@@ -166,7 +165,7 @@ where
     /// Append transaction senders to the destination
     pub fn append_senders<I>(&mut self, senders: I) -> ProviderResult<()>
     where
-        I: Iterator<Item = (TxNumber, alloy_primitives::Address)>,
+        I: Iterator<Item = (TxNumber, Address)>,
     {
         match self {
             Self::Database(cursor) => {
@@ -213,6 +212,64 @@ where
     }
 }
 
+/// Represents a source for reading data, either from database or static files.
+#[derive(Debug, Display)]
+pub enum EitherReader<CURSOR, N> {
+    /// Read from database table via cursor
+    Database(CURSOR),
+    /// Read from static file
+    StaticFile(StaticFileProvider<N>),
+}
+
+impl EitherReader<(), ()> {
+    /// Creates a new [`EitherReader`] for senders based on storage settings.
+    pub fn new_senders<P>(
+        provider: &P,
+    ) -> ProviderResult<EitherReaderTy<P, tables::TransactionSenders>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTx,
+    {
+        if EitherWriterDestination::senders(provider).is_static_file() {
+            Ok(EitherReader::StaticFile(provider.static_file_provider()))
+        } else {
+            Ok(EitherReader::Database(
+                provider.tx_ref().cursor_read::<tables::TransactionSenders>()?,
+            ))
+        }
+    }
+}
+
+impl<CURSOR, N: NodePrimitives> EitherReader<CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::TransactionSenders>,
+{
+    /// Fetches the senders for a range of transactions.
+    pub fn senders_by_tx_range(
+        &mut self,
+        range: Range<TxNumber>,
+    ) -> ProviderResult<HashMap<TxNumber, Address>> {
+        match self {
+            Self::Database(cursor) => cursor
+                .walk_range(range)?
+                .map(|result| result.map_err(ProviderError::from))
+                .collect::<ProviderResult<HashMap<_, _>>>(),
+            Self::StaticFile(provider) => range
+                .clone()
+                .zip(provider.fetch_range_iter(
+                    StaticFileSegment::TransactionSenders,
+                    range,
+                    |cursor, number| cursor.get_one::<TransactionSenderMask>(number.into()),
+                )?)
+                .filter_map(|(tx_num, sender)| {
+                    let result = sender.transpose()?;
+                    Some(result.map(|sender| (tx_num, sender)))
+                })
+                .collect::<ProviderResult<HashMap<_, _>>>(),
+        }
+    }
+}
+
 /// Destination for writing data.
 #[derive(Debug, EnumIs)]
 pub enum EitherWriterDestination {
@@ -220,4 +277,73 @@ pub enum EitherWriterDestination {
     Database,
     /// Write to static file
     StaticFile,
+}
+
+impl EitherWriterDestination {
+    /// Returns the destination for writing senders based on storage settings.
+    pub fn senders<P>(provider: &P) -> Self
+    where
+        P: StorageSettingsCache,
+    {
+        // Write senders to static files only if they're explicitly enabled
+        if provider.cached_storage_settings().transaction_senders_in_static_files {
+            Self::StaticFile
+        } else {
+            Self::Database
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_utils::create_test_provider_factory;
+
+    use super::*;
+    use alloy_primitives::Address;
+    use reth_storage_api::{DatabaseProviderFactory, StorageSettings};
+
+    #[test]
+    fn test_reader_senders_by_tx_range() {
+        let factory = create_test_provider_factory();
+
+        let test_senders = [
+            (1, Address::random()),
+            (2, Address::random()),
+            (3, Address::random()),
+            (4, Address::random()),
+        ];
+
+        for transaction_senders_in_static_files in [false, true] {
+            let provider = factory.database_provider_rw().unwrap();
+            factory.set_storage_settings_cache(
+                StorageSettings::legacy()
+                    .with_transaction_senders_in_static_files(transaction_senders_in_static_files),
+            );
+            let mut writer = EitherWriter::new_senders(&provider, 0).unwrap();
+            if transaction_senders_in_static_files {
+                assert!(matches!(writer, EitherWriter::StaticFile(_)));
+            } else {
+                assert!(matches!(writer, EitherWriter::Database(_)));
+            }
+
+            writer.increment_block(0).unwrap();
+            writer.append_senders(test_senders.iter().copied()).unwrap();
+            drop(writer);
+            provider.commit().unwrap();
+
+            let provider = factory.database_provider_ro().unwrap();
+            let mut reader = EitherReader::new_senders(&provider).unwrap();
+            if transaction_senders_in_static_files {
+                assert!(matches!(reader, EitherReader::StaticFile(_)));
+            } else {
+                assert!(matches!(reader, EitherReader::Database(_)));
+            }
+
+            assert_eq!(
+                reader.senders_by_tx_range(0..6).unwrap(),
+                test_senders.iter().copied().collect::<HashMap<_, _>>(),
+                "{reader}"
+            );
+        }
+    }
 }

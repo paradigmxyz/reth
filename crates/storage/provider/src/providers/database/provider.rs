@@ -13,12 +13,13 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, EitherWriter, HashingWriter, HeaderProvider, HeaderSyncGapProvider,
-    HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter, LatestStateProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, RevertsInit, StageCheckpointReader, StateProviderBox, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieReader, TrieWriter,
+    DBProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider,
+    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
+    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
+    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
+    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    TrieReader, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -683,21 +684,22 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             let senders = if tx_range.is_empty() {
                 Vec::new()
             } else {
-                // fetch senders from the senders table
-                let known_senders = self.senders_by_tx_range(tx_range)?;
+                let known_senders: HashMap<TxNumber, Address> =
+                    EitherReader::new_senders(self)?.senders_by_tx_range(tx_range.clone())?;
 
-                body.transactions()
-                    .iter()
-                    .zip(known_senders.into_iter().map(Some).chain(std::iter::repeat(None)))
-                    .map(|(tx, sender)| {
-                        if let Some(sender) = sender {
-                            Ok(sender)
-                        } else {
+                let mut senders = Vec::with_capacity(body.transactions().len());
+                for (tx_num, tx) in tx_range.zip(body.transactions()) {
+                    match known_senders.get(&tx_num) {
+                        None => {
                             // recover the sender from the transaction if not found
-                            tx.recover_signer_unchecked()
+                            let sender = tx.recover_signer_unchecked()?;
+                            senders.push(sender);
                         }
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
+                        Some(sender) => senders.push(*sender),
+                    }
+                }
+
+                senders
             };
 
             assemble_block(header, body, senders)
@@ -1336,7 +1338,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        if EitherWriter::senders_destination(self).is_static_file() {
+        if EitherWriterDestination::senders(self).is_static_file() {
             self.static_file_provider.senders_by_tx_range(range)
         } else {
             self.cursor_read_collect::<tables::TransactionSenders>(range)
@@ -1344,7 +1346,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        if EitherWriter::senders_destination(self).is_static_file() {
+        if EitherWriterDestination::senders(self).is_static_file() {
             self.static_file_provider.transaction_sender(id)
         } else {
             Ok(self.tx.get::<tables::TransactionSenders>(id)?)

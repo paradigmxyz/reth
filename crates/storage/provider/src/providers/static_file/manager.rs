@@ -458,12 +458,37 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn get_segment_provider(
         &self,
         segment: StaticFileSegment,
-        start: u64,
+        number: u64,
     ) -> ProviderResult<StaticFileJarProvider<'_, N>> {
         if segment.is_block_based() {
-            self.get_segment_provider_for_block(segment, start, None)
+            self.get_segment_provider_for_block(segment, number, None)
         } else {
-            self.get_segment_provider_for_transaction(segment, start, None)
+            self.get_segment_provider_for_transaction(segment, number, None)
+        }
+    }
+
+    /// Gets the [`StaticFileJarProvider`] of the requested segment and start index that can be
+    /// either block or transaction.
+    ///
+    /// If the segment is not found, returns [`None`].
+    pub fn get_maybe_segment_provider(
+        &self,
+        segment: StaticFileSegment,
+        number: u64,
+    ) -> ProviderResult<Option<StaticFileJarProvider<'_, N>>> {
+        let provider = if segment.is_block_based() {
+            self.get_segment_provider_for_block(segment, number, None)
+        } else {
+            self.get_segment_provider_for_transaction(segment, number, None)
+        };
+
+        match provider {
+            Ok(provider) => Ok(Some(provider)),
+            Err(
+                ProviderError::MissingStaticFileBlock(_, _) |
+                ProviderError::MissingStaticFileTx(_, _),
+            ) => Ok(None),
+            Err(err) => Err(err),
         }
     }
 
@@ -1468,23 +1493,31 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         range: Range<u64>,
         get_fn: F,
-    ) -> ProviderResult<impl Iterator<Item = ProviderResult<T>> + 'a>
+    ) -> ProviderResult<impl Iterator<Item = ProviderResult<Option<T>>> + 'a>
     where
         F: Fn(&mut StaticFileCursor<'_>, u64) -> ProviderResult<Option<T>> + 'a,
         T: std::fmt::Debug,
     {
-        let mut provider = Some(self.get_segment_provider(segment, range.start)?);
-        Ok(range.filter_map(move |number| {
-            match get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose() {
-                Some(result) => Some(result),
+        let mut provider = self.get_maybe_segment_provider(segment, range.start)?;
+        Ok(range.map(move |number| {
+            match provider
+                .as_ref()
+                .map(|provider| get_fn(&mut provider.cursor()?, number))
+                .and_then(|result| result.transpose())
+            {
+                Some(result) => result.map(Some),
                 None => {
-                    // There is a very small chance of hitting a deadlock if two consecutive static
-                    // files share the same bucket in the internal dashmap and
-                    // we don't drop the current provider before requesting the
-                    // next one.
+                    // There is a very small chance of hitting a deadlock if two consecutive
+                    // static files share the same bucket in the
+                    // internal dashmap and we don't drop the current
+                    // provider before requesting the next one.
                     provider.take();
-                    provider = Some(self.get_segment_provider(segment, number).ok()?);
-                    get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose()
+                    provider = self.get_maybe_segment_provider(segment, number)?;
+                    provider
+                        .as_ref()
+                        .map(|provider| get_fn(&mut provider.cursor()?, number))
+                        .and_then(|result| result.transpose())
+                        .transpose()
                 }
             }
         }))
