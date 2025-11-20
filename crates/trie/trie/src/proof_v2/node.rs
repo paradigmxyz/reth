@@ -3,7 +3,8 @@ use alloy_rlp::Encodable;
 use alloy_trie::nodes::ExtensionNodeRef;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    BranchNode, ExtensionNode, LeafNode, LeafNodeRef, Nibbles, RlpNode, TrieMask, TrieNode,
+    BranchNode, ExtensionNode, LeafNode, LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask,
+    TrieMasks, TrieNode,
 };
 
 /// A trie node which is the child of a branch in the trie.
@@ -71,20 +72,34 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         }
     }
 
-    /// Converts this child into a [`TrieNode`].
-    pub(crate) fn into_trie_node(self, buf: &mut Vec<u8>) -> Result<TrieNode, StateProofError> {
-        match self {
+    /// Converts this child into a [`ProofTrieNode`] having the given path.
+    pub(crate) fn into_proof_trie_node(
+        self,
+        path: Nibbles,
+        buf: &mut Vec<u8>,
+    ) -> Result<ProofTrieNode, StateProofError> {
+        let (node, masks) = match self {
             Self::Leaf { short_key, value } => {
                 value.encode(buf)?;
-                Ok(TrieNode::Leaf(LeafNode::new(short_key, core::mem::take(buf))))
+                (TrieNode::Leaf(LeafNode::new(short_key, core::mem::take(buf))), TrieMasks::none())
             }
             Self::Extension { short_key, child } => {
                 child.encode(buf);
                 let child_rlp_node = RlpNode::from_rlp(buf);
-                Ok(TrieNode::Extension(ExtensionNode { key: short_key, child: child_rlp_node }))
+                (
+                    TrieNode::Extension(ExtensionNode { key: short_key, child: child_rlp_node }),
+                    TrieMasks::none(),
+                )
             }
-            Self::Branch(branch_node) => Ok(TrieNode::Branch(branch_node)),
-        }
+            // TODO store trie masks on branch
+            Self::Branch(branch_node) => (TrieNode::Branch(branch_node), TrieMasks::none()),
+        };
+
+        // Encode the `TrieNode` to the buffer, so we can return the `RlpNode` for it at the end.
+        buf.clear();
+        node.encode(buf);
+
+        Ok(ProofTrieNode { node, path, masks })
     }
 
     /// Returns the short key of the child, if it is a leaf or extension, or empty if its a
