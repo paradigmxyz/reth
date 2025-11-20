@@ -860,7 +860,7 @@ where
         let changeset_progress_exists =
             self.provider.get_stage_checkpoint(StageId::MerkleChangeSets)?.is_some();
 
-        let strategy = if self.config.state_root_fallback() || changeset_progress_exists {
+        let strategy = if self.config.state_root_fallback() || !changeset_progress_exists {
             StateRootStrategy::Synchronous
         } else if self.config.use_state_root_task() {
             StateRootStrategy::StateRootTask
