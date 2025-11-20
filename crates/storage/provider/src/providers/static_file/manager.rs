@@ -1487,7 +1487,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Fetches data within a specified range across multiple static files.
     ///
-    /// Returns an iterator over the data
+    /// Returns an iterator over the data. Yields [`None`] if the data for the specified number is
+    /// not found.
     pub fn fetch_range_iter<'a, T, F>(
         &'a self,
         segment: StaticFileSegment,
@@ -1508,9 +1509,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 Some(result) => result.map(Some),
                 None => {
                     // There is a very small chance of hitting a deadlock if two consecutive
-                    // static files share the same bucket in the
-                    // internal dashmap and we don't drop the current
-                    // provider before requesting the next one.
+                    // static files share the same bucket in the internal dashmap and we don't drop
+                    // the current provider before requesting the next one.
                     provider.take();
                     provider = self.get_maybe_segment_provider(segment, number)?;
                     provider

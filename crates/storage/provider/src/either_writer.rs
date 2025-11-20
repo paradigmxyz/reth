@@ -306,7 +306,8 @@ mod tests {
     fn test_reader_senders_by_tx_range() {
         let factory = create_test_provider_factory();
 
-        let test_senders = [
+        // Insert senders only from 1 to 4, but we will query from 0 to 5.
+        let senders = [
             (1, Address::random()),
             (2, Address::random()),
             (3, Address::random()),
@@ -314,11 +315,12 @@ mod tests {
         ];
 
         for transaction_senders_in_static_files in [false, true] {
-            let provider = factory.database_provider_rw().unwrap();
             factory.set_storage_settings_cache(
                 StorageSettings::legacy()
                     .with_transaction_senders_in_static_files(transaction_senders_in_static_files),
             );
+
+            let provider = factory.database_provider_rw().unwrap();
             let mut writer = EitherWriter::new_senders(&provider, 0).unwrap();
             if transaction_senders_in_static_files {
                 assert!(matches!(writer, EitherWriter::StaticFile(_)));
@@ -327,7 +329,7 @@ mod tests {
             }
 
             writer.increment_block(0).unwrap();
-            writer.append_senders(test_senders.iter().copied()).unwrap();
+            writer.append_senders(senders.iter().copied()).unwrap();
             drop(writer);
             provider.commit().unwrap();
 
@@ -341,7 +343,7 @@ mod tests {
 
             assert_eq!(
                 reader.senders_by_tx_range(0..6).unwrap(),
-                test_senders.iter().copied().collect::<HashMap<_, _>>(),
+                senders.iter().copied().collect::<HashMap<_, _>>(),
                 "{reader}"
             );
         }
