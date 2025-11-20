@@ -684,26 +684,20 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
                 Vec::new()
             } else {
                 // fetch senders from the senders table
-                // TODO: optimize
                 let known_senders = self.senders_by_tx_range(tx_range)?;
 
-                let mut senders = Vec::with_capacity(body.transactions().len());
-                for (tx, sender) in body
-                    .transactions()
+                body.transactions()
                     .iter()
                     .zip(known_senders.into_iter().map(Some).chain(std::iter::repeat(None)))
-                {
-                    match sender {
-                        None => {
+                    .map(|(tx, sender)| {
+                        if let Some(sender) = sender {
+                            Ok(sender)
+                        } else {
                             // recover the sender from the transaction if not found
-                            let sender = tx.recover_signer_unchecked()?;
-                            senders.push(sender);
+                            tx.recover_signer_unchecked()
                         }
-                        Some(sender) => senders.push(sender),
-                    }
-                }
-
-                senders
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
             };
 
             assemble_block(header, body, senders)
