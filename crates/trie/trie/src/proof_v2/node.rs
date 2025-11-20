@@ -155,3 +155,54 @@ pub(crate) fn trim_nibbles_prefix(n: &Nibbles, len: usize) -> Nibbles {
     debug_assert!(n.len() >= len);
     n.slice_unchecked(len, n.len())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_trim_nibbles_prefix_basic() {
+        // Create nibbles [1, 2, 3, 4, 5, 6]
+        let nibbles = Nibbles::from_nibbles([1, 2, 3, 4, 5, 6]);
+
+        // Trim first 2 nibbles
+        let trimmed = trim_nibbles_prefix(&nibbles, 2);
+        assert_eq!(trimmed.len(), 4);
+
+        // Verify the remaining nibbles are [3, 4, 5, 6]
+        assert_eq!(trimmed.get(0), Some(3));
+        assert_eq!(trimmed.get(1), Some(4));
+        assert_eq!(trimmed.get(2), Some(5));
+        assert_eq!(trimmed.get(3), Some(6));
+    }
+
+    #[test]
+    fn test_trim_nibbles_prefix_zero() {
+        // Create nibbles [10, 11, 12, 13]
+        let nibbles = Nibbles::from_nibbles([10, 11, 12, 13]);
+
+        // Trim zero nibbles - should return identical nibbles
+        let trimmed = trim_nibbles_prefix(&nibbles, 0);
+        assert_eq!(trimmed, nibbles);
+    }
+
+    #[test]
+    fn test_trim_nibbles_prefix_all() {
+        // Create nibbles [1, 2, 3, 4]
+        let nibbles = Nibbles::from_nibbles([1, 2, 3, 4]);
+
+        // Trim all nibbles - should return empty
+        let trimmed = trim_nibbles_prefix(&nibbles, 4);
+        assert!(trimmed.is_empty());
+    }
+
+    #[test]
+    fn test_trim_nibbles_prefix_empty() {
+        // Create empty nibbles
+        let nibbles = Nibbles::new();
+
+        // Trim zero from empty - should return empty
+        let trimmed = trim_nibbles_prefix(&nibbles, 0);
+        assert!(trimmed.is_empty());
+    }
+}

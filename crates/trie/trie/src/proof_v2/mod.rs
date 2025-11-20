@@ -113,7 +113,7 @@ where
         } else {
             // When there is a current branch then trim off its path as well as the nibble that it
             // has set for this leaf.
-            leaf_key.slice_unchecked(self.branch_path.len() + 1, leaf_key.len())
+            trim_nibbles_prefix(&leaf_key, self.branch_path.len() + 1)
         };
 
         trace!(
@@ -186,7 +186,7 @@ where
             target: TRACE_TARGET,
             ?leaf_short_key,
             ?common_prefix_len,
-            new_branch = ?self.branch_stack.last().unwrap(),
+            new_branch = ?self.branch_stack.last().expect("branch_stack was just pushed to"),
             ?branch_path_len,
             branch_path = ?self.branch_path,
             "push_new_branch: returning",
