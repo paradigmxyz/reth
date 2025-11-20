@@ -682,8 +682,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     }
 
     /// Appends change to changeset static file.
-    ///
-    /// Returns the current number of changesets in the block.
     fn append_change<V: Compact>(&mut self, change: &V) -> ProviderResult<()> {
         if self.writer.user_header().changeset_offsets().is_some() {
             self.writer.user_header_mut().increment_block_changes();
