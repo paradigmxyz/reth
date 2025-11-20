@@ -8702,7 +8702,6 @@ version = "1.9.3"
 dependencies = [
  "alloy-eips",
  "eyre",
- "futures-util",
  "reth-chainspec",
  "reth-config",
  "reth-consensus",

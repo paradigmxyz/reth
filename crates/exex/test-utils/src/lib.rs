@@ -11,12 +11,12 @@
 use std::{
     fmt::Debug,
     future::{poll_fn, Future},
+    pin::Pin,
     sync::Arc,
     task::Poll,
 };
 
 use alloy_eips::BlockNumHash;
-use futures_util::FutureExt;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
 use reth_db::{
@@ -352,7 +352,7 @@ pub enum PollOnceError {
 
 impl<F: Future<Output = eyre::Result<()>> + Unpin + Send> PollOnce for F {
     async fn poll_once(&mut self) -> Result<(), PollOnceError> {
-        poll_fn(|cx| match self.poll_unpin(cx) {
+        poll_fn(|cx| match Pin::new(&mut *self).poll(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Err(PollOnceError::FutureIsReady)),
             Poll::Ready(Err(err)) => Poll::Ready(Err(PollOnceError::FutureError(err))),
             Poll::Pending => Poll::Ready(Ok(())),

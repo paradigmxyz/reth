@@ -36,7 +36,6 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 alloy-eips.workspace = true
 
 ## async
-futures-util.workspace = true
 tokio.workspace = true
 
 ## misc
