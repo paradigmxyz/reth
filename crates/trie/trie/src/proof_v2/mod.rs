@@ -328,7 +328,7 @@ where
             } else {
                 curr_branch.state_mask.set_bit(nibble);
 
-                // Push the leaf onto the stack.
+                // Add this leaf as a new child of the current branch (no intermediate branch needed).
                 self.child_stack.push(ProofTrieBranchChild::Leaf {
                     short_key: key.slice_unchecked(common_prefix_len + 1, key.len()),
                     value: val,
