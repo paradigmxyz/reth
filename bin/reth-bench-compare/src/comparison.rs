@@ -109,8 +109,7 @@ pub(crate) struct ComparisonSummary {
     pub blocks_per_second_change_percent: f64,
 }
 
-/// Per-block comparison data (raw latencies in µs; percent change is `(feature - baseline) /
-/// baseline * 100`).
+/// Per-block comparison data
 #[derive(Debug, Serialize)]
 pub(crate) struct BlockComparison {
     pub block_number: u64,
