@@ -103,7 +103,6 @@ where
         let end_block = *range_output.block_range.end();
 
         let mut writer = EitherWriter::new_senders(provider, *range_output.block_range.start())?;
-        writer.ensure_at_block(range_output.block_range.start().saturating_sub(1))?;
 
         info!(target: "sync::stages::sender_recovery", tx_range = ?range_output.tx_range, "Recovering senders");
 
