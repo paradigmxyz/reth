@@ -384,23 +384,6 @@ where
         self.pool.validator().validate_transactions_with_origin(origin, transactions).await
     }
 
-    /// Validates all transactions with their individual origins.
-    ///
-    /// This returns the validated transactions in the same order as input.
-    async fn validate_all_with_origins(
-        &self,
-        transactions: Vec<(TransactionOrigin, V::Transaction)>,
-    ) -> Vec<(TransactionOrigin, TransactionValidationOutcome<V::Transaction>)> {
-        if transactions.len() == 1 {
-            let (origin, tx) = transactions.into_iter().next().unwrap();
-            let res = self.pool.validator().validate_transaction(origin, tx).await;
-            return vec![(origin, res)]
-        }
-        let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
-        let tx_outcomes = self.pool.validator().validate_transactions(transactions).await;
-        origins.into_iter().zip(tx_outcomes).collect()
-    }
-
     /// Number of transactions in the entire pool
     pub fn len(&self) -> usize {
         self.pool.len()
@@ -514,18 +497,6 @@ where
         let validated = self.validate_all(origin, transactions).await;
 
         self.pool.add_transactions(origin, validated.into_iter())
-    }
-
-    async fn add_transactions_with_origins(
-        &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
-        if transactions.is_empty() {
-            return Vec::new()
-        }
-        let validated = self.validate_all_with_origins(transactions).await;
-
-        self.pool.add_transactions_with_origins(validated)
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
