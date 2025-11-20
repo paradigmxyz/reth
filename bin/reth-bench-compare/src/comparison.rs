@@ -58,6 +58,7 @@ pub(crate) struct TotalGasRow {
 /// - `mean_new_payload_latency_ms`: arithmetic mean latency across blocks.
 /// - `median_new_payload_latency_ms`: p50 latency across blocks.
 /// - `p90_new_payload_latency_ms` / `p99_new_payload_latency_ms`: tail latencies across blocks.
+///
 /// `gas_per_second` and `blocks_per_second` use the total run duration from the gas trace.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct BenchmarkSummary {
