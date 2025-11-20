@@ -3,7 +3,8 @@
 use crate::{providers::StaticFileProviderRWRefMut, StaticFileProviderFactory};
 use alloy_primitives::{BlockNumber, TxNumber};
 use reth_db::{
-    table::Value,
+    cursor::DbCursorRO,
+    table::{Table, Value},
     transaction::{CursorMutTy, DbTxMut},
 };
 use reth_db_api::{cursor::DbCursorRW, tables};
@@ -41,49 +42,16 @@ impl<'a> EitherWriter<'a, (), ()> {
         P::Tx: DbTxMut,
         ReceiptTy<P::Primitives>: Value,
     {
-        // Write receipts to static files only if they're explicitly enabled or we don't have
-        // receipts pruning
-        if provider.cached_storage_settings().receipts_in_static_files ||
-            !provider.prune_modes_ref().has_receipts_pruning()
-        {
-            Ok(EitherWriter::StaticFile(
-                provider.get_static_file_writer(block_number, StaticFileSegment::Receipts)?,
-            ))
-        } else {
-            Ok(EitherWriter::Database(
+        match Self::receipts_destination(provider) {
+            EitherWriterDestination::Database => Ok(EitherWriter::Database(
                 provider.tx_ref().cursor_write::<tables::Receipts<ReceiptTy<P::Primitives>>>()?,
-            ))
+            )),
+            EitherWriterDestination::StaticFile => Ok(EitherWriter::StaticFile(
+                provider.get_static_file_writer(block_number, StaticFileSegment::Receipts)?,
+            )),
         }
     }
-}
 
-impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
-    /// Increment the block number.
-    ///
-    /// Relevant only for [`Self::StaticFile`]. It is a no-op for [`Self::Database`].
-    pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {
-        match self {
-            Self::Database(_) => Ok(()),
-            Self::StaticFile(writer) => writer.increment_block(expected_block_number),
-        }
-    }
-}
-
-impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
-where
-    N::Receipt: Value,
-    CURSOR: DbCursorRW<tables::Receipts<N::Receipt>>,
-{
-    /// Append a transaction receipt.
-    pub fn append_receipt(&mut self, tx_num: TxNumber, receipt: &N::Receipt) -> ProviderResult<()> {
-        match self {
-            Self::Database(cursor) => Ok(cursor.append(tx_num, receipt)?),
-            Self::StaticFile(writer) => writer.append_receipt(tx_num, receipt),
-        }
-    }
-}
-
-impl EitherWriter<'_, (), ()> {
     /// Returns the destination for writing receipts.
     ///
     /// The rules are as follows:
@@ -106,6 +74,68 @@ impl EitherWriter<'_, (), ()> {
         } else {
             EitherWriterDestination::StaticFile
         }
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
+    /// Increment the block number.
+    ///
+    /// Relevant only for [`Self::StaticFile`]. It is a no-op for [`Self::Database`].
+    pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {
+        match self {
+            Self::Database(_) => Ok(()),
+            Self::StaticFile(writer) => writer.increment_block(expected_block_number),
+        }
+    }
+
+    /// Prune transaction number based table or static file above the specified transaction number.
+    fn prune_tx_based_above<T>(&mut self, from_tx: TxNumber) -> ProviderResult<()>
+    where
+        T: Table<Key = u64, Value: Value>,
+        CURSOR: DbCursorRO<T> + DbCursorRW<T>,
+    {
+        match self {
+            Self::Database(cursor) => {
+                let mut walker = cursor.walk_range(from_tx..)?;
+                while walker.next().transpose()?.is_some() {
+                    walker.delete_current()?;
+                }
+            }
+            Self::StaticFile(writer) => {
+                let highest_block = writer.get_highest_static_file_block().unwrap_or_default();
+                let highest_tx = writer.get_highest_static_file_tx();
+
+                let to_delete = highest_tx
+                    .map(|tx_number| (tx_number + 1).saturating_sub(from_tx))
+                    .unwrap_or_default();
+
+                writer.queue_prune(to_delete, Some(highest_block))?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    N::Receipt: Value,
+    CURSOR: DbCursorRW<tables::Receipts<N::Receipt>>,
+{
+    /// Append a transaction receipt.
+    pub fn append_receipt(&mut self, tx_num: TxNumber, receipt: &N::Receipt) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.append(tx_num, receipt)?),
+            Self::StaticFile(writer) => writer.append_receipt(tx_num, receipt),
+        }
+    }
+
+    /// Removes receipts for transaction numbers above the specified.
+    pub fn prune_receipts_above(&mut self, from_tx: TxNumber) -> ProviderResult<()>
+    where
+        CURSOR: DbCursorRO<tables::Receipts<N::Receipt>>,
+    {
+        self.prune_tx_based_above(from_tx)
     }
 }
 
