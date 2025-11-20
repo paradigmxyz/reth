@@ -58,6 +58,8 @@ std = [
     "serde_with?/std",
     "alloy-eips/std",
     "secp256k1/std",
+    "bytes/std",
+    "reth-zstd-compressors/std",
 ]
 alloy-compat = ["op-alloy-consensus/alloy-compat"]
 reth-codec = [
@@ -74,6 +76,8 @@ serde = [
     "rand/serde",
     "rand_08/serde",
     "secp256k1/serde",
+    "bytes/serde",
+    "reth-codecs/serde",
 ]
 serde-bincode-compat = [
     "serde",
@@ -90,4 +94,5 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-eips/arbitrary",
+    "reth-codecs/arbitrary",
 ]
