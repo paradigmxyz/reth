@@ -38,6 +38,7 @@ use reth_provider::{
     StateRootProvider, TrieReader,
 };
 use reth_revm::db::State;
+use reth_stages_api::StageId;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
@@ -132,6 +133,7 @@ where
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
+        + StageCheckpointReader
         + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
@@ -368,7 +370,7 @@ where
         let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
 
         // Plan the strategy used for state root computation.
-        let strategy = self.plan_state_root_computation();
+        let strategy = ensure_ok!(self.plan_state_root_computation());
 
         debug!(
             target: "engine::tree::payload_validator",
@@ -852,14 +854,21 @@ where
     }
 
     /// Determines the state root computation strategy based on configuration.
-    const fn plan_state_root_computation(&self) -> StateRootStrategy {
-        if self.config.state_root_fallback() {
+    fn plan_state_root_computation(&self) -> ProviderResult<StateRootStrategy> {
+        // If there are no changesets then it's not safe to use the parallel state root or state
+        // root task.
+        let changeset_progress_exists =
+            self.provider.get_stage_checkpoint(StageId::MerkleChangeSets)?.is_some();
+
+        let strategy = if self.config.state_root_fallback() || changeset_progress_exists {
             StateRootStrategy::Synchronous
         } else if self.config.use_state_root_task() {
             StateRootStrategy::StateRootTask
         } else {
             StateRootStrategy::Parallel
-        }
+        };
+
+        Ok(strategy)
     }
 
     /// Called when an invalid block is encountered during validation.
@@ -1007,6 +1016,7 @@ where
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
+        + StageCheckpointReader
         + Clone
         + 'static,
     N: NodePrimitives,
