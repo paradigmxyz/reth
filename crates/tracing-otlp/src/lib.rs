@@ -82,8 +82,16 @@ impl OtlpConfig {
         endpoint: Url,
         protocol: OtlpProtocol,
         sample_ratio: Option<f64>,
-    ) -> Self {
-        Self { service_name: service_name.into(), endpoint, protocol, sample_ratio }
+    ) -> eyre::Result<Self> {
+        if let Some(ratio) = sample_ratio {
+            ensure!(
+                (0.0..=1.0).contains(&ratio),
+                "Sample ratio must be between 0.0 and 1.0, got: {}",
+                ratio
+            );
+        }
+
+        Ok(Self { service_name: service_name.into(), endpoint, protocol, sample_ratio })
     }
 
     /// Returns the service name.
