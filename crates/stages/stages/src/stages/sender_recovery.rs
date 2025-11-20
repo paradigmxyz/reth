@@ -180,7 +180,7 @@ where
     Provider: DBProvider + HeaderProvider + TransactionsProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
-    assert_eq!(
+    debug_assert_eq!(
         tx_range.clone().count(),
         block_numbers.len(),
         "Transaction range and block numbers count mismatch"
