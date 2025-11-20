@@ -129,6 +129,9 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
+    // Make sure to set storage settings before anything reads / writes
+    factory.set_storage_settings_cache(storage_settings);
+
     let chain = factory.chain_spec();
 
     let genesis = chain.genesis();
@@ -168,6 +171,10 @@ where
 
     // use transaction to insert genesis header
     let provider_rw = factory.database_provider_rw()?;
+
+    // Behaviour reserved only for new nodes should be set in the storage settings.
+    provider_rw.write_storage_settings(storage_settings)?;
+
     insert_genesis_hashes(&provider_rw, alloc.iter())?;
     insert_genesis_history(&provider_rw, alloc.iter())?;
 
@@ -193,13 +200,9 @@ where
     static_file_provider.latest_writer(StaticFileSegment::Receipts)?.increment_block(0)?;
     static_file_provider.latest_writer(StaticFileSegment::Transactions)?.increment_block(0)?;
 
-    // Behaviour reserved only for new nodes should be set here.
-    provider_rw.write_storage_settings(storage_settings)?;
-
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
     provider_rw.commit()?;
-    factory.set_storage_settings_cache(storage_settings);
 
     Ok(hash)
 }
