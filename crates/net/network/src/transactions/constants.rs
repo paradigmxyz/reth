@@ -149,25 +149,6 @@ pub mod tx_fetcher {
 
     /* ====== LIMITED CAPACITY ON FETCH PENDING HASHES ====== */
 
-    /// Default budget for finding an idle fallback peer for any hash pending fetch, when said
-    /// search is budget constrained.
-    ///
-    /// Default is a sixth of [`DEFAULT_MAX_COUNT_PENDING_FETCH`], which defaults to 12 800 hashes
-    /// (the ideal max number of hashes pending fetch), divided by
-    /// [`DEFAULT_MAX_COUNT_FALLBACK_PEERS`], which defaults to 3 peers (the depth of the search),
-    /// so a search breadth of 711 lru hashes in the pending hashes cache.
-    pub const DEFAULT_BUDGET_FIND_IDLE_FALLBACK_PEER: usize =
-        DEFAULT_MAX_COUNT_PENDING_FETCH / 6 / DEFAULT_MAX_COUNT_FALLBACK_PEERS as usize;
-
-    /// Default budget for finding hashes in the intersection of transactions announced by a peer
-    /// and in the cache of hashes pending fetch, when said search is budget constrained.
-    ///
-    /// Default is an eight of [`DEFAULT_MAX_COUNT_PENDING_FETCH`], which defaults to 12 800 hashes
-    /// (the ideal max number of hashes pending fetch), so a search breadth of 1 600 lru hashes in
-    /// the pending hashes cache.
-    pub const DEFAULT_BUDGET_FIND_INTERSECTION_ANNOUNCED_BY_PEER_AND_PENDING_FETCH: usize =
-        DEFAULT_MAX_COUNT_PENDING_FETCH / 8;
-
     /* ====== SCALARS FOR USE ON FETCH PENDING HASHES ====== */
 
     /// Default soft limit for the number of hashes in a
@@ -198,38 +179,6 @@ pub mod tx_fetcher {
     /// requests, so 65 requests.
     pub const DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES: usize =
         DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS as usize / 2;
-
-    /// Default divisor of the max inflight request when calculating search breadth of the search
-    /// for any idle peer to which to send a request filled with hashes pending fetch. The max
-    /// inflight requests is configured in
-    /// [`TransactionFetcherInfo`](crate::transactions::fetcher::TransactionFetcherInfo).
-    ///
-    /// Default is 3 requests.
-    pub const DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER: usize = 3;
-
-    /// Default divisor of the max inflight request when calculating search breadth of the search
-    /// for the intersection of hashes announced by a peer and hashes pending fetch. The max
-    /// inflight requests is configured in
-    /// [`TransactionFetcherInfo`](crate::transactions::fetcher::TransactionFetcherInfo).
-    ///
-    /// Default is 3 requests.
-    pub const DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION: usize = 3;
-
-    // Default divisor to the max pending pool imports when calculating search breadth of the
-    /// search for any idle peer to which to send a request filled with hashes pending fetch.
-    /// The max pending pool imports is configured in
-    /// [`PendingPoolImportsInfo`](crate::transactions::PendingPoolImportsInfo).
-    ///
-    /// Default is 4 requests.
-    pub const DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_IDLE_PEER: usize = 4;
-
-    /// Default divisor to the max pending pool imports when calculating search breadth of the
-    /// search for any idle peer to which to send a request filled with hashes pending fetch.
-    /// The max pending pool imports is configured in
-    /// [`PendingPoolImportsInfo`](crate::transactions::PendingPoolImportsInfo).
-    ///
-    /// Default is 4 requests.
-    pub const DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_INTERSECTION: usize = 4;
 
     /* ================== ROUGH MEASURES ================== */
 
