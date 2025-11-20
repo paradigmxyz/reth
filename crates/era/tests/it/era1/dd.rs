@@ -16,7 +16,7 @@ use std::io::Cursor;
 
 use crate::{EraTestDownloader, MAINNET};
 
-// Helper function to test decompression and decoding for a specific file
+// Helper function to test decompression and decoding for a specific era1 file
 async fn test_file_decompression(
     downloader: &EraTestDownloader,
     filename: &str,

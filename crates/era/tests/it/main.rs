@@ -38,14 +38,15 @@ const ERA1_MAINNET_URL: &str = "https://era.ithaca.xyz/era1/";
 /// Succinct list of mainnet files we want to download
 /// from <https://era.ithaca.xyz/era1/>
 /// for testing purposes
-const ERA1_MAINNET_FILES_NAMES: [&str; 7] = [
+const ERA1_MAINNET_FILES_NAMES: [&str; 8] = [
     "mainnet-00000-5ec1ffb8.era1",
     "mainnet-00003-d8b8a40b.era1",
     "mainnet-00151-e322efe1.era1",
     "mainnet-00293-0d6c5812.era1",
     "mainnet-00443-ea71b6f9.era1",
     "mainnet-01367-d7efc68f.era1",
-    "mainnet-01517-be94d5d0.era1", // Last era until we can decode right now
+    "mainnet-01610-99fdde4b.era1",
+    "mainnet-01895-3f81607c.era1",
 ];
 
 /// Sepolia network name
