@@ -109,7 +109,8 @@ pub(crate) struct ComparisonSummary {
     pub blocks_per_second_change_percent: f64,
 }
 
-/// Per-block comparison data
+/// Per-block comparison data (raw latencies in µs; percent change is `(feature - baseline) /
+/// baseline * 100`).
 #[derive(Debug, Serialize)]
 pub(crate) struct BlockComparison {
     pub block_number: u64,
@@ -300,7 +301,11 @@ impl ComparisonGenerator {
         Ok(rows)
     }
 
-    /// Calculate summary statistics for a benchmark run
+    /// Calculate summary statistics for a benchmark run.
+    ///
+    /// Computes latency statistics from per-block `new_payload_latency` values in `combined_data`
+    /// (converting from µs to ms), and throughput metrics using the total run duration from
+    /// `total_gas_data`. Percentiles (p50/p90/p99) use linear interpolation on sorted latencies.
     fn calculate_summary(
         &self,
         combined_data: &[CombinedLatencyRow],
