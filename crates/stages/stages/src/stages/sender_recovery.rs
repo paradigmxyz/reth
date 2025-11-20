@@ -246,7 +246,9 @@ where
                 }
             };
 
-            let new_block_number = block_numbers.next().unwrap();
+            let new_block_number = block_numbers
+                .next()
+                .expect("block numbers iterator has the same length as the number of transactions");
             writer.ensure_at_block(new_block_number)?;
             writer.append_sender(tx_id, &sender)?;
             processed_transactions += 1;
