@@ -5,17 +5,9 @@
 #[cfg(any(test, feature = "file-client"))]
 use crate::{bodies::test_utils::create_raw_bodies, file_codec::BlockFileCodec};
 use alloy_primitives::B256;
-#[cfg(any(test, feature = "file-client"))]
-use futures::SinkExt;
 use reth_ethereum_primitives::BlockBody;
 use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-#[cfg(any(test, feature = "file-client"))]
-use std::io::SeekFrom;
 use std::{collections::HashMap, ops::RangeInclusive};
-#[cfg(any(test, feature = "file-client"))]
-use tokio::{fs::File, io::AsyncSeekExt};
-#[cfg(any(test, feature = "file-client"))]
-use tokio_util::codec::FramedWrite;
 
 mod bodies_client;
 pub use bodies_client::TestBodiesClient;
@@ -47,6 +39,11 @@ pub(crate) fn generate_bodies(
 pub(crate) async fn generate_bodies_file(
     range: RangeInclusive<u64>,
 ) -> (tokio::fs::File, Vec<SealedHeader>, HashMap<B256, BlockBody>) {
+    use futures::SinkExt;
+    use std::io::SeekFrom;
+    use tokio::{fs::File, io::AsyncSeekExt};
+    use tokio_util::codec::FramedWrite;
+
     let (headers, bodies) = generate_bodies(range);
     let raw_block_bodies = create_raw_bodies(headers.iter().cloned(), &mut bodies.clone());
 
