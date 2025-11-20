@@ -54,19 +54,14 @@ pub(crate) struct TotalGasRow {
 /// Summary statistics for a benchmark run.
 ///
 /// Latencies are derived from per-block `engine_newPayload` timings (converted from µs to ms):
-/// - `total_new_payload_latency_ms`: sum of all blocks' latencies. Used for calculating mean and
-///   provides total execution time spent in `engine_newPayload`.
 /// - `mean_new_payload_latency_ms`: arithmetic mean latency across blocks.
 /// - `median_new_payload_latency_ms`: p50 latency across blocks.
 /// - `p90_new_payload_latency_ms` / `p99_new_payload_latency_ms`: tail latencies across blocks.
-///
-/// `gas_per_second` and `blocks_per_second` use the total run duration from the benchmark.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct BenchmarkSummary {
     pub total_blocks: u64,
     pub total_gas_used: u64,
     pub total_duration_ms: u128,
-    pub total_new_payload_latency_ms: f64,
     pub mean_new_payload_latency_ms: f64,
     pub median_new_payload_latency_ms: f64,
     pub p90_new_payload_latency_ms: f64,
@@ -322,8 +317,8 @@ impl ComparisonGenerator {
 
         let latencies_ms: Vec<f64> =
             combined_data.iter().map(|r| r.new_payload_latency as f64 / 1000.0).collect();
-        let total_new_payload_latency_ms: f64 = latencies_ms.iter().sum();
-        let mean_new_payload_latency_ms: f64 = total_new_payload_latency_ms / total_blocks as f64;
+        let mean_new_payload_latency_ms: f64 =
+            latencies_ms.iter().sum::<f64>() / total_blocks as f64;
 
         let mut sorted_latencies_ms = latencies_ms;
         sorted_latencies_ms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
@@ -351,7 +346,6 @@ impl ComparisonGenerator {
             total_blocks,
             total_gas_used,
             total_duration_ms,
-            total_new_payload_latency_ms,
             mean_new_payload_latency_ms,
             median_new_payload_latency_ms,
             p90_new_payload_latency_ms,
@@ -531,8 +525,7 @@ impl ComparisonGenerator {
         );
         println!("  NewPayload latency (ms):");
         println!(
-            "    total: {:.2}, mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
-            baseline.total_new_payload_latency_ms,
+            "    mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
             baseline.mean_new_payload_latency_ms,
             baseline.median_new_payload_latency_ms,
             baseline.p90_new_payload_latency_ms,
@@ -561,8 +554,7 @@ impl ComparisonGenerator {
         );
         println!("  NewPayload latency (ms):");
         println!(
-            "    total: {:.2}, mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
-            feature.total_new_payload_latency_ms,
+            "    mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
             feature.mean_new_payload_latency_ms,
             feature.median_new_payload_latency_ms,
             feature.p90_new_payload_latency_ms,
