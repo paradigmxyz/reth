@@ -42,17 +42,21 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
 impl<N: NodePrimitives> BuiltPayloadExecutedBlock<N> {
     /// Converts this into an [`reth_chain_state::ExecutedBlock`].
     ///
-    /// If the hashed state or trie updates are in sorted form, they will be converted
-    /// back to their unsorted representations.
+    /// Ensures hashed state and trie updates are in their sorted representations
+    /// as required by `reth_chain_state::ExecutedBlock`.
     pub fn into_executed_payload(self) -> reth_chain_state::ExecutedBlock<N> {
         let hashed_state = match self.hashed_state {
-            Either::Left(unsorted) => unsorted,
-            Either::Right(sorted) => Arc::new(Arc::unwrap_or_clone(sorted).into()),
+            // Convert unsorted to sorted
+            Either::Left(unsorted) => Arc::new(Arc::unwrap_or_clone(unsorted).into_sorted()),
+            // Already sorted
+            Either::Right(sorted) => sorted,
         };
 
         let trie_updates = match self.trie_updates {
-            Either::Left(unsorted) => unsorted,
-            Either::Right(sorted) => Arc::new(Arc::unwrap_or_clone(sorted).into()),
+            // Convert unsorted to sorted
+            Either::Left(unsorted) => Arc::new(Arc::unwrap_or_clone(unsorted).into_sorted()),
+            // Already sorted
+            Either::Right(sorted) => sorted,
         };
 
         reth_chain_state::ExecutedBlock {
