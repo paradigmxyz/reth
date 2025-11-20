@@ -67,7 +67,6 @@ where
                 Ok(_) => {
                     // No changesets for this block, continue to next
                     self.current_block += 1;
-                    continue;
                 }
                 Err(e) => {
                     self.current_block += 1;
