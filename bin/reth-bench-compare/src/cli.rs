@@ -242,7 +242,8 @@ impl Args {
             }
             None => {
                 // Use the same logic as reth: <datadir>/<chain>/jwt.hex
-                let chain_path = self.datadir.clone().resolve_datadir(self.chain);
+                let chain_path =
+                    self.datadir.clone().resolve_datadir(self.chain.to_string().as_str());
                 chain_path.jwt()
             }
         }
@@ -250,7 +251,7 @@ impl Args {
 
     /// Get the resolved datadir path using the chain
     pub(crate) fn datadir_path(&self) -> PathBuf {
-        let chain_path = self.datadir.clone().resolve_datadir(self.chain);
+        let chain_path = self.datadir.clone().resolve_datadir(self.chain.to_string().as_str());
         chain_path.data_dir().to_path_buf()
     }
 
