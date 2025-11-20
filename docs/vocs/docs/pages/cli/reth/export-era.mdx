@@ -86,13 +86,6 @@ Database:
       --db.sync-mode <SYNC_MODE>
           Controls how aggressively the database synchronizes data to disk
 
-      --db.enable-v2-static-files
-          Explicitly enabled static file writers.
-
-          For release / backwards compatibility purposes, some static file writers are disabled by default. See `read_only_segments` in `StaticFileProviderInner`.
-
-          This flag enables writing for these static file segments.
-
 Static Files:
       --static-files.blocks-per-file.headers <BLOCKS_PER_FILE_HEADERS>
           Number of blocks per file for the headers segment
@@ -103,6 +96,9 @@ Static Files:
       --static-files.blocks-per-file.receipts <BLOCKS_PER_FILE_RECEIPTS>
           Number of blocks per file for the receipts segment
 
+      --static-files.blocks-per-file.account-change-sets <BLOCKS_PER_FILE_ACCOUNT_CHANGE_SETS>
+          Number of blocks per file for the account changesets segment
+
       --static-files.receipts
           Store receipts in static files instead of the database.
 
@@ -110,8 +106,8 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-      --static-files.blocks-per-file.account-change-sets <BLOCKS_PER_FILE_ACCOUNT_CHANGE_SETS>
-          Number of blocks per file for the account changesets segment
+      --static-files.account-change-sets
+          Storage account changesets in static files
 
       --first-block-number <first-block-number>
           Optional first block number to export from the db.
