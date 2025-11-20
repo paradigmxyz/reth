@@ -15,7 +15,7 @@ use reth_era::{
 use reth_era_downloader::EraClient;
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
+    path::PathBuf,
     str::FromStr,
     sync::{Arc, Mutex},
 };
@@ -63,7 +63,7 @@ const ERA1_SEPOLIA_FILES_NAMES: [&str; 4] = [
     "sepolia-00000-643a00f7.era1",
     "sepolia-00074-0e81003c.era1",
     "sepolia-00173-b6924da5.era1",
-    "sepolia-00182-a4f0a8a1.era1 ",
+    "sepolia-00182-a4f0a8a1.era1",
 ];
 
 /// Utility for downloading `.era1` files for tests
@@ -156,19 +156,4 @@ impl Era1TestDownloader {
         let path = self.download_file(filename, network).await?;
         Era1Reader::open(&path, network).map_err(|e| eyre!("Failed to open Era1 file: {e}"))
     }
-}
-
-/// Open a test file by name,
-/// downloading only if it is necessary
-async fn open_test_file(
-    file_path: &str,
-    downloader: &Era1TestDownloader,
-    network: &str,
-) -> Result<Era1File> {
-    let filename = Path::new(file_path)
-        .file_name()
-        .and_then(|os_str| os_str.to_str())
-        .ok_or_else(|| eyre!("Invalid file path: {}", file_path))?;
-
-    downloader.open_era1_file(filename, network).await
 }
