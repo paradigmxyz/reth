@@ -114,8 +114,12 @@ impl SessionError for EthStreamError {
                 P2PHandshakeError::NonHelloMessageInHandshake,
             )) => true,
             Self::EthHandshakeError(err) => {
+                #[allow(clippy::match_same_arms)]
                 match err {
-                    EthHandshakeError::NoResponse => false,
+                    EthHandshakeError::NoResponse => {
+                        // this happens when the conn simply stalled
+                        false
+                    }
                     EthHandshakeError::InvalidFork(_) => {
                         // this can occur when the remote or our node is running an outdated client,
                         // we shouldn't treat this as fatal, because the node can come back only
@@ -156,8 +160,12 @@ impl SessionError for EthStreamError {
                 )
             }
             Self::EthHandshakeError(err) => {
+                #[allow(clippy::match_same_arms)]
                 match err {
-                    EthHandshakeError::NoResponse => false,
+                    EthHandshakeError::NoResponse => {
+                        // this happens when the conn simply stalled
+                        false
+                    }
                     EthHandshakeError::InvalidFork(_) => {
                         // this can occur when the remote or our node is running an outdated client,
                         // we shouldn't treat this as fatal, because the node can come back only
