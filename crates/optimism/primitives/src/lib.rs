@@ -56,6 +56,6 @@ impl reth_primitives_traits::NodePrimitives for OpPrimitives {
 /// Bincode-compatible serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
-    pub(crate) use super::receipt::serde_bincode_compat::*;
-    pub(crate) use op_alloy_consensus::serde_bincode_compat::*;
+    pub use super::receipt::serde_bincode_compat::OpReceipt as LocalOpReceipt;
+    pub use op_alloy_consensus::serde_bincode_compat::OpReceipt;
 }
