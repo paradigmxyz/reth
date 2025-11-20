@@ -51,7 +51,8 @@ pub use reth_storage_api::{
 pub use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use static_file::StaticFileSegment;
 
-pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
+/// Converts a [`RangeBounds`] into a concrete [`Range`]
+pub fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
     let start = match bounds.start_bound() {
         std::ops::Bound::Included(&v) => v,
         std::ops::Bound::Excluded(&v) => v + 1,

@@ -847,7 +847,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         &mut self,
         mut changeset: Vec<AccountBeforeTx>,
         block_number: u64,
-    ) -> ProviderResult<Option<u64>> {
+    ) -> ProviderResult<()> {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
         let start = Instant::now();
 
@@ -873,8 +873,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        // Return the current block number if we have written any changes
-        Ok(if count > 0 { self.writer.user_header().block_end() } else { None })
+        Ok(())
     }
 
     /// Adds an instruction to prune `to_delete` transactions during commit.

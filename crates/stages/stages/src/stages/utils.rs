@@ -10,7 +10,7 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, ProviderError,
+    providers::StaticFileProvider, to_range, BlockReader, DBProvider, ProviderError,
     StaticFileProviderFactory,
 };
 use reth_stages_api::StageError;
@@ -123,17 +123,7 @@ where
     };
 
     // Convert range bounds to concrete range
-    let start = match range.start_bound() {
-        std::ops::Bound::Included(&n) => n,
-        std::ops::Bound::Excluded(&n) => n + 1,
-        std::ops::Bound::Unbounded => 0,
-    };
-
-    let end = match range.end_bound() {
-        std::ops::Bound::Included(&n) => n + 1,
-        std::ops::Bound::Excluded(&n) => n,
-        std::ops::Bound::Unbounded => BlockNumber::MAX,
-    };
+    let range = to_range(range);
 
     // Use the new walker for lazy iteration over static file changesets
     let static_file_provider = provider.static_file_provider();
@@ -142,7 +132,7 @@ where
     let total_changesets = static_file_provider.account_changeset_count()?;
     let interval = (total_changesets / 1000).max(1);
 
-    let walker = static_file_provider.walk_account_changeset_range(start..end);
+    let walker = static_file_provider.walk_account_changeset_range(range);
 
     let mut flush_counter = 0;
     let mut current_block_number = u64::MAX;
