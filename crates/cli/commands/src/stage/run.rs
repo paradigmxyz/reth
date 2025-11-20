@@ -84,6 +84,9 @@ pub struct Command<C: ChainSpecParser> {
     /// Commits the changes in the database. WARNING: potentially destructive.
     ///
     /// Useful when you want to run diagnostics on the database.
+    ///
+    /// NOTE: This flag is currently required for the headers, bodies, and execution stages because
+    /// they use static files and must commit to properly unwind and run.
     // TODO: We should consider allowing to run hooks at the end of the stage run,
     // e.g. query the DB size, or any table data.
     #[arg(long, short)]
@@ -105,6 +108,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
     {
+        // Quit early if the stages requires a commit and `--commit` is not provided.
+        if self.requires_commit() && !self.commit {
+            return Err(eyre::eyre!(
+                "The stage {} requires overwriting existing static files and must commit, but `--commit` was not provided. Please pass `--commit` and try again.",
+                self.stage.to_string()
+            ));
+        }
+
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         let _ = fdlimit::raise_fd_limit();
@@ -382,5 +393,14 @@ impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
+    }
+
+    /// Returns whether or not the configured stage requires committing.
+    ///
+    /// This is the case for stages that mainly modify static files, as there is no way to unwind
+    /// these stages without committing anyways. This is because static files do not have
+    /// transactions and we cannot change the view of headers without writing.
+    pub fn requires_commit(&self) -> bool {
+        matches!(self.stage, StageEnum::Headers | StageEnum::Bodies | StageEnum::Execution)
     }
 }

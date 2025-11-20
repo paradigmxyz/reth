@@ -15,3 +15,7 @@ slow-timeout = { period = "2m", terminate-after = 10 }
 [[profile.default.overrides]]
 filter = "binary(e2e_testsuite)"
 slow-timeout = { period = "2m", terminate-after = 3 }
+
+[[profile.default.overrides]]
+filter = "package(reth-era) and binary(it)"
+slow-timeout = { period = "2m", terminate-after = 10 }

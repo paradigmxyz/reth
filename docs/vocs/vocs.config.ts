@@ -21,7 +21,7 @@ export default defineConfig({
     },
     { text: 'GitHub', link: 'https://github.com/paradigmxyz/reth' },
     {
-      text: 'v1.9.2',
+      text: 'v1.9.3',
       items: [
         {
           text: 'Releases',

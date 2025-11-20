@@ -16,7 +16,7 @@ use reth_era::{
 use reth_era_downloader::EraClient;
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
+    path::PathBuf,
     str::FromStr,
     sync::{Arc, Mutex},
 };
@@ -213,33 +213,4 @@ impl EraTestDownloader {
         let path = self.download_file(filename, network).await?;
         EraReader::open(&path, network).map_err(|e| eyre!("Failed to open Era1 file: {e}"))
     }
-}
-
-/// Open a test era1 file by name, downloading only if it is necessary
-async fn open_era1_test_file(
-    file_path: &str,
-    downloader: &EraTestDownloader,
-    network: &str,
-) -> Result<Era1File> {
-    let filename = Path::new(file_path)
-        .file_name()
-        .and_then(|os_str| os_str.to_str())
-        .ok_or_else(|| eyre!("Invalid file path: {}", file_path))?;
-
-    downloader.open_era1_file(filename, network).await
-}
-
-/// Open a test era file by name, downloading only if it is necessary
-#[allow(dead_code)]
-async fn open_era_test_file(
-    file_path: &str,
-    downloader: &EraTestDownloader,
-    network: &str,
-) -> Result<EraFile> {
-    let filename = Path::new(file_path)
-        .file_name()
-        .and_then(|os_str| os_str.to_str())
-        .ok_or_else(|| eyre!("Invalid file path: {}", file_path))?;
-
-    downloader.open_era_file(filename, network).await
 }
