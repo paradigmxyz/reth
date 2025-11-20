@@ -53,13 +53,14 @@ pub(crate) struct TotalGasRow {
 
 /// Summary statistics for a benchmark run.
 ///
-/// Latencies are derived from per-block `engine_newPayloadV3` timings (converted from µs to ms):
-/// - `total_new_payload_latency_ms`: sum of all blocks' latencies.
+/// Latencies are derived from per-block `engine_newPayload` timings (converted from µs to ms):
+/// - `total_new_payload_latency_ms`: sum of all blocks' latencies. Used for calculating mean and
+///   provides total execution time spent in `engine_newPayload`.
 /// - `mean_new_payload_latency_ms`: arithmetic mean latency across blocks.
 /// - `median_new_payload_latency_ms`: p50 latency across blocks.
 /// - `p90_new_payload_latency_ms` / `p99_new_payload_latency_ms`: tail latencies across blocks.
 ///
-/// `gas_per_second` and `blocks_per_second` use the total run duration from the gas trace.
+/// `gas_per_second` and `blocks_per_second` use the total run duration from the benchmark.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct BenchmarkSummary {
     pub total_blocks: u64,
@@ -97,8 +98,8 @@ pub(crate) struct RefInfo {
 
 /// Summary of the comparison between references.
 ///
-/// Percent deltas are `(feature - baseline) / baseline * 100`, so positive is slower/higher and
-/// negative is faster/lower.
+/// Percent deltas are `(feature - baseline) / baseline * 100`, so positive is slower and
+/// negative is faster.
 #[derive(Debug, Serialize)]
 pub(crate) struct ComparisonSummary {
     pub new_payload_latency_change_percent: f64,
@@ -495,10 +496,7 @@ impl ComparisonGenerator {
         let summary = &report.comparison_summary;
 
         println!("Performance Changes:");
-        println!(
-            "  NewPayload Latency (mean per block): {:+.2}%",
-            summary.new_payload_latency_change_percent
-        );
+        println!("  NewPayload Latency mean: {:+.2}%", summary.new_payload_latency_change_percent);
         println!(
             "  NewPayload Latency p50:           {:+.2}%",
             summary.new_payload_latency_p50_change_percent
@@ -533,7 +531,7 @@ impl ComparisonGenerator {
         );
         println!("  NewPayload latency (ms):");
         println!(
-            "    total: {:.2}, mean/block: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
+            "    total: {:.2}, mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
             baseline.total_new_payload_latency_ms,
             baseline.mean_new_payload_latency_ms,
             baseline.median_new_payload_latency_ms,
@@ -563,7 +561,7 @@ impl ComparisonGenerator {
         );
         println!("  NewPayload latency (ms):");
         println!(
-            "    total: {:.2}, mean/block: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
+            "    total: {:.2}, mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
             feature.total_new_payload_latency_ms,
             feature.mean_new_payload_latency_ms,
             feature.median_new_payload_latency_ms,
