@@ -185,6 +185,10 @@ where
     }
 
     // Static file segments start empty, so we need to initialize the genesis block.
+    //
+    // We do not do this for changesets because they get initialized in `insert_state` /
+    // `write_state` / `write_state_reverts`. If the node is configured for writing changesets to
+    // static files they will be written there, otherwise they will be written to the DB.
     let static_file_provider = provider_rw.static_file_provider();
     static_file_provider.latest_writer(StaticFileSegment::Receipts)?.increment_block(0)?;
     static_file_provider.latest_writer(StaticFileSegment::Transactions)?.increment_block(0)?;
