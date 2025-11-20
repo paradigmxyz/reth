@@ -581,7 +581,11 @@ impl ComparisonGenerator {
 
 /// Calculate percentile using linear interpolation on a sorted slice.
 ///
-/// Returns 0.0 for empty input (should already be guarded upstream).
+/// Computes `rank = percentile × (n - 1)` where n is the array length. If the rank falls
+/// between two indices, linearly interpolates between those values. For example, with 100 values,
+/// p90 computes rank = 0.9 × 99 = 89.1, then returns `values[89] × 0.9 + values[90] × 0.1`.
+///
+/// Returns 0.0 for empty input.
 fn percentile(sorted_values: &[f64], percentile: f64) -> f64 {
     if sorted_values.is_empty() {
         return 0.0;
