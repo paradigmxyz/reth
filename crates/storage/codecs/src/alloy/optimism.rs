@@ -7,12 +7,14 @@ use alloy_primitives::Log;
 use op_alloy_consensus::{OpDepositReceipt, OpReceipt, OpTxType};
 use reth_codecs_derive::CompactZstd;
 
-#[derive(Debug, Clone, PartialEq, Eq, CompactZstd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "std", derive(CompactZstd))]
+#[cfg_attr(not(feature = "std"), derive(Compact))]
 #[reth_codecs(crate = "crate")]
-#[reth_zstd(
+#[cfg_attr(feature = "std", reth_zstd(
     compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
     decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
-)]
+))]
 struct CompactOpReceipt<'a> {
     tx_type: OpTxType,
     success: bool,
