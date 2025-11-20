@@ -311,6 +311,8 @@ pub struct StaticFileProviderInner<N> {
     blocks_per_file: HashMap<StaticFileSegment, u64>,
     /// Write lock for when access is [`StaticFileAccess::RW`].
     _lock_file: Option<StorageLock>,
+    /// Genesis block number, default is 0;
+    genesis_block_number: u64,
 }
 
 impl<N: NodePrimitives> StaticFileProviderInner<N> {
@@ -337,6 +339,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             access,
             blocks_per_file,
             _lock_file,
+            genesis_block_number: 0,
         };
 
         Ok(provider)
@@ -411,6 +414,11 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
                 .map(|index| &index.expected_block_ranges_by_max_block),
             block,
         )
+    }
+
+    /// Get genesis block number
+    pub fn get_genesis_block_number(&self) -> u64 {
+        self.genesis_block_number
     }
 }
 
@@ -1589,6 +1597,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .map(|index| &index.expected_block_ranges_by_max_block)
             .cloned()
     }
+
+    /// Set genesis block number.
+    pub fn set_genesis_block_number(&mut self, genesis_block_number: u64) {
+        if let Some(inner) = Arc::get_mut(&mut self.0) {
+            inner.genesis_block_number = genesis_block_number;
+        } else {
+            panic!("set_genesis_block_number must be called when there's only one reference to StaticFileProvider");
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1670,7 +1687,11 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         &self,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
-        self.get_writer(self.get_highest_static_file_block(segment).unwrap_or_default(), segment)
+        let genesis_number = self.0.as_ref().get_genesis_block_number();
+        self.get_writer(
+            self.get_highest_static_file_block(segment).unwrap_or(genesis_number),
+            segment,
+        )
     }
 
     fn commit(&self) -> ProviderResult<()> {

@@ -137,7 +137,8 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             self.chain.clone(),
             static_file_provider,
         )?
-        .with_prune_modes(prune_modes.clone());
+        .with_prune_modes(prune_modes.clone())
+        .with_genesis_block_number(self.chain.genesis().number.unwrap());
 
         // Check for consistency between database and static files.
         if !access.is_read_only_inconsistent() &&
