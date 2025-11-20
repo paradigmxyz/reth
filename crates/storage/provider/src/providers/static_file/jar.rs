@@ -3,7 +3,7 @@ use super::{
     LoadedJarRef,
 };
 use crate::{
-    to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
+    range_len_or, to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
@@ -105,12 +105,10 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProv
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Self::Header>> {
-        let range = to_range(range);
-
         let mut cursor = self.cursor()?;
-        let mut headers = Vec::with_capacity((range.end - range.start) as usize);
+        let mut headers = Vec::with_capacity(range_len_or(&range, 0));
 
-        for num in range {
+        for num in to_range(range) {
             if let Some(header) = cursor.get_one::<HeaderMask<Self::Header>>(num.into())? {
                 headers.push(header);
             }
@@ -134,12 +132,10 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProv
         range: impl RangeBounds<BlockNumber>,
         mut predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
-        let range = to_range(range);
-
         let mut cursor = self.cursor()?;
-        let mut headers = Vec::with_capacity((range.end - range.start) as usize);
+        let mut headers = Vec::with_capacity(range_len_or(&range, 0));
 
-        for number in range {
+        for number in to_range(range) {
             if let Some((header, hash)) =
                 cursor.get_two::<HeaderWithHashMask<Self::Header>>(number.into())?
             {
@@ -259,27 +255,25 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Transaction>> {
-        let range = to_range(range);
         let mut cursor = self.cursor()?;
-        let mut txes = Vec::with_capacity((range.end - range.start) as usize);
+        let mut txs = Vec::with_capacity(range_len_or(&range, 0));
 
-        for num in range {
+        for num in to_range(range) {
             if let Some(tx) = cursor.get_one::<TransactionMask<Self::Transaction>>(num.into())? {
-                txes.push(tx)
+                txs.push(tx)
             }
         }
-        Ok(txes)
+        Ok(txs)
     }
 
     fn senders_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        let range = to_range(range);
         let mut cursor = self.cursor()?;
-        let mut senders = Vec::with_capacity((range.end - range.start) as usize);
+        let mut senders = Vec::with_capacity(range_len_or(&range, 0));
 
-        for num in range {
+        for num in to_range(range) {
             if let Some(tx) = cursor.get_one::<TransactionSenderMask>(num.into())? {
                 senders.push(tx)
             }
@@ -323,11 +317,10 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decomp
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Receipt>> {
-        let range = to_range(range);
         let mut cursor = self.cursor()?;
-        let mut receipts = Vec::with_capacity((range.end - range.start) as usize);
+        let mut receipts = Vec::with_capacity(range_len_or(&range, 0));
 
-        for num in range {
+        for num in to_range(range) {
             if let Some(tx) = cursor.get_one::<ReceiptMask<Self::Receipt>>(num.into())? {
                 receipts.push(tx)
             }
