@@ -96,7 +96,8 @@ pub(crate) struct RefInfo {
 
 /// Summary of the comparison between references.
 ///
-/// Latency deltas are percent changes for per-block statistics relative to the baseline run.
+/// Percent deltas are `(feature - baseline) / baseline * 100`, so positive is slower/higher and
+/// negative is faster/lower.
 #[derive(Debug, Serialize)]
 pub(crate) struct ComparisonSummary {
     pub new_payload_latency_change_percent: f64,
