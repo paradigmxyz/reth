@@ -288,17 +288,15 @@ impl NetworkArgs {
         // Configure peer connections
         let ip_filter = self.ip_filter().unwrap_or_default();
         let peers_config = config
-            .peers
-            .clone()
+            .peers_config_with_basic_nodes_from_file(
+                self.persistent_peers_file(peers_file).as_deref(),
+            )
             .with_max_inbound_opt(self.max_inbound_peers)
             .with_max_outbound_opt(self.max_outbound_peers)
             .with_ip_filter(ip_filter);
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key)
-            .peer_config(config.peers_config_with_basic_nodes_from_file(
-                self.persistent_peers_file(peers_file).as_deref(),
-            ))
             .external_ip_resolver(self.nat)
             .sessions_config(
                 SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
@@ -924,5 +922,48 @@ mod tests {
                 .args;
 
         assert!(args.ip_filter().is_err());
+    }
+
+    #[test]
+    fn network_config_preserves_basic_nodes_from_peers_file() {
+        use reth_chainspec::MAINNET;
+        use reth_config::Config;
+        use reth_network_peers::NodeRecord;
+        use secp256k1::SecretKey;
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        // Prepare a temporary peers file with a known NodeRecord as JSON (expects array of strings)
+        let enode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let peers_file = std::env::temp_dir().join(format!("reth_peers_test_{}.json", unique));
+        fs::write(&peers_file, format!("[\"{}\"]", enode)).expect("write peers file");
+
+        // Build NetworkArgs with peers_file set and no_persist_peers=false
+        let args = NetworkArgs {
+            peers_file: Some(peers_file.clone()),
+            no_persist_peers: false,
+            ..Default::default()
+        };
+
+        // Build the network config using a deterministic secret key
+        let secret_key = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let builder = args.network_config::<reth_network::EthNetworkPrimitives>(
+            &Config::default(),
+            MAINNET.clone(),
+            secret_key,
+            peers_file.clone(),
+        );
+
+        let net_cfg = builder.build_with_noop_provider(MAINNET.clone());
+
+        // Assert basic_nodes contains our node
+        let node: NodeRecord = enode.parse().unwrap();
+        assert!(net_cfg.peers_config.basic_nodes.contains(&node));
+
+        // Cleanup
+        let _ = fs::remove_file(&peers_file);
     }
 }
