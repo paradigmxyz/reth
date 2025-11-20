@@ -34,7 +34,6 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         self,
         buf: &mut Vec<u8>,
     ) -> Result<(RlpNode, Option<Vec<RlpNode>>), StateProofError> {
-        buf.clear();
         match self {
             Self::Leaf { short_key, value } => {
                 // RLP encode the value itself
@@ -74,7 +73,6 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
 
     /// Converts this child into a [`TrieNode`].
     pub(crate) fn into_trie_node(self, buf: &mut Vec<u8>) -> Result<TrieNode, StateProofError> {
-        buf.clear();
         match self {
             Self::Leaf { short_key, value } => {
                 value.encode(buf)?;

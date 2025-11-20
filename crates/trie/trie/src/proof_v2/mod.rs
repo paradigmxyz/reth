@@ -245,6 +245,7 @@ where
 
         // Collect children into an `RlpNode` Vec by calling into_rlp on each.
         for child in children {
+            self.rlp_encode_buf.clear();
             let (child_rlp_node, freed_rlp_nodes_buf) = child.into_rlp(&mut self.rlp_encode_buf)?;
             rlp_nodes_buf.push(child_rlp_node);
 
@@ -414,6 +415,7 @@ where
         // Determine the root node based on the child stack, and push the proof of the root node
         // onto the result stack.
         let root_node = if let Some(node) = self.child_stack.pop() {
+            self.rlp_encode_buf.clear();
             node.into_trie_node(&mut self.rlp_encode_buf)?
         } else {
             TrieNode::EmptyRoot
