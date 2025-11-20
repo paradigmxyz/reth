@@ -65,39 +65,3 @@ pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Ra
 
     start..end
 }
-
-/// Returns the length of the range or the provided default value if the range has unbounded end.
-pub(crate) fn range_len_or<R: std::ops::RangeBounds<u64>>(bounds: &R, or: usize) -> usize {
-    let start = match bounds.start_bound() {
-        std::ops::Bound::Included(&v) => v,
-        std::ops::Bound::Excluded(&v) => v + 1,
-        std::ops::Bound::Unbounded => 0,
-    };
-
-    let end = match bounds.end_bound() {
-        std::ops::Bound::Included(&v) => v + 1,
-        std::ops::Bound::Excluded(&v) => v,
-        std::ops::Bound::Unbounded => return or,
-    };
-
-    (end - start) as usize
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_range_len_or() {
-        // Bounded ranges
-        assert_eq!(range_len_or(&(0..10), 100), 10);
-        assert_eq!(range_len_or(&(0..=10), 100), 11);
-
-        // Unbounded end
-        assert_eq!(range_len_or(&(0..), 100), 100);
-        assert_eq!(range_len_or(&(5..), 50), 50);
-
-        // Fully unbounded range
-        assert_eq!(range_len_or(&(..), 75), 75);
-    }
-}

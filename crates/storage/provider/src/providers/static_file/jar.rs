@@ -3,7 +3,7 @@ use super::{
     LoadedJarRef,
 };
 use crate::{
-    range_len_or, to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
+    to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
@@ -17,6 +17,7 @@ use reth_db::static_file::{
 use reth_db_api::table::{Decompress, Value};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{SealedHeader, SignedTransaction};
+use reth_storage_api::range_size_hint;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
@@ -106,7 +107,7 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProv
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Self::Header>> {
         let mut cursor = self.cursor()?;
-        let mut headers = Vec::with_capacity(range_len_or(&range, 0));
+        let mut headers = Vec::with_capacity(range_size_hint(&range).unwrap_or(1024));
 
         for num in to_range(range) {
             if let Some(header) = cursor.get_one::<HeaderMask<Self::Header>>(num.into())? {
@@ -133,7 +134,7 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProv
         mut predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
         let mut cursor = self.cursor()?;
-        let mut headers = Vec::with_capacity(range_len_or(&range, 0));
+        let mut headers = Vec::with_capacity(range_size_hint(&range).unwrap_or(1024));
 
         for number in to_range(range) {
             if let Some((header, hash)) =
@@ -256,7 +257,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Transaction>> {
         let mut cursor = self.cursor()?;
-        let mut txs = Vec::with_capacity(range_len_or(&range, 0));
+        let mut txs = Vec::with_capacity(range_size_hint(&range).unwrap_or(1024));
 
         for num in to_range(range) {
             if let Some(tx) = cursor.get_one::<TransactionMask<Self::Transaction>>(num.into())? {
@@ -271,7 +272,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
         let mut cursor = self.cursor()?;
-        let mut senders = Vec::with_capacity(range_len_or(&range, 0));
+        let mut senders = Vec::with_capacity(range_size_hint(&range).unwrap_or(1024));
 
         for num in to_range(range) {
             if let Some(tx) = cursor.get_one::<TransactionSenderMask>(num.into())? {
@@ -318,7 +319,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decomp
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Receipt>> {
         let mut cursor = self.cursor()?;
-        let mut receipts = Vec::with_capacity(range_len_or(&range, 0));
+        let mut receipts = Vec::with_capacity(range_size_hint(&range).unwrap_or(1024));
 
         for num in to_range(range) {
             if let Some(tx) = cursor.get_one::<ReceiptMask<Self::Receipt>>(num.into())? {
