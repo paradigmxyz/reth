@@ -8,7 +8,7 @@ pub mod config;
 pub mod constants;
 /// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
 pub mod fetcher;
-/// Defines the [`TransactionPolicies`] trait for aggregating transaction-related policies.
+/// Defines the traits for transaction-related policies.
 pub mod policy;
 
 pub use self::constants::{
@@ -242,7 +242,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 /// propagate new transactions over the network.
 ///
 /// It can be configured with different policies for transaction propagation and announcement
-/// filtering. See [`NetworkPolicies`] and [`TransactionPolicies`] for more details.
+/// filtering. See [`NetworkPolicies`] for more details.
 ///
 /// ## Network Transaction Processing
 ///
