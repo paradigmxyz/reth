@@ -140,8 +140,8 @@ where
                 return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient))
             }
             for (sender, tx) in block.senders_iter().zip(block.body().transactions()) {
-                if self.disallow.contains(sender) {
-                    return Err(ValidationApiError::Blacklist(*sender))
+                if self.disallow.contains(&sender) {
+                    return Err(ValidationApiError::Blacklist(sender))
                 }
                 if let Some(to) = tx.to() &&
                     self.disallow.contains(&to)

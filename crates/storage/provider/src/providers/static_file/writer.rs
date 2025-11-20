@@ -763,7 +763,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Appends multiple transaction senders to the static file.
     pub fn append_transaction_senders<I>(&mut self, senders: I) -> ProviderResult<()>
     where
-        I: Iterator<Item = Result<(TxNumber, alloy_primitives::Address), ProviderError>>,
+        I: Iterator<Item = (TxNumber, alloy_primitives::Address)>,
     {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::TransactionSenders);
 
@@ -778,9 +778,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         // At this point senders contains at least one sender, so this would be overwritten.
         let mut count: u64 = 0;
-
-        for sender_result in senders_iter {
-            let (tx_num, sender) = sender_result?;
+        for (tx_num, sender) in senders_iter {
             self.append_with_tx_number(tx_num, sender)?;
             count += 1;
         }

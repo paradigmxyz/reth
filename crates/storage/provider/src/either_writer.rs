@@ -163,6 +163,22 @@ where
         }
     }
 
+    /// Append transaction senders to the destination
+    pub fn append_senders<I>(&mut self, senders: I) -> ProviderResult<()>
+    where
+        I: Iterator<Item = (TxNumber, alloy_primitives::Address)>,
+    {
+        match self {
+            Self::Database(cursor) => {
+                for (tx_num, sender) in senders {
+                    cursor.append(tx_num, &sender)?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(writer) => writer.append_transaction_senders(senders),
+        }
+    }
+
     /// Removes all transaction senders above the given transaction number, and stops at the given
     /// block number.
     pub fn prune_senders(

@@ -2835,6 +2835,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         block: RecoveredBlock<Self::Block>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number();
+        let tx_count = block.body().transaction_count() as u64;
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
@@ -2845,31 +2846,29 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);
 
-        let mut next_tx_num = self
+        let first_tx_num = self
             .tx
             .cursor_read::<tables::TransactionBlocks>()?
             .last()?
             .map(|(n, _)| n + 1)
             .unwrap_or_default();
         durations_recorder.record_relative(metrics::Action::GetNextTxNum);
-        let first_tx_num = next_tx_num;
 
-        let tx_count = block.body().transaction_count() as u64;
+        let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
 
-        // Ensures we have all the senders for the block's transactions.
-        let mut senders_writer = EitherWriter::new_senders(self, block.number())?;
-        senders_writer.increment_block(block.number())?;
-        for (transaction, sender) in block.body().transactions_iter().zip(block.senders_iter()) {
-            let hash = transaction.tx_hash();
+        if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
+            let mut senders_writer = EitherWriter::new_senders(self, block.number())?;
+            senders_writer.increment_block(block.number())?;
+            senders_writer.append_senders(tx_nums_iter.clone().zip(block.senders_iter()))?;
+            durations_recorder.record_relative(metrics::Action::InsertTransactionSenders);
+        }
 
-            if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
-                senders_writer.append_sender(next_tx_num, sender)?;
+        if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
+            for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
+                let hash = transaction.tx_hash();
+                self.tx.put::<tables::TransactionHashNumbers>(*hash, tx_num)?;
             }
-
-            if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
-                self.tx.put::<tables::TransactionHashNumbers>(*hash, next_tx_num)?;
-            }
-            next_tx_num += 1;
+            durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
         }
 
         self.append_block_bodies(vec![(block_number, Some(block.into_body()))])?;
