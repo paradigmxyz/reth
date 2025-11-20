@@ -90,7 +90,7 @@ where
                 provider,
                 provider
                     .static_file_provider()
-                    .get_highest_static_file_block(StaticFileSegment::Transactions)
+                    .get_highest_static_file_block(StaticFileSegment::TransactionSenders)
                     .unwrap_or_default(),
             )?
             .ensure_at_block(input.target())?;
