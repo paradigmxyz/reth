@@ -64,15 +64,8 @@ impl StaticFilesArgs {
 
     /// Converts the static files arguments into [`StorageSettings`].
     pub const fn to_settings(&self) -> StorageSettings {
-        let mut settings = StorageSettings::legacy();
-
-        if self.receipts {
-            settings = settings.with_receipts_in_static_files();
-        }
-        if self.transaction_senders {
-            settings = settings.with_transaction_senders_in_static_files();
-        }
-
-        settings
+        StorageSettings::legacy()
+            .with_receipts_in_static_files(self.receipts)
+            .with_transaction_senders_in_static_files(self.transaction_senders)
     }
 }

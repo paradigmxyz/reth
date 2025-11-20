@@ -4758,7 +4758,7 @@ mod tests {
         // Static files mode
         {
             let factory = create_test_provider_factory();
-            let storage_settings = StorageSettings::legacy().with_receipts_in_static_files();
+            let storage_settings = StorageSettings::legacy().with_receipts_in_static_files(true);
             factory.set_storage_settings_cache(storage_settings);
             let factory = factory.with_prune_modes(PruneModes {
                 receipts: Some(PruneMode::Before(2)),
