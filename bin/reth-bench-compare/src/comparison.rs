@@ -53,12 +53,12 @@ pub(crate) struct TotalGasRow {
 
 /// Summary statistics for a benchmark run.
 ///
-/// Latencies are in milliseconds and describe `engine_newPayloadV3` calls:
-/// - `total_new_payload_latency_ms`: sum across all processed blocks.
-/// - `avg_new_payload_latency_ms`: mean latency per block.
-/// - `median_new_payload_latency_ms`: p50 latency per block.
-/// - `p90_new_payload_latency_ms` / `p99_new_payload_latency_ms`: tail latencies per block.
-/// - Throughput numbers are computed using total duration.
+/// Latencies are derived from per-block `engine_newPayloadV3` timings (converted from µs to ms):
+/// - `total_new_payload_latency_ms`: sum of all blocks' latencies.
+/// - `avg_new_payload_latency_ms`: arithmetic mean latency across blocks.
+/// - `median_new_payload_latency_ms`: p50 latency across blocks.
+/// - `p90_new_payload_latency_ms` / `p99_new_payload_latency_ms`: tail latencies across blocks.
+/// `gas_per_second` and `blocks_per_second` use the total run duration from the gas trace.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct BenchmarkSummary {
     pub total_blocks: u64,
