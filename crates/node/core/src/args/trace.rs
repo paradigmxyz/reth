@@ -86,9 +86,9 @@ pub struct TraceArgs {
     /// - 0.01: Sample 1% of traces
     /// - 0.0: Disable sampling
     ///
-    /// Example: --tracing-otlp-sample-ratio=0.0.
+    /// Example: --tracing-otlp.sample-ratio=0.0.
     #[arg(
-        long = "tracing-otlp-sample-ratio",
+        long = "tracing-otlp.sample-ratio",
         env = "OTEL_TRACES_SAMPLER_ARG",
         global = true,
         value_name = "RATIO",
