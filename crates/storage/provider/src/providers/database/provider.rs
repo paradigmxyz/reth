@@ -2825,9 +2825,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// [`BlockWithdrawals`](tables::BlockWithdrawals).
     ///
     /// If the provider has __not__ configured full sender pruning, this will modify either:
-    /// * [`StaticFileSegment::TransactionSenders`] (if `static_files_v2_enabled` flag is enabled)
-    /// * [`TransactionSenders`](tables::TransactionSenders) (if `static_files_v2_enabled` flag is
-    ///   disabled)
+    /// * [`StaticFileSegment::TransactionSenders`] if senders are written to static files
+    /// * [`tables::TransactionSenders`] if senders are written to the database
     ///
     /// If the provider has __not__ configured full transaction lookup pruning, this will modify
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
