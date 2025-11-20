@@ -1,8 +1,12 @@
+use crate::stages::utils::collect_history_indices;
+
 use super::{collect_account_history_indices, load_history_indices};
 use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{models::ShardedKey, table::Decode, tables, transaction::DbTxMut};
-use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
+use reth_provider::{
+    DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter, StorageSettingsCache,
+};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
@@ -48,7 +52,8 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + reth_storage_api::ChangeSetReader
-        + reth_provider::StaticFileProviderFactory,
+        + reth_provider::StaticFileProviderFactory
+        + StorageSettingsCache,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -106,9 +111,18 @@ where
 
         info!(target: "sync::stages::index_account_history::exec", ?first_sync, "Collecting indices");
 
-        // Use the provider-based collection that can read from both static files and database.
-        // This is required for correctness once changesets are written to static files.
-        let collector = collect_account_history_indices(provider, range.clone(), &self.etl_config)?;
+        let collector = if provider.cached_storage_settings().account_changesets_in_static_files {
+            // Use the provider-based collection that can read from static files.
+            collect_account_history_indices(provider, range.clone(), &self.etl_config)?
+        } else {
+            collect_history_indices::<_, tables::AccountChangeSets, tables::AccountsHistory, _>(
+                provider,
+                range.clone(),
+                ShardedKey::new,
+                |(index, value)| (index, value.address),
+                &self.etl_config,
+            )?
+        };
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
         load_history_indices::<_, tables::AccountsHistory, _>(

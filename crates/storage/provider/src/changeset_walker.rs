@@ -44,30 +44,26 @@ where
     type Item = ProviderResult<(BlockNumber, AccountBeforeTx)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Return next changeset from current block if available
-        if self.changeset_index < self.current_changesets.len() {
-            let changeset = self.current_changesets[self.changeset_index].clone();
+        // Yield remaining changesets from current block
+        if let Some(changeset) = self.current_changesets.get(self.changeset_index).cloned() {
             self.changeset_index += 1;
             return Some(Ok((self.current_block, changeset)));
         }
 
-        // Move to next block and fetch changesets until we find some or reach the end
+        // Advance to next block if we exhausted the previous one
+        if !self.current_changesets.is_empty() {
+            self.current_block += 1;
+        }
+
+        // Load next block with changesets
         while self.current_block < self.range.end {
-            // Fetch changesets for current block
             match self.provider.account_block_changeset(self.current_block) {
                 Ok(changesets) if !changesets.is_empty() => {
-                    // Found changesets, prepare to yield them
                     self.current_changesets = changesets;
                     self.changeset_index = 1;
-                    let first = self.current_changesets[0].clone();
-                    let block = self.current_block;
-                    self.current_block += 1;
-                    return Some(Ok((block, first)));
+                    return Some(Ok((self.current_block, self.current_changesets[0].clone())));
                 }
-                Ok(_) => {
-                    // No changesets for this block, continue to next
-                    self.current_block += 1;
-                }
+                Ok(_) => self.current_block += 1,
                 Err(e) => {
                     self.current_block += 1;
                     return Some(Err(e));
