@@ -54,6 +54,7 @@ pub(crate) struct TotalGasRow {
 /// Summary statistics for a benchmark run.
 ///
 /// Latencies are derived from per-block `engine_newPayload` timings (converted from µs to ms):
+/// - `total_new_payload_latency_ms`: sum of per-block latencies.
 /// - `mean_new_payload_latency_ms`: arithmetic mean latency across blocks.
 /// - `median_new_payload_latency_ms`: p50 latency across blocks.
 /// - `p90_new_payload_latency_ms` / `p99_new_payload_latency_ms`: tail latencies across blocks.
@@ -62,6 +63,7 @@ pub(crate) struct BenchmarkSummary {
     pub total_blocks: u64,
     pub total_gas_used: u64,
     pub total_duration_ms: u128,
+    pub total_new_payload_latency_ms: f64,
     pub mean_new_payload_latency_ms: f64,
     pub median_new_payload_latency_ms: f64,
     pub p90_new_payload_latency_ms: f64,
@@ -93,11 +95,19 @@ pub(crate) struct RefInfo {
 
 /// Summary of the comparison between references.
 ///
-/// Percent deltas are `(feature - baseline) / baseline * 100`, so positive is slower and
-/// negative is faster.
+/// Percent deltas are `(feature - baseline) / baseline * 100`:
+/// - `new_payload_latency_p50_change_percent` / p90 / p99: percent changes of the respective
+///   per-block percentiles.
+/// `new_payload_latency_mean_delta_ms` is an absolute mean delta: `(feature total latency -
+/// baseline total latency) / total blocks` in milliseconds.
+/// `per_block_latency_change_mean_percent` / `per_block_latency_change_median_percent` are the
+/// mean and median of per-block percent deltas (feature vs baseline), capturing block-level drift.
+/// Positive means slower/higher; negative means faster/lower.
 #[derive(Debug, Serialize)]
 pub(crate) struct ComparisonSummary {
-    pub new_payload_latency_change_percent: f64,
+    pub new_payload_latency_mean_delta_ms: f64,
+    pub per_block_latency_change_mean_percent: f64,
+    pub per_block_latency_change_median_percent: f64,
     pub new_payload_latency_p50_change_percent: f64,
     pub new_payload_latency_p90_change_percent: f64,
     pub new_payload_latency_p99_change_percent: f64,
@@ -203,10 +213,12 @@ impl ComparisonGenerator {
         let feature =
             self.feature_results.as_ref().ok_or_else(|| eyre!("Feature results not loaded"))?;
 
-        // Generate comparison
-        let comparison_summary =
-            self.calculate_comparison_summary(&baseline.summary, &feature.summary)?;
         let per_block_comparisons = self.calculate_per_block_comparisons(baseline, feature)?;
+        let comparison_summary = self.calculate_comparison_summary(
+            &baseline.summary,
+            &feature.summary,
+            &per_block_comparisons,
+        )?;
 
         let report = ComparisonReport {
             timestamp: self.timestamp.clone(),
@@ -317,8 +329,8 @@ impl ComparisonGenerator {
 
         let latencies_ms: Vec<f64> =
             combined_data.iter().map(|r| r.new_payload_latency as f64 / 1000.0).collect();
-        let mean_new_payload_latency_ms: f64 =
-            latencies_ms.iter().sum::<f64>() / total_blocks as f64;
+        let total_new_payload_latency_ms: f64 = latencies_ms.iter().sum();
+        let mean_new_payload_latency_ms: f64 = total_new_payload_latency_ms / total_blocks as f64;
 
         let mut sorted_latencies_ms = latencies_ms;
         sorted_latencies_ms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
@@ -346,6 +358,7 @@ impl ComparisonGenerator {
             total_blocks,
             total_gas_used,
             total_duration_ms,
+            total_new_payload_latency_ms,
             mean_new_payload_latency_ms,
             median_new_payload_latency_ms,
             p90_new_payload_latency_ms,
@@ -362,6 +375,7 @@ impl ComparisonGenerator {
         &self,
         baseline: &BenchmarkSummary,
         feature: &BenchmarkSummary,
+        per_block_comparisons: &[BlockComparison],
     ) -> Result<ComparisonSummary> {
         let calc_percent_change = |baseline: f64, feature: f64| -> f64 {
             if baseline.abs() > f64::EPSILON {
@@ -371,11 +385,35 @@ impl ComparisonGenerator {
             }
         };
 
+        let common_blocks = baseline.total_blocks.max(feature.total_blocks);
+        let new_payload_latency_mean_delta_ms = if common_blocks > 0 {
+            (feature.total_new_payload_latency_ms - baseline.total_new_payload_latency_ms) /
+                common_blocks as f64
+        } else {
+            0.0
+        };
+
+        let per_block_percent_changes: Vec<f64> = per_block_comparisons
+            .iter()
+            .map(|c| c.new_payload_latency_change_percent)
+            .collect();
+        let per_block_latency_change_mean_percent = if per_block_percent_changes.is_empty() {
+            0.0
+        } else {
+            per_block_percent_changes.iter().sum::<f64>() / per_block_percent_changes.len() as f64
+        };
+        let per_block_latency_change_median_percent = if per_block_percent_changes.is_empty() {
+            0.0
+        } else {
+            let mut sorted = per_block_percent_changes;
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+            percentile(&sorted, 0.5)
+        };
+
         Ok(ComparisonSummary {
-            new_payload_latency_change_percent: calc_percent_change(
-                baseline.mean_new_payload_latency_ms,
-                feature.mean_new_payload_latency_ms,
-            ),
+            new_payload_latency_mean_delta_ms,
+            per_block_latency_change_mean_percent,
+            per_block_latency_change_median_percent,
             new_payload_latency_p50_change_percent: calc_percent_change(
                 baseline.median_new_payload_latency_ms,
                 feature.median_new_payload_latency_ms,
@@ -490,7 +528,18 @@ impl ComparisonGenerator {
         let summary = &report.comparison_summary;
 
         println!("Performance Changes:");
-        println!("  NewPayload Latency mean: {:+.2}%", summary.new_payload_latency_change_percent);
+        println!(
+            "  NewPayload Latency mean (total diff / total blocks): {:+.2} ms",
+            summary.new_payload_latency_mean_delta_ms
+        );
+        println!(
+            "  NewPayload Latency per-block mean change:   {:+.2}%",
+            summary.per_block_latency_change_mean_percent
+        );
+        println!(
+            "  NewPayload Latency per-block median change: {:+.2}%",
+            summary.per_block_latency_change_median_percent
+        );
         println!(
             "  NewPayload Latency p50:           {:+.2}%",
             summary.new_payload_latency_p50_change_percent
