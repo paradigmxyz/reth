@@ -768,7 +768,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::TransactionSenders);
 
         let mut senders_iter = senders.into_iter().peekable();
-        // If senders are empty, we can simply return None
+        // If senders are empty, we can simply return
         if senders_iter.peek().is_none() {
             return Ok(());
         }
