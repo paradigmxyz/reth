@@ -16,7 +16,7 @@
 //!
 //! ```rust
 //! use alloy_consensus::Header;
-//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedHeader};
+//! use reth_era::{common::decode::DecodeCompressedRlp, era1::types::execution::CompressedHeader};
 //!
 //! let header = Header { number: 100, ..Default::default() };
 //! // Compress the header: rlp encoding and Snappy compression
@@ -32,7 +32,7 @@
 //! ```rust
 //! use alloy_consensus::{BlockBody, Header};
 //! use alloy_primitives::Bytes;
-//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedBody};
+//! use reth_era::{common::decode::DecodeCompressedRlp, era1::types::execution::CompressedBody};
 //! use reth_ethereum_primitives::TransactionSigned;
 //!
 //! let body: BlockBody<Bytes> = BlockBody {
@@ -53,7 +53,9 @@
 //!
 //! ```rust
 //! use alloy_consensus::{Eip658Value, Receipt, ReceiptEnvelope, ReceiptWithBloom};
-//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedReceipts};
+//! use reth_era::{
+//!     common::decode::DecodeCompressedRlp, era1::types::execution::CompressedReceipts,
+//! };
 //!
 //! let receipt =
 //!     Receipt { status: Eip658Value::Eip658(true), cumulative_gas_used: 21000, logs: vec![] };
@@ -68,7 +70,7 @@
 //! ``````
 
 use crate::{
-    common::decode::DecodeCompressed,
+    common::decode::DecodeCompressedRlp,
     e2s::{error::E2sError, types::Entry},
 };
 use alloy_consensus::{Block, BlockBody, Header};
@@ -223,7 +225,7 @@ impl CompressedHeader {
     }
 }
 
-impl DecodeCompressed for CompressedHeader {
+impl DecodeCompressedRlp for CompressedHeader {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
         let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
@@ -310,7 +312,7 @@ impl CompressedBody {
     }
 }
 
-impl DecodeCompressed for CompressedBody {
+impl DecodeCompressedRlp for CompressedBody {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
         let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
@@ -401,7 +403,7 @@ impl CompressedReceipts {
     }
 }
 
-impl DecodeCompressed for CompressedReceipts {
+impl DecodeCompressedRlp for CompressedReceipts {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
         let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)

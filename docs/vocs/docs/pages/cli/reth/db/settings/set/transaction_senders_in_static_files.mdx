@@ -1,28 +1,18 @@
-# reth db get static-file
+# reth db settings set transaction_senders_in_static_files
 
-Gets the content of a static file segment for the given key
+Store transaction senders in static files instead of the database
 
 ```bash
-$ reth db get static-file --help
+$ reth db settings set transaction_senders_in_static_files --help
 ```
 ```txt
-Usage: reth db get static-file [OPTIONS] <SEGMENT> <KEY>
+Usage: reth db settings set transaction_senders_in_static_files [OPTIONS] <VALUE>
 
 Arguments:
-  <SEGMENT>
-          Possible values:
-          - headers:             Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
-          - transactions:        Static File segment responsible for the `Transactions` table
-          - receipts:            Static File segment responsible for the `Receipts` table
-          - transaction-senders: Static File segment responsible for the `TransactionSenders` table
-
-  <KEY>
-          The key to get content for
+  <VALUE>
+          [possible values: true, false]
 
 Options:
-      --raw
-          Output bytes instead of human-readable decoded value
-
   -h, --help
           Print help (see a summary with '-h')
 
@@ -150,13 +140,4 @@ Tracing:
           Defaults to TRACE if not specified.
 
           [default: debug]
-
-      --tracing-otlp.sample-ratio <RATIO>
-          Trace sampling ratio to control the percentage of traces to export.
-
-          Valid range: 0.0 to 1.0 - 1.0, default: Sample all traces - 0.01: Sample 1% of traces - 0.0: Disable sampling
-
-          Example: --tracing-otlp.sample-ratio=0.0.
-
-          [env: OTEL_TRACES_SAMPLER_ARG=]
 ```
