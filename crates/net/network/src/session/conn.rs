@@ -1,6 +1,7 @@
 //! Connection types for a session
 
 use futures::{Sink, SinkExt, Stream};
+use pin_project::pin_project;
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     errors::EthStreamError,
@@ -35,16 +36,17 @@ pub type EthSnapSatelliteConnection<N = EthNetworkPrimitives> =
 /// - A connection that supports the ETH protocol and at least one other `RLPx` protocol
 // This type is boxed because the underlying stream is ~6KB,
 // mostly coming from `P2PStream`'s `snap::Encoder` (2072), and `ECIESStream` (3600).
+#[pin_project(project = EthRlpxConnProj)]
 #[derive(Debug)]
 pub enum EthRlpxConnection<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// A connection that only supports the ETH protocol.
-    EthOnly(Box<EthPeerConnection<N>>),
+    EthOnly(#[pin] Box<EthPeerConnection<N>>),
     /// A connection that supports the ETH protocol and __at least one other__ `RLPx` protocol.
-    Satellite(Box<EthSatelliteConnection<N>>),
+    Satellite(#[pin] Box<EthSatelliteConnection<N>>),
     /// A connection that supports eth + snap combined stream.
-    EthSnapOnly(Box<EthSnapPeerConnection<N>>),
+    EthSnapOnly(#[pin] Box<EthSnapPeerConnection<N>>),
     /// A connection that supports eth + snap with additional protocols.
-    SnapSatellite(Box<EthSnapSatelliteConnection<N>>),
+    SnapSatellite(#[pin] Box<EthSnapSatelliteConnection<N>>),
 }
 
 impl<N: NetworkPrimitives> EthRlpxConnection<N> {
@@ -151,27 +153,18 @@ impl<N: NetworkPrimitives> Stream for EthRlpxConnection<N> {
     type Item = Result<EthSnapMessage<N>, EthStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // We need to map snap-specific errors into EthStreamError for snap streams.
-        unsafe {
-            match self.get_unchecked_mut() {
-                Self::EthOnly(l) => Pin::new_unchecked(l)
-                    .poll_next(cx)
-                    .map(|opt| opt.map(|res| res.map(EthSnapMessage::Eth))),
-                Self::Satellite(r) => Pin::new_unchecked(r)
-                    .poll_next(cx)
-                    .map(|opt| opt.map(|res| res.map(EthSnapMessage::Eth))),
-                Self::EthSnapOnly(l) => match Pin::new_unchecked(l).poll_next(cx) {
-                    Poll::Ready(Some(Ok(msg))) => Poll::Ready(Some(Ok(msg))),
-                    Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err.into()))),
-                    Poll::Ready(None) => Poll::Ready(None),
-                    Poll::Pending => Poll::Pending,
-                },
-                Self::SnapSatellite(r) => match Pin::new_unchecked(r).poll_next(cx) {
-                    Poll::Ready(Some(Ok(msg))) => Poll::Ready(Some(Ok(msg))),
-                    Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err.into()))),
-                    Poll::Ready(None) => Poll::Ready(None),
-                    Poll::Pending => Poll::Pending,
-                },
+        match self.project() {
+            EthRlpxConnProj::EthOnly(conn) => {
+                conn.poll_next(cx).map(|opt| opt.map(|res| res.map(EthSnapMessage::Eth)))
+            }
+            EthRlpxConnProj::Satellite(conn) => {
+                conn.poll_next(cx).map(|opt| opt.map(|res| res.map(EthSnapMessage::Eth)))
+            }
+            EthRlpxConnProj::EthSnapOnly(conn) => {
+                conn.poll_next(cx).map(|opt| opt.map(|res| res.map_err(Into::into)))
+            }
+            EthRlpxConnProj::SnapSatellite(conn) => {
+                conn.poll_next(cx).map(|opt| opt.map(|res| res.map_err(Into::into)))
             }
         }
     }
@@ -181,60 +174,53 @@ impl<N: NetworkPrimitives> Sink<EthSnapMessage<N>> for EthRlpxConnection<N> {
     type Error = EthStreamError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        unsafe {
-            match self.get_unchecked_mut() {
-                Self::EthOnly(l) => Pin::new_unchecked(l).poll_ready(cx),
-                Self::Satellite(r) => Pin::new_unchecked(r).poll_ready(cx),
-                Self::EthSnapOnly(l) => Pin::new_unchecked(l).poll_ready(cx).map_err(Into::into),
-                Self::SnapSatellite(r) => Pin::new_unchecked(r).poll_ready(cx).map_err(Into::into),
-            }
+        match self.project() {
+            EthRlpxConnProj::EthOnly(conn) => conn.poll_ready(cx),
+            EthRlpxConnProj::Satellite(conn) => conn.poll_ready(cx),
+            EthRlpxConnProj::EthSnapOnly(conn) => conn.poll_ready(cx).map_err(Into::into),
+            EthRlpxConnProj::SnapSatellite(conn) => conn.poll_ready(cx).map_err(Into::into),
         }
     }
 
     fn start_send(self: Pin<&mut Self>, item: EthSnapMessage<N>) -> Result<(), Self::Error> {
-        unsafe {
-            match (self.get_unchecked_mut(), item) {
-                (Self::EthOnly(l), EthSnapMessage::Eth(msg)) => {
-                    Pin::new_unchecked(l).start_send_unpin(msg)
-                }
-                (Self::Satellite(r), EthSnapMessage::Eth(msg)) => {
-                    Pin::new_unchecked(r).start_send_unpin(msg)
-                }
-                (Self::EthSnapOnly(l), msg) => {
-                    Pin::new_unchecked(l).start_send_unpin(msg).map_err(Into::into)
-                }
-                (Self::SnapSatellite(r), msg) => {
-                    Pin::new_unchecked(r).start_send_unpin(msg).map_err(Into::into)
-                }
-                // Sending snap message over eth-only connection is unsupported
-                (Self::EthOnly(_) | Self::Satellite(_), EthSnapMessage::Snap(_)) => {
-                    Err(EthStreamError::UnsupportedMessage {
-                        message_id: SnapMessageId::GetAccountRange as u8,
-                    })
-                }
+        match (self.project(), item) {
+            (EthRlpxConnProj::EthOnly(mut conn), EthSnapMessage::Eth(msg)) => {
+                conn.start_send_unpin(msg)
             }
+            (EthRlpxConnProj::Satellite(mut conn), EthSnapMessage::Eth(msg)) => {
+                conn.start_send_unpin(msg)
+            }
+            (EthRlpxConnProj::EthSnapOnly(mut conn), msg) => {
+                conn.start_send_unpin(msg).map_err(Into::into)
+            }
+            (EthRlpxConnProj::SnapSatellite(mut conn), msg) => {
+                conn.start_send_unpin(msg).map_err(Into::into)
+            }
+            // Sending snap message over eth-only connection is unsupported
+            (
+                EthRlpxConnProj::EthOnly(_) | EthRlpxConnProj::Satellite(_),
+                EthSnapMessage::Snap(_),
+            ) => Err(EthStreamError::UnsupportedMessage {
+                message_id: SnapMessageId::GetAccountRange as u8,
+            }),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        unsafe {
-            match self.get_unchecked_mut() {
-                Self::EthOnly(l) => Pin::new_unchecked(l).poll_flush(cx),
-                Self::Satellite(r) => Pin::new_unchecked(r).poll_flush(cx),
-                Self::EthSnapOnly(l) => Pin::new_unchecked(l).poll_flush(cx).map_err(Into::into),
-                Self::SnapSatellite(r) => Pin::new_unchecked(r).poll_flush(cx).map_err(Into::into),
-            }
+        match self.project() {
+            EthRlpxConnProj::EthOnly(conn) => conn.poll_flush(cx),
+            EthRlpxConnProj::Satellite(conn) => conn.poll_flush(cx),
+            EthRlpxConnProj::EthSnapOnly(conn) => conn.poll_flush(cx).map_err(Into::into),
+            EthRlpxConnProj::SnapSatellite(conn) => conn.poll_flush(cx).map_err(Into::into),
         }
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        unsafe {
-            match self.get_unchecked_mut() {
-                Self::EthOnly(l) => Pin::new_unchecked(l).poll_close(cx),
-                Self::Satellite(r) => Pin::new_unchecked(r).poll_close(cx),
-                Self::EthSnapOnly(l) => Pin::new_unchecked(l).poll_close(cx).map_err(Into::into),
-                Self::SnapSatellite(r) => Pin::new_unchecked(r).poll_close(cx).map_err(Into::into),
-            }
+        match self.project() {
+            EthRlpxConnProj::EthOnly(conn) => conn.poll_close(cx),
+            EthRlpxConnProj::Satellite(conn) => conn.poll_close(cx),
+            EthRlpxConnProj::EthSnapOnly(conn) => conn.poll_close(cx).map_err(Into::into),
+            EthRlpxConnProj::SnapSatellite(conn) => conn.poll_close(cx).map_err(Into::into),
         }
     }
 }
