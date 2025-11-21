@@ -276,7 +276,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.24.2"
-source = "git+https://github.com/Rimeeeeee/evm?branch=new-approach4#93e65625dd142a72290d53ec10fe36c8e7ab7074"
+source = "git+https://github.com/Rimeeeeee/evm?branch=new-approach4#a716ab51f877698cc496bef3312ae70dfa3ba375"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -389,7 +389,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.24.2"
-source = "git+https://github.com/Rimeeeeee/evm?branch=new-approach4#93e65625dd142a72290d53ec10fe36c8e7ab7074"
+source = "git+https://github.com/Rimeeeeee/evm?branch=new-approach4#a716ab51f877698cc496bef3312ae70dfa3ba375"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
