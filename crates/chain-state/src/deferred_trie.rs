@@ -4,8 +4,8 @@ use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSort
 use std::{error::Error, fmt, sync::Arc};
 
 /// Sorted trie data computed for an executed block.
-/// These represent the complete set of sorted trie data required to persist a block state and proof
-/// generation.
+/// These represent the complete set of sorted trie data required to persist 
+/// block state and proof generation for a block.
 #[derive(Clone, Debug, Default)]
 pub struct ComputedTrieData {
     /// Sorted hashed post-state produced by execution.
