@@ -13,7 +13,13 @@ use reth_eth_wire::{
     NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData, PooledTransactions,
     Receipts, SharedTransactions, Transactions,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{
+    snap::{
+        AccountRangeMessage, ByteCodesMessage, SnapProtocolMessage, StorageRangesMessage,
+        TrieNodesMessage,
+    },
+    RawCapabilityMessage,
+};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_primitives_traits::Block;
@@ -57,6 +63,8 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
     EthRequest(PeerRequest<N>),
+    /// All `snap` request variants (wrapped in PeerRequest).
+    SnapRequest(PeerRequest<N>),
     /// Announces when `BlockRange` is updated.
     BlockRangeUpdated(BlockRangeUpdate),
     /// Any other or manually crafted eth message.
@@ -116,6 +124,26 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a receipts request.
         response: oneshot::Receiver<RequestResult<Receipts69<N::Receipt>>>,
     },
+    /// Snap account range response.
+    SnapAccountRange {
+        /// Receiver for the account range response.
+        response: oneshot::Receiver<RequestResult<AccountRangeMessage>>,
+    },
+    /// Snap storage ranges response.
+    SnapStorageRanges {
+        /// Receiver for the storage ranges response.
+        response: oneshot::Receiver<RequestResult<StorageRangesMessage>>,
+    },
+    /// Snap byte codes response.
+    SnapByteCodes {
+        /// Receiver for the byte codes response.
+        response: oneshot::Receiver<RequestResult<ByteCodesMessage>>,
+    },
+    /// Snap trie nodes response.
+    SnapTrieNodes {
+        /// Receiver for the trie nodes response.
+        response: oneshot::Receiver<RequestResult<TrieNodesMessage>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -133,24 +161,28 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
         }
 
         let res = match self {
-            Self::BlockHeaders { response } => {
-                poll_request!(response, BlockHeaders, cx)
-            }
-            Self::BlockBodies { response } => {
-                poll_request!(response, BlockBodies, cx)
-            }
-            Self::PooledTransactions { response } => {
-                poll_request!(response, PooledTransactions, cx)
-            }
-            Self::NodeData { response } => {
-                poll_request!(response, NodeData, cx)
-            }
-            Self::Receipts { response } => {
-                poll_request!(response, Receipts, cx)
-            }
-            Self::Receipts69 { response } => {
-                poll_request!(response, Receipts69, cx)
-            }
+            Self::BlockHeaders { response } => poll_request!(response, BlockHeaders, cx),
+            Self::BlockBodies { response } => poll_request!(response, BlockBodies, cx),
+            Self::PooledTransactions { response } => poll_request!(response, PooledTransactions, cx),
+            Self::NodeData { response } => poll_request!(response, NodeData, cx),
+            Self::Receipts { response } => poll_request!(response, Receipts, cx),
+            Self::Receipts69 { response } => poll_request!(response, Receipts69, cx),
+            Self::SnapAccountRange { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::SnapAccountRange(res),
+                Err(err) => PeerResponseResult::SnapAccountRange(Err(err.into())),
+            },
+            Self::SnapStorageRanges { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::SnapStorageRanges(res),
+                Err(err) => PeerResponseResult::SnapStorageRanges(Err(err.into())),
+            },
+            Self::SnapByteCodes { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::SnapByteCodes(res),
+                Err(err) => PeerResponseResult::SnapByteCodes(Err(err.into())),
+            },
+            Self::SnapTrieNodes { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::SnapTrieNodes(res),
+                Err(err) => PeerResponseResult::SnapTrieNodes(Err(err.into())),
+            },
         };
         Poll::Ready(res)
     }
@@ -171,6 +203,14 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     Receipts(RequestResult<Vec<Vec<ReceiptWithBloom<N::Receipt>>>>),
     /// Represents a result containing receipts or an error for eth/69.
     Receipts69(RequestResult<Vec<Vec<N::Receipt>>>),
+    /// Snap account range response.
+    SnapAccountRange(RequestResult<AccountRangeMessage>),
+    /// Snap storage ranges response.
+    SnapStorageRanges(RequestResult<StorageRangesMessage>),
+    /// Snap bytecodes response.
+    SnapByteCodes(RequestResult<ByteCodesMessage>),
+    /// Snap trie nodes response.
+    SnapTrieNodes(RequestResult<TrieNodesMessage>),
 }
 
 // === impl PeerResponseResult ===
@@ -208,6 +248,58 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts69(resp) => {
                 to_message!(resp, Receipts69, id)
             }
+            Self::SnapAccountRange(resp) => {
+                match resp {
+                    Ok(resp) => {
+                        let snap = SnapProtocolMessage::AccountRange(resp);
+                        let encoded = snap.encode();
+                        Ok(EthMessage::Other(RawCapabilityMessage::new(
+                            snap.message_id() as usize,
+                            encoded.slice(1..).to_vec().into(),
+                        )))
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            Self::SnapStorageRanges(resp) => {
+                match resp {
+                    Ok(resp) => {
+                        let snap = SnapProtocolMessage::StorageRanges(resp);
+                        let encoded = snap.encode();
+                        Ok(EthMessage::Other(RawCapabilityMessage::new(
+                            snap.message_id() as usize,
+                            encoded.slice(1..).to_vec().into(),
+                        )))
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            Self::SnapByteCodes(resp) => {
+                match resp {
+                    Ok(resp) => {
+                        let snap = SnapProtocolMessage::ByteCodes(resp);
+                        let encoded = snap.encode();
+                        Ok(EthMessage::Other(RawCapabilityMessage::new(
+                            snap.message_id() as usize,
+                            encoded.slice(1..).to_vec().into(),
+                        )))
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            Self::SnapTrieNodes(resp) => {
+                match resp {
+                    Ok(resp) => {
+                        let snap = SnapProtocolMessage::TrieNodes(resp);
+                        let encoded = snap.encode();
+                        Ok(EthMessage::Other(RawCapabilityMessage::new(
+                            snap.message_id() as usize,
+                            encoded.slice(1..).to_vec().into(),
+                        )))
+                    }
+                    Err(err) => Err(err),
+                }
+            }
         }
     }
 
@@ -220,6 +312,10 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::NodeData(res) => res.as_ref().err(),
             Self::Receipts(res) => res.as_ref().err(),
             Self::Receipts69(res) => res.as_ref().err(),
+            Self::SnapAccountRange(res) => res.as_ref().err(),
+            Self::SnapStorageRanges(res) => res.as_ref().err(),
+            Self::SnapByteCodes(res) => res.as_ref().err(),
+            Self::SnapTrieNodes(res) => res.as_ref().err(),
         }
     }
 

@@ -495,7 +495,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     }
 
     /// Handle an incoming request from the peer
-    fn on_eth_request(&self, peer_id: PeerId, req: PeerRequest<N>) {
+    fn on_eth_request(&mut self, peer_id: PeerId, req: PeerRequest<N>) {
         match req {
             PeerRequest::GetBlockHeaders { request, response } => {
                 self.delegate_eth_request(IncomingEthRequest::GetBlockHeaders {
@@ -538,6 +538,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     request,
                     response,
                 });
+            }
+            // Snap requests are sent directly to the peer (noop handler on remote for now).
+            other @ PeerRequest::SnapGetAccountRange { .. }
+            | other @ PeerRequest::SnapGetStorageRanges { .. }
+            | other @ PeerRequest::SnapGetByteCodes { .. }
+            | other @ PeerRequest::SnapGetTrieNodes { .. } => {
+                self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::SnapRequest(other));
             }
         }
     }
@@ -625,6 +632,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 });
             }
             PeerMessage::EthRequest(req) => {
+                self.on_eth_request(peer_id, req);
+            }
+            PeerMessage::SnapRequest(req) => {
                 self.on_eth_request(peer_id, req);
             }
             PeerMessage::ReceivedTransaction(msg) => {

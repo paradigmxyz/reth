@@ -20,6 +20,7 @@ use std::{
 use crate::{
     capability::{SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
+    eth_snap_stream::EthSnapStream,
     handshake::EthRlpxHandshake,
     p2pstream::DisconnectP2P,
     CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, UnifiedStatus,
@@ -124,7 +125,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         self.into_satellite_stream_with_tuple_handshake(cap, move |proxy| async move {
             let st = handshake(proxy).await?;
             Ok((st, ()))
-        })
+        }, Vec::new())
         .await
         .map(|(st, _)| st)
     }
@@ -142,6 +143,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         mut self,
         cap: &Capability,
         handshake: F,
+        additional_caps: Vec<SharedCapability>,
     ) -> Result<(RlpxSatelliteStream<St, Primary>, Extra), Err>
     where
         F: FnOnce(ProtocolProxy) -> Fut,
@@ -177,16 +179,16 @@ impl<St> RlpxProtocolMultiplexer<St> {
                         return Err(P2PStreamError::EmptyProtocolMessage.into())
                     };
                     if let Some(cap) = self.shared_capabilities().find_by_relative_offset(offset).cloned() {
-                            if cap == shared_cap {
-                                // delegate to primary
-                                let _ = to_primary.send(msg);
-                            } else {
-                                // delegate to satellite
-                                self.inner.delegate_message(&cap, msg);
-                            }
+                        if cap == shared_cap || additional_caps.iter().any(|c| c == &cap) {
+                            // delegate to primary (eth and any additional caps like snap)
+                            let _ = to_primary.send(msg);
                         } else {
-                           return Err(P2PStreamError::UnknownReservedMessageId(offset).into())
+                            // delegate to satellite
+                            self.inner.delegate_message(&cap, msg);
                         }
+                    } else {
+                        return Err(P2PStreamError::UnknownReservedMessageId(offset).into())
+                    }
                 }
                 Some(msg) = from_primary.recv() => {
                     self.inner.conn.send(msg).await.map_err(Into::into)?;
@@ -233,7 +235,45 @@ impl<St> RlpxProtocolMultiplexer<St> {
                 let eth_stream = EthStream::new(eth_cap, unauth.into_inner());
                 Ok((eth_stream, their_status))
             }
-        })
+        }, Vec::new())
+        .await
+    }
+
+    /// Converts this multiplexer into a [`RlpxSatelliteStream`] using an `EthSnapStream` as primary
+    /// (eth + snap multiplexed in one stream) when snap is also shared.
+    pub async fn into_eth_snap_satellite_stream<N: NetworkPrimitives>(
+        self,
+        status: UnifiedStatus,
+        fork_filter: ForkFilter,
+        handshake: Arc<dyn EthRlpxHandshake>,
+    ) -> Result<(RlpxSatelliteStream<St, EthSnapStream<ProtocolProxy, N>>, UnifiedStatus), EthStreamError>
+    where
+        St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
+    {
+        let eth_cap = self.inner.conn.shared_capabilities().eth_version()?;
+        let snap_cap = self
+            .shared_capabilities()
+            .iter_caps()
+            .find(|cap| cap.name() == "snap")
+            .cloned()
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        self.into_satellite_stream_with_tuple_handshake(
+            &Capability::eth(eth_cap),
+            move |proxy| {
+                let handshake = handshake.clone();
+                async move {
+                    let mut unauth = UnauthProxy { inner: proxy };
+                    let their_status = handshake
+                        .handshake(&mut unauth, status, fork_filter, HANDSHAKE_TIMEOUT)
+                        .await?;
+                    let stream = EthSnapStream::new(unauth.into_inner(), eth_cap);
+                    Ok((stream, their_status))
+                }
+            },
+            snap_cap,
+        )
         .await
     }
 }

@@ -25,10 +25,17 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
+    eth_snap_stream::EthSnapMessage,
     message::{EthBroadcastMessage, MessageError, RequestPair},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{
+    snap::{
+        AccountRangeMessage, ByteCodesMessage, SnapProtocolMessage, StorageRangesMessage,
+        TrieNodesMessage,
+    },
+    RawCapabilityMessage,
+};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::RequestError;
@@ -164,7 +171,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Handle a message read from the connection.
     ///
     /// Returns an error if the message is considered to be in violation of the protocol.
-    fn on_incoming_message(&mut self, msg: EthMessage<N>) -> OnIncomingMessageOutcome<N> {
+    fn on_incoming_message(&mut self, msg: EthSnapMessage<N>) -> OnIncomingMessageOutcome<N> {
         /// A macro that handles an incoming request
         /// This creates a new channel and tries to send the sender half to the session while
         /// storing the receiver half internally so the pending response can be polled.
@@ -216,95 +223,222 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         }
 
         match msg {
-            message @ EthMessage::Status(_) => OnIncomingMessageOutcome::BadMessage {
-                error: EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake),
-                message,
+            EthSnapMessage::Eth(msg) => match msg {
+                message @ EthMessage::Status(_) => OnIncomingMessageOutcome::BadMessage {
+                    error: EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake),
+                    message,
+                },
+                EthMessage::NewBlockHashes(msg) => {
+                    self.try_emit_broadcast(PeerMessage::NewBlockHashes(msg)).into()
+                }
+                EthMessage::NewBlock(msg) => {
+                    let block: NewBlockMessage<N::NewBlockPayload> = NewBlockMessage {
+                        hash: msg.block().header().hash_slow(),
+                        block: Arc::new(*msg),
+                    };
+                    self.try_emit_broadcast(PeerMessage::NewBlock(block)).into()
+                }
+                EthMessage::Transactions(msg) => {
+                    self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
+                }
+                EthMessage::NewPooledTransactionHashes66(msg) => {
+                    self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+                }
+                EthMessage::NewPooledTransactionHashes68(msg) => {
+                    self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+                }
+                EthMessage::GetBlockHeaders(req) => {
+                    on_request!(req, BlockHeaders, GetBlockHeaders)
+                }
+                EthMessage::BlockHeaders(resp) => {
+                    on_response!(resp, GetBlockHeaders)
+                }
+                EthMessage::GetBlockBodies(req) => {
+                    on_request!(req, BlockBodies, GetBlockBodies)
+                }
+                EthMessage::BlockBodies(resp) => {
+                    on_response!(resp, GetBlockBodies)
+                }
+                EthMessage::GetPooledTransactions(req) => {
+                    on_request!(req, PooledTransactions, GetPooledTransactions)
+                }
+                EthMessage::PooledTransactions(resp) => {
+                    on_response!(resp, GetPooledTransactions)
+                }
+                EthMessage::GetNodeData(req) => {
+                    on_request!(req, NodeData, GetNodeData)
+                }
+                EthMessage::NodeData(resp) => {
+                    on_response!(resp, GetNodeData)
+                }
+                EthMessage::GetReceipts(req) => {
+                    if self.conn.version() >= EthVersion::Eth69 {
+                        on_request!(req, Receipts69, GetReceipts69)
+                    } else {
+                        on_request!(req, Receipts, GetReceipts)
+                    }
+                }
+                EthMessage::Receipts(resp) => {
+                    on_response!(resp, GetReceipts)
+                }
+                EthMessage::Receipts69(resp) => {
+                    on_response!(resp, GetReceipts69)
+                }
+                EthMessage::BlockRangeUpdate(msg) => {
+                    // Validate that earliest <= latest according to the spec
+                    if msg.earliest > msg.latest {
+                        return OnIncomingMessageOutcome::BadMessage {
+                            error: EthStreamError::InvalidMessage(MessageError::Other(format!(
+                                "invalid block range: earliest ({}) > latest ({})",
+                                msg.earliest, msg.latest
+                            ))),
+                            message: EthMessage::BlockRangeUpdate(msg),
+                        };
+                    }
+
+                    // Validate that the latest hash is not zero
+                    if msg.latest_hash.is_zero() {
+                        return OnIncomingMessageOutcome::BadMessage {
+                            error: EthStreamError::InvalidMessage(MessageError::Other(
+                                "invalid block range: latest_hash cannot be zero".to_string(),
+                            )),
+                            message: EthMessage::BlockRangeUpdate(msg),
+                        };
+                    }
+
+                    if let Some(range_info) = self.range_info.as_ref() {
+                        range_info.update(msg.earliest, msg.latest, msg.latest_hash);
+                    }
+
+                    OnIncomingMessageOutcome::Ok
+                }
+                EthMessage::Other(bytes) => {
+                    self.try_emit_broadcast(PeerMessage::Other(bytes)).into()
+                }
             },
-            EthMessage::NewBlockHashes(msg) => {
-                self.try_emit_broadcast(PeerMessage::NewBlockHashes(msg)).into()
-            }
-            EthMessage::NewBlock(msg) => {
-                let block = NewBlockMessage {
-                    hash: msg.block().header().hash_slow(),
-                    block: Arc::new(*msg),
-                };
-                self.try_emit_broadcast(PeerMessage::NewBlock(block)).into()
-            }
-            EthMessage::Transactions(msg) => {
-                self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
-            }
-            EthMessage::NewPooledTransactionHashes66(msg) => {
-                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
-            }
-            EthMessage::NewPooledTransactionHashes68(msg) => {
-                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
-            }
-            EthMessage::GetBlockHeaders(req) => {
-                on_request!(req, BlockHeaders, GetBlockHeaders)
-            }
-            EthMessage::BlockHeaders(resp) => {
-                on_response!(resp, GetBlockHeaders)
-            }
-            EthMessage::GetBlockBodies(req) => {
-                on_request!(req, BlockBodies, GetBlockBodies)
-            }
-            EthMessage::BlockBodies(resp) => {
-                on_response!(resp, GetBlockBodies)
-            }
-            EthMessage::GetPooledTransactions(req) => {
-                on_request!(req, PooledTransactions, GetPooledTransactions)
-            }
-            EthMessage::PooledTransactions(resp) => {
-                on_response!(resp, GetPooledTransactions)
-            }
-            EthMessage::GetNodeData(req) => {
-                on_request!(req, NodeData, GetNodeData)
-            }
-            EthMessage::NodeData(resp) => {
-                on_response!(resp, GetNodeData)
-            }
-            EthMessage::GetReceipts(req) => {
-                if self.conn.version() >= EthVersion::Eth69 {
-                    on_request!(req, Receipts69, GetReceipts69)
-                } else {
-                    on_request!(req, Receipts, GetReceipts)
-                }
-            }
-            EthMessage::Receipts(resp) => {
-                on_response!(resp, GetReceipts)
-            }
-            EthMessage::Receipts69(resp) => {
-                on_response!(resp, GetReceipts69)
-            }
-            EthMessage::BlockRangeUpdate(msg) => {
-                // Validate that earliest <= latest according to the spec
-                if msg.earliest > msg.latest {
-                    return OnIncomingMessageOutcome::BadMessage {
-                        error: EthStreamError::InvalidMessage(MessageError::Other(format!(
-                            "invalid block range: earliest ({}) > latest ({})",
-                            msg.earliest, msg.latest
-                        ))),
-                        message: EthMessage::BlockRangeUpdate(msg),
-                    };
-                }
+            EthSnapMessage::Snap(msg) => self.on_incoming_snap_message(msg),
+        }
+    }
 
-                // Validate that the latest hash is not zero
-                if msg.latest_hash.is_zero() {
-                    return OnIncomingMessageOutcome::BadMessage {
-                        error: EthStreamError::InvalidMessage(MessageError::Other(
-                            "invalid block range: latest_hash cannot be zero".to_string(),
-                        )),
-                        message: EthMessage::BlockRangeUpdate(msg),
-                    };
-                }
-
-                if let Some(range_info) = self.range_info.as_ref() {
-                    range_info.update(msg.earliest, msg.latest, msg.latest_hash);
-                }
-
+    /// Handle incoming snap protocol messages; for now, reply with empty responses for requests.
+    fn on_incoming_snap_message(&mut self, msg: SnapProtocolMessage) -> OnIncomingMessageOutcome<N> {
+        match msg {
+            // Incoming snap requests -> send noop response
+            SnapProtocolMessage::GetAccountRange(req) => {
+                let resp = SnapProtocolMessage::AccountRange(AccountRangeMessage {
+                    request_id: req.request_id,
+                    accounts: Vec::new(),
+                    proof: Vec::new(),
+                });
+                self.queued_outgoing.push_back(OutgoingMessage::Snap(EthSnapMessage::Snap(resp)));
                 OnIncomingMessageOutcome::Ok
             }
-            EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
+            SnapProtocolMessage::GetStorageRanges(req) => {
+                let resp = SnapProtocolMessage::StorageRanges(StorageRangesMessage {
+                    request_id: req.request_id,
+                    slots: Vec::new(),
+                    proof: Vec::new(),
+                });
+                self.queued_outgoing.push_back(OutgoingMessage::Snap(EthSnapMessage::Snap(resp)));
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::GetByteCodes(req) => {
+                let resp = SnapProtocolMessage::ByteCodes(ByteCodesMessage {
+                    request_id: req.request_id,
+                    codes: Vec::new(),
+                });
+                self.queued_outgoing.push_back(OutgoingMessage::Snap(EthSnapMessage::Snap(resp)));
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::GetTrieNodes(req) => {
+                let resp = SnapProtocolMessage::TrieNodes(TrieNodesMessage {
+                    request_id: req.request_id,
+                    nodes: Vec::new(),
+                });
+                self.queued_outgoing.push_back(OutgoingMessage::Snap(EthSnapMessage::Snap(resp)));
+                OnIncomingMessageOutcome::Ok
+            }
+            // Incoming responses to our previously sent snap requests
+            SnapProtocolMessage::AccountRange(resp) => {
+                let request_id = resp.request_id;
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    match req.request {
+                        RequestState::Waiting(PeerRequest::SnapGetAccountRange { response, .. }) => {
+                            let _ = response.send(Ok(resp));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(other) => {
+                            other.send_bad_response();
+                        }
+                        RequestState::TimedOut => {
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                    }
+                } else {
+                    self.on_bad_message();
+                }
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::StorageRanges(resp) => {
+                let request_id = resp.request_id;
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    match req.request {
+                        RequestState::Waiting(PeerRequest::SnapGetStorageRanges { response, .. }) => {
+                            let _ = response.send(Ok(resp));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(other) => {
+                            other.send_bad_response();
+                        }
+                        RequestState::TimedOut => {
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                    }
+                } else {
+                    self.on_bad_message();
+                }
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::ByteCodes(resp) => {
+                let request_id = resp.request_id;
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    match req.request {
+                        RequestState::Waiting(PeerRequest::SnapGetByteCodes { response, .. }) => {
+                            let _ = response.send(Ok(resp));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(other) => {
+                            other.send_bad_response();
+                        }
+                        RequestState::TimedOut => {
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                    }
+                } else {
+                    self.on_bad_message();
+                }
+                OnIncomingMessageOutcome::Ok
+            }
+            SnapProtocolMessage::TrieNodes(resp) => {
+                let request_id = resp.request_id;
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    match req.request {
+                        RequestState::Waiting(PeerRequest::SnapGetTrieNodes { response, .. }) => {
+                            let _ = response.send(Ok(resp));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(other) => {
+                            other.send_bad_response();
+                        }
+                        RequestState::TimedOut => {
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                    }
+                } else {
+                    self.on_bad_message();
+                }
+                OnIncomingMessageOutcome::Ok
+            }
         }
     }
 
@@ -313,8 +447,33 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         let request_id = self.next_id();
 
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let msg = request.create_request_message(request_id);
-        self.queued_outgoing.push_back(msg.into());
+        let outgoing = match &request {
+            PeerRequest::SnapGetAccountRange { request, .. } => {
+                let mut req = request.clone();
+                req.request_id = request_id;
+                OutgoingMessage::Snap(EthSnapMessage::Snap(SnapProtocolMessage::GetAccountRange(req)))
+            }
+            PeerRequest::SnapGetStorageRanges { request, .. } => {
+                let mut req = request.clone();
+                req.request_id = request_id;
+                OutgoingMessage::Snap(EthSnapMessage::Snap(SnapProtocolMessage::GetStorageRanges(
+                    req,
+                )))
+            }
+            PeerRequest::SnapGetByteCodes { request, .. } => {
+                let mut req = request.clone();
+                req.request_id = request_id;
+                OutgoingMessage::Snap(EthSnapMessage::Snap(SnapProtocolMessage::GetByteCodes(req)))
+            }
+            PeerRequest::SnapGetTrieNodes { request, .. } => {
+                let mut req = request.clone();
+                req.request_id = request_id;
+                OutgoingMessage::Snap(EthSnapMessage::Snap(SnapProtocolMessage::GetTrieNodes(req)))
+            }
+            _ => request.create_request_message(request_id).into(),
+        };
+
+        self.queued_outgoing.push_back(outgoing);
         let req = InflightRequest {
             request: RequestState::Waiting(request),
             timestamp: Instant::now(),
@@ -340,6 +499,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 }
             }
             PeerMessage::EthRequest(req) => {
+                let deadline = self.request_deadline();
+                self.on_internal_peer_request(req, deadline);
+            }
+            PeerMessage::SnapRequest(req) => {
                 let deadline = self.request_deadline();
                 self.on_internal_peer_request(req, deadline);
             }
@@ -627,7 +790,10 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 if let Some(msg) = this.queued_outgoing.pop_front() {
                     progress = true;
                     let res = match msg {
-                        OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
+                        OutgoingMessage::Eth(msg) => {
+                            this.conn.start_send_unpin(EthSnapMessage::Eth(msg))
+                        }
+                        OutgoingMessage::Snap(msg) => this.conn.start_send_unpin(msg),
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
                         OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
                     };
@@ -703,7 +869,11 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     Poll::Ready(Some(res)) => {
                         match res {
                             Ok(msg) => {
-                                trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
+                                trace!(
+                                    target: "net::session",
+                                    remote_peer_id=?this.remote_peer_id,
+                                    "received protocol message"
+                                );
                                 // decode and handle message
                                 match this.on_incoming_message(msg) {
                                     OnIncomingMessageOutcome::Ok => {
@@ -850,6 +1020,8 @@ enum RequestState<R> {
 pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     /// A message that is owned.
     Eth(EthMessage<N>),
+    /// A snap protocol message (wrapped in EthSnapMessage).
+    Snap(EthSnapMessage<N>),
     /// A message that may be shared by multiple sessions.
     Broadcast(EthBroadcastMessage<N>),
     /// A raw capability message
@@ -861,6 +1033,8 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
     const fn is_response(&self) -> bool {
         match self {
             Self::Eth(msg) => msg.is_response(),
+            Self::Snap(EthSnapMessage::Eth(msg)) => msg.is_response(),
+            Self::Snap(EthSnapMessage::Snap(_)) => false,
             _ => false,
         }
     }
@@ -869,6 +1043,12 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
 impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
     fn from(value: EthMessage<N>) -> Self {
         Self::Eth(value)
+    }
+}
+
+impl<N: NetworkPrimitives> From<EthSnapMessage<N>> for OutgoingMessage<N> {
+    fn from(value: EthSnapMessage<N>) -> Self {
+        Self::Snap(value)
     }
 }
 

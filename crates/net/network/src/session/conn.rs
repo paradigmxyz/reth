@@ -1,14 +1,15 @@
 //! Connection types for a session
 
-use futures::{Sink, Stream};
+use futures::{Sink, SinkExt, Stream};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     errors::EthStreamError,
+    eth_snap_stream::{EthSnapMessage, EthSnapStream},
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
-    EthMessage, EthNetworkPrimitives, EthStream, EthVersion, NetworkPrimitives, P2PStream,
+    EthNetworkPrimitives, EthStream, EthVersion, NetworkPrimitives, P2PStream,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{RawCapabilityMessage, SnapMessageId};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -17,10 +18,15 @@ use tokio::net::TcpStream;
 
 /// The type of the underlying peer network connection.
 pub type EthPeerConnection<N> = EthStream<P2PStream<ECIESStream<TcpStream>>, N>;
+/// The type of the underlying peer network connection when snap is also shared.
+pub type EthSnapPeerConnection<N> = EthSnapStream<P2PStream<ECIESStream<TcpStream>>, N>;
 
 /// Various connection types that at least support the ETH protocol.
 pub type EthSatelliteConnection<N = EthNetworkPrimitives> =
     RlpxSatelliteStream<ECIESStream<TcpStream>, EthStream<ProtocolProxy, N>>;
+/// Various connection types when snap is also shared (eth + snap combined stream).
+pub type EthSnapSatelliteConnection<N = EthNetworkPrimitives> =
+    RlpxSatelliteStream<ECIESStream<TcpStream>, EthSnapStream<ProtocolProxy, N>>;
 
 /// Connection types that support the ETH protocol.
 ///
@@ -35,6 +41,10 @@ pub enum EthRlpxConnection<N: NetworkPrimitives = EthNetworkPrimitives> {
     EthOnly(Box<EthPeerConnection<N>>),
     /// A connection that supports the ETH protocol and __at least one other__ `RLPx` protocol.
     Satellite(Box<EthSatelliteConnection<N>>),
+    /// A connection that supports eth + snap combined stream.
+    EthSnapOnly(Box<EthSnapPeerConnection<N>>),
+    /// A connection that supports eth + snap with additional protocols.
+    SnapSatellite(Box<EthSnapSatelliteConnection<N>>),
 }
 
 impl<N: NetworkPrimitives> EthRlpxConnection<N> {
@@ -44,6 +54,8 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         match self {
             Self::EthOnly(conn) => conn.version(),
             Self::Satellite(conn) => conn.primary().version(),
+            Self::EthSnapOnly(conn) => conn.eth_version(),
+            Self::SnapSatellite(conn) => conn.primary().eth_version(),
         }
     }
 
@@ -53,6 +65,8 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         match self {
             Self::EthOnly(conn) => conn.into_inner(),
             Self::Satellite(conn) => conn.into_inner(),
+            Self::EthSnapOnly(conn) => conn.into_inner(),
+            Self::SnapSatellite(conn) => conn.into_inner(),
         }
     }
 
@@ -62,6 +76,8 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         match self {
             Self::EthOnly(conn) => conn.inner_mut(),
             Self::Satellite(conn) => conn.inner_mut(),
+            Self::EthSnapOnly(conn) => conn.inner_mut(),
+            Self::SnapSatellite(conn) => conn.inner_mut(),
         }
     }
 
@@ -71,6 +87,8 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         match self {
             Self::EthOnly(conn) => conn.inner(),
             Self::Satellite(conn) => conn.inner(),
+            Self::EthSnapOnly(conn) => conn.inner(),
+            Self::SnapSatellite(conn) => conn.inner(),
         }
     }
 
@@ -83,6 +101,10 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         match self {
             Self::EthOnly(conn) => conn.start_send_broadcast(item),
             Self::Satellite(conn) => conn.primary_mut().start_send_broadcast(item),
+            Self::EthSnapOnly(conn) => conn.start_send_broadcast(item).map_err(Into::into),
+            Self::SnapSatellite(conn) => {
+                conn.primary_mut().start_send_broadcast(item).map_err(Into::into)
+            }
         }
     }
 
@@ -91,6 +113,8 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         match self {
             Self::EthOnly(conn) => conn.start_send_raw(msg),
             Self::Satellite(conn) => conn.primary_mut().start_send_raw(msg),
+            Self::EthSnapOnly(conn) => conn.start_send_raw(msg).map_err(Into::into),
+            Self::SnapSatellite(conn) => conn.primary_mut().start_send_raw(msg).map_err(Into::into),
         }
     }
 }
@@ -109,42 +133,106 @@ impl<N: NetworkPrimitives> From<EthSatelliteConnection<N>> for EthRlpxConnection
     }
 }
 
-macro_rules! delegate_call {
-    ($self:ident.$method:ident($($args:ident),+)) => {
+impl<N: NetworkPrimitives> From<EthSnapPeerConnection<N>> for EthRlpxConnection<N> {
+    #[inline]
+    fn from(conn: EthSnapPeerConnection<N>) -> Self {
+        Self::EthSnapOnly(Box::new(conn))
+    }
+}
+
+impl<N: NetworkPrimitives> From<EthSnapSatelliteConnection<N>> for EthRlpxConnection<N> {
+    #[inline]
+    fn from(conn: EthSnapSatelliteConnection<N>) -> Self {
+        Self::SnapSatellite(Box::new(conn))
+    }
+}
+
+impl<N: NetworkPrimitives> Stream for EthRlpxConnection<N> {
+    type Item = Result<EthSnapMessage<N>, EthStreamError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // We need to map snap-specific errors into EthStreamError for snap streams.
         unsafe {
-            match $self.get_unchecked_mut() {
-                Self::EthOnly(l) => Pin::new_unchecked(l).$method($($args),+),
-                Self::Satellite(r) => Pin::new_unchecked(r).$method($($args),+),
+            match self.get_unchecked_mut() {
+                Self::EthOnly(l) => Pin::new_unchecked(l)
+                    .poll_next(cx)
+                    .map(|opt| opt.map(|res| res.map(EthSnapMessage::Eth))),
+                Self::Satellite(r) => Pin::new_unchecked(r)
+                    .poll_next(cx)
+                    .map(|opt| opt.map(|res| res.map(EthSnapMessage::Eth))),
+                Self::EthSnapOnly(l) => match Pin::new_unchecked(l).poll_next(cx) {
+                    Poll::Ready(Some(Ok(msg))) => Poll::Ready(Some(Ok(msg))),
+                    Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err.into()))),
+                    Poll::Ready(None) => Poll::Ready(None),
+                    Poll::Pending => Poll::Pending,
+                },
+                Self::SnapSatellite(r) => match Pin::new_unchecked(r).poll_next(cx) {
+                    Poll::Ready(Some(Ok(msg))) => Poll::Ready(Some(Ok(msg))),
+                    Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err.into()))),
+                    Poll::Ready(None) => Poll::Ready(None),
+                    Poll::Pending => Poll::Pending,
+                },
             }
         }
     }
 }
 
-impl<N: NetworkPrimitives> Stream for EthRlpxConnection<N> {
-    type Item = Result<EthMessage<N>, EthStreamError>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        delegate_call!(self.poll_next(cx))
-    }
-}
-
-impl<N: NetworkPrimitives> Sink<EthMessage<N>> for EthRlpxConnection<N> {
+impl<N: NetworkPrimitives> Sink<EthSnapMessage<N>> for EthRlpxConnection<N> {
     type Error = EthStreamError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        delegate_call!(self.poll_ready(cx))
+        unsafe {
+            match self.get_unchecked_mut() {
+                Self::EthOnly(l) => Pin::new_unchecked(l).poll_ready(cx),
+                Self::Satellite(r) => Pin::new_unchecked(r).poll_ready(cx),
+                Self::EthSnapOnly(l) => Pin::new_unchecked(l).poll_ready(cx).map_err(Into::into),
+                Self::SnapSatellite(r) => Pin::new_unchecked(r).poll_ready(cx).map_err(Into::into),
+            }
+        }
     }
 
-    fn start_send(self: Pin<&mut Self>, item: EthMessage<N>) -> Result<(), Self::Error> {
-        delegate_call!(self.start_send(item))
+    fn start_send(self: Pin<&mut Self>, item: EthSnapMessage<N>) -> Result<(), Self::Error> {
+        unsafe {
+            match (self.get_unchecked_mut(), item) {
+                (Self::EthOnly(l), EthSnapMessage::Eth(msg)) => {
+                    Pin::new_unchecked(l).start_send_unpin(msg)
+                }
+                (Self::Satellite(r), EthSnapMessage::Eth(msg)) => {
+                    Pin::new_unchecked(r).start_send_unpin(msg)
+                }
+                (Self::EthSnapOnly(l), msg) => {
+                    Pin::new_unchecked(l).start_send_unpin(msg).map_err(Into::into)
+                }
+                (Self::SnapSatellite(r), msg) => {
+                    Pin::new_unchecked(r).start_send_unpin(msg).map_err(Into::into)
+                }
+                // Sending snap message over eth-only connection is unsupported
+                (Self::EthOnly(_), EthSnapMessage::Snap(_)) |
+                (Self::Satellite(_), EthSnapMessage::Snap(_)) => Err(EthStreamError::UnsupportedMessage { message_id: SnapMessageId::GetAccountRange as u8 }),
+            }
+        }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        delegate_call!(self.poll_flush(cx))
+        unsafe {
+            match self.get_unchecked_mut() {
+                Self::EthOnly(l) => Pin::new_unchecked(l).poll_flush(cx),
+                Self::Satellite(r) => Pin::new_unchecked(r).poll_flush(cx),
+                Self::EthSnapOnly(l) => Pin::new_unchecked(l).poll_flush(cx).map_err(Into::into),
+                Self::SnapSatellite(r) => Pin::new_unchecked(r).poll_flush(cx).map_err(Into::into),
+            }
+        }
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        delegate_call!(self.poll_close(cx))
+        unsafe {
+            match self.get_unchecked_mut() {
+                Self::EthOnly(l) => Pin::new_unchecked(l).poll_close(cx),
+                Self::Satellite(r) => Pin::new_unchecked(r).poll_close(cx),
+                Self::EthSnapOnly(l) => Pin::new_unchecked(l).poll_close(cx).map_err(Into::into),
+                Self::SnapSatellite(r) => Pin::new_unchecked(r).poll_close(cx).map_err(Into::into),
+            }
+        }
     }
 }
 
@@ -152,16 +240,15 @@ impl<N: NetworkPrimitives> Sink<EthMessage<N>> for EthRlpxConnection<N> {
 mod tests {
     use super::*;
 
-    const fn assert_eth_stream<N, St>()
+    const fn assert_eth_snap_stream<N, St>()
     where
         N: NetworkPrimitives,
-        St: Stream<Item = Result<EthMessage<N>, EthStreamError>> + Sink<EthMessage<N>>,
+        St: Stream<Item = Result<EthSnapMessage<N>, EthStreamError>> + Sink<EthSnapMessage<N>>,
     {
     }
 
     #[test]
     const fn test_eth_stream_variants() {
-        assert_eth_stream::<EthNetworkPrimitives, EthSatelliteConnection<EthNetworkPrimitives>>();
-        assert_eth_stream::<EthNetworkPrimitives, EthRlpxConnection<EthNetworkPrimitives>>();
+        assert_eth_snap_stream::<EthNetworkPrimitives, EthRlpxConnection<EthNetworkPrimitives>>();
     }
 }

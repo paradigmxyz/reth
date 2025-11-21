@@ -6,6 +6,12 @@ use reth_eth_wire_types::{
     GetPooledTransactions, GetReceipts, NetworkPrimitives, NodeData, PooledTransactions, Receipts,
     Receipts69, UnifiedStatus,
 };
+use reth_eth_wire_types::snap::{
+    AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage, GetByteCodesMessage,
+    GetStorageRangesMessage, GetTrieNodesMessage, SnapProtocolMessage, StorageRangesMessage,
+    TrieNodesMessage,
+};
+use reth_eth_wire_types::RawCapabilityMessage;
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
@@ -238,6 +244,34 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The channel to send the response for receipts.
         response: oneshot::Sender<RequestResult<Receipts69<N::Receipt>>>,
     },
+    /// Requests snap account range
+    SnapGetAccountRange {
+        /// The request payload for account range.
+        request: GetAccountRangeMessage,
+        /// Channel to receive the account range response.
+        response: oneshot::Sender<RequestResult<AccountRangeMessage>>,
+    },
+    /// Requests snap storage ranges
+    SnapGetStorageRanges {
+        /// The request payload for storage ranges.
+        request: GetStorageRangesMessage,
+        /// Channel to receive the storage ranges response.
+        response: oneshot::Sender<RequestResult<StorageRangesMessage>>,
+    },
+    /// Requests snap bytecodes
+    SnapGetByteCodes {
+        /// The request payload for bytecodes.
+        request: GetByteCodesMessage,
+        /// Channel to receive the bytecodes response.
+        response: oneshot::Sender<RequestResult<ByteCodesMessage>>,
+    },
+    /// Requests snap trie nodes
+    SnapGetTrieNodes {
+        /// The request payload for trie nodes.
+        request: GetTrieNodesMessage,
+        /// Channel to receive the trie nodes response.
+        response: oneshot::Sender<RequestResult<TrieNodesMessage>>,
+    },
 }
 
 // === impl PeerRequest ===
@@ -257,6 +291,10 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetNodeData { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts69 { response, .. } => response.send(Err(err)).ok(),
+            Self::SnapGetAccountRange { response, .. } => response.send(Err(err)).ok(),
+            Self::SnapGetStorageRanges { response, .. } => response.send(Err(err)).ok(),
+            Self::SnapGetByteCodes { response, .. } => response.send(Err(err)).ok(),
+            Self::SnapGetTrieNodes { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
@@ -280,6 +318,40 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             }
             Self::GetReceipts { request, .. } | Self::GetReceipts69 { request, .. } => {
                 EthMessage::GetReceipts(RequestPair { request_id, message: request.clone() })
+            }
+            // Snap requests are encoded via EthSnapMessage in the session layer; this path should
+            // not be used. We still return a raw capability message for compatibility.
+            Self::SnapGetAccountRange { request, .. } => {
+                let msg = SnapProtocolMessage::GetAccountRange(request.clone());
+                let encoded = msg.encode();
+                EthMessage::Other(RawCapabilityMessage::new(
+                    msg.message_id() as usize,
+                    encoded.slice(1..).to_vec().into(),
+                ))
+            }
+            Self::SnapGetStorageRanges { request, .. } => {
+                let msg = SnapProtocolMessage::GetStorageRanges(request.clone());
+                let encoded = msg.encode();
+                EthMessage::Other(RawCapabilityMessage::new(
+                    msg.message_id() as usize,
+                    encoded.slice(1..).to_vec().into(),
+                ))
+            }
+            Self::SnapGetByteCodes { request, .. } => {
+                let msg = SnapProtocolMessage::GetByteCodes(request.clone());
+                let encoded = msg.encode();
+                EthMessage::Other(RawCapabilityMessage::new(
+                    msg.message_id() as usize,
+                    encoded.slice(1..).to_vec().into(),
+                ))
+            }
+            Self::SnapGetTrieNodes { request, .. } => {
+                let msg = SnapProtocolMessage::GetTrieNodes(request.clone());
+                let encoded = msg.encode();
+                EthMessage::Other(RawCapabilityMessage::new(
+                    msg.message_id() as usize,
+                    encoded.slice(1..).to_vec().into(),
+                ))
             }
         }
     }
@@ -329,5 +401,44 @@ impl<R> PeerRequestSender<R> {
 impl<R> fmt::Debug for PeerRequestSender<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PeerRequestSender").field("peer_id", &self.peer_id).finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+    use reth_eth_wire_types::snap::{GetAccountRangeMessage, GetByteCodesMessage, SnapMessageId};
+
+    #[test]
+    fn snap_account_range_request_is_encoded_as_raw_capability() {
+        let req = GetAccountRangeMessage {
+            request_id: 0,
+            root_hash: B256::ZERO,
+            starting_hash: B256::ZERO,
+            limit_hash: B256::ZERO,
+            response_bytes: 1024,
+        };
+        let (tx, _rx) = oneshot::channel();
+        let peer_req: PeerRequest = PeerRequest::SnapGetAccountRange { request: req.clone(), response: tx };
+        let msg = peer_req.create_request_message(42);
+
+        let EthMessage::Other(raw) = msg else { panic!("expected raw capability message") };
+        let encoded = SnapProtocolMessage::GetAccountRange(req).encode();
+        assert_eq!(raw.id, SnapMessageId::GetAccountRange as usize);
+        assert_eq!(raw.payload.as_ref(), encoded.slice(1..).as_ref());
+    }
+
+    #[test]
+    fn snap_bytecodes_request_is_encoded_as_raw_capability() {
+        let req = GetByteCodesMessage { request_id: 0, hashes: vec![B256::ZERO], response_bytes: 10 };
+        let (tx, _rx) = oneshot::channel();
+        let peer_req: PeerRequest = PeerRequest::SnapGetByteCodes { request: req.clone(), response: tx };
+        let msg = peer_req.create_request_message(7);
+
+        let EthMessage::Other(raw) = msg else { panic!("expected raw capability message") };
+        let encoded = SnapProtocolMessage::GetByteCodes(req).encode();
+        assert_eq!(raw.id, SnapMessageId::GetByteCodes as usize);
+        assert_eq!(raw.payload.as_ref(), encoded.slice(1..).as_ref());
     }
 }

@@ -84,6 +84,15 @@ impl HelloMessageWithProtocols {
         self.protocols.iter().any(|p| p.cap == protocol.cap)
     }
 
+    /// Adds snap/1 to the protocol list if not present.
+    pub fn with_snap(mut self) -> Self {
+        let snap = Protocol::snap();
+        if !self.contains_protocol(&snap) {
+            let _ = self.try_add_protocol(snap);
+        }
+        self
+    }
+
     /// Adds a new protocol to the set.
     ///
     /// Returns an error if the protocol already exists.
@@ -178,6 +187,16 @@ impl HelloMessageBuilder {
     /// Sets protocols to use.
     pub fn protocols(mut self, protocols: impl IntoIterator<Item = Protocol>) -> Self {
         self.protocols.get_or_insert_with(Vec::new).extend(protocols);
+        self
+    }
+
+    /// Enables or disables announcing snap/1 capability.
+    pub fn with_snap(mut self, enable: bool) -> Self {
+        if enable {
+            self.protocols.get_or_insert_with(Vec::new).push(Protocol::snap());
+        } else if let Some(protocols) = self.protocols.as_mut() {
+            protocols.retain(|p| !(p.cap.name == "snap"));
+        }
         self
     }
 

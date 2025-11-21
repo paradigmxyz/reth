@@ -5,14 +5,16 @@
 
 use super::message::MAX_MESSAGE_SIZE;
 use crate::{
-    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
-    EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
-    RawCapabilityMessage, SnapMessageId, SnapProtocolMessage,
+    errors::{EthHandshakeError, EthStreamError, P2PStreamError},
+    message::{EthBroadcastMessage, MessageError, ProtocolBroadcastMessage},
+    EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
+    ProtocolMessage, RawCapabilityMessage, SnapMessageId, SnapProtocolMessage,
 };
 use alloy_rlp::{Bytes, BytesMut, Encodable};
 use core::fmt::Debug;
 use futures::{Sink, SinkExt};
 use pin_project::pin_project;
+use std::io;
 use std::{
     marker::PhantomData,
     pin::Pin,
@@ -38,6 +40,10 @@ pub enum EthSnapStreamError {
     /// RLP decoding error
     #[error("rlp error: {0}")]
     Rlp(#[from] alloy_rlp::Error),
+
+    /// Underlying p2p stream error
+    #[error(transparent)]
+    P2P(#[from] P2PStreamError),
 
     /// Status message received outside handshake
     #[error("status message received outside handshake")]
@@ -418,5 +424,34 @@ mod tests {
         // Not a valid snap message yet, only snap id --> error
         let snap_boundary_result = inner.decode_message(snap_boundary_bytes);
         assert!(snap_boundary_result.is_err());
+    }
+}
+
+impl From<io::Error> for EthSnapStreamError {
+    fn from(err: io::Error) -> Self {
+        P2PStreamError::from(err).into()
+    }
+}
+
+impl From<EthSnapStreamError> for EthStreamError {
+    fn from(err: EthSnapStreamError) -> Self {
+        match err {
+            EthSnapStreamError::InvalidMessage(version, msg) => {
+                EthStreamError::InvalidMessage(MessageError::Other(format!(
+                    "{msg} (version {version:?})"
+                )))
+            }
+            EthSnapStreamError::UnknownMessageId(message_id) => {
+                EthStreamError::UnsupportedMessage { message_id }
+            }
+            EthSnapStreamError::MessageTooLarge(len, _) => EthStreamError::MessageTooBig(len),
+            EthSnapStreamError::Rlp(err) => {
+                EthStreamError::InvalidMessage(MessageError::RlpError(err))
+            }
+            EthSnapStreamError::P2P(err) => EthStreamError::P2PStreamError(err),
+            EthSnapStreamError::StatusNotInHandshake => {
+                EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake)
+            }
+        }
     }
 }
