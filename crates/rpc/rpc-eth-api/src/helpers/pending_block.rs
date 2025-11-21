@@ -30,6 +30,7 @@ use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
     PoolTransaction, TransactionPool,
 };
+use reth_trie_common::TrieInputSorted;
 use revm::context_interface::Block;
 use std::{
     sync::Arc,
@@ -376,7 +377,7 @@ pub trait LoadPendingBlock:
                 hashed_state: Arc::new(hashed_state.into_sorted()),
                 trie_updates: Arc::new(trie_updates.into_sorted()),
                 anchor_hash: B256::ZERO,
-                trie_input: Arc::new(reth_trie::TrieInputSorted::default()),
+                trie_input: Arc::new(TrieInputSorted::default()),
             }),
         })
     }

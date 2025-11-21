@@ -29,7 +29,6 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
 use std::{
     collections::BTreeMap,
     str::FromStr,

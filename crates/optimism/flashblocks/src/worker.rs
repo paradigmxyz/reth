@@ -5,6 +5,7 @@ use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::{
     CanonStateSubscriptions, ComputedTrieData, DeferredTrieData, ExecutedBlock,
 };
+use reth_trie_common::TrieInputSorted;
 use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -131,7 +132,7 @@ where
                     hashed_state: Arc::new(hashed_state.into_sorted()),
                     trie_updates: Arc::default(),
                     anchor_hash: B256::ZERO,
-                    trie_input: Arc::new(reth_trie::TrieInputSorted::default()),
+                    trie_input: Arc::new(TrieInputSorted::default()),
                 }),
             },
         );
