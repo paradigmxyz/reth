@@ -97,7 +97,8 @@ pub(crate) struct RefInfo {
 /// - `new_payload_latency_p50_change_percent` / p90 / p99: percent changes of the respective
 ///   per-block percentiles.
 /// - `per_block_latency_change_mean_percent` / `per_block_latency_change_median_percent` are the
-///   mean and median of per-block percent deltas (feature vs baseline), capturing block-level drift.
+///   mean and median of per-block percent deltas (feature vs baseline), capturing block-level
+///   drift.
 /// - `new_payload_total_latency_change_percent` is the percent change of the total newPayload time
 ///   across the run.
 ///
