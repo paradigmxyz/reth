@@ -30,14 +30,10 @@ const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
 /// Global static download defaults
 static DOWNLOAD_DEFAULTS: OnceLock<DownloadDefaults> = OnceLock::new();
 
-static DOWNLOAD_METRICS: OnceLock<DownloadMetrics> = OnceLock::new();
-
 /// Metrics for the download command
 #[derive(Metrics, Clone)]
 #[metrics(scope = "cli.download")]
 struct DownloadMetrics {
-    /// Download attempts started
-    downloads_started_total: Counter,
     /// Successful downloads
     downloads_success_total: Counter,
     /// Failed downloads
@@ -54,12 +50,6 @@ struct DownloadMetrics {
     download_file_size_bytes: Gauge,
     /// Progress (0-100)
     download_progress_percent: Gauge,
-}
-
-impl DownloadMetrics {
-    fn global() -> &'static Self {
-        DOWNLOAD_METRICS.get_or_init(DownloadMetrics::default)
-    }
 }
 
 /// Download configuration defaults
@@ -186,8 +176,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             "Starting snapshot download and extraction"
         );
 
+        let metrics = DownloadMetrics::default();
         let start = Instant::now();
-        let result = stream_and_extract(&url, data_dir.data_dir()).await;
+        let result = stream_and_extract(&url, data_dir.data_dir(), &metrics).await;
 
         match result {
             Ok(_) => {
@@ -218,19 +209,17 @@ impl<C: ChainSpecParser> DownloadCommand<C> {
 
 // Monitor process status and display progress every 100ms
 // to avoid overwhelming stdout
-struct DownloadProgress {
+struct DownloadProgress<'a> {
     downloaded: u64,
     total_size: u64,
     last_displayed: Instant,
-    _started_at: Instant,
     last_speed_update: Instant,
     last_speed_bytes: u64,
-    metrics: &'static DownloadMetrics,
+    metrics: &'a DownloadMetrics,
 }
 
-impl DownloadProgress {
-    fn new(total_size: u64) -> Self {
-        let metrics = DownloadMetrics::global();
+impl<'a> DownloadProgress<'a> {
+    fn new(total_size: u64, metrics: &'a DownloadMetrics) -> Self {
         metrics.download_file_size_bytes.set(total_size as f64);
         metrics.download_progress_percent.set(0.0);
 
@@ -238,7 +227,6 @@ impl DownloadProgress {
             downloaded: 0,
             total_size,
             last_displayed: Instant::now(),
-            _started_at: Instant::now(),
             last_speed_update: Instant::now(),
             last_speed_bytes: 0,
             metrics,
@@ -289,18 +277,18 @@ impl DownloadProgress {
 }
 
 /// Adapter to track progress while reading
-struct ProgressReader<R> {
+struct ProgressReader<'a, R> {
     reader: R,
-    progress: DownloadProgress,
+    progress: DownloadProgress<'a>,
 }
 
-impl<R: Read> ProgressReader<R> {
-    fn new(reader: R, total_size: u64) -> Self {
-        Self { reader, progress: DownloadProgress::new(total_size) }
+impl<'a, R: Read> ProgressReader<'a, R> {
+    fn new(reader: R, total_size: u64, metrics: &'a DownloadMetrics) -> Self {
+        Self { reader, progress: DownloadProgress::new(total_size, metrics) }
     }
 }
 
-impl<R: Read> Read for ProgressReader<R> {
+impl<'a, R: Read> Read for ProgressReader<'a, R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let bytes = self.reader.read(buf)?;
         if bytes > 0 &&
@@ -332,50 +320,49 @@ impl CompressionFormat {
     }
 }
 
-fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
-    let metrics = DownloadMetrics::global();
+/// Downloads and extracts a snapshot, blocking until finished.
+fn blocking_download_and_extract(
+    url: &str,
+    target_dir: &Path,
+    metrics: &DownloadMetrics,
+) -> Result<()> {
     let overall_start = Instant::now();
 
-    metrics.downloads_started_total.increment(1);
+    let client = reqwest::blocking::Client::builder().build()?;
+    let response = client.get(url).send()?.error_for_status()?;
 
-    let result = (|| -> Result<()> {
-        let client = reqwest::blocking::Client::builder().build()?;
-        let response = client.get(url).send()?.error_for_status()?;
+    let total_size = response.content_length().ok_or_else(|| {
+        eyre::eyre!(
+            "Server did not provide Content-Length header. This is required for snapshot downloads"
+        )
+    })?;
 
-        let total_size = response.content_length().ok_or_else(|| {
-            eyre::eyre!(
-                "Server did not provide Content-Length header. This is required for snapshot downloads"
-            )
-        })?;
+    let progress_reader = ProgressReader::new(response, total_size, metrics);
+    let format = CompressionFormat::from_url(url)?;
 
-        let _download_start = Instant::now();
-        let progress_reader = ProgressReader::new(response, total_size);
-        let format = CompressionFormat::from_url(url)?;
-
-        let extraction_start = Instant::now();
-        match format {
-            CompressionFormat::Lz4 => {
-                let decoder = Decoder::new(progress_reader)?;
-                Archive::new(decoder).unpack(target_dir)?;
-            }
-            CompressionFormat::Zstd => {
-                let decoder = ZstdDecoder::new(progress_reader)?;
-                Archive::new(decoder).unpack(target_dir)?;
-            }
+    let extraction_start = Instant::now();
+    let result = match format {
+        CompressionFormat::Lz4 => {
+            let decoder = Decoder::new(progress_reader)?;
+            Archive::new(decoder).unpack(target_dir)?;
+            Ok(())
         }
+        CompressionFormat::Zstd => {
+            let decoder = ZstdDecoder::new(progress_reader)?;
+            Archive::new(decoder).unpack(target_dir)?;
+            Ok(())
+        }
+    };
 
-        metrics.extraction_duration_seconds.record(extraction_start.elapsed());
-
-        info!(target: "reth::cli", "Extraction complete.");
-        Ok(())
-    })();
-
+    metrics.extraction_duration_seconds.record(extraction_start.elapsed());
     metrics.download_duration_seconds.record(overall_start.elapsed());
+
     match &result {
         Ok(_) => {
             metrics.downloads_success_total.increment(1);
             metrics.download_progress_percent.set(100.0);
             metrics.download_speed_bytes_per_second.set(0.0);
+            info!(target: "reth::cli", "Extraction complete.");
         }
         Err(_) => {
             metrics.downloads_failed_total.increment(1);
@@ -385,10 +372,12 @@ fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     result
 }
 
-async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
+async fn stream_and_extract(url: &str, target_dir: &Path, metrics: &DownloadMetrics) -> Result<()> {
     let target_dir = target_dir.to_path_buf();
     let url = url.to_string();
-    task::spawn_blocking(move || blocking_download_and_extract(&url, &target_dir)).await??;
+    let metrics = metrics.clone();
+    task::spawn_blocking(move || blocking_download_and_extract(&url, &target_dir, &metrics))
+        .await??;
 
     Ok(())
 }
