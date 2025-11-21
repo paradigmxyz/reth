@@ -199,6 +199,52 @@ where
         );
     }
 
+    /// Returns true if the proof of a node at the given path should be retained. This may move the
+    /// `targets` iterator forward if the given path comes after the current target.
+    fn should_retain(
+        &self,
+        targets: &mut Peekable<impl Iterator<Item = Nibbles>>,
+        path: &Nibbles,
+    ) -> bool {
+        debug_assert!(self.retained_proofs.last().is_none_or(
+                |ProofTrieNode { path: last_retained_path, .. }| {
+                    crate::trie_cursor::depth_first::cmp(path, last_retained_path) ==
+                        std::cmp::Ordering::Greater
+                }
+            ),
+            "should_retain called with path {path:?} which is not after previously retained node {:?} in depth-first order",
+            self.retained_proofs.last().map(|n| n.path),
+        );
+
+        // If the node in question is a prefix of the previously retained proof then we retain.
+        //
+        // This is required for cases where the target iterator is moved forward such that the
+        // next target is None or the current branch is not a prefix of it. In this case it's
+        // still possible, when popping the branch, that one of its children was retained due to
+        // the previous target, and therefore this node should be retained still.
+        if self.retained_proofs.last().is_some_and(
+            |ProofTrieNode { path: last_retained_path, .. }| last_retained_path.starts_with(path),
+        ) {
+            return true
+        }
+
+        // Iterate targets forwards to catch up to the given path. Some notes here:
+        // - If `target.starts_with(path)`, then `path <= target`.
+        // - Therefore, if `target < path`, there is no situation where path could be retained by
+        //   this target.
+        // - The ProofCalculator traverse the trie in depth-first order, meaning paths are provided
+        //   to this method such that `prev_path.starts_with(path)` (handled in the previous
+        //   if-block) OR `path > prev_path`.
+        while let Some(target) = targets.peek() &&
+            target < path
+        {
+            targets.next();
+        }
+
+        // If the node in question is a prefix of the target then we retain
+        targets.peek().is_some_and(|t| t.starts_with(path))
+    }
+
     /// Pops the top branch off of the `branch_stack`, hashes its children on the `child_stack`, and
     /// replaces those children on the `child_stack`. The `branch_path` field will be updated
     /// accordingly.
@@ -228,10 +274,11 @@ where
             self.child_stack.len() >= num_children,
             "Stack is missing necessary children"
         );
-        let children = self.child_stack.drain(self.child_stack.len() - num_children..);
 
-        // From here we will be encoding the branch node and pushing it onto the child stack,
-        // replacing its children.
+        // We have to take the child_stack off self so we can still call other methods while
+        // draining it.
+        let mut child_stack = core::mem::take(&mut self.child_stack);
+        let children = child_stack.drain(child_stack.len() - num_children..);
 
         // Create an iterator over the paths of each child in the branch.
         let child_paths = TrieMaskIter(branch.state_mask).map(|nibble| {
@@ -243,13 +290,11 @@ where
 
         // Collect children into an `RlpNode` Vec by encoding each of them.
         for (child_path, child) in child_paths.zip(children) {
-            // If the child path is a prefix of the target then we retain the proof.
-            if let Some(curr_target) = targets.peek() &&
-                curr_target.starts_with(&child_path)
-            {
+            // If we should retain the child then do so.
+            if self.should_retain(targets, &child_path) {
                 // Convert to `ProofTrieNode`, which will be what is retained. If this node is a
-                // leaf then the `rlp_encode_buf` is taken by it and we have to allocate a new one
-                // going forward.
+                // leaf then the `rlp_encode_buf` is taken by it and a new one will be allocated by
+                // the next encode call.
                 self.rlp_encode_buf.clear();
                 let proof_node =
                     child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
@@ -275,6 +320,9 @@ where
                 self.rlp_nodes_bufs.push(buf);
             }
         }
+
+        // Put the child_stack back, now that we're done draining from it.
+        let _ = core::mem::replace(&mut self.child_stack, child_stack);
 
         debug_assert_eq!(
             rlp_nodes_buf.len(),
