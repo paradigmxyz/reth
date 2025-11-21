@@ -1,4 +1,4 @@
-//! Generic reader and writer abstractions for interactin with either database tables or static
+//! Generic reader and writer abstractions for interacting with either database tables or static
 //! files.
 
 use std::ops::Range;
