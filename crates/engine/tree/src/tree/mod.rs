@@ -1793,7 +1793,8 @@ where
         let hashed_state = self.provider.hashed_post_state(execution_output.state());
         let trie_updates = self.provider.get_block_trie_updates(block.number())?;
 
-        // Build trie data from the DB response synchronously and wrap it as a ready deferred handle.
+        // Build trie data from the DB response synchronously and wrap it as a ready deferred
+        // handle.
         let prefix_sets = hashed_state.construct_prefix_sets();
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
@@ -1812,7 +1813,8 @@ where
         Ok(Some(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
             execution_output: Arc::new(execution_output),
-            trie_data: DeferredTrieData::ready(trie_data), // already computed from DB; expose via the deferred handle type
+            // Already computed from DB; expose via the deferred handle type.
+            trie_data: DeferredTrieData::ready(trie_data),
         }))
     }
 
