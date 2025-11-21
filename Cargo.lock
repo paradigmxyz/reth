@@ -6174,9 +6174,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-consensus"
-version = "0.22.3"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e82f4f768ba39e52a4efe1b8f3425c04ab0d0e6f90c003fe97e5444cd963405e"
+checksum = "726da827358a547be9f1e37c2a756b9e3729cb0350f43408164794b370cad8ae"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6200,9 +6200,9 @@ checksum = "a79f352fc3893dcd670172e615afef993a41798a1d3fc0db88a3e60ef2e70ecc"
 
 [[package]]
 name = "op-alloy-network"
-version = "0.22.3"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2607d0d985f848f98fa79068d11c612f8476dba7deb7498881794bf51b3cfb5"
+checksum = "f63f27e65be273ec8fcb0b6af0fd850b550979465ab93423705ceb3dfddbd2ab"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -6231,9 +6231,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-jsonrpsee"
-version = "0.22.3"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6911db73a4bf59bf8a963dec153ada1057fa426fdc35e0b35fe82657af3501a3"
+checksum = "8ef9114426b16172254555aad34a8ea96c01895e40da92f5d12ea680a1baeaa7"
 dependencies = [
  "alloy-primitives",
  "jsonrpsee",
@@ -6241,9 +6241,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types"
-version = "0.22.3"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "890b51c3a619c263d52ee5a945dce173a4052d017f93bf5698613b21cbe0d237"
+checksum = "562dd4462562c41f9fdc4d860858c40e14a25df7f983ae82047f15f08fce4d19"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6261,9 +6261,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types-engine"
-version = "0.22.3"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c92f9dd709b3a769b7604d4d2257846b6de3d3f60e5163982cc4e90c0d0b6f95"
+checksum = "d8f24b8cb66e4b33e6c9e508bf46b8ecafc92eadd0b93fedd306c0accb477657"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
