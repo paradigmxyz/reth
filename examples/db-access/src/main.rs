@@ -6,8 +6,8 @@ use reth_ethereum::{
     node::EthereumNode,
     primitives::{AlloyBlockHeader, SealedBlock, SealedHeader},
     provider::{
-        providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
-        ReceiptProvider, StateProvider, TransactionVariant, TransactionsProvider,
+        providers::ReadOnlyConfig, AccountReader, BlockNumReader, BlockReader, BlockSource,
+        HeaderProvider, ReceiptProvider, StateProvider, TransactionVariant, TransactionsProvider,
     },
     rpc::eth::primitives::Filter,
     TransactionSigned,
@@ -39,15 +39,12 @@ fn main() -> eyre::Result<()> {
     txs_provider_example(&provider)?;
     receipts_provider_example(&provider)?;
 
+    state_provider_example(factory.latest()?, &provider, provider.best_block_number()?)?;
+    state_provider_example(factory.history_by_block_number(block_num)?, &provider, block_num)?;
+
     // Closes the RO transaction opened in the `factory.provider()` call. This is optional and
     // would happen anyway at the end of the function scope.
     drop(provider);
-
-    // Run the example against latest state
-    state_provider_example(factory.latest()?)?;
-
-    // Run it with historical state
-    state_provider_example(factory.history_by_block_number(block_num)?)?;
 
     Ok(())
 }
@@ -210,16 +207,39 @@ fn receipts_provider_example<
     Ok(())
 }
 
-fn state_provider_example<T: StateProvider + AccountReader>(provider: T) -> eyre::Result<()> {
+/// The `StateProvider` allows querying the state tables.
+fn state_provider_example<T: StateProvider + AccountReader, H: HeaderProvider>(
+    provider: T,
+    headers: &H,
+    number: u64,
+) -> eyre::Result<()> {
     let address = Address::random();
     let storage_key = B256::random();
+    let slots = [storage_key];
+
+    let header = headers.header_by_number(number)?.ok_or(eyre::eyre!("header not found"))?;
+    let state_root = header.state_root();
 
     // Can get account / storage state with simple point queries
-    let _account = provider.basic_account(&address)?;
-    let _code = provider.account_code(&address)?;
-    let _storage = provider.storage(address, storage_key)?;
-    // TODO: unimplemented.
-    // let _proof = provider.proof(address, &[])?;
+    let account = provider.basic_account(&address)?;
+    let code = provider.account_code(&address)?;
+    let storage_value = provider.storage(address, storage_key)?;
+
+    println!(
+        "state at block #{number}: addr={address:?}, nonce={}, balance={}, storage[{:?}]={:?}, has_code={}",
+        account.as_ref().map(|acc| acc.nonce).unwrap_or_default(),
+        account.as_ref().map(|acc| acc.balance).unwrap_or_default(),
+        storage_key,
+        storage_value,
+        code.is_some()
+    );
+
+    // Returns a bundled proof with the account's info
+    let proof = provider.proof(Default::default(), address, &slots)?;
+
+    // Can verify the returned proof against the state root
+    proof.verify(state_root)?;
+    println!("account proof verified against state root {state_root:?}");
 
     Ok(())
 }
