@@ -4,8 +4,8 @@ use super::{
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
-    HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt,
+    EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt,
 };
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
@@ -1045,7 +1045,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     }
                 }
                 StaticFileSegment::TransactionSenders => {
-                    if !provider.cached_storage_settings().transaction_senders_in_static_files {
+                    if !EitherWriterDestination::senders(provider).is_database() {
                         continue
                     }
                 }
