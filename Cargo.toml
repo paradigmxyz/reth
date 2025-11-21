@@ -520,11 +520,11 @@ alloy-transport-ws = { version = "1.1.2", default-features = false }
 # op
 alloy-op-evm = { version = "0.24.1", default-features = false }
 alloy-op-hardforks = "0.4.4"
-op-alloy-rpc-types = { version = "0.22.3", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.22.3", default-features = false }
-op-alloy-network = { version = "0.22.3", default-features = false }
-op-alloy-consensus = { version = "0.22.3", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.22.3", default-features = false }
+op-alloy-rpc-types = { version = "0.22.4", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.22.4", default-features = false }
+op-alloy-network = { version = "0.22.4", default-features = false }
+op-alloy-consensus = { version = "0.22.4", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.22.4", default-features = false }
 op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc
