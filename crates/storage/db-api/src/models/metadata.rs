@@ -31,7 +31,7 @@ impl StorageSettings {
         Self { receipts_in_static_files: false, transaction_senders_in_static_files: false }
     }
 
-    /// Sets the `receipts_static_files` flag to the provided value.
+    /// Sets the `receipts_in_static_files` flag to the provided value.
     pub const fn with_receipts_in_static_files(mut self, value: bool) -> Self {
         self.receipts_in_static_files = value;
         self
