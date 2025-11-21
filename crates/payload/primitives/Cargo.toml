@@ -51,6 +51,7 @@ std = [
     "thiserror/std",
     "reth-primitives-traits/std",
     "either/std",
+    "alloy-consensus/std",
 ]
 op = [
     "dep:op-alloy-rpc-types-engine",

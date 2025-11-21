@@ -44,4 +44,5 @@ op = [
     "dep:op-alloy-rpc-types-engine",
     "dep:reth-optimism-chainspec",
     "reth-payload-primitives/op",
+    "reth-primitives-traits/op",
 ]

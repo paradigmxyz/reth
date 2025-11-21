@@ -106,7 +106,7 @@ pub struct LocalMiner<T: PayloadTypes, B, Pool: TransactionPool + Unpin> {
     mode: MiningMode<Pool>,
     /// The payload builder for the engine
     payload_builder: PayloadBuilderHandle<T>,
-    /// Timestamp for the next block.
+    /// Latest block in the chain so far.
     last_header: SealedHeaderFor<<T::BuiltPayload as BuiltPayload>::Primitives>,
     /// Stores latest mined blocks.
     last_block_hashes: VecDeque<B256>,
