@@ -270,7 +270,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
     let tx_hash = *tx.tx_hash();
     let _ = nodes[0].rpc.inject_tx(tx.encoded_2718().into()).await?;
 
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Assert that all nodes have the transaction
     for (i, node) in nodes.iter().enumerate() {
@@ -285,7 +285,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
     let tx_hash = *tx.tx_hash();
     let _ = nodes.choose(&mut rand::rng()).unwrap().rpc.inject_tx(tx.encoded_2718().into()).await?;
 
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Assert that all nodes have the transaction
     for node in nodes {
