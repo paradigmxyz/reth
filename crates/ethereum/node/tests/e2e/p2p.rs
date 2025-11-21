@@ -280,7 +280,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
         );
     }
 
-    // Build and send one more transaction to a random node, assert t
+    // Build and send one more transaction to a random node
     let tx = build_tx();
     let tx_hash = *tx.tx_hash();
     let _ = nodes.choose(&mut rand::rng()).unwrap().rpc.inject_tx(tx.encoded_2718().into()).await?;
