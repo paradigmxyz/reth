@@ -216,6 +216,14 @@ where
             self.retained_proofs.last().map(|n| n.path),
         );
 
+        trace!(
+            target: TRACE_TARGET,
+            ?path,
+            last_retained_path = ?self.retained_proofs.last().map(|n| n.path),
+            target = ?targets.peek(),
+            "should_retain: called",
+        );
+
         // If the node in question is a prefix of the previously retained proof then we retain.
         //
         // This is required for cases where the target iterator is moved forward such that the
@@ -239,6 +247,11 @@ where
             target < path
         {
             targets.next();
+            trace!(
+                target: TRACE_TARGET,
+                target = ?targets.peek(),
+                "target < path, next target",
+            );
         }
 
         // If the node in question is a prefix of the target then we retain
@@ -332,13 +345,9 @@ where
         // Create an iterator over the paths of each child in the branch.
         let child_paths = {
             let branch_path = self.branch_path;
-            debug_assert!(
-                branch_path.len() < 64,
-                "branch_path {branch_path:?} is too long to extend"
-            );
             TrieMaskIter(branch.state_mask).map(move |nibble| {
                 let mut child_path = branch_path;
-                child_path.extend_from_slice_unchecked(&[nibble]);
+                child_path.push_unchecked(nibble);
                 child_path
             })
         };
@@ -493,8 +502,8 @@ where
 
         // If there are no targets then nothing could be returned, return early.
         if targets.peek().is_none() {
-            // TODO uncomment
-            //return Ok(Vec::new())
+            trace!(target: TRACE_TARGET, "Empty targets, returning");
+            return Ok(Vec::new())
         }
 
         // Ensure initial state is cleared. By the end of the method call these should be empty once
@@ -631,7 +640,7 @@ where
     }
 }
 
-/// A helper type for iterating over the indexes of the non-zero bits of a TrieMask.
+/// A helper type for iterating over the indexes of the non-zero bits of a [`TrieMask`].
 struct TrieMaskIter(TrieMask);
 
 impl Iterator for TrieMaskIter {
@@ -653,10 +662,11 @@ mod tests {
         proof::Proof,
         trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
     };
-    use alloy_primitives::map::B256Map;
+    use alloy_primitives::map::{B256Map, B256Set};
     use alloy_rlp::Decodable;
+    use assert_matches::assert_matches;
     use itertools::Itertools;
-    use reth_trie_common::{HashedPostState, MultiProofTargets};
+    use reth_trie_common::{HashedPostState, MultiProofTargets, TrieNode};
     use std::collections::BTreeMap;
 
     /// Target to use with the `tracing` crate.
@@ -726,14 +736,29 @@ mod tests {
         /// proofs.
         ///
         /// This method calls both implementations with the given account targets and compares
-        /// the results. For now, it performs a basic comparison by checking that both succeed
-        /// and produce non-empty results. More detailed comparison logic can be added as needed.
+        /// the results.
         fn assert_proof(
             &self,
-            // For now ProofCalculator doesn't support real targets, we just compare calculated
-            // roots.
-            _targets: impl IntoIterator<Item = B256> + Clone,
+            targets: impl IntoIterator<Item = B256> + Clone,
         ) -> Result<(), StateProofError> {
+            // Convert B256 targets to Nibbles for proof_v2
+            let targets_vec: Vec<B256> = targets.into_iter().collect();
+            let nibbles_targets: Vec<Nibbles> = targets_vec
+                .iter()
+                .map(|b256| {
+                    // SAFETY: B256 is exactly 32 bytes
+                    unsafe { Nibbles::unpack_unchecked(b256.as_slice()) }
+                })
+                .sorted()
+                .collect();
+
+            // Convert B256 targets to MultiProofTargets for legacy implementation
+            // For account-only proofs, each account maps to an empty storage set
+            let legacy_targets = targets_vec
+                .iter()
+                .map(|addr| (*addr, B256Set::default()))
+                .collect::<MultiProofTargets>();
+
             // Create ProofCalculator (proof_v2) with account cursors
             let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
             let hashed_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
@@ -744,15 +769,15 @@ mod tests {
                 self.hashed_cursor_factory.clone(),
             );
             let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
-            let proof_v2_result = proof_calculator.proof(&value_encoder, [Nibbles::new()])?;
+            let proof_v2_result = proof_calculator.proof(&value_encoder, nibbles_targets)?;
 
             // Call Proof::multiproof (legacy implementation)
             let proof_legacy_result =
                 Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
-                    .multiproof(MultiProofTargets::default())?;
+                    .multiproof(legacy_targets)?;
 
             // Decode and sort legacy proof nodes
-            let proof_legacy_nodes = proof_legacy_result
+            let mut proof_legacy_nodes = proof_legacy_result
                 .account_subtree
                 .iter()
                 .map(|(path, node_enc)| {
@@ -777,6 +802,17 @@ mod tests {
                 })
                 .sorted_by_key(|n| n.path)
                 .collect::<Vec<_>>();
+
+            // When no targets are given the legacy implementation will still produce the root node
+            // in the proof. This differs from the V2 implementation, which produces nothing when
+            // given no targets.
+            if targets_vec.is_empty() {
+                assert_matches!(
+                    proof_legacy_nodes.pop(),
+                    Some(ProofTrieNode { path, .. }) if path.is_empty()
+                );
+                assert!(proof_legacy_nodes.is_empty());
+            }
 
             // Basic comparison: both should succeed and produce identical results
             assert_eq!(proof_legacy_nodes, proof_v2_result);
@@ -824,26 +860,57 @@ mod tests {
             )
         }
 
+        /// Generate a strategy for proof targets that are 80% from the `HashedPostState` accounts
+        /// and 20% random keys.
+        fn proof_targets_strategy(account_keys: Vec<B256>) -> impl Strategy<Value = Vec<B256>> {
+            let num_accounts = account_keys.len();
+
+            // Generate between 0 and (num_accounts + 5) targets
+            let target_count = 0..=(num_accounts + 5);
+
+            target_count.prop_flat_map(move |count| {
+                let account_keys = account_keys.clone();
+                prop::collection::vec(
+                    prop::bool::weighted(0.8).prop_flat_map(move |from_accounts| {
+                        if from_accounts && !account_keys.is_empty() {
+                            // 80% chance: pick from existing account keys
+                            prop::sample::select(account_keys.clone()).boxed()
+                        } else {
+                            // 20% chance: generate random B256
+                            any::<[u8; 32]>().prop_map(B256::from).boxed()
+                        }
+                    }),
+                    count,
+                )
+            })
+        }
+
         proptest! {
             #![proptest_config(ProptestConfig::with_cases(5000))]
 
             /// Tests that ProofCalculator produces valid proofs for randomly generated
-            /// HashedPostState with empty target sets.
+            /// HashedPostState with proof targets.
             ///
             /// This test:
             /// - Generates random accounts in a HashedPostState
+            /// - Generates proof targets: 80% from existing account keys, 20% random
             /// - Creates a test harness with the generated state
-            /// - Calls assert_proof with an empty target set
-            /// - Verifies both ProofCalculator and legacy Proof succeed
+            /// - Calls assert_proof with the generated targets
+            /// - Verifies both ProofCalculator and legacy Proof produce equivalent results
             #[test]
-            fn proptest_proof_with_empty_targets(
-                post_state in hashed_post_state_strategy(),
+            fn proptest_proof_with_targets(
+                (post_state, targets) in hashed_post_state_strategy()
+                    .prop_flat_map(|post_state| {
+                        let account_keys: Vec<B256> = post_state.accounts.keys().copied().collect();
+                        let targets_strategy = proof_targets_strategy(account_keys);
+                        (Just(post_state), targets_strategy)
+                    })
             ) {
                 reth_tracing::init_test_tracing();
                 let harness = ProofTestHarness::new(post_state);
 
-                // Pass empty target set
-                harness.assert_proof(std::iter::empty()).expect("Proof generation failed");
+                // Pass generated targets to both implementations
+                harness.assert_proof(targets).expect("Proof generation failed");
             }
         }
     }
