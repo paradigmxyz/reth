@@ -593,7 +593,10 @@ where
 
             // Enforce the pool size limits if at least one transaction was added successfully
             let discarded = if added.iter().any(Result::is_ok) {
-                pool.discard_worst()
+                let discarded = pool.discard_worst();
+                // Update metrics once at the caller level after evictions
+                pool.update_size_metrics();
+                discarded
             } else {
                 Default::default()
             };
