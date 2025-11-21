@@ -9217,6 +9217,7 @@ dependencies = [
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
+ "reth-stages-types",
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
