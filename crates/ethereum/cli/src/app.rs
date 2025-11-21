@@ -95,7 +95,7 @@ where
                 self.cli.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
 
-        self.init_tracing(runner)?;
+        self.init_tracing(&runner)?;
 
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
@@ -108,8 +108,10 @@ where
     /// See [`Cli::init_tracing`] for more information.
     pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
         if self.guard.is_none() {
-            self.guard = self.cli.init_tracing(&runner, self.layers.take().unwrap_or_default())?;
+            self.guard = self.cli.init_tracing(runner, self.layers.take().unwrap_or_default())?;
         }
+
+        Ok(())
     }
 }
 

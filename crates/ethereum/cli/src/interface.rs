@@ -218,6 +218,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
     ///
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
+    ///
     /// If an OTLP endpoint is specified, it will export metrics to the configured collector.
     pub fn init_tracing(
         &mut self,
