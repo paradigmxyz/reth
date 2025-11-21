@@ -44,6 +44,12 @@ pub enum SetCommand {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
+
+    /// Store account changesets in static files instead of the database
+    AccountChangesetsInStaticFiles {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
 }
 
 impl Command {
@@ -83,8 +89,10 @@ impl Command {
             println!("No storage settings found, creating new settings.");
         }
 
-        let mut settings @ StorageSettings { receipts_in_static_files: _ } =
-            settings.unwrap_or_default();
+        let mut settings @ StorageSettings {
+            receipts_in_static_files: _,
+            account_changesets_in_static_files: _,
+        } = settings.unwrap_or_default();
 
         // Update the setting based on the key
         match cmd {
@@ -95,6 +103,14 @@ impl Command {
                 }
                 settings.receipts_in_static_files = value;
                 println!("Set receipts_in_static_files = {}", value);
+            }
+            SetCommand::AccountChangesetsInStaticFiles { value } => {
+                if settings.account_changesets_in_static_files == value {
+                    println!("account_changesets_in_static_files is already set to {}", value);
+                    return Ok(());
+                }
+                settings.account_changesets_in_static_files = value;
+                println!("Set account_changesets_in_static_files = {}", value);
             }
         }
 

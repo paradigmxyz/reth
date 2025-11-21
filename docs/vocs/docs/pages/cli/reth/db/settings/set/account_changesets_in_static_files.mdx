@@ -1,17 +1,16 @@
-# reth db settings set
+# reth db settings set account_changesets_in_static_files
 
-Set storage settings in database
+Store account changesets in static files instead of the database
 
 ```bash
-$ reth db settings set --help
+$ reth db settings set account_changesets_in_static_files --help
 ```
 ```txt
-Usage: reth db settings set [OPTIONS] <COMMAND>
+Usage: reth db settings set account_changesets_in_static_files [OPTIONS] <VALUE>
 
-Commands:
-  receipts_in_static_files            Store receipts in static files instead of the database
-  account_changesets_in_static_files  Store account changesets in static files instead of the database
-  help                                Print this message or the help of the given subcommand(s)
+Arguments:
+  <VALUE>
+          [possible values: true, false]
 
 Options:
   -h, --help

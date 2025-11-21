@@ -8,6 +8,9 @@ use std::fmt::Debug;
 /// Helper adapter type for accessing [`DbTxMut`] mutable cursor.
 pub type CursorMutTy<TX, T> = <TX as DbTxMut>::CursorMut<T>;
 
+/// Helper adapter type for accessing [`DbTxMut`] mutable dup cursor.
+pub type DupCursorMutTy<TX, T> = <TX as DbTxMut>::DupCursorMut<T>;
+
 /// Read only transaction
 pub trait DbTx: Debug + Send + Sync {
     /// Cursor type for this read-only transaction
