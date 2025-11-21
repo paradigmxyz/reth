@@ -18,7 +18,9 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
+use reth_chain_state::{
+    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, DeferredTrieData,
+};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -27,7 +29,7 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -822,12 +824,13 @@ fn test_tree_state_on_new_head_deep_fork() {
     let chain_a = test_block_builder.create_fork(&last_block, 10);
     let chain_b = test_block_builder.create_fork(&last_block, 10);
 
+    let empty_trie_data = ComputedTrieData::default;
+
     for block in &chain_a {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
             recovered_block: Arc::new(block.clone()),
             execution_output: Arc::new(ExecutionOutcome::default()),
-            hashed_state: Arc::new(HashedPostState::default().into_sorted()),
-            trie_updates: Arc::new(TrieUpdates::default().into_sorted()),
+            trie_data: DeferredTrieData::ready(empty_trie_data()),
         });
     }
     test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
@@ -836,8 +839,7 @@ fn test_tree_state_on_new_head_deep_fork() {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
             recovered_block: Arc::new(block.clone()),
             execution_output: Arc::new(ExecutionOutcome::default()),
-            hashed_state: Arc::new(HashedPostState::default().into_sorted()),
-            trie_updates: Arc::new(TrieUpdates::default().into_sorted()),
+            trie_data: DeferredTrieData::ready(empty_trie_data()),
         });
     }
 

@@ -15,7 +15,10 @@ use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
-use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock};
+use reth_chain_state::{
+    CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, DeferredTrieDataError,
+    ExecutedBlock,
+};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -40,7 +43,8 @@ use reth_provider::{
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, panic::AssertUnwindSafe, sync::Arc, time::Instant};
+use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
 /// Context providing access to tree state during validation.
@@ -522,11 +526,94 @@ where
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(&output.state));
 
+        // Capture parent hash and ancestor overlays for deferred trie input construction.
+        let (parent_hash, overlay_blocks) = ctx
+            .state()
+            .tree_state
+            .blocks_by_hash(block.parent_hash())
+            .unwrap_or_else(|| (block.parent_hash(), Vec::new()));
+
+        // Create a deferred handle to store the sorted trie data.
+        let deferred_trie_data = DeferredTrieData::pending();
+        let deferred_handle_task = deferred_trie_data.clone();
+        let deferred_handle_err = deferred_trie_data.clone();
+        let hashed_state_for_trie = hashed_state;
+        let trie_output_for_trie = trie_output;
+        let overlay_blocks_for_trie = overlay_blocks;
+        let deferred_compute_duration =
+            self.metrics.block_validation.deferred_trie_compute_duration.clone();
+
+        // Defer trie sorting and compute trie input to a background task so the validation hot path
+        // can return once the state root is checked. Consumers (DB writes, overlay
+        // providers, proofs) block on the handle only when they actually need the sorted
+        // trie data.
+        let task = move || {
+            let compute_start = Instant::now();
+            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                let mut parent_trie_input = TrieInputSorted::default();
+                let mut blocks_iter = overlay_blocks_for_trie.iter().rev().peekable();
+
+                if let Some(first) = blocks_iter.next() {
+                    let data = first.trie_data();
+                    parent_trie_input.state = data.hashed_state;
+                    parent_trie_input.nodes = data.trie_updates;
+
+                    if blocks_iter.peek().is_some() {
+                        let state_mut = Arc::make_mut(&mut parent_trie_input.state);
+                        let nodes_mut = Arc::make_mut(&mut parent_trie_input.nodes);
+                        for block in blocks_iter {
+                            let data = block.trie_data();
+                            state_mut.extend_ref(data.hashed_state.as_ref());
+                            nodes_mut.extend_ref(data.trie_updates.as_ref());
+                        }
+                    }
+                }
+
+                let prefix_sets = hashed_state_for_trie.construct_prefix_sets();
+                let sorted_hashed_state = Arc::new(hashed_state_for_trie.into_sorted());
+                let sorted_trie_updates = Arc::new(trie_output_for_trie.into_sorted());
+
+                parent_trie_input.prefix_sets.extend(prefix_sets);
+                {
+                    let state_mut = Arc::make_mut(&mut parent_trie_input.state);
+                    state_mut.extend_ref(sorted_hashed_state.as_ref());
+                    let nodes_mut = Arc::make_mut(&mut parent_trie_input.nodes);
+                    nodes_mut.extend_ref(sorted_trie_updates.as_ref());
+                }
+
+                ComputedTrieData {
+                    hashed_state: sorted_hashed_state,
+                    trie_updates: sorted_trie_updates,
+                    anchor_hash: parent_hash,
+                    trie_input: Arc::new(parent_trie_input),
+                }
+            }));
+
+            match result {
+                Ok(bundle) => {
+                    deferred_handle_task.set_ready(bundle);
+                    deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
+                }
+                Err(_) => {
+                    deferred_handle_task.set_error(DeferredTrieDataError::panicked());
+                    deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
+                }
+            }
+        };
+
+        if let Ok(handle) = Handle::try_current() {
+            handle.spawn_blocking(task);
+        } else {
+            // No runtime to run the deferred task: fail fast so waiters don't hang indefinitely.
+            deferred_handle_err.set_error(DeferredTrieDataError::new(
+                "failed to spawn deferred trie task (no runtime)",
+            ));
+        }
+
         Ok(ExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
-            hashed_state: Arc::new(hashed_state.into_sorted()),
-            trie_updates: Arc::new(trie_output.into_sorted()),
+            trie_data: deferred_trie_data,
         })
     }
 
@@ -902,6 +989,7 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<(TrieInputSorted, B256)> {
+        let wait_start = Instant::now();
         let (block_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
@@ -916,20 +1004,26 @@ where
         let mut blocks_iter = blocks.iter().rev().peekable();
 
         if let Some(first) = blocks_iter.next() {
-            input.state = Arc::clone(&first.hashed_state);
-            input.nodes = Arc::clone(&first.trie_updates);
+            let data = first.trie_data();
+            input.state = data.hashed_state;
+            input.nodes = data.trie_updates;
 
             // Only clone and mutate if there are more in-memory blocks.
             if blocks_iter.peek().is_some() {
                 let state_mut = Arc::make_mut(&mut input.state);
                 let nodes_mut = Arc::make_mut(&mut input.nodes);
                 for block in blocks_iter {
-                    state_mut.extend_ref(block.hashed_state());
-                    nodes_mut.extend_ref(block.trie_updates());
+                    let data = block.trie_data();
+                    state_mut.extend_ref(data.hashed_state.as_ref());
+                    nodes_mut.extend_ref(data.trie_updates.as_ref());
                 }
             }
         }
 
+        self.metrics
+            .block_validation
+            .deferred_trie_wait_duration
+            .record(wait_start.elapsed().as_secs_f64());
         Ok((input, block_hash))
     }
 }

@@ -314,9 +314,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
         // Insert the blocks
-        for ExecutedBlock { recovered_block, execution_output, hashed_state, trie_updates } in
-            blocks
-        {
+        for block in blocks {
+            let trie_data = block.trie_data();
+            let ExecutedBlock { recovered_block, execution_output, .. } = block;
             let block_number = recovered_block.number();
             self.insert_block(Arc::unwrap_or_clone(recovered_block))?;
 
@@ -325,10 +325,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             self.write_state(&execution_output, OriginalValuesKnown::No)?;
 
             // insert hashes and intermediate merkle nodes
-            self.write_hashed_state(&hashed_state)?;
+            self.write_hashed_state(&trie_data.hashed_state)?;
 
-            self.write_trie_changesets(block_number, &trie_updates, None)?;
-            self.write_trie_updates_sorted(&trie_updates)?;
+            self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
+            self.write_trie_updates_sorted(&trie_data.trie_updates)?;
         }
 
         // update history indices
