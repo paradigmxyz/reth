@@ -444,4 +444,44 @@ mod tests {
         assert_eq!(raw.id, SnapMessageId::GetByteCodes as usize);
         assert_eq!(raw.payload.as_ref(), encoded.slice(1..).as_ref());
     }
+
+    #[test]
+    fn snap_storage_ranges_request_is_encoded_as_raw_capability() {
+        let req = GetStorageRangesMessage {
+            request_id: 3,
+            root_hash: B256::ZERO,
+            account_hashes: vec![B256::ZERO],
+            starting_hash: B256::ZERO,
+            limit_hash: B256::ZERO,
+            response_bytes: 256,
+        };
+        let (tx, _rx) = oneshot::channel();
+        let peer_req: PeerRequest =
+            PeerRequest::SnapGetStorageRanges { request: req.clone(), response: tx };
+        let msg = peer_req.create_request_message(11);
+
+        let EthMessage::Other(raw) = msg else { panic!("expected raw capability message") };
+        let encoded = SnapProtocolMessage::GetStorageRanges(req).encode();
+        assert_eq!(raw.id, SnapMessageId::GetStorageRanges as usize);
+        assert_eq!(raw.payload.as_ref(), encoded.slice(1..).as_ref());
+    }
+
+    #[test]
+    fn snap_trie_nodes_request_is_encoded_as_raw_capability() {
+        let req = GetTrieNodesMessage {
+            request_id: 9,
+            root_hash: B256::ZERO,
+            paths: Vec::new(),
+            response_bytes: 512,
+        };
+        let (tx, _rx) = oneshot::channel();
+        let peer_req: PeerRequest =
+            PeerRequest::SnapGetTrieNodes { request: req.clone(), response: tx };
+        let msg = peer_req.create_request_message(19);
+
+        let EthMessage::Other(raw) = msg else { panic!("expected raw capability message") };
+        let encoded = SnapProtocolMessage::GetTrieNodes(req).encode();
+        assert_eq!(raw.id, SnapMessageId::GetTrieNodes as usize);
+        assert_eq!(raw.payload.as_ref(), encoded.slice(1..).as_ref());
+    }
 }

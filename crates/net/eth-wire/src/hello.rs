@@ -313,4 +313,21 @@ mod tests {
         // zero is encoded as 0x80, the empty string code in RLP
         assert_eq!(hello_encoded[0], EMPTY_STRING_CODE);
     }
+
+    #[test]
+    fn builder_with_snap_toggle() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+
+        let snap_proto = crate::protocol::Protocol::snap();
+
+        // enable snap: should contain snap capability
+        let hello_with_snap = HelloMessageWithProtocols::builder(id).with_snap(true).build();
+        assert!(hello_with_snap.contains_protocol(&snap_proto));
+
+        // enable then disable: snap should be removed
+        let hello_without_snap =
+            HelloMessageWithProtocols::builder(id).with_snap(true).with_snap(false).build();
+        assert!(!hello_without_snap.contains_protocol(&snap_proto));
+    }
 }
