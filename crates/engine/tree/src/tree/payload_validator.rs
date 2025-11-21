@@ -537,6 +537,7 @@ where
         let deferred_trie_data = DeferredTrieData::pending();
         let deferred_handle_task = deferred_trie_data.clone();
         let deferred_handle_err = deferred_trie_data.clone();
+        let block_hash = block.hash();
         let hashed_state_for_trie = hashed_state;
         let trie_output_for_trie = trie_output;
         let overlay_blocks_for_trie = overlay_blocks;
@@ -595,6 +596,11 @@ where
                     deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
                 }
                 Err(_) => {
+                    error!(
+                        target: "engine::tree::payload_validator",
+                        %block_hash,
+                        "deferred trie task panicked while sorting/assembling trie data"
+                    );
                     deferred_handle_task.set_error(DeferredTrieDataError::panicked());
                     deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
                 }
