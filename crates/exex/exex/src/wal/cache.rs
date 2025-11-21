@@ -108,15 +108,32 @@ impl BlockCache {
         }
 
         if let Some(committed_chain) = &committed_chain {
+            let mut chain_min: Option<BlockNumber> = None;
+            let mut chain_max: Option<BlockNumber> = None;
+
             for block in committed_chain.blocks().values() {
+                let number = block.number();
+                chain_min = Some(chain_min.map_or(number, |min| min.min(number)));
+                chain_max = Some(chain_max.map_or(number, |max| max.max(number)));
+
                 let cached_block = CachedBlock {
-                    block: (block.number(), block.hash()).into(),
+                    block: (number, block.hash()).into(),
                     parent_hash: block.parent_hash(),
                 };
                 self.committed_blocks.insert(block.hash(), (file_id, cached_block));
             }
 
-            self.highest_committed_block_height = Some(committed_chain.tip().number());
+            if let Some(min_num) = chain_min {
+                self.lowest_committed_block_height = Some(
+                    self.lowest_committed_block_height.map_or(min_num, |cur| cur.min(min_num)),
+                );
+            }
+
+            if let Some(max_num) = chain_max {
+                self.highest_committed_block_height = Some(
+                    self.highest_committed_block_height.map_or(max_num, |cur| cur.max(max_num)),
+                );
+            }
         }
     }
 
