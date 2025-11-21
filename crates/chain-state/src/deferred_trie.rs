@@ -4,7 +4,7 @@ use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSort
 use std::{error::Error, fmt, sync::Arc};
 
 /// Sorted trie data computed for an executed block.
-/// These represent the complete set of sorted trie data required to persist 
+/// These represent the complete set of sorted trie data required to persist
 /// block state and proof generation for a block.
 #[derive(Clone, Debug, Default)]
 pub struct ComputedTrieData {
@@ -63,7 +63,9 @@ enum DeferredState {
 /// Shared handle to asynchronously populated trie data.
 #[derive(Clone)]
 pub struct DeferredTrieData {
+    /// Shared deferred state (pending/ready/error) holding the computed trie data.
     state: Arc<Mutex<DeferredState>>,
+    /// Condition variable used to wake all waiters once the state transitions out of pending.
     ready: Arc<Condvar>,
 }
 
