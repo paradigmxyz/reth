@@ -225,7 +225,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         match msg {
             EthSnapMessage::Eth(msg) => match msg {
                 message @ EthMessage::Status(_) => OnIncomingMessageOutcome::BadMessage {
-                    error: EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake),
+                    error: EthStreamError::EthHandshakeError(
+                        EthHandshakeError::StatusNotInHandshake,
+                    ),
                     message,
                 },
                 EthMessage::NewBlockHashes(msg) => {
@@ -321,7 +323,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     }
 
     /// Handle incoming snap protocol messages; for now, reply with empty responses for requests.
-    fn on_incoming_snap_message(&mut self, msg: SnapProtocolMessage) -> OnIncomingMessageOutcome<N> {
+    fn on_incoming_snap_message(
+        &mut self,
+        msg: SnapProtocolMessage,
+    ) -> OnIncomingMessageOutcome<N> {
         match msg {
             // Incoming snap requests -> send noop response
             SnapProtocolMessage::GetAccountRange(req) => {
@@ -363,7 +368,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::SnapGetAccountRange { response, .. }) => {
+                        RequestState::Waiting(PeerRequest::SnapGetAccountRange {
+                            response,
+                            ..
+                        }) => {
                             let _ = response.send(Ok(resp));
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
@@ -383,7 +391,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::SnapGetStorageRanges { response, .. }) => {
+                        RequestState::Waiting(PeerRequest::SnapGetStorageRanges {
+                            response,
+                            ..
+                        }) => {
                             let _ = response.send(Ok(resp));
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
@@ -403,7 +414,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::SnapGetByteCodes { response, .. }) => {
+                        RequestState::Waiting(PeerRequest::SnapGetByteCodes {
+                            response, ..
+                        }) => {
                             let _ = response.send(Ok(resp));
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
@@ -423,7 +436,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let request_id = resp.request_id;
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
-                        RequestState::Waiting(PeerRequest::SnapGetTrieNodes { response, .. }) => {
+                        RequestState::Waiting(PeerRequest::SnapGetTrieNodes {
+                            response, ..
+                        }) => {
                             let _ = response.send(Ok(resp));
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
@@ -451,7 +466,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             PeerRequest::SnapGetAccountRange { request, .. } => {
                 let mut req = request.clone();
                 req.request_id = request_id;
-                OutgoingMessage::Snap(EthSnapMessage::Snap(SnapProtocolMessage::GetAccountRange(req)))
+                OutgoingMessage::Snap(EthSnapMessage::Snap(SnapProtocolMessage::GetAccountRange(
+                    req,
+                )))
             }
             PeerRequest::SnapGetStorageRanges { request, .. } => {
                 let mut req = request.clone();
@@ -498,11 +515,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     debug!(target: "net", ?msg,  version=?self.conn.version(), "Message is invalid for connection version, skipping");
                 }
             }
-            PeerMessage::EthRequest(req) => {
-                let deadline = self.request_deadline();
-                self.on_internal_peer_request(req, deadline);
-            }
-            PeerMessage::SnapRequest(req) => {
+            PeerMessage::EthRequest(req) | PeerMessage::SnapRequest(req) => {
                 let deadline = self.request_deadline();
                 self.on_internal_peer_request(req, deadline);
             }
@@ -1020,7 +1033,7 @@ enum RequestState<R> {
 pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     /// A message that is owned.
     Eth(EthMessage<N>),
-    /// A snap protocol message (wrapped in EthSnapMessage).
+    /// A snap protocol message (wrapped in `EthSnapMessage`).
     Snap(EthSnapMessage<N>),
     /// A message that may be shared by multiple sessions.
     Broadcast(EthBroadcastMessage<N>),
@@ -1032,9 +1045,7 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
     /// Returns true if this is a response.
     const fn is_response(&self) -> bool {
         match self {
-            Self::Eth(msg) => msg.is_response(),
-            Self::Snap(EthSnapMessage::Eth(msg)) => msg.is_response(),
-            Self::Snap(EthSnapMessage::Snap(_)) => false,
+            Self::Eth(msg) | Self::Snap(EthSnapMessage::Eth(msg)) => msg.is_response(),
             _ => false,
         }
     }

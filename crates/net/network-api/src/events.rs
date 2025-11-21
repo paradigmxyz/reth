@@ -1,17 +1,17 @@
 //! API related to listening for network events.
 
 use reth_eth_wire_types::{
-    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
-    EthNetworkPrimitives, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetPooledTransactions, GetReceipts, NetworkPrimitives, NodeData, PooledTransactions, Receipts,
-    Receipts69, UnifiedStatus,
+    message::RequestPair,
+    snap::{
+        AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage, GetByteCodesMessage,
+        GetStorageRangesMessage, GetTrieNodesMessage, SnapProtocolMessage, StorageRangesMessage,
+        TrieNodesMessage,
+    },
+    BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage, EthNetworkPrimitives,
+    EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
+    NetworkPrimitives, NodeData, PooledTransactions, RawCapabilityMessage, Receipts, Receipts69,
+    UnifiedStatus,
 };
-use reth_eth_wire_types::snap::{
-    AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage, GetByteCodesMessage,
-    GetStorageRangesMessage, GetTrieNodesMessage, SnapProtocolMessage, StorageRangesMessage,
-    TrieNodesMessage,
-};
-use reth_eth_wire_types::RawCapabilityMessage;
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
@@ -420,7 +420,8 @@ mod tests {
             response_bytes: 1024,
         };
         let (tx, _rx) = oneshot::channel();
-        let peer_req: PeerRequest = PeerRequest::SnapGetAccountRange { request: req.clone(), response: tx };
+        let peer_req: PeerRequest =
+            PeerRequest::SnapGetAccountRange { request: req.clone(), response: tx };
         let msg = peer_req.create_request_message(42);
 
         let EthMessage::Other(raw) = msg else { panic!("expected raw capability message") };
@@ -431,9 +432,11 @@ mod tests {
 
     #[test]
     fn snap_bytecodes_request_is_encoded_as_raw_capability() {
-        let req = GetByteCodesMessage { request_id: 0, hashes: vec![B256::ZERO], response_bytes: 10 };
+        let req =
+            GetByteCodesMessage { request_id: 0, hashes: vec![B256::ZERO], response_bytes: 10 };
         let (tx, _rx) = oneshot::channel();
-        let peer_req: PeerRequest = PeerRequest::SnapGetByteCodes { request: req.clone(), response: tx };
+        let peer_req: PeerRequest =
+            PeerRequest::SnapGetByteCodes { request: req.clone(), response: tx };
         let msg = peer_req.create_request_message(7);
 
         let EthMessage::Other(raw) = msg else { panic!("expected raw capability message") };

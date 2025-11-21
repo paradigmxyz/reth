@@ -7,15 +7,15 @@ use super::message::MAX_MESSAGE_SIZE;
 use crate::{
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, MessageError, ProtocolBroadcastMessage},
-    EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
-    ProtocolMessage, RawCapabilityMessage, SnapMessageId, SnapProtocolMessage,
+    EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
+    RawCapabilityMessage, SnapMessageId, SnapProtocolMessage,
 };
 use alloy_rlp::{Bytes, BytesMut, Encodable};
 use core::fmt::Debug;
 use futures::{Sink, SinkExt};
 use pin_project::pin_project;
-use std::io;
 use std::{
+    io,
     marker::PhantomData,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -292,6 +292,31 @@ where
     }
 }
 
+impl From<io::Error> for EthSnapStreamError {
+    fn from(err: io::Error) -> Self {
+        P2PStreamError::from(err).into()
+    }
+}
+
+impl From<EthSnapStreamError> for EthStreamError {
+    fn from(err: EthSnapStreamError) -> Self {
+        match err {
+            EthSnapStreamError::InvalidMessage(version, msg) => {
+                Self::InvalidMessage(MessageError::Other(format!("{msg} (version {version:?})")))
+            }
+            EthSnapStreamError::UnknownMessageId(message_id) => {
+                Self::UnsupportedMessage { message_id }
+            }
+            EthSnapStreamError::MessageTooLarge(len, _) => Self::MessageTooBig(len),
+            EthSnapStreamError::Rlp(err) => Self::InvalidMessage(MessageError::RlpError(err)),
+            EthSnapStreamError::P2P(err) => Self::P2PStreamError(err),
+            EthSnapStreamError::StatusNotInHandshake => {
+                Self::EthHandshakeError(EthHandshakeError::StatusNotInHandshake)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,34 +449,5 @@ mod tests {
         // Not a valid snap message yet, only snap id --> error
         let snap_boundary_result = inner.decode_message(snap_boundary_bytes);
         assert!(snap_boundary_result.is_err());
-    }
-}
-
-impl From<io::Error> for EthSnapStreamError {
-    fn from(err: io::Error) -> Self {
-        P2PStreamError::from(err).into()
-    }
-}
-
-impl From<EthSnapStreamError> for EthStreamError {
-    fn from(err: EthSnapStreamError) -> Self {
-        match err {
-            EthSnapStreamError::InvalidMessage(version, msg) => {
-                EthStreamError::InvalidMessage(MessageError::Other(format!(
-                    "{msg} (version {version:?})"
-                )))
-            }
-            EthSnapStreamError::UnknownMessageId(message_id) => {
-                EthStreamError::UnsupportedMessage { message_id }
-            }
-            EthSnapStreamError::MessageTooLarge(len, _) => EthStreamError::MessageTooBig(len),
-            EthSnapStreamError::Rlp(err) => {
-                EthStreamError::InvalidMessage(MessageError::RlpError(err))
-            }
-            EthSnapStreamError::P2P(err) => EthStreamError::P2PStreamError(err),
-            EthSnapStreamError::StatusNotInHandshake => {
-                EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake)
-            }
-        }
     }
 }

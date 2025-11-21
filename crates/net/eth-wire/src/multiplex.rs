@@ -122,10 +122,14 @@ impl<St> RlpxProtocolMultiplexer<St> {
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
         P2PStreamError: Into<Err>,
     {
-        self.into_satellite_stream_with_tuple_handshake(cap, move |proxy| async move {
-            let st = handshake(proxy).await?;
-            Ok((st, ()))
-        }, Vec::new())
+        self.into_satellite_stream_with_tuple_handshake(
+            cap,
+            move |proxy| async move {
+                let st = handshake(proxy).await?;
+                Ok((st, ()))
+            },
+            Vec::new(),
+        )
         .await
         .map(|(st, _)| st)
     }
@@ -225,17 +229,21 @@ impl<St> RlpxProtocolMultiplexer<St> {
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     {
         let eth_cap = self.inner.conn.shared_capabilities().eth_version()?;
-        self.into_satellite_stream_with_tuple_handshake(&Capability::eth(eth_cap), move |proxy| {
-            let handshake = handshake.clone();
-            async move {
-                let mut unauth = UnauthProxy { inner: proxy };
-                let their_status = handshake
-                    .handshake(&mut unauth, status, fork_filter, HANDSHAKE_TIMEOUT)
-                    .await?;
-                let eth_stream = EthStream::new(eth_cap, unauth.into_inner());
-                Ok((eth_stream, their_status))
-            }
-        }, Vec::new())
+        self.into_satellite_stream_with_tuple_handshake(
+            &Capability::eth(eth_cap),
+            move |proxy| {
+                let handshake = handshake.clone();
+                async move {
+                    let mut unauth = UnauthProxy { inner: proxy };
+                    let their_status = handshake
+                        .handshake(&mut unauth, status, fork_filter, HANDSHAKE_TIMEOUT)
+                        .await?;
+                    let eth_stream = EthStream::new(eth_cap, unauth.into_inner());
+                    Ok((eth_stream, their_status))
+                }
+            },
+            Vec::new(),
+        )
         .await
     }
 
@@ -246,7 +254,10 @@ impl<St> RlpxProtocolMultiplexer<St> {
         status: UnifiedStatus,
         fork_filter: ForkFilter,
         handshake: Arc<dyn EthRlpxHandshake>,
-    ) -> Result<(RlpxSatelliteStream<St, EthSnapStream<ProtocolProxy, N>>, UnifiedStatus), EthStreamError>
+    ) -> Result<
+        (RlpxSatelliteStream<St, EthSnapStream<ProtocolProxy, N>>, UnifiedStatus),
+        EthStreamError,
+    >
     where
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     {

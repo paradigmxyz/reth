@@ -540,10 +540,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 });
             }
             // Snap requests are sent directly to the peer (noop handler on remote for now).
-            other @ PeerRequest::SnapGetAccountRange { .. }
-            | other @ PeerRequest::SnapGetStorageRanges { .. }
-            | other @ PeerRequest::SnapGetByteCodes { .. }
-            | other @ PeerRequest::SnapGetTrieNodes { .. } => {
+            other @ (PeerRequest::SnapGetAccountRange { .. }
+                | PeerRequest::SnapGetStorageRanges { .. }
+                | PeerRequest::SnapGetByteCodes { .. }
+                | PeerRequest::SnapGetTrieNodes { .. }) => {
                 self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::SnapRequest(other));
             }
         }
@@ -631,10 +631,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     msg,
                 });
             }
-            PeerMessage::EthRequest(req) => {
-                self.on_eth_request(peer_id, req);
-            }
-            PeerMessage::SnapRequest(req) => {
+            PeerMessage::EthRequest(req) | PeerMessage::SnapRequest(req) => {
                 self.on_eth_request(peer_id, req);
             }
             PeerMessage::ReceivedTransaction(msg) => {

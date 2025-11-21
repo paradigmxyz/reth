@@ -1159,7 +1159,9 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 .into_eth_snap_satellite_stream(status, fork_filter, handshake)
                 .await
             {
-                Ok((multiplex_stream, their_status)) => (EthRlpxConnection::from(multiplex_stream), their_status),
+                Ok((multiplex_stream, their_status)) => {
+                    (EthRlpxConnection::from(multiplex_stream), their_status)
+                }
                 Err(err) => {
                     return PendingSessionEvent::Disconnected {
                         remote_addr,
@@ -1170,11 +1172,10 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 }
             }
         } else {
-            match multiplex_stream
-                .into_eth_satellite_stream(status, fork_filter, handshake)
-                .await
-            {
-                Ok((multiplex_stream, their_status)) => (EthRlpxConnection::from(multiplex_stream), their_status),
+            match multiplex_stream.into_eth_satellite_stream(status, fork_filter, handshake).await {
+                Ok((multiplex_stream, their_status)) => {
+                    (EthRlpxConnection::from(multiplex_stream), their_status)
+                }
                 Err(err) => {
                     return PendingSessionEvent::Disconnected {
                         remote_addr,

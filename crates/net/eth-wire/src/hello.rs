@@ -195,7 +195,7 @@ impl HelloMessageBuilder {
         if enable {
             self.protocols.get_or_insert_with(Vec::new).push(Protocol::snap());
         } else if let Some(protocols) = self.protocols.as_mut() {
-            protocols.retain(|p| !(p.cap.name == "snap"));
+            protocols.retain(|p| p.cap.name != "snap");
         }
         self
     }

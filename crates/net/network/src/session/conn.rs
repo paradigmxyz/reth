@@ -207,8 +207,11 @@ impl<N: NetworkPrimitives> Sink<EthSnapMessage<N>> for EthRlpxConnection<N> {
                     Pin::new_unchecked(r).start_send_unpin(msg).map_err(Into::into)
                 }
                 // Sending snap message over eth-only connection is unsupported
-                (Self::EthOnly(_), EthSnapMessage::Snap(_)) |
-                (Self::Satellite(_), EthSnapMessage::Snap(_)) => Err(EthStreamError::UnsupportedMessage { message_id: SnapMessageId::GetAccountRange as u8 }),
+                (Self::EthOnly(_) | Self::Satellite(_), EthSnapMessage::Snap(_)) => {
+                    Err(EthStreamError::UnsupportedMessage {
+                        message_id: SnapMessageId::GetAccountRange as u8,
+                    })
+                }
             }
         }
     }

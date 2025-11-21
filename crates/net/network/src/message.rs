@@ -63,7 +63,7 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
     EthRequest(PeerRequest<N>),
-    /// All `snap` request variants (wrapped in PeerRequest).
+    /// All `snap` request variants (wrapped in `PeerRequest`).
     SnapRequest(PeerRequest<N>),
     /// Announces when `BlockRange` is updated.
     BlockRangeUpdated(BlockRangeUpdate),
@@ -163,7 +163,9 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
         let res = match self {
             Self::BlockHeaders { response } => poll_request!(response, BlockHeaders, cx),
             Self::BlockBodies { response } => poll_request!(response, BlockBodies, cx),
-            Self::PooledTransactions { response } => poll_request!(response, PooledTransactions, cx),
+            Self::PooledTransactions { response } => {
+                poll_request!(response, PooledTransactions, cx)
+            }
             Self::NodeData { response } => poll_request!(response, NodeData, cx),
             Self::Receipts { response } => poll_request!(response, Receipts, cx),
             Self::Receipts69 { response } => poll_request!(response, Receipts69, cx),
@@ -248,58 +250,50 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts69(resp) => {
                 to_message!(resp, Receipts69, id)
             }
-            Self::SnapAccountRange(resp) => {
-                match resp {
-                    Ok(resp) => {
-                        let snap = SnapProtocolMessage::AccountRange(resp);
-                        let encoded = snap.encode();
-                        Ok(EthMessage::Other(RawCapabilityMessage::new(
-                            snap.message_id() as usize,
-                            encoded.slice(1..).to_vec().into(),
-                        )))
-                    }
-                    Err(err) => Err(err),
+            Self::SnapAccountRange(resp) => match resp {
+                Ok(resp) => {
+                    let snap = SnapProtocolMessage::AccountRange(resp);
+                    let encoded = snap.encode();
+                    Ok(EthMessage::Other(RawCapabilityMessage::new(
+                        snap.message_id() as usize,
+                        encoded.slice(1..).to_vec().into(),
+                    )))
                 }
-            }
-            Self::SnapStorageRanges(resp) => {
-                match resp {
-                    Ok(resp) => {
-                        let snap = SnapProtocolMessage::StorageRanges(resp);
-                        let encoded = snap.encode();
-                        Ok(EthMessage::Other(RawCapabilityMessage::new(
-                            snap.message_id() as usize,
-                            encoded.slice(1..).to_vec().into(),
-                        )))
-                    }
-                    Err(err) => Err(err),
+                Err(err) => Err(err),
+            },
+            Self::SnapStorageRanges(resp) => match resp {
+                Ok(resp) => {
+                    let snap = SnapProtocolMessage::StorageRanges(resp);
+                    let encoded = snap.encode();
+                    Ok(EthMessage::Other(RawCapabilityMessage::new(
+                        snap.message_id() as usize,
+                        encoded.slice(1..).to_vec().into(),
+                    )))
                 }
-            }
-            Self::SnapByteCodes(resp) => {
-                match resp {
-                    Ok(resp) => {
-                        let snap = SnapProtocolMessage::ByteCodes(resp);
-                        let encoded = snap.encode();
-                        Ok(EthMessage::Other(RawCapabilityMessage::new(
-                            snap.message_id() as usize,
-                            encoded.slice(1..).to_vec().into(),
-                        )))
-                    }
-                    Err(err) => Err(err),
+                Err(err) => Err(err),
+            },
+            Self::SnapByteCodes(resp) => match resp {
+                Ok(resp) => {
+                    let snap = SnapProtocolMessage::ByteCodes(resp);
+                    let encoded = snap.encode();
+                    Ok(EthMessage::Other(RawCapabilityMessage::new(
+                        snap.message_id() as usize,
+                        encoded.slice(1..).to_vec().into(),
+                    )))
                 }
-            }
-            Self::SnapTrieNodes(resp) => {
-                match resp {
-                    Ok(resp) => {
-                        let snap = SnapProtocolMessage::TrieNodes(resp);
-                        let encoded = snap.encode();
-                        Ok(EthMessage::Other(RawCapabilityMessage::new(
-                            snap.message_id() as usize,
-                            encoded.slice(1..).to_vec().into(),
-                        )))
-                    }
-                    Err(err) => Err(err),
+                Err(err) => Err(err),
+            },
+            Self::SnapTrieNodes(resp) => match resp {
+                Ok(resp) => {
+                    let snap = SnapProtocolMessage::TrieNodes(resp);
+                    let encoded = snap.encode();
+                    Ok(EthMessage::Other(RawCapabilityMessage::new(
+                        snap.message_id() as usize,
+                        encoded.slice(1..).to_vec().into(),
+                    )))
                 }
-            }
+                Err(err) => Err(err),
+            },
         }
     }
 
