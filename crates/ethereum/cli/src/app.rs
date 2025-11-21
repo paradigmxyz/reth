@@ -10,13 +10,11 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::args::OtlpInitStatus;
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
-use reth_tracing::{tracing_appender::non_blocking::WorkerGuard, FileWorkerGuard, Layers};
+use reth_tracing::{FileWorkerGuard, Layers};
 use std::{fmt, sync::Arc};
-use tracing::{info, warn};
 
 /// A wrapper around a parsed CLI that handles command execution.
 #[derive(Debug)]
