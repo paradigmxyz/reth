@@ -14,7 +14,8 @@ use alloy_rpc_types_engine::{
 };
 use error::{InsertBlockError, InsertBlockFatalError};
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
+    CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock,
+    MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -34,6 +35,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_trie::TrieInputSorted;
 use revm::state::EvmState;
 use state::TreeState;
 use std::{
@@ -1791,11 +1793,26 @@ where
         let hashed_state = self.provider.hashed_post_state(execution_output.state());
         let trie_updates = self.provider.get_block_trie_updates(block.number())?;
 
+        // Build trie data from the DB response synchronously and wrap it as a ready deferred handle.
+        let prefix_sets = hashed_state.construct_prefix_sets();
+        let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
+        let sorted_trie_updates = Arc::new(trie_updates);
+        let trie_input = Arc::new(TrieInputSorted::new(
+            Arc::clone(&sorted_trie_updates),
+            Arc::clone(&sorted_hashed_state),
+            prefix_sets,
+        ));
+        let trie_data = ComputedTrieData {
+            hashed_state: sorted_hashed_state,
+            trie_updates: sorted_trie_updates,
+            anchor_hash: block.parent_hash(),
+            trie_input,
+        };
+
         Ok(Some(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
             execution_output: Arc::new(execution_output),
-            hashed_state: Arc::new(hashed_state.into_sorted()),
-            trie_updates: Arc::new(trie_updates),
+            trie_data: DeferredTrieData::ready(trie_data), // already computed from DB; expose via the deferred handle type
         }))
     }
 
