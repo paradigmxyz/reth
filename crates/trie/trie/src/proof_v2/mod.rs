@@ -245,6 +245,55 @@ where
         targets.peek().is_some_and(|t| t.starts_with(path))
     }
 
+    /// Takes a child which has been removed from the `child_stack` and converts it to an
+    /// [`RlpNode`].
+    ///
+    /// Calling this method indicates that the child will not undergo any further modifications, and
+    /// therefore can be retained as a proof node if applicable.
+    fn commit_child(
+        &mut self,
+        targets: &mut Peekable<impl Iterator<Item = Nibbles>>,
+        child_path: Nibbles,
+        child: ProofTrieBranchChild<VE::DeferredEncoder>,
+    ) -> Result<RlpNode, StateProofError> {
+        // If the child is already an `RlpNode` then there is nothing to do.
+        if let ProofTrieBranchChild::RlpNode(rlp_node) = child {
+            return Ok(rlp_node)
+        }
+
+        // If we should retain the child then do so.
+        if self.should_retain(targets, &child_path) {
+            // Convert to `ProofTrieNode`, which will be what is retained.
+            //
+            // If this node is a leaf then the `rlp_encode_buf` is taken by it and a new one will be
+            // allocated by the next encode call.
+            //
+            // If it is a branch then its `rlp_nodes_buf` will be taken and not returned to the
+            // `rlp_nodes_bufs` free-list.
+            self.rlp_encode_buf.clear();
+            let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
+
+            // Use the `ProofTrieNode` to encode the `RlpNode` and push that into the
+            // `rlp_nodes_buf`.
+            self.rlp_encode_buf.clear();
+            proof_node.node.encode(&mut self.rlp_encode_buf);
+            return Ok(RlpNode::from_rlp(&self.rlp_encode_buf));
+        }
+
+        // If the child path is not being retained then we convert directly to an `RlpNode`
+        // using `into_rlp`. Since we are not retaining the node we can recover any `RlpNode`
+        // buffers for the free-list here, hence why we do this as a separate logical branch.
+        self.rlp_encode_buf.clear();
+        let (child_rlp_node, freed_rlp_nodes_buf) = child.into_rlp(&mut self.rlp_encode_buf)?;
+
+        // If there is an `RlpNode` buffer which can be re-used then push it onto the free-list.
+        if let Some(buf) = freed_rlp_nodes_buf {
+            self.rlp_nodes_bufs.push(buf);
+        }
+
+        Ok(child_rlp_node)
+    }
+
     /// Pops the top branch off of the `branch_stack`, hashes its children on the `child_stack`, and
     /// replaces those children on the `child_stack`. The `branch_path` field will be updated
     /// accordingly.
@@ -281,44 +330,23 @@ where
         let children = child_stack.drain(child_stack.len() - num_children..);
 
         // Create an iterator over the paths of each child in the branch.
-        let child_paths = TrieMaskIter(branch.state_mask).map(|nibble| {
-            let mut child_path = self.branch_path;
-            debug_assert!(child_path.len() < 64, "child_path {child_path:?} is too long to extend");
-            child_path.extend_from_slice_unchecked(&[nibble]);
-            child_path
-        });
+        let child_paths = {
+            let branch_path = self.branch_path;
+            debug_assert!(
+                branch_path.len() < 64,
+                "branch_path {branch_path:?} is too long to extend"
+            );
+            TrieMaskIter(branch.state_mask).map(move |nibble| {
+                let mut child_path = branch_path;
+                child_path.extend_from_slice_unchecked(&[nibble]);
+                child_path
+            })
+        };
 
-        // Collect children into an `RlpNode` Vec by encoding each of them.
+        // Collect children into an `RlpNode` Vec by committing and pushing each of them.
         for (child_path, child) in child_paths.zip(children) {
-            // If we should retain the child then do so.
-            if self.should_retain(targets, &child_path) {
-                // Convert to `ProofTrieNode`, which will be what is retained. If this node is a
-                // leaf then the `rlp_encode_buf` is taken by it and a new one will be allocated by
-                // the next encode call.
-                self.rlp_encode_buf.clear();
-                let proof_node =
-                    child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
-
-                // Use the `ProofTrieNode` to encode the `RlpNode` and push that into the
-                // `rlp_nodes_buf`.
-                self.rlp_encode_buf.clear();
-                proof_node.node.encode(&mut self.rlp_encode_buf);
-                rlp_nodes_buf.push(RlpNode::from_rlp(&self.rlp_encode_buf));
-
-                continue;
-            }
-
-            // If the child path is not being retained then we convert directly to an `RlpNode`
-            // using `into_rlp`. Since we are not retaining the node we can recover any `RlpNode`
-            // buffers for the free-list here, hence why we do this as a separate logical branch.
-            self.rlp_encode_buf.clear();
-            let (child_rlp_node, freed_rlp_nodes_buf) = child.into_rlp(&mut self.rlp_encode_buf)?;
+            let child_rlp_node = self.commit_child(targets, child_path, child)?;
             rlp_nodes_buf.push(child_rlp_node);
-
-            // If there is an `RlpNode` buffer which can be re-used then push it onto the free-list.
-            if let Some(buf) = freed_rlp_nodes_buf {
-                self.rlp_nodes_bufs.push(buf);
-            }
         }
 
         // Put the child_stack back, now that we're done draining from it.
@@ -337,27 +365,15 @@ where
             self.branch_path.len() - branch.ext_len as usize,
         );
 
-        // Construct the `ProofTrieBranchChild` for the branch itself.
-        let branch_child =
+        // Wrap the `BranchNode` so it can be pushed onto the child stack.
+        let mut branch_as_child =
             ProofTrieBranchChild::Branch(BranchNode::new(rlp_nodes_buf, branch.state_mask));
 
-        // Wrap the `BranchNode` so it can be pushed onto the child stack.
-        let branch_as_child = if short_key.is_empty() {
-            // If there is no extension then push the child as-is
-            branch_child
-        } else {
-            // If there is an extension then encode the branch as an `RlpNode` and use it to
-            // construct the extension.
-            self.rlp_encode_buf.clear();
-            let (branch_rlp_node, freed_rlp_nodes_buf) =
-                branch_child.into_rlp(&mut self.rlp_encode_buf)?;
-
-            // If there is an `RlpNode` buffer which can be re-used then push it onto the free-list.
-            if let Some(buf) = freed_rlp_nodes_buf {
-                self.rlp_nodes_bufs.push(buf);
-            }
-
-            ProofTrieBranchChild::Extension { short_key, child: branch_rlp_node }
+        // If there is an extension then encode the branch as an `RlpNode` and use it to construct
+        // the extension in its place
+        if !short_key.is_empty() {
+            let branch_rlp_node = self.commit_child(targets, self.branch_path, branch_as_child)?;
+            branch_as_child = ProofTrieBranchChild::Extension { short_key, child: branch_rlp_node };
         };
 
         self.child_stack.push(branch_as_child);
