@@ -11,6 +11,7 @@ use reth_node_builder::{
     PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
+use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
@@ -163,7 +164,8 @@ where
 
             let mut node = NodeTestContext::new(node, self.attributes_generator).await?;
 
-            let genesis = node.block_hash(0);
+            let genesis_number = self.chain_spec.genesis_header().number();
+            let genesis = node.block_hash(genesis_number);
             node.update_forkchoice(genesis, genesis).await?;
 
             // Connect nodes if requested

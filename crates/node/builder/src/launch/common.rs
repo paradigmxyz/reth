@@ -480,7 +480,8 @@ where
 
         let factory =
             ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
-                .with_prune_modes(self.prune_modes());
+                .with_prune_modes(self.prune_modes())
+                .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default());
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
