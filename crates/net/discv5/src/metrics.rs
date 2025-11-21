@@ -1,8 +1,8 @@
 //! Tracks peer discovery for [`Discv5`](crate::Discv5).
-use metrics::{Counter, Gauge};
-use reth_metrics::Metrics;
-
 use crate::NetworkStackId;
+use metrics::{Counter, Gauge};
+use reth_discv5_metrics_derive::kbuckets_metrics;
+use reth_metrics::Metrics;
 
 /// Information tracked by [`Discv5`](crate::Discv5).
 #[derive(Debug, Default, Clone)]
@@ -11,6 +11,28 @@ pub struct Discv5Metrics {
     pub discovered_peers_advertised_networks: AdvertisedChainMetrics,
     /// Tracks discovered peers.
     pub discovered_peers: DiscoveredPeersMetrics,
+    /// Tracks discovered peers per [`KBucket`](discv5::kbucket::KBucketsTable).
+    pub discovered_peers_by_kbucket: KBucketMetrics,
+}
+
+impl Discv5Metrics {
+    /// Sets current total number of peers in [`discv5::Discv5`]'s kbuckets.
+    pub fn set_total_kbucket_peers(&self, num: usize) {
+        self.discovered_peers.kbucket_peers_raw_total.set(num as f64)
+    }
+
+    /// Sets current total number of connected peers in each
+    /// [`KBucket`](discv5::kbucket::KBucketsTable).
+    /// Takes an iterator over peer count in kbuckets starting from bucket at index
+    /// 0 to 255, i.e. from closest to furthest log2distance.
+    pub fn set_total_peers_by_kbucket(&self, peer_counts: Vec<usize>) {
+        self.discovered_peers_by_kbucket.set_total_peers_by_kbucket(peer_counts)
+    }
+
+    /// Sets current total number of peers connected to [`discv5::Discv5`].
+    pub fn set_total_sessions(&self, num: usize) {
+        self.discovered_peers.sessions_raw_total.set(num as f64)
+    }
 }
 
 /// Tracks discovered peers.
@@ -137,3 +159,6 @@ impl AdvertisedChainMetrics {
         }
     }
 }
+
+#[kbuckets_metrics]
+pub struct KBucketMetrics {}

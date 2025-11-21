@@ -17,6 +17,7 @@ reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-metrics.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
+reth-discv5-metrics-derive.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
