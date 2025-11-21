@@ -337,16 +337,27 @@ where
             self.branch_path.len() - branch.ext_len as usize,
         );
 
-        // Construct the `BranchNode`.
-        let branch_node = BranchNode::new(rlp_nodes_buf, branch.state_mask);
+        // Construct the `ProofTrieBranchChild` for the branch itself.
+        let branch_child =
+            ProofTrieBranchChild::Branch(BranchNode::new(rlp_nodes_buf, branch.state_mask));
 
         // Wrap the `BranchNode` so it can be pushed onto the child stack.
         let branch_as_child = if short_key.is_empty() {
-            // If there is no extension then push a branch node
-            ProofTrieBranchChild::Branch(branch_node)
+            // If there is no extension then push the child as-is
+            branch_child
         } else {
-            // Otherwise push an extension node
-            ProofTrieBranchChild::Extension { short_key, child: branch_node }
+            // If there is an extension then encode the branch as an `RlpNode` and use it to
+            // construct the extension.
+            self.rlp_encode_buf.clear();
+            let (branch_rlp_node, freed_rlp_nodes_buf) =
+                branch_child.into_rlp(&mut self.rlp_encode_buf)?;
+
+            // If there is an `RlpNode` buffer which can be re-used then push it onto the free-list.
+            if let Some(buf) = freed_rlp_nodes_buf {
+                self.rlp_nodes_bufs.push(buf);
+            }
+
+            ProofTrieBranchChild::Extension { short_key, child: branch_rlp_node }
         };
 
         self.child_stack.push(branch_as_child);
