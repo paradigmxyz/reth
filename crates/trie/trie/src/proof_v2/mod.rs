@@ -9,14 +9,14 @@
 
 use crate::{
     hashed_cursor::{HashedCursor, HashedStorageCursor},
-    trie_cursor::{TrieCursor, TrieStorageCursor},
+    trie_cursor::{depth_first, TrieCursor, TrieStorageCursor},
 };
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::TrieMask;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{BranchNode, Nibbles, ProofTrieNode, RlpNode, TrieMasks, TrieNode};
-use std::iter::Peekable;
+use std::{cmp::Ordering, iter::Peekable};
 use tracing::{instrument, trace};
 
 mod value;
@@ -84,6 +84,9 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
         }
     }
 }
+
+/// Helper type for the [`Iterator`] used to pass targets in from the caller.
+type TargetsIter<I> = Peekable<WindowIter<I>>;
 
 impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
@@ -203,59 +206,29 @@ where
     /// `targets` iterator forward if the given path comes after the current target.
     fn should_retain(
         &self,
-        targets: &mut Peekable<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
         path: &Nibbles,
     ) -> bool {
+        trace!(target: TRACE_TARGET, ?path, target = ?targets.peek(), "should_retain: called");
         debug_assert!(self.retained_proofs.last().is_none_or(
                 |ProofTrieNode { path: last_retained_path, .. }| {
-                    crate::trie_cursor::depth_first::cmp(path, last_retained_path) ==
-                        std::cmp::Ordering::Greater
+                    depth_first::cmp(path, last_retained_path) == Ordering::Greater
                 }
             ),
             "should_retain called with path {path:?} which is not after previously retained node {:?} in depth-first order",
             self.retained_proofs.last().map(|n| n.path),
         );
 
-        trace!(
-            target: TRACE_TARGET,
-            ?path,
-            last_retained_path = ?self.retained_proofs.last().map(|n| n.path),
-            target = ?targets.peek(),
-            "should_retain: called",
-        );
-
-        // If the node in question is a prefix of the previously retained proof then we retain.
-        //
-        // This is required for cases where the target iterator is moved forward such that the
-        // next target is None or the current branch is not a prefix of it. In this case it's
-        // still possible, when popping the branch, that one of its children was retained due to
-        // the previous target, and therefore this node should be retained still.
-        if self.retained_proofs.last().is_some_and(
-            |ProofTrieNode { path: last_retained_path, .. }| last_retained_path.starts_with(path),
-        ) {
-            return true
-        }
-
-        // Iterate targets forwards to catch up to the given path. Some notes here:
-        // - If `target.starts_with(path)`, then `path <= target`.
-        // - Therefore, if `target < path`, there is no situation where path could be retained by
-        //   this target.
-        // - The ProofCalculator traverse the trie in depth-first order, meaning paths are provided
-        //   to this method such that `prev_path.starts_with(path)` (handled in the previous
-        //   if-block) OR `path > prev_path`.
-        while let Some(target) = targets.peek() &&
-            target < path
+        // TODO docs
+        while let Some((_, Some(upper))) = targets.peek() &&
+            depth_first::cmp(path, upper) != Ordering::Less
         {
             targets.next();
-            trace!(
-                target: TRACE_TARGET,
-                target = ?targets.peek(),
-                "target < path, next target",
-            );
+            trace!(target: TRACE_TARGET, target = ?targets.peek(), "upper target <= path, next target");
         }
 
         // If the node in question is a prefix of the target then we retain
-        targets.peek().is_some_and(|t| t.starts_with(path))
+        targets.peek().is_some_and(|(lower, _)| lower.starts_with(path))
     }
 
     /// Takes a child which has been removed from the `child_stack` and converts it to an
@@ -265,7 +238,7 @@ where
     /// therefore can be retained as a proof node if applicable.
     fn commit_child(
         &mut self,
-        targets: &mut Peekable<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
     ) -> Result<RlpNode, StateProofError> {
@@ -276,6 +249,8 @@ where
 
         // If we should retain the child then do so.
         if self.should_retain(targets, &child_path) {
+            trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
+
             // Convert to `ProofTrieNode`, which will be what is retained.
             //
             // If this node is a leaf then the `rlp_encode_buf` is taken by it and a new one will be
@@ -286,10 +261,12 @@ where
             self.rlp_encode_buf.clear();
             let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
 
-            // Use the `ProofTrieNode` to encode the `RlpNode` and push that into the
-            // `rlp_nodes_buf`.
+            // Use the `ProofTrieNode` to encode the `RlpNode`, and then push it onto retained
+            // nodes before returning.
             self.rlp_encode_buf.clear();
             proof_node.node.encode(&mut self.rlp_encode_buf);
+
+            self.retained_proofs.push(proof_node);
             return Ok(RlpNode::from_rlp(&self.rlp_encode_buf));
         }
 
@@ -316,7 +293,7 @@ where
     /// This method panics if `branch_stack` is empty.
     fn pop_branch(
         &mut self,
-        targets: &mut Peekable<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
     ) -> Result<(), StateProofError> {
         let mut rlp_nodes_buf = self.take_rlp_nodes_buf();
         let branch = self.branch_stack.pop().expect("branch_stack cannot be empty");
@@ -403,7 +380,7 @@ where
     /// creating a new one depending on the path of the key.
     fn add_leaf(
         &mut self,
-        targets: &mut Peekable<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
         key: Nibbles,
         val: VE::DeferredEncoder,
     ) -> Result<(), StateProofError> {
@@ -479,26 +456,26 @@ where
 
         // In debug builds, verify that targets are sorted
         #[cfg(debug_assertions)]
-        let mut targets = {
+        let targets = {
             let mut prev: Option<Nibbles> = None;
-            targets
-                .into_iter()
-                .inspect(move |target| {
-                    if let Some(prev) = prev {
-                        debug_assert!(
-                            prev <= *target,
-                            "targets must be sorted lexicographically: {:?} > {:?}",
-                            prev,
-                            target
-                        );
-                    }
-                    prev = Some(*target);
-                })
-                .peekable()
+            targets.into_iter().inspect(move |target| {
+                if let Some(prev) = prev {
+                    debug_assert!(
+                        prev <= *target,
+                        "targets must be sorted lexicographically: {:?} > {:?}",
+                        prev,
+                        target
+                    );
+                }
+                prev = Some(*target);
+            })
         };
 
         #[cfg(not(debug_assertions))]
-        let mut targets = targets.into_iter().peekable();
+        let targets = targets.into_iter();
+
+        // Wrap targets into a `TargetsIter`.
+        let mut targets = WindowIter::new(targets).peekable();
 
         // If there are no targets then nothing could be returned, return early.
         if targets.peek().is_none() {
@@ -654,13 +631,49 @@ impl Iterator for TrieMaskIter {
     }
 }
 
+/// `WindowIter` is a wrapper around an [`Iterator`] which allows viewing both previous and current
+/// items on every iteration. It is similar to `itertools::tuple_windows`, except that the final
+/// item returned will contain the previous item and `None` as the current.
+struct WindowIter<I: Iterator> {
+    iter: I,
+    prev: Option<I::Item>,
+}
+
+impl<I: Iterator> WindowIter<I> {
+    /// Wraps an iterator with a [`WindowIter`].
+    const fn new(iter: I) -> Self {
+        Self { iter, prev: None }
+    }
+}
+
+impl<I: Iterator<Item: Copy>> Iterator for WindowIter<I> {
+    /// The iterator returns the previous and current items, respectively. If the underlying
+    /// iterator is exhausted then `Some(prev, None)` is returned on the subsequent call to
+    /// `WindowIter::next`, and `None` from the call after that.
+    type Item = (I::Item, Option<I::Item>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.prev, self.iter.next()) {
+            (None, None) => None,
+            (None, Some(v)) => {
+                self.prev = Some(v);
+                self.next()
+            }
+            (Some(v), next) => {
+                self.prev = next;
+                Some((v, next))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
         proof::Proof,
-        trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
+        trie_cursor::{depth_first, mock::MockTrieCursorFactory, TrieCursorFactory},
     };
     use alloy_primitives::map::{B256Map, B256Set};
     use alloy_rlp::Decodable;
@@ -800,7 +813,7 @@ mod tests {
                         },
                     }
                 })
-                .sorted_by_key(|n| n.path)
+                .sorted_by(|a, b| depth_first::cmp(&a.path, &b.path))
                 .collect::<Vec<_>>();
 
             // When no targets are given the legacy implementation will still produce the root node
