@@ -68,7 +68,7 @@
 //! ``````
 
 use crate::{
-    common::decode::DecodeCompressed,
+    common::decode::DecodeCompressedRlp,
     e2s::{error::E2sError, types::Entry},
 };
 use alloy_consensus::{Block, BlockBody, Header};
@@ -223,7 +223,7 @@ impl CompressedHeader {
     }
 }
 
-impl DecodeCompressed for CompressedHeader {
+impl DecodeCompressedRlp for CompressedHeader {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
         let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
@@ -310,7 +310,7 @@ impl CompressedBody {
     }
 }
 
-impl DecodeCompressed for CompressedBody {
+impl DecodeCompressedRlp for CompressedBody {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
         let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
@@ -401,7 +401,7 @@ impl CompressedReceipts {
     }
 }
 
-impl DecodeCompressed for CompressedReceipts {
+impl DecodeCompressedRlp for CompressedReceipts {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
         let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
