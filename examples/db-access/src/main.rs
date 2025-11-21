@@ -6,8 +6,8 @@ use reth_ethereum::{
     node::EthereumNode,
     primitives::{AlloyBlockHeader, SealedBlock, SealedHeader},
     provider::{
-        providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
-        ReceiptProvider, StateProvider, TransactionVariant, TransactionsProvider,
+        providers::ReadOnlyConfig, AccountReader, BlockNumReader, BlockReader, BlockSource,
+        HeaderProvider, ReceiptProvider, StateProvider, TransactionVariant, TransactionsProvider,
     },
     rpc::eth::primitives::Filter,
     TransactionSigned,
@@ -33,13 +33,13 @@ fn main() -> eyre::Result<()> {
     let provider = factory.provider()?;
 
     // Run basic queries against the DB
-    let block_num = 11184524;
+    let block_num = 100;
     header_provider_example(&provider, block_num)?;
     block_provider_example(&provider, block_num)?;
     txs_provider_example(&provider)?;
     receipts_provider_example(&provider)?;
 
-    state_provider_example(factory.latest()?, &provider, block_num)?;
+    state_provider_example(factory.latest()?, &provider, provider.best_block_number()?)?;
     state_provider_example(factory.history_by_block_number(block_num)?, &provider, block_num)?; 
 
     // Closes the RO transaction opened in the `factory.provider()` call. This is optional and
