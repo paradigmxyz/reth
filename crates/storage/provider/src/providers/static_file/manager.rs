@@ -1045,7 +1045,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     }
                 }
                 StaticFileSegment::TransactionSenders => {
-                    if !EitherWriterDestination::senders(provider).is_database() {
+                    if EitherWriterDestination::senders(provider).is_database() {
                         continue
                     }
                 }
