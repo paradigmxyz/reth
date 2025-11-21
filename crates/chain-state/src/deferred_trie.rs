@@ -87,7 +87,10 @@ impl DeferredTrieData {
         }
     }
 
-    /// Create a handle that is immediately ready with the computed trie data.
+    /// Creates a new handle that is already populated with the given [`ComputedTrieData`].
+    ///
+    /// This is useful when the trie data is already available and does not need to be computed
+    /// asynchronously. Any calls to [`Self::wait_cloned`] will return immediately.
     pub fn ready(bundle: ComputedTrieData) -> Self {
         let handle = Self::pending();
         handle.set_ready(bundle);
