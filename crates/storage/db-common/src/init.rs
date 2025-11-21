@@ -197,11 +197,13 @@ where
     // For genesis blocks with non-zero block numbers, we need to use get_writer() instead of
     // latest_writer() to ensure the genesis block is stored in the correct static file range.
     static_file_provider
-        .latest_writer(StaticFileSegment::Receipts)?
-        .increment_block(genesis_block_number)?;
+        .get_writer(genesis_block_number, StaticFileSegment::Receipts)?
+        .user_header_mut()
+        .set_block_range(genesis_block_number, genesis_block_number);
     static_file_provider
-        .latest_writer(StaticFileSegment::Transactions)?
-        .increment_block(genesis_block_number)?;
+        .get_writer(genesis_block_number, StaticFileSegment::Transactions)?
+        .user_header_mut()
+        .set_block_range(genesis_block_number, genesis_block_number);
 
     // Behaviour reserved only for new nodes should be set here.
     provider_rw.write_storage_settings(storage_settings)?;
