@@ -229,8 +229,8 @@ impl EraFileId for EraId {
             )
         } else {
             // era spec format with placeholder hash when no hash available
-            // Format: `<config-name>-<era-number>-<era-count>-00000000.era1`
-            format!("{}-{:05}-{:05}-00000000.era1", self.network_name, era_number, era_count)
+            // Format: `<config-name>-<era-number>-<era-count>-00000000.era`
+            format!("{}-{:05}-{:05}-00000000.era", self.network_name, era_number, era_count)
         }
     }
 }
