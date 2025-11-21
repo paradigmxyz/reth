@@ -7,17 +7,30 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
 /// Minimum number of workers we allow configuring explicitly.
-pub const MIN_WORKER_COUNT: usize = 32;
+pub const MIN_WORKER_COUNT: usize = 16;
 
 /// Returns the default number of storage worker threads based on available parallelism.
+///
+/// Uses the higher of:
+/// - 2x CPU thread count
+/// - 16 workers (minimum)
+///
+/// The minimum of 16 workers is based on performance testing showing this is the optimal
+/// balance between parallelism and resource usage. Testing shows I/O-bound proof operations
+/// benefit from 2x CPU oversubscription, with 16 workers providing sufficient throughput
+/// while avoiding excessive memory pressure and MDBX reader table contention.
+///
+/// TODO: We should dynamically adjust this based on the number of available workers.
 fn default_storage_worker_count() -> usize {
     #[cfg(feature = "std")]
     {
-        std::thread::available_parallelism().map_or(8, |n| n.get() * 2).min(MIN_WORKER_COUNT)
+        std::thread::available_parallelism()
+            .map_or(MIN_WORKER_COUNT, |n| n.get() * 2)
+            .max(MIN_WORKER_COUNT)
     }
     #[cfg(not(feature = "std"))]
     {
-        8
+        MIN_WORKER_COUNT
     }
 }
 
