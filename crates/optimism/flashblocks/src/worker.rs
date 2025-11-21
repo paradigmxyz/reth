@@ -5,7 +5,6 @@ use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::{
     CanonStateSubscriptions, ComputedTrieData, DeferredTrieData, ExecutedBlock,
 };
-use reth_trie_common::TrieInputSorted;
 use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -18,6 +17,7 @@ use reth_primitives_traits::{
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
+use reth_trie_common::TrieInputSorted;
 use std::{
     sync::Arc,
     time::{Duration, Instant},

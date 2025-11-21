@@ -52,17 +52,12 @@ impl fmt::Display for DeferredTrieDataError {
 
 impl Error for DeferredTrieDataError {}
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 enum DeferredState {
+    #[default]
     Pending,
     Ready(ComputedTrieData),
     Failed(DeferredTrieDataError),
-}
-
-impl Default for DeferredState {
-    fn default() -> Self {
-        Self::Pending
-    }
 }
 
 /// Shared handle to asynchronously populated trie data.
