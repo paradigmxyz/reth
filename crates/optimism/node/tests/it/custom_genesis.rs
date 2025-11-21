@@ -12,7 +12,7 @@ use reth_node_builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig};
 use reth_node_core::args::DatadirArgs;
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_optimism_node::{utils::optimism_payload_attributes, OpNode};
-use reth_provider::{providers::BlockchainProvider, StageCheckpointReader};
+use reth_provider::{providers::BlockchainProvider, StageCheckpointReader, HeaderProvider};
 use reth_stages_types::StageId;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -22,10 +22,12 @@ use tokio::sync::Mutex;
 async fn test_op_node_custom_genesis_number() {
     reth_tracing::init_test_tracing();
 
+    let genesis_number = 1000;
+
     // Create genesis with custom block number (1000)
     let mut genesis: Genesis =
         serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    genesis.number = Some(1000);
+    genesis.number = Some(genesis_number);
     genesis.parent_hash = Some(B256::random());
 
     let chain_spec =
@@ -75,6 +77,16 @@ async fn test_op_node_custom_genesis_number() {
             "Stage {:?} checkpoint should be at genesis block 1000",
             stage
         );
+    }
+
+    // Query genesis block should succeed
+    let genesis_header = node.inner.provider.header_by_number(genesis_number).unwrap();
+    assert!(genesis_header.is_some(), "Genesis block at {} should exist", genesis_number);
+
+    // Query blocks before genesis should return None
+    for block_num in [0, 1, genesis_number - 1] {
+        let header = node.inner.provider.header_by_number(block_num).unwrap();
+        assert!(header.is_none(), "Block {} before genesis should not exist", block_num);
     }
 
     // Advance the chain with a single block
