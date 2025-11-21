@@ -1,5 +1,6 @@
 # A simple network configuration for kurtosis (https://github.com/ethpandaops/optimism-package)
-# Spins up a 2 EL/CL networks. One with op-geth/op-node and one with op-reth/op-node.
+# Spins up chain with two participating EL/CL pairs.
+# One with op-geth/op-node (sequencer role) and one with op-reth/op-node (verifier role).
 
 optimism_package:
   faucet:
@@ -21,13 +22,13 @@ optimism_package:
             log_level: "debug"
             extra_params: [--experimental.sequencer-api=true]
           sequencer: true
-        validator:
+        verifier:
           el:
             type: op-reth
             # Note: we use the local image for now. This allows us to run the tests in CI pipelines without publishing new docker images every time.
             image: op-reth:local
             extra_params: [--proofs-history, --proofs-history.storage-path=/data/proofs-history]
-          cl: 
+          cl:
             type: op-node
             log_level: "debug"
             extra_params: [--experimental.sequencer-api=true]
