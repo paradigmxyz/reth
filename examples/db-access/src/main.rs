@@ -40,7 +40,7 @@ fn main() -> eyre::Result<()> {
     receipts_provider_example(&provider)?;
 
     state_provider_example(factory.latest()?, &provider, provider.best_block_number()?)?;
-    state_provider_example(factory.history_by_block_number(block_num)?, &provider, block_num)?; 
+    state_provider_example(factory.history_by_block_number(block_num)?, &provider, block_num)?;
 
     // Closes the RO transaction opened in the `factory.provider()` call. This is optional and
     // would happen anyway at the end of the function scope.
@@ -208,8 +208,11 @@ fn receipts_provider_example<
 }
 
 /// The `StateProvider` allows querying the state tables.
-fn state_provider_example<T: StateProvider + AccountReader, H: HeaderProvider>(provider: T, headers: &H, number: u64) -> eyre::Result<()>
-{    
+fn state_provider_example<T: StateProvider + AccountReader, H: HeaderProvider>(
+    provider: T,
+    headers: &H,
+    number: u64,
+) -> eyre::Result<()> {
     let address = Address::random();
     let storage_key = B256::random();
     let slots = [storage_key];
@@ -223,7 +226,7 @@ fn state_provider_example<T: StateProvider + AccountReader, H: HeaderProvider>(p
     let storage_value = provider.storage(address, storage_key)?;
 
     println!(
-        "State at block #{number}: addr={address:?}, nonce={}, balance={}, storage[{:?}]={:?}, has_code={}",
+        "state at block #{number}: addr={address:?}, nonce={}, balance={}, storage[{:?}]={:?}, has_code={}",
         account.as_ref().map(|acc| acc.nonce).unwrap_or_default(),
         account.as_ref().map(|acc| acc.balance).unwrap_or_default(),
         storage_key,
@@ -234,7 +237,7 @@ fn state_provider_example<T: StateProvider + AccountReader, H: HeaderProvider>(p
     // Returns a bundled proof with the account's info
     let proof = provider.proof(Default::default(), address, &slots)?;
 
-
+    // Can verify the returned proof against the state root
     proof.verify(state_root)?;
     println!("account proof verified against state root {state_root:?}");
 
