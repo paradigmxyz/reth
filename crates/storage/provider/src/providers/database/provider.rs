@@ -833,21 +833,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             }
 
             // slow path: rechunk into multiple shards
-            let all_indices: Vec<u64> = last_shard.iter().collect();
-            let mut chunks = all_indices.chunks(sharded_key::NUM_OF_INDICES_IN_SHARD).peekable();
+            let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
+            let mut chunks_peekable = chunks.into_iter().peekable();
 
-            while let Some(list) = chunks.next() {
-                let highest_block_number = if chunks.peek().is_some() {
-                    *list.last().expect("`chunks` does not return empty list")
+            while let Some(chunk) = chunks_peekable.next() {
+                let shard = BlockNumberList::new_pre_sorted(chunk);
+                let highest_block_number = if chunks_peekable.peek().is_some() {
+                    shard.iter().next_back().expect("`chunks` does not return empty list")
                 } else {
                     // Insert last list with `u64::MAX`.
                     u64::MAX
                 };
 
-                cursor.upsert(
-                    sharded_key_factory(partial_key, highest_block_number),
-                    &BlockNumberList::new_pre_sorted(list.iter().copied()),
-                )?;
+                cursor.upsert(sharded_key_factory(partial_key, highest_block_number), &shard)?;
             }
         }
 
