@@ -97,7 +97,11 @@ pub trait DatabaseStorageProof<'a, TX> {
 }
 
 impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
-    for StorageProof<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
+    for StorageProof<
+        'static,
+        DatabaseTrieCursorFactory<&'a TX>,
+        DatabaseHashedCursorFactory<&'a TX>,
+    >
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
         Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx), address)

@@ -1,3 +1,5 @@
+#[cfg(feature = "metrics")]
+use crate::proof_task_metrics::ProofTaskCursorMetricsCache;
 use derive_more::Deref;
 use reth_trie::stats::{TrieStats, TrieTracker};
 
@@ -34,6 +36,9 @@ pub struct ParallelTrieTracker {
     trie: TrieTracker,
     precomputed_storage_roots: u64,
     missed_leaves: u64,
+    #[cfg(feature = "metrics")]
+    /// Local tracking of cursor-related metrics
+    pub cursor_metrics: ProofTaskCursorMetricsCache,
 }
 
 impl ParallelTrieTracker {

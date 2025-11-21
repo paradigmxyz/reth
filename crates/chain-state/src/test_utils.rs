@@ -23,7 +23,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
+use reth_trie::{root::state_root_unhashed, updates::TrieUpdatesSorted, HashedPostStateSorted};
 use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::{
@@ -217,8 +217,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 block_number,
                 vec![Requests::default()],
             )),
-            hashed_state: Arc::new(HashedPostState::default()),
-            trie_updates: Arc::new(TrieUpdates::default()),
+            hashed_state: Arc::new(HashedPostStateSorted::default()),
+            trie_updates: Arc::new(TrieUpdatesSorted::default()),
         }
     }
 

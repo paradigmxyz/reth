@@ -1,13 +1,14 @@
 use crate::{
-    sequence::FlashBlockPendingSequence,
+    sequence::{FlashBlockPendingSequence, SequenceExecutionOutcome},
     worker::{BuildArgs, FlashBlockBuilder},
-    ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
-    InProgressFlashBlockRx, PendingFlashBlock,
+    FlashBlock, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx, InProgressFlashBlockRx,
+    PendingFlashBlock,
 };
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
-use metrics::Histogram;
+use metrics::{Gauge, Histogram};
+use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::{CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions};
 use reth_evm::ConfigureEvm;
 use reth_metrics::Metrics;
@@ -29,7 +30,8 @@ use tokio::{
 };
 use tracing::{debug, trace, warn};
 
-pub(crate) const FB_STATE_ROOT_FROM_INDEX: usize = 9;
+/// 200 ms flashblock time.
+pub(crate) const FLASHBLOCK_BLOCK_TIME: u64 = 200;
 
 /// The `FlashBlockService` maintains an in-memory [`PendingFlashBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
@@ -37,7 +39,7 @@ pub(crate) const FB_STATE_ROOT_FROM_INDEX: usize = 9;
 pub struct FlashBlockService<
     N: NodePrimitives,
     S,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: Unpin>,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>,
     Provider,
 > {
     rx: S,
@@ -59,7 +61,7 @@ pub struct FlashBlockService<
     in_progress_tx: watch::Sender<Option<FlashBlockBuildInfo>>,
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
-    /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
+    /// Enable state root calculation
     compute_state_root: bool,
 }
 
@@ -67,7 +69,7 @@ impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
 where
     N: NodePrimitives,
     S: Stream<Item = eyre::Result<FlashBlock>> + Unpin + 'static,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>
         + Clone
         + 'static,
     Provider: StateProviderFactory
@@ -137,12 +139,14 @@ where
     /// Note: this should be spawned
     pub async fn run(mut self, tx: tokio::sync::watch::Sender<Option<PendingFlashBlock<N>>>) {
         while let Some(block) = self.next().await {
-            if let Ok(block) = block.inspect_err(|e| tracing::error!("{e}")) {
-                let _ = tx.send(block).inspect_err(|e| tracing::error!("{e}"));
+            if let Ok(block) = block.inspect_err(|e| tracing::error!(target: "flashblocks", "{e}"))
+            {
+                let _ =
+                    tx.send(block).inspect_err(|e| tracing::error!(target: "flashblocks", "{e}"));
             }
         }
 
-        warn!("Flashblock service has stopped");
+        warn!(target: "flashblocks", "Flashblock service has stopped");
     }
 
     /// Notifies all subscribers about the received flashblock
@@ -165,6 +169,7 @@ where
     > {
         let Some(base) = self.blocks.payload_base() else {
             trace!(
+                target: "flashblocks",
                 flashblock_number = ?self.blocks.block_number(),
                 count = %self.blocks.count(),
                 "Missing flashblock payload base"
@@ -173,22 +178,55 @@ where
             return None
         };
 
+        let Some(latest) = self.builder.provider().latest_header().ok().flatten() else {
+            trace!(target: "flashblocks", "No latest header found");
+            return None
+        };
+
         // attempt an initial consecutive check
-        if let Some(latest) = self.builder.provider().latest_header().ok().flatten() &&
-            latest.hash() != base.parent_hash
-        {
-            trace!(flashblock_parent=?base.parent_hash, flashblock_number=base.block_number, local_latest=?latest.num_hash(), "Skipping non consecutive build attempt");
+        if latest.hash() != base.parent_hash {
+            trace!(target: "flashblocks", flashblock_parent=?base.parent_hash, flashblock_number=base.block_number, local_latest=?latest.num_hash(), "Skipping non consecutive build attempt");
             return None
         }
 
         let Some(last_flashblock) = self.blocks.last_flashblock() else {
-            trace!(flashblock_number = ?self.blocks.block_number(), count = %self.blocks.count(), "Missing last flashblock");
+            trace!(target: "flashblocks", flashblock_number = ?self.blocks.block_number(), count = %self.blocks.count(), "Missing last flashblock");
             return None
         };
 
-        // Check if state root must be computed
-        let compute_state_root =
-            self.compute_state_root && self.blocks.index() >= Some(FB_STATE_ROOT_FROM_INDEX as u64);
+        // Auto-detect when to compute state root: only if the builder didn't provide it (sent
+        // B256::ZERO) and we're near the expected final flashblock index.
+        //
+        // Background: Each block period receives multiple flashblocks at regular intervals.
+        // The sequencer sends an initial "base" flashblock at index 0 when a new block starts,
+        // then subsequent flashblocks are produced every FLASHBLOCK_BLOCK_TIME intervals (200ms).
+        //
+        // Examples with different block times:
+        // - Base (2s blocks):    expect 2000ms / 200ms = 10 intervals → Flashblocks: index 0 (base)
+        //   + indices 1-10 = potentially 11 total
+        //
+        // - Unichain (1s blocks): expect 1000ms / 200ms = 5 intervals → Flashblocks: index 0 (base)
+        //   + indices 1-5 = potentially 6 total
+        //
+        // Why compute at N-1 instead of N:
+        // 1. Timing variance in flashblock producing time may mean only N flashblocks were produced
+        //    instead of N+1 (missing the final one). Computing at N-1 ensures we get the state root
+        //    for most common cases.
+        //
+        // 2. The +1 case (index 0 base + N intervals): If all N+1 flashblocks do arrive, we'll
+        //    still calculate state root for flashblock N, which sacrifices a little performance but
+        //    still ensures correctness for common cases.
+        //
+        // Note: Pathological cases may result in fewer flashblocks than expected (e.g., builder
+        // downtime, flashblock execution exceeding timing budget). When this occurs, we won't
+        // compute the state root, causing FlashblockConsensusClient to lack precomputed state for
+        // engine_newPayload. This is safe: we still have op-node as backstop to maintain
+        // chain progression.
+        let block_time_ms = (base.timestamp - latest.timestamp()) * 1000;
+        let expected_final_flashblock = block_time_ms / FLASHBLOCK_BLOCK_TIME;
+        let compute_state_root = self.compute_state_root &&
+            last_flashblock.diff.state_root.is_zero() &&
+            self.blocks.index() >= Some(expected_final_flashblock.saturating_sub(1));
 
         Some(BuildArgs {
             base,
@@ -228,7 +266,7 @@ impl<N, S, EvmConfig, Provider> Stream for FlashBlockService<N, S, EvmConfig, Pr
 where
     N: NodePrimitives,
     S: Stream<Item = eyre::Result<FlashBlock>> + Unpin + 'static,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>
         + Clone
         + 'static,
     Provider: StateProviderFactory
@@ -264,8 +302,15 @@ where
             if let Some((now, result)) = result {
                 match result {
                     Ok(Some((new_pending, cached_reads))) => {
-                        // update state root of the current sequence
-                        this.blocks.set_state_root(new_pending.computed_state_root());
+                        // update execution outcome of the current sequence
+                        let execution_outcome =
+                            new_pending.computed_state_root().map(|state_root| {
+                                SequenceExecutionOutcome {
+                                    block_hash: new_pending.block().hash(),
+                                    state_root,
+                                }
+                            });
+                        this.blocks.set_execution_outcome(execution_outcome);
 
                         // built a new pending block
                         this.current = Some(new_pending.clone());
@@ -275,7 +320,9 @@ where
 
                         let elapsed = now.elapsed();
                         this.metrics.execution_duration.record(elapsed.as_secs_f64());
+
                         trace!(
+                            target: "flashblocks",
                             parent_hash = %new_pending.block().parent_hash(),
                             block_number = new_pending.block().number(),
                             flash_blocks = this.blocks.count(),
@@ -290,7 +337,7 @@ where
                     }
                     Err(err) => {
                         // we can ignore this error
-                        debug!(%err, "failed to execute flashblock");
+                        debug!(target: "flashblocks", %err, "failed to execute flashblock");
                     }
                 }
             }
@@ -305,7 +352,9 @@ where
                         }
                         match this.blocks.insert(flashblock) {
                             Ok(_) => this.rebuild = true,
-                            Err(err) => debug!(%err, "Failed to prepare flashblock"),
+                            Err(err) => {
+                                debug!(target: "flashblocks", %err, "Failed to prepare flashblock")
+                            }
                         }
                     }
                     Err(err) => return Poll::Ready(Some(Err(err))),
@@ -320,6 +369,7 @@ where
             } && let Some(current) = this.on_new_tip(state)
             {
                 trace!(
+                    target: "flashblocks",
                     parent_hash = %current.block().parent_hash(),
                     block_number = current.block().number(),
                     "Clearing current flashblock on new canonical block"
@@ -341,6 +391,9 @@ where
                     index: args.last_flashblock_index,
                     block_number: args.base.block_number,
                 };
+                // Record current block and index metrics
+                this.metrics.current_block_height.set(fb_info.block_number as f64);
+                this.metrics.current_index.set(fb_info.index as f64);
                 // Signal that a flashblock build has started with build metadata
                 let _ = this.in_progress_tx.send(Some(fb_info));
                 let (tx, rx) = oneshot::channel();
@@ -381,4 +434,8 @@ struct FlashBlockServiceMetrics {
     last_flashblock_length: Histogram,
     /// The duration applying flashblock state changes in seconds.
     execution_duration: Histogram,
+    /// Current block height.
+    current_block_height: Gauge,
+    /// Current flashblock index.
+    current_index: Gauge,
 }

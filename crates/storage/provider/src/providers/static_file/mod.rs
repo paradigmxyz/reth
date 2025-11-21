@@ -61,7 +61,7 @@ mod tests {
         test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
-    use alloy_primitives::{map::HashMap, BlockHash, Signature, TxNumber, B256};
+    use alloy_primitives::{BlockHash, Signature, TxNumber, B256};
     use rand::seq::SliceRandom;
     use reth_db::test_utils::create_test_static_files_dir;
     use reth_db_api::{transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};
@@ -314,16 +314,20 @@ mod tests {
 
                 // Append transaction/receipt if there's still a transaction count to append
                 if tx_count > 0 {
-                    if segment.is_receipts() {
-                        // Used as ID for validation
-                        receipt.cumulative_gas_used = *next_tx_num;
-                        writer.append_receipt(*next_tx_num, &receipt).unwrap();
-                    } else {
-                        // Used as ID for validation
-                        tx.nonce = *next_tx_num;
-                        let tx: TransactionSigned =
-                            tx.clone().into_signed(Signature::test_signature()).into();
-                        writer.append_transaction(*next_tx_num, &tx).unwrap();
+                    match segment {
+                        StaticFileSegment::Headers => panic!("non tx based segment"),
+                        StaticFileSegment::Transactions => {
+                            // Used as ID for validation
+                            tx.nonce = *next_tx_num;
+                            let tx: TransactionSigned =
+                                tx.clone().into_signed(Signature::test_signature()).into();
+                            writer.append_transaction(*next_tx_num, &tx).unwrap();
+                        }
+                        StaticFileSegment::Receipts => {
+                            // Used as ID for validation
+                            receipt.cumulative_gas_used = *next_tx_num;
+                            writer.append_receipt(*next_tx_num, &receipt).unwrap();
+                        }
                     }
                     *next_tx_num += 1;
                     tx_count -= 1;
@@ -387,11 +391,12 @@ mod tests {
         });
 
         // Ensure transaction index
-        let tx_index = sf_rw.tx_index().read();
-        let expected_tx_index =
-            vec![(8, SegmentRangeInclusive::new(0, 9)), (9, SegmentRangeInclusive::new(20, 29))];
+        let expected_tx_index = BTreeMap::from([
+            (8, SegmentRangeInclusive::new(0, 9)),
+            (9, SegmentRangeInclusive::new(20, 29)),
+        ]);
         assert_eq!(
-            tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+            sf_rw.tx_index(segment),
             (!expected_tx_index.is_empty()).then_some(expected_tx_index),
             "tx index mismatch",
         );
@@ -414,15 +419,17 @@ mod tests {
             last_block: u64,
             expected_tx_tip: Option<u64>,
             expected_file_count: i32,
-            expected_tx_index: Vec<(TxNumber, SegmentRangeInclusive)>,
+            expected_tx_index: BTreeMap<TxNumber, SegmentRangeInclusive>,
         ) -> eyre::Result<()> {
             let mut writer = sf_rw.latest_writer(segment)?;
 
             // Prune transactions or receipts based on the segment type
-            if segment.is_receipts() {
-                writer.prune_receipts(prune_count, last_block)?;
-            } else {
-                writer.prune_transactions(prune_count, last_block)?;
+            match segment {
+                StaticFileSegment::Headers => panic!("non tx based segment"),
+                StaticFileSegment::Transactions => {
+                    writer.prune_transactions(prune_count, last_block)?
+                }
+                StaticFileSegment::Receipts => writer.prune_receipts(prune_count, last_block)?,
             }
             writer.commit()?;
 
@@ -437,18 +444,18 @@ mod tests {
             // Verify that transactions and receipts are returned correctly. Uses
             // cumulative_gas_used & nonce as ids.
             if let Some(id) = expected_tx_tip {
-                if segment.is_receipts() {
-                    assert_eyre(
-                        expected_tx_tip,
-                        sf_rw.receipt(id)?.map(|r| r.cumulative_gas_used),
-                        "tx mismatch",
-                    )?;
-                } else {
-                    assert_eyre(
+                match segment {
+                    StaticFileSegment::Headers => panic!("non tx based segment"),
+                    StaticFileSegment::Transactions => assert_eyre(
                         expected_tx_tip,
                         sf_rw.transaction_by_id(id)?.map(|t| t.nonce()),
                         "tx mismatch",
-                    )?;
+                    )?,
+                    StaticFileSegment::Receipts => assert_eyre(
+                        expected_tx_tip,
+                        sf_rw.receipt(id)?.map(|r| r.cumulative_gas_used),
+                        "receipt mismatch",
+                    )?,
                 }
             }
 
@@ -460,9 +467,8 @@ mod tests {
             )?;
 
             // Ensure that the inner tx index (max_tx -> block range) is as expected
-            let tx_index = sf_rw.tx_index().read();
             assert_eyre(
-                tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+                sf_rw.tx_index(segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
                 (!expected_tx_index.is_empty()).then_some(expected_tx_index),
                 "tx index mismatch",
             )?;
@@ -500,7 +506,7 @@ mod tests {
                     blocks_per_file * 2,
                     Some(highest_tx - 1),
                     initial_file_count,
-                    vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
+                    BTreeMap::from([(highest_tx - 1, SegmentRangeInclusive::new(0, 9))]),
                 ),
                 // Case 1: 10..=19 has no txs. There are no txes in the whole block range, but want
                 // to unwind to block 9. Ensures that the 20..=29 and 10..=19 files
@@ -510,7 +516,7 @@ mod tests {
                     blocks_per_file - 1,
                     Some(highest_tx - 1),
                     files_per_range,
-                    vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
+                    BTreeMap::from([(highest_tx - 1, SegmentRangeInclusive::new(0, 9))]),
                 ),
                 // Case 2: Prune most txs up to block 1.
                 (
@@ -518,10 +524,10 @@ mod tests {
                     1,
                     Some(0),
                     files_per_range,
-                    vec![(0, SegmentRangeInclusive::new(0, 1))],
+                    BTreeMap::from([(0, SegmentRangeInclusive::new(0, 1))]),
                 ),
                 // Case 3: Prune remaining tx and ensure that file is not deleted.
-                (1, 0, None, files_per_range, vec![]),
+                (1, 0, None, files_per_range, BTreeMap::from([])),
             ];
 
             // Loop through test cases
@@ -578,14 +584,11 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=15)?.len(), 16);
             assert_eq!(
-                sf_rw.expected_block_index().read().deref(),
-                &HashMap::from([(
-                    StaticFileSegment::Headers,
-                    BTreeMap::from([
-                        (9, SegmentRangeInclusive::new(0, 9)),
-                        (19, SegmentRangeInclusive::new(10, 19))
-                    ])
-                )])
+                sf_rw.expected_block_index(StaticFileSegment::Headers),
+                Some(BTreeMap::from([
+                    (9, SegmentRangeInclusive::new(0, 9)),
+                    (19, SegmentRangeInclusive::new(10, 19))
+                ])),
             )
         }
 
@@ -604,15 +607,12 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=22)?.len(), 23);
             assert_eq!(
-                sf_rw.expected_block_index().read().deref(),
-                &HashMap::from([(
-                    StaticFileSegment::Headers,
-                    BTreeMap::from([
-                        (9, SegmentRangeInclusive::new(0, 9)),
-                        (19, SegmentRangeInclusive::new(10, 19)),
-                        (24, SegmentRangeInclusive::new(20, 24))
-                    ])
-                )])
+                sf_rw.expected_block_index(StaticFileSegment::Headers),
+                Some(BTreeMap::from([
+                    (9, SegmentRangeInclusive::new(0, 9)),
+                    (19, SegmentRangeInclusive::new(10, 19)),
+                    (24, SegmentRangeInclusive::new(20, 24))
+                ]))
             )
         }
 
@@ -631,17 +631,14 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=40)?.len(), 41);
             assert_eq!(
-                sf_rw.expected_block_index().read().deref(),
-                &HashMap::from([(
-                    StaticFileSegment::Headers,
-                    BTreeMap::from([
-                        (9, SegmentRangeInclusive::new(0, 9)),
-                        (19, SegmentRangeInclusive::new(10, 19)),
-                        (24, SegmentRangeInclusive::new(20, 24)),
-                        (39, SegmentRangeInclusive::new(25, 39)),
-                        (54, SegmentRangeInclusive::new(40, 54))
-                    ])
-                )])
+                sf_rw.expected_block_index(StaticFileSegment::Headers),
+                Some(BTreeMap::from([
+                    (9, SegmentRangeInclusive::new(0, 9)),
+                    (19, SegmentRangeInclusive::new(10, 19)),
+                    (24, SegmentRangeInclusive::new(20, 24)),
+                    (39, SegmentRangeInclusive::new(25, 39)),
+                    (54, SegmentRangeInclusive::new(40, 54))
+                ]))
             )
         }
 

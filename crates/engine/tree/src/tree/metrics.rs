@@ -82,9 +82,12 @@ impl EngineApiMetrics {
                 let tx = tx?;
                 let span =
                     debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
-                let _enter = span.enter();
+                let enter = span.entered();
                 trace!(target: "engine::tree", "Executing transaction");
-                executor.execute_transaction(tx)?;
+                let gas_used = executor.execute_transaction(tx)?;
+
+                // record the tx gas used
+                enter.record("gas_used", gas_used);
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
@@ -248,6 +251,8 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) new_payload_total_gas: Histogram,
     /// The gas per second of valid new payload messages received.
     pub(crate) new_payload_gas_per_second: Histogram,
+    /// The gas per second for the last new payload call.
+    pub(crate) new_payload_gas_per_second_last: Gauge,
     /// Latency for the new payload calls.
     pub(crate) new_payload_latency: Histogram,
     /// Latency for the last new payload call.
@@ -271,7 +276,9 @@ impl NewPayloadStatusMetrics {
                 PayloadStatusEnum::Valid => {
                     self.new_payload_valid.increment(1);
                     self.new_payload_total_gas.record(gas_used as f64);
-                    self.new_payload_gas_per_second.record(gas_used as f64 / elapsed.as_secs_f64());
+                    let gas_per_second = gas_used as f64 / elapsed.as_secs_f64();
+                    self.new_payload_gas_per_second.record(gas_per_second);
+                    self.new_payload_gas_per_second_last.set(gas_per_second);
                 }
                 PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),
                 PayloadStatusEnum::Accepted => self.new_payload_accepted.increment(1),

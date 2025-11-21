@@ -1,7 +1,6 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
 pub mod api;
-use crate::error::api::FromEvmHalt;
 use alloy_eips::BlockId;
 use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
@@ -23,7 +22,7 @@ use reth_transaction_pool::error::{
 };
 use revm::{
     context_interface::result::{
-        EVMError, ExecutionResult, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
+        EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
     },
     state::bal::BalError,
 };
@@ -1078,19 +1077,19 @@ pub enum SignError {
     NoChainId,
 }
 
-/// Converts the evm [`ExecutionResult`] into a result where `Ok` variant is the output bytes if it
-/// is [`ExecutionResult::Success`].
-pub fn ensure_success<Halt, Error: FromEvmHalt<Halt> + FromEthApiError>(
-    result: ExecutionResult<Halt>,
-) -> Result<Bytes, Error> {
-    match result {
-        ExecutionResult::Success { output, .. } => Ok(output.into_data()),
-        ExecutionResult::Revert { output, .. } => {
-            Err(Error::from_eth_err(RpcInvalidTransactionError::Revert(RevertError::new(output))))
-        }
-        ExecutionResult::Halt { reason, gas_used } => Err(Error::from_evm_halt(reason, gas_used)),
-    }
-}
+// /// Converts the evm [`ExecutionResult`] into a result where `Ok` variant is the output bytes if
+// it /// is [`ExecutionResult::Success`].
+// pub fn ensure_success<Halt, Error: FromEvmHalt<Halt> + FromEthApiError>(
+//     result: ExecutionResult<Halt>,
+// ) -> Result<Bytes, Error> {
+//     match result {
+//         ExecutionResult::Success { output, .. } => Ok(output.into_data()),
+//         ExecutionResult::Revert { output, .. } => {
+//
+// Err(Error::from_eth_err(RpcInvalidTransactionError::Revert(RevertError::new(output))))         }
+//         ExecutionResult::Halt { reason, gas_used } => Err(Error::from_evm_halt(reason,
+// gas_used)),     }
+// }
 
 impl<E> From<BalDatabaseError<E>> for EthApiError
 where

@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use reth_net_banlist::BanList;
+use reth_net_banlist::{BanList, IpFilter};
 use reth_network_peers::{NodeRecord, TrustedPeer};
 use tracing::info;
 
@@ -166,6 +166,12 @@ pub struct PeersConfig {
     /// This acts as an IP based rate limit.
     #[cfg_attr(feature = "serde", serde(default, with = "humantime_serde"))]
     pub incoming_ip_throttle_duration: Duration,
+    /// IP address filter for restricting network connections to specific IP ranges.
+    ///
+    /// Similar to geth's --netrestrict flag. If configured, only connections to/from
+    /// IPs within the specified CIDR ranges will be allowed.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub ip_filter: IpFilter,
 }
 
 impl Default for PeersConfig {
@@ -184,6 +190,7 @@ impl Default for PeersConfig {
             basic_nodes: Default::default(),
             max_backoff_count: 5,
             incoming_ip_throttle_duration: INBOUND_IP_THROTTLE_DURATION,
+            ip_filter: IpFilter::default(),
         }
     }
 }
@@ -299,6 +306,12 @@ impl PeersConfig {
         info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
         let nodes: HashSet<NodeRecord> = serde_json::from_reader(reader)?;
         Ok(self.with_basic_nodes(nodes))
+    }
+
+    /// Configure the IP filter for restricting network connections to specific IP ranges.
+    pub fn with_ip_filter(mut self, ip_filter: IpFilter) -> Self {
+        self.ip_filter = ip_filter;
+        self
     }
 
     /// Returns settings for testing

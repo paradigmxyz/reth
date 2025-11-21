@@ -1,8 +1,5 @@
 use crate::{BlockNumber, Compression};
-use alloc::{
-    format,
-    string::{String, ToString},
-};
+use alloc::{format, string::String};
 use alloy_primitives::TxNumber;
 use core::{ops::RangeInclusive, str::FromStr};
 use derive_more::Display;
@@ -86,7 +83,7 @@ impl StaticFileSegment {
     ) -> String {
         let prefix = self.filename(block_range);
 
-        let filters_name = "none".to_string();
+        let filters_name = "none";
 
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`.]
@@ -127,12 +124,18 @@ impl StaticFileSegment {
 
     /// Returns `true` if a segment row is linked to a transaction.
     pub const fn is_tx_based(&self) -> bool {
-        matches!(self, Self::Receipts | Self::Transactions)
+        match self {
+            Self::Receipts | Self::Transactions => true,
+            Self::Headers => false,
+        }
     }
 
     /// Returns `true` if a segment row is linked to a block.
     pub const fn is_block_based(&self) -> bool {
-        matches!(self, Self::Headers)
+        match self {
+            Self::Headers => true,
+            Self::Receipts | Self::Transactions => false,
+        }
     }
 }
 
