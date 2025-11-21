@@ -653,8 +653,9 @@ where
         *range.start()..*range.end() + 1,
         |cursor, number| cursor.get_one::<HeaderMask<N::BlockHeader>>(number.into()),
     )? {
-        let entry = entry?;
-        gas_total += entry.gas_used();
+        if let Some(entry) = entry? {
+            gas_total += entry.gas_used();
+        }
     }
 
     let duration = start.elapsed();
@@ -1252,7 +1253,9 @@ mod tests {
         // but no receipt data is written.
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::new().with_receipts_in_static_files());
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_receipts_in_static_files(true),
+        );
 
         // Setup with block 1
         let provider_rw = factory.database_provider_rw().unwrap();
