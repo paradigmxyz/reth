@@ -53,7 +53,9 @@
 //!
 //! ```rust
 //! use alloy_consensus::{Eip658Value, Receipt, ReceiptEnvelope, ReceiptWithBloom};
-//! use reth_era::{common::decode::DecodeCompressedRlp, era1::types::execution::CompressedReceipts};
+//! use reth_era::{
+//!     common::decode::DecodeCompressedRlp, era1::types::execution::CompressedReceipts,
+//! };
 //!
 //! let receipt =
 //!     Receipt { status: Eip658Value::Eip658(true), cumulative_gas_used: 21000, logs: vec![] };
