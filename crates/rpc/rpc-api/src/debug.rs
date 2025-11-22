@@ -1,4 +1,4 @@
-use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_eips::{eip7928::BlockAccessList, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256};
@@ -21,6 +21,13 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// Returns an RLP-encoded block.
     #[method(name = "getRawBlock")]
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
+
+    /// Returns a Eip-7928 block access list.
+    #[method(name = "getBlockAccessList")]
+    async fn debug_get_block_access_list(
+        &self,
+        block_id: BlockId,
+    ) -> RpcResult<Option<BlockAccessList>>;
 
     /// Returns a EIP-2718 binary-encoded transaction.
     ///

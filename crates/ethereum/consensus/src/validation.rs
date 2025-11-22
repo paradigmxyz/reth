@@ -1,11 +1,11 @@
 use alloc::vec::Vec;
 use alloy_consensus::{proofs::calculate_receipt_root, BlockHeader, TxReceipt};
-use alloy_eips::{eip7685::Requests, Encodable2718};
+use alloy_eips::{eip7685::Requests, eip7928::BlockAccessList, Encodable2718};
 use alloy_primitives::{Bloom, Bytes, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
-    receipt::gas_spent_by_transactions, Block, GotExpected, Receipt, RecoveredBlock,
+    receipt::gas_spent_by_transactions, Block, BlockBody, GotExpected, Receipt, RecoveredBlock,
 };
 
 /// Validate a block with regard to execution results:
@@ -17,6 +17,7 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     chain_spec: &ChainSpec,
     receipts: &[R],
     requests: &Requests,
+    block_access_list: &Option<BlockAccessList>,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -62,6 +63,28 @@ where
             return Err(ConsensusError::BodyRequestsHashDiff(
                 GotExpected::new(requests_hash, header_requests_hash).into(),
             ))
+        }
+    }
+
+    // Validate bal hash matches the calculated hash
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+        let Some(header_block_access_list_hash) = block.header().block_access_list_hash() else {
+            return Err(ConsensusError::BlockAccessListHashMissing)
+        };
+        if let Some(bal) = block_access_list {
+            let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
+            if let Some(body_bal) = block.body().block_access_list() {
+                verify_bal(body_bal, bal)?;
+            }
+
+            if bal_hash != header_block_access_list_hash {
+                tracing::debug!(
+                    ?bal_hash,
+                    ?header_block_access_list_hash,
+                    "block access list hash mismatch"
+                );
+                return Err(ConsensusError::InvalidBalHash);
+            }
         }
     }
 
@@ -113,6 +136,47 @@ fn compare_receipts_root_and_logs_bloom(
     }
 
     Ok(())
+}
+
+/// Validates that the block access list in the body matches the expected block access list.
+fn verify_bal(
+    body_bal: &BlockAccessList,
+    expected_bal: &BlockAccessList,
+) -> Result<(), ConsensusError> {
+    if body_bal == expected_bal {
+        return Ok(());
+    }
+
+    // Extract addresses
+    let body_addrs: Vec<_> = body_bal.iter().map(|a| a.address).collect();
+    let expected_addrs: Vec<_> = expected_bal.iter().map(|a| a.address).collect();
+
+    // Missing accounts (expected but not found in body)
+    for addr in &expected_addrs {
+        if !body_addrs.contains(addr) {
+            tracing::debug!("Missing acc : computed bal {:?},body bal{:?}", expected_bal, body_bal);
+            tracing::debug!("Missing Address: {:?}", addr);
+            return Err(ConsensusError::InvalidBalMissingAccount);
+        }
+    }
+
+    // Extra accounts (body has accounts not in expected)
+    for addr in &body_addrs {
+        if !expected_addrs.contains(addr) {
+            tracing::debug!("Extra acc : computed bal {:?},body bal{:?}", expected_bal, body_bal);
+            tracing::debug!("Extra Address: {:?}", addr);
+            return Err(ConsensusError::InvalidBalExtraAccount);
+        }
+    }
+
+    tracing::debug!(
+        ?expected_bal,
+        ?body_bal,
+        "block access list in body does not match the provided block access list"
+    );
+
+    // Fallback: mismatched access lists
+    Err(ConsensusError::InvalidBlockAccessList)
 }
 
 #[cfg(test)]

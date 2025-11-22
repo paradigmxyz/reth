@@ -48,7 +48,8 @@ where
             execution_ctx: ctx,
             parent,
             transactions,
-            output: BlockExecutionResult { receipts, requests, gas_used, blob_gas_used },
+            output:
+                BlockExecutionResult { receipts, requests, gas_used, blob_gas_used, block_access_list },
             state_root,
             ..
         } = input;
@@ -93,6 +94,18 @@ where
             };
         }
 
+        let (built_block_access_list, block_access_list_hash) =
+            if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
+                if let Some(bal) = block_access_list {
+                    let hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
+                    (Some(bal), Some(hash))
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+
         let header = Header {
             parent_hash: ctx.parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -115,11 +128,17 @@ where
             blob_gas_used: block_blob_gas_used,
             excess_blob_gas,
             requests_hash,
+            block_access_list_hash,
         };
 
         Ok(Block {
             header,
-            body: BlockBody { transactions, ommers: Default::default(), withdrawals },
+            body: BlockBody {
+                transactions,
+                ommers: Default::default(),
+                withdrawals,
+                block_access_list: built_block_access_list.cloned(),
+            },
         })
     }
 }
