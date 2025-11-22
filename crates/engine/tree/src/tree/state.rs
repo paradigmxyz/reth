@@ -31,7 +31,7 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// This maps unique block number to all known blocks for that height.
     ///
     /// Note: there can be multiple blocks at the same height due to forks.
-    pub(crate) blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock<N>>>,
+    pub(crate) blocks_by_number: BTreeMap<BlockNumber, Vec<B256>>,
     /// Map of any parent block hash to its children.
     pub(crate) parent_to_child: HashMap<B256, HashSet<B256>>,
     /// Currently tracked canonical head of the chain.
@@ -102,9 +102,9 @@ impl<N: NodePrimitives> TreeState<N> {
             return;
         }
 
-        self.blocks_by_hash.insert(hash, executed.clone());
+        self.blocks_by_hash.insert(hash, executed);
 
-        self.blocks_by_number.entry(block_number).or_default().push(executed);
+        self.blocks_by_number.entry(block_number).or_default().push(hash);
 
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
     }
@@ -133,9 +133,8 @@ impl<N: NodePrimitives> TreeState<N> {
         // Remove this block from `blocks_by_number`.
         let block_number_entry = self.blocks_by_number.entry(executed.recovered_block().number());
         if let btree_map::Entry::Occupied(mut entry) = block_number_entry {
-            // We have to find the index of the block since it exists in a vec
-            if let Some(index) = entry.get().iter().position(|b| b.recovered_block().hash() == hash)
-            {
+            // We have to find the index of the block hash since it exists in a vec
+            if let Some(index) = entry.get().iter().position(|h| *h == hash) {
                 entry.get_mut().swap_remove(index);
 
                 // If there are no blocks left then remove the entry for this block
@@ -210,7 +209,7 @@ impl<N: NodePrimitives> TreeState<N> {
         let blocks_to_remove = self
             .blocks_by_number
             .range((Bound::Unbounded, Bound::Excluded(finalized_num)))
-            .flat_map(|(_, blocks)| blocks.iter().map(|b| b.recovered_block().hash()))
+            .flat_map(|(_, blocks)| blocks.iter().copied())
             .collect::<Vec<_>>();
         for hash in blocks_to_remove {
             if let Some((removed, _)) = self.remove_by_hash(hash) {
@@ -227,17 +226,13 @@ impl<N: NodePrimitives> TreeState<N> {
         let mut blocks_to_remove = self.blocks_by_number.remove(&finalized_num).unwrap_or_default();
 
         // re-insert the finalized hash if we removed it
-        if let Some(position) =
-            blocks_to_remove.iter().position(|b| b.recovered_block().hash() == finalized_hash)
-        {
-            let finalized_block = blocks_to_remove.swap_remove(position);
-            self.blocks_by_number.insert(finalized_num, vec![finalized_block]);
+        if let Some(position) = blocks_to_remove.iter().position(|h| *h == finalized_hash) {
+            // keep only the finalized hash at this height
+            let _ = blocks_to_remove.swap_remove(position);
+            self.blocks_by_number.insert(finalized_num, vec![finalized_hash]);
         }
 
-        let mut blocks_to_remove = blocks_to_remove
-            .into_iter()
-            .map(|e| e.recovered_block().hash())
-            .collect::<VecDeque<_>>();
+        let mut blocks_to_remove = blocks_to_remove.into_iter().collect::<VecDeque<_>>();
         while let Some(block) = blocks_to_remove.pop_front() {
             if let Some((removed, children)) = self.remove_by_hash(block) {
                 debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain child block");
