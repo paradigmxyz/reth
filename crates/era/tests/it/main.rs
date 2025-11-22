@@ -183,7 +183,7 @@ impl EraTestDownloader {
         Ok(())
     }
 
-    /// Get network configuration, URL and supported files,  based on network and file type
+    /// Get network configuration, URL and supported files, based on network and file type
     fn get_network_config(
         &self,
         filename: &str,
@@ -205,14 +205,13 @@ impl EraTestDownloader {
         }
     }
 
-    /// open `.era1` file, downloading it if necessary
+    /// Open `.era1` file, downloading it if necessary
     async fn open_era1_file(&self, filename: &str, network: &str) -> Result<Era1File> {
         let path = self.download_file(filename, network).await?;
         Era1Reader::open(&path, network).map_err(|e| eyre!("Failed to open Era1 file: {e}"))
     }
 
-    /// open `.era` file, downloading it if necessary
-    #[allow(dead_code)]
+    /// Open `.era` file, downloading it if necessary
     async fn open_era_file(&self, filename: &str, network: &str) -> Result<EraFile> {
         let path = self.download_file(filename, network).await?;
         EraReader::open(&path, network).map_err(|e| eyre!("Failed to open Era1 file: {e}"))
