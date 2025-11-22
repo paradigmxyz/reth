@@ -53,11 +53,10 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     /// Return lazy-loaded trie state aggregated from in-memory blocks.
     fn trie_input(&self) -> &TrieInput {
         self.trie_input.get_or_init(|| {
+            let bundles: Vec<_> =
+                self.in_memory.iter().rev().map(|block| block.trie_data()).collect();
             TrieInput::from_blocks_sorted(
-                self.in_memory
-                    .iter()
-                    .rev()
-                    .map(|block| (block.hashed_state.as_ref(), block.trie_updates.as_ref())),
+                bundles.iter().map(|data| (data.hashed_state.as_ref(), data.trie_updates.as_ref())),
             )
         })
     }

@@ -2,7 +2,7 @@
 
 use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainInfoTracker, MemoryOverlayStateProvider,
+    ChainInfoTracker, ComputedTrieData, DeferredTrieData, MemoryOverlayStateProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
@@ -17,7 +17,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted};
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -719,16 +719,15 @@ impl<N: NodePrimitives> BlockState<N> {
 }
 
 /// Represents an executed block stored in-memory.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// Recovered Block
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
-    /// Block's sorted hashed state.
-    pub hashed_state: Arc<HashedPostStateSorted>,
-    /// Sorted trie updates that result from calculating the state root for the block.
-    pub trie_updates: Arc<TrieUpdatesSorted>,
+    /// Deferred trie data produced by execution.
+    /// These are computed in a background task to unblock the validation hot path
+    pub trie_data: DeferredTrieData,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -736,11 +735,20 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
         Self {
             recovered_block: Default::default(),
             execution_output: Default::default(),
-            hashed_state: Default::default(),
-            trie_updates: Default::default(),
+            trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
         }
     }
 }
+
+impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
+    fn eq(&self, other: &Self) -> bool {
+        // Ignore deferred trie data here to avoid blocking comparisons.
+        self.recovered_block == other.recovered_block &&
+            self.execution_output == other.execution_output
+    }
+}
+
+impl<N: NodePrimitives> Eq for ExecutedBlock<N> {}
 
 impl<N: NodePrimitives> ExecutedBlock<N> {
     /// Returns a reference to an inner [`SealedBlock`]
@@ -761,16 +769,46 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         &self.execution_output
     }
 
-    /// Returns a reference to the hashed state result of the execution outcome
+    /// Returns the deferred trie data, blocking until it is available.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the background trie computation task failed or panicked.
     #[inline]
-    pub fn hashed_state(&self) -> &HashedPostStateSorted {
-        &self.hashed_state
+    pub fn trie_data(&self) -> ComputedTrieData {
+        self.trie_data
+            .wait_cloned()
+            .unwrap_or_else(|err| panic!("deferred trie data unavailable: {err}"))
     }
 
-    /// Returns a reference to the trie updates resulting from the execution outcome
+    /// Returns the hashed state result of the execution outcome.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the background trie computation task failed or panicked.
     #[inline]
-    pub fn trie_updates(&self) -> &TrieUpdatesSorted {
-        &self.trie_updates
+    pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
+        self.trie_data().hashed_state
+    }
+
+    /// Returns the trie updates resulting from the execution outcome.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the background trie computation task failed or panicked.
+    #[inline]
+    pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
+        self.trie_data().trie_updates
+    }
+
+    /// Returns the trie input anchored to the persisted ancestor.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the background trie computation task failed or panicked.
+    #[inline]
+    pub fn trie_input(&self) -> Arc<TrieInputSorted> {
+        self.trie_data().trie_input
     }
 
     /// Returns a [`BlockNumber`] of the block.

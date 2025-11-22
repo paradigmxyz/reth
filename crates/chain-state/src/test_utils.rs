@@ -1,6 +1,6 @@
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions,
+    CanonStateSubscriptions, ComputedTrieData, DeferredTrieData,
 };
 use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::{
@@ -23,7 +23,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::{root::state_root_unhashed, updates::TrieUpdatesSorted, HashedPostStateSorted};
+use reth_trie::root::state_root_unhashed;
 use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::{
@@ -208,6 +208,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let block_with_senders = self.generate_random_block(block_number, parent_hash);
 
         let (block, senders) = block_with_senders.split_sealed();
+        let trie_data = ComputedTrieData::default();
         ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
             execution_output: Arc::new(ExecutionOutcome::new(
@@ -216,8 +217,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 block_number,
                 vec![Requests::default()],
             )),
-            hashed_state: Arc::new(HashedPostStateSorted::default()),
-            trie_updates: Arc::new(TrieUpdatesSorted::default()),
+            trie_data: DeferredTrieData::ready(trie_data),
         }
     }
 

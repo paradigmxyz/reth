@@ -127,6 +127,11 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
+    /// Returns a reference to the workload executor driving payload tasks.
+    pub(super) const fn executor(&self) -> &WorkloadExecutor {
+        &self.executor
+    }
+
     /// Creates a new payload processor.
     pub fn new(
         executor: WorkloadExecutor,

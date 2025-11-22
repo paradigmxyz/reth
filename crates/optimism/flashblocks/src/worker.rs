@@ -2,7 +2,9 @@ use crate::PendingFlashBlock;
 use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag};
 use alloy_primitives::B256;
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
-use reth_chain_state::{CanonStateSubscriptions, ExecutedBlock};
+use reth_chain_state::{
+    CanonStateSubscriptions, ComputedTrieData, DeferredTrieData, ExecutedBlock,
+};
 use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -15,6 +17,7 @@ use reth_primitives_traits::{
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
+use reth_trie_common::TrieInputSorted;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -125,8 +128,12 @@ where
             ExecutedBlock {
                 recovered_block: block.into(),
                 execution_output: Arc::new(execution_outcome),
-                hashed_state: Arc::new(hashed_state.into_sorted()),
-                trie_updates: Arc::default(),
+                trie_data: DeferredTrieData::ready(ComputedTrieData {
+                    hashed_state: Arc::new(hashed_state.into_sorted()),
+                    trie_updates: Arc::default(),
+                    anchor_hash: B256::ZERO,
+                    trie_input: Arc::new(TrieInputSorted::default()),
+                }),
             },
         );
         let pending_flashblock = PendingFlashBlock::new(

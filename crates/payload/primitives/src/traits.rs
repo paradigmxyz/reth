@@ -10,6 +10,7 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use either::Either;
+use reth_chain_state::{ComputedTrieData, DeferredTrieData};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie_common::{
@@ -62,8 +63,12 @@ impl<N: NodePrimitives> BuiltPayloadExecutedBlock<N> {
         reth_chain_state::ExecutedBlock {
             recovered_block: self.recovered_block,
             execution_output: self.execution_output,
-            hashed_state,
-            trie_updates,
+            trie_data: DeferredTrieData::ready(ComputedTrieData {
+                hashed_state,
+                trie_updates,
+                anchor_hash: B256::ZERO,
+                trie_input: Arc::new(reth_trie_common::TrieInputSorted::default()),
+            }),
         }
     }
 }
