@@ -4523,4 +4523,74 @@ mod tests {
             "Non-4844 tx should gain ENOUGH_FEE_CAP_BLOCK bit after basefee decrease"
         );
     }
+
+    /// Test that verifies removed transactions are not included by existing iterators.
+    ///
+    /// This test simulates a race condition where:
+    /// 1. Block builder creates an iterator (takes snapshot of pool)
+    /// 2. Maintenance job removes a transaction from the pool
+    /// 3. Block builder continues iterating
+    ///
+    /// The test verifies that removal notifications reach the iterator, so the removed
+    /// transaction is not returned even though it was in the original snapshot.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_race_condition_snapshot_vs_removal() {
+        use parking_lot::RwLock;
+        use std::{
+            sync::{Arc, Barrier, Mutex},
+            time::Duration,
+        };
+
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut factory = MockTransactionFactory::default();
+
+        let tx = factory.validated(MockTransaction::eip1559().with_nonce(0));
+        let tx_hash = *tx.hash();
+
+        pool.add_transaction(tx, U256::from(1000), 0, None).unwrap();
+        assert_eq!(pool.pending().len(), 1);
+
+        let pool = Arc::new(RwLock::new(pool));
+        let pool1 = pool.clone();
+        let pool2 = pool.clone();
+
+        let found_in_snapshot = Arc::new(Mutex::new(false));
+        let was_removed = Arc::new(Mutex::new(false));
+        let found_ref = found_in_snapshot.clone();
+        let removed_ref = was_removed.clone();
+
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier1 = barrier.clone();
+        let barrier2 = barrier.clone();
+
+        // Thread 1: Create iterator and collect transactions (simulates block builder)
+        let snapshot_handle = tokio::task::spawn_blocking(move || {
+            let best_txs = pool1.read().best_transactions();
+            barrier1.wait();
+
+            // Simulate block building delay
+            std::thread::sleep(Duration::from_millis(100));
+
+            let txs: Vec<_> = best_txs.collect();
+            *found_ref.lock().unwrap() = !txs.is_empty();
+        });
+
+        // Thread 2: Remove transaction (simulates maintenance job)
+        let removal_handle = tokio::task::spawn_blocking(move || {
+            barrier2.wait();
+            std::thread::sleep(Duration::from_millis(20));
+
+            let removed = pool2.write().remove_transactions(vec![tx_hash]);
+            *removed_ref.lock().unwrap() = !removed.is_empty();
+        });
+
+        snapshot_handle.await.unwrap();
+        removal_handle.await.unwrap();
+
+        let found = *found_in_snapshot.lock().unwrap();
+        let removed = *was_removed.lock().unwrap();
+
+        assert!(removed, "Transaction should have been removed from pool");
+        assert!(!found, "Iterator should not return removed transaction");
+    }
 }
