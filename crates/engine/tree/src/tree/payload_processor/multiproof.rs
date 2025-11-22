@@ -773,10 +773,8 @@ impl MultiProofTask {
             let Some(chunk_size) = self.chunk_size &&
             proof_targets.chunking_length() > chunk_size
         {
-            let mut chunks = 0usize;
             for proof_targets_chunk in proof_targets.chunks(chunk_size) {
                 dispatch(proof_targets_chunk);
-                chunks += 1;
             }
             tracing::Span::current().record("chunks", chunks);
         } else {
@@ -937,10 +935,8 @@ impl MultiProofTask {
             let Some(chunk_size) = self.chunk_size &&
             not_fetched_state_update.chunking_length() > chunk_size
         {
-            let mut chunks = 0usize;
             for chunk in not_fetched_state_update.chunks(chunk_size) {
                 dispatch(chunk);
-                chunks += 1;
             }
             tracing::Span::current().record("chunks", chunks);
         } else {
