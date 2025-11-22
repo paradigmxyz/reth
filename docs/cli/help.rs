@@ -235,7 +235,7 @@ fn cmd_summary(cmd: &Cmd, indent: usize) -> String {
     let cmd_s = cmd.to_string();
     let cmd_path = cmd_s.replace(" ", "/");
     let indent_string = " ".repeat(indent + (cmd.subcommands.len() * 2));
-    format!("{}- [`{}`](/cli/{})\n", indent_string, cmd_s, cmd_path)
+    format!("{}- [`{}`](../cli/{}.mdx)\n", indent_string, cmd_s, cmd_path)
 }
 
 /// Overwrites the root SUMMARY.mdx file with the generated content.
