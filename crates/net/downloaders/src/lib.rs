@@ -13,6 +13,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(any(test, feature = "test-utils"))]
+use tempfile as _;
+
 /// The collection of algorithms for downloading block bodies.
 pub mod bodies;
 
