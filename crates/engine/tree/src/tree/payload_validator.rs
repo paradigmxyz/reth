@@ -3,9 +3,8 @@
 use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    executor::WorkloadExecutor,
     instrumented_state::InstrumentedStateProvider,
-    payload_processor::PayloadProcessor,
+    payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
     EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
@@ -44,7 +43,6 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, panic::AssertUnwindSafe, sync::Arc, time::Instant};
-use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
 /// Context providing access to tree state during validation.
@@ -536,7 +534,6 @@ where
         // Create a deferred handle to store the sorted trie data.
         let deferred_trie_data = DeferredTrieData::pending();
         let deferred_handle_task = deferred_trie_data.clone();
-        let deferred_handle_err = deferred_trie_data.clone();
         let block_hash = block.hash();
         let hashed_state_for_trie = hashed_state;
         let trie_output_for_trie = trie_output;
@@ -607,14 +604,7 @@ where
             }
         };
 
-        if let Ok(handle) = Handle::try_current() {
-            handle.spawn_blocking(task);
-        } else {
-            // No runtime to run the deferred task: fail fast so waiters don't hang indefinitely.
-            deferred_handle_err.set_error(DeferredTrieDataError::new(
-                "failed to spawn deferred trie task (no runtime)",
-            ));
-        }
+        self.payload_processor.executor().spawn_blocking(task);
 
         Ok(ExecutedBlock {
             recovered_block: Arc::new(block),
