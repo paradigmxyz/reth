@@ -20,6 +20,10 @@ pub struct StaticFilesArgs {
     #[arg(long = "static-files.blocks-per-file.receipts")]
     pub blocks_per_file_receipts: Option<u64>,
 
+    /// Number of blocks per file for the transaction senders segment.
+    #[arg(long = "static-files.blocks-per-file.transaction-senders")]
+    pub blocks_per_file_transaction_senders: Option<u64>,
+
     /// Store receipts in static files instead of the database.
     ///
     /// When enabled, receipts will be written to static files on disk instead of the database.
@@ -28,6 +32,16 @@ pub struct StaticFilesArgs {
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
     #[arg(long = "static-files.receipts")]
     pub receipts: bool,
+
+    /// Store transaction senders in static files instead of the database.
+    ///
+    /// When enabled, transaction senders will be written to static files on disk instead of the
+    /// database.
+    ///
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
+    #[arg(long = "static-files.transaction-senders")]
+    pub transaction_senders: bool,
 }
 
 impl StaticFilesArgs {
@@ -41,16 +55,17 @@ impl StaticFilesArgs {
                     .blocks_per_file_transactions
                     .or(config.blocks_per_file.transactions),
                 receipts: self.blocks_per_file_receipts.or(config.blocks_per_file.receipts),
+                transaction_senders: self
+                    .blocks_per_file_transaction_senders
+                    .or(config.blocks_per_file.transaction_senders),
             },
         }
     }
 
     /// Converts the static files arguments into [`StorageSettings`].
     pub const fn to_settings(&self) -> StorageSettings {
-        if self.receipts {
-            StorageSettings::new().with_receipts_in_static_files()
-        } else {
-            StorageSettings::legacy()
-        }
+        StorageSettings::legacy()
+            .with_receipts_in_static_files(self.receipts)
+            .with_transaction_senders_in_static_files(self.transaction_senders)
     }
 }

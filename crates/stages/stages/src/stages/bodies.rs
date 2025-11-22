@@ -772,8 +772,9 @@ mod tests {
                     *range.start()..*range.end() + 1,
                     |cursor, number| cursor.get_two::<HeaderWithHashMask<Header>>(number.into()),
                 )? {
-                    let (header, hash) = header?;
-                    self.headers.push_back(SealedHeader::new(header, hash));
+                    if let Some((header, hash)) = header? {
+                        self.headers.push_back(SealedHeader::new(header, hash));
+                    }
                 }
 
                 Ok(())
