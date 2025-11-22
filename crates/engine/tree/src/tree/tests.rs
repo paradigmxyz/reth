@@ -242,7 +242,7 @@ impl TestHarness {
             let hash = sealed_block.hash();
             let number = sealed_block.number;
             blocks_by_hash.insert(hash, block.clone());
-            blocks_by_number.entry(number).or_insert_with(Vec::new).push(block.clone());
+            blocks_by_number.entry(number).or_insert_with(Vec::new).push(hash);
             state_by_hash.insert(hash, Arc::new(BlockState::new(block.clone())));
             hash_by_number.insert(number, hash);
             parent_to_child.entry(parent_hash).or_default().insert(hash);
