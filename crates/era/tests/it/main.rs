@@ -91,16 +91,19 @@ const ERA_MAINNET_URL: &str = "https://mainnet.era.nimbus.team/";
 /// Succinct list of mainnet files we want to download
 /// from <https://mainnet.era.nimbus.team/> //TODO: to replace with internal era files hosting url
 /// for testing purposes
-const ERA_MAINNET_FILES_NAMES: [&str; 4] = [
+const ERA_MAINNET_FILES_NAMES: [&str; 8] = [
     "mainnet-00000-4b363db9.era",
+    "mainnet-00178-0d0a5290.era",
     "mainnet-00518-4e267a3a.era",
-    "mainnet-01140-f70d4869.era",
+    "mainnet-00780-bb546fec.era",
+    "mainnet-01070-7616e3e2.era",
+    "mainnet-01267-e3ddc749.era",
     "mainnet-01581-82073d28.era",
+    "mainnet-01592-d4dc8b98.era"
 ];
 
-/// Utility for downloading `.era1` files for tests
-/// in a temporary directory
-/// and caching them in memory
+/// Utility for downloading `.era` and `.era1` files for tests
+/// in a temporary directory and caching them in memory
 #[derive(Debug)]
 struct EraTestDownloader {
     /// Temporary directory for storing downloaded files
@@ -202,13 +205,13 @@ impl EraTestDownloader {
         }
     }
 
-    /// open .era1 file, downloading it if necessary
+    /// open `.era1` file, downloading it if necessary
     async fn open_era1_file(&self, filename: &str, network: &str) -> Result<Era1File> {
         let path = self.download_file(filename, network).await?;
         Era1Reader::open(&path, network).map_err(|e| eyre!("Failed to open Era1 file: {e}"))
     }
 
-    /// open .era file, downloading it if necessary
+    /// open `.era` file, downloading it if necessary
     #[allow(dead_code)]
     async fn open_era_file(&self, filename: &str, network: &str) -> Result<EraFile> {
         let path = self.download_file(filename, network).await?;
