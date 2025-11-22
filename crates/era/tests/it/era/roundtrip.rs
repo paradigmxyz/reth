@@ -12,8 +12,8 @@
 //! and `https://hoodi.era.nimbus.team/` for hoodi to keep the tests efficient.
 
 use reth_era::{
-    common::file_ops::{EraFileFormat, StreamReader, StreamWriter},
-    e2s::types::IndexEntry, era::file::{EraWriter, EraReader},
+    common::file_ops::{StreamReader, StreamWriter},
+    era::file::{EraReader, EraWriter},
 };
 use std::io::Cursor;
 
@@ -25,17 +25,9 @@ async fn test_era_file_roundtrip(
     filename: &str,
     network: &str,
 ) -> eyre::Result<()> {
-
     println!("\nTesting roundtrip for file: {filename}");
 
     let original_file = downloader.open_era_file(filename, network).await?;
-
-    // Select a few blocks to test
-    let test_block_indices = [
-        0,                                    // First block
-        original_file.group.blocks.len() / 2, // Middle block
-        original_file.group.blocks.len() - 1, // Last block
-    ];
 
     // Write the entire file to a buffer
     let mut buffer = Vec::new();
@@ -61,6 +53,13 @@ async fn test_era_file_roundtrip(
         roundtrip_file.group.blocks.len(),
         "Block count should match after roundtrip"
     );
+
+    // Select a few blocks to test
+    let _test_block_indices = [
+        0,                                    // First block
+        original_file.group.blocks.len() / 2, // Middle block
+        original_file.group.blocks.len() - 1, // Last block
+    ];
 
     Ok(())
 }

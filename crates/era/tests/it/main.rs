@@ -99,7 +99,7 @@ const ERA_MAINNET_FILES_NAMES: [&str; 8] = [
     "mainnet-01070-7616e3e2.era",
     "mainnet-01267-e3ddc749.era",
     "mainnet-01581-82073d28.era",
-    "mainnet-01592-d4dc8b98.era"
+    "mainnet-01592-d4dc8b98.era",
 ];
 
 /// Utility for downloading `.era` and `.era1` files for tests
