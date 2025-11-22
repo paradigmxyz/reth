@@ -1,12 +1,18 @@
 use crate::utils::eth_payload_attributes;
+#[cfg(unix)]
 use alloy_genesis::Genesis;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::{
-    node::NodeTestContext, setup, transaction::TransactionTestContext, wallet::Wallet,
-};
+use reth_e2e_test_utils::{setup, transaction::TransactionTestContext};
+#[cfg(unix)]
+use reth_e2e_test_utils::wallet::Wallet;
+#[cfg(unix)]
+use reth_e2e_test_utils::node::NodeTestContext;
+#[cfg(unix)]
 use reth_node_builder::{NodeBuilder, NodeHandle};
+#[cfg(unix)]
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
+#[cfg(unix)]
 use reth_tasks::TaskManager;
 use std::sync::Arc;
 
