@@ -8,6 +8,7 @@ use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
 use itertools::Itertools;
+use reth_primitives_traits::SealedHeader;
 use reth_rpc_server_types::{
     constants,
     constants::gas_oracle::{
@@ -15,11 +16,11 @@ use reth_rpc_server_types::{
         DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
     },
 };
-use reth_storage_api::{BlockReaderIdExt, NodePrimitivesProvider};
+use reth_storage_api::{BlockReaderIdExt, HeaderProvider, NodePrimitivesProvider};
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 use tracing::warn;
 
 /// The default gas limit for `eth_call` and adjacent calls. See
@@ -96,6 +97,29 @@ impl<Provider> GasPriceOracle<Provider>
 where
     Provider: BlockReaderIdExt + NodePrimitivesProvider,
 {
+    async fn lock_head_and_inner(
+        &self,
+    ) -> EthResult<(
+        SealedHeader<<Provider as HeaderProvider>::Header>,
+        MutexGuard<'_, GasPriceOracleInner>,
+    )> {
+        let header = self
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
+            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+
+        let inner = self.inner.lock().await;
+
+        Ok((header, inner))
+    }
+
+    fn cached_price_for_head(
+        header: &SealedHeader<<Provider as HeaderProvider>::Header>,
+        inner: &GasPriceOracleInner,
+    ) -> Option<U256> {
+        (inner.last_price.block_hash == header.hash()).then_some(inner.last_price.price)
+    }
+
     /// Creates and returns the [`GasPriceOracle`].
     pub fn new(
         provider: Provider,
@@ -133,16 +157,10 @@ where
 
     /// Suggests a gas price estimate based on recent blocks, using the configured percentile.
     pub async fn suggest_tip_cap(&self) -> EthResult<U256> {
-        let header = self
-            .provider
-            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
-            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+        let (header, mut inner) = self.lock_head_and_inner().await?;
 
-        let mut inner = self.inner.lock().await;
-
-        // if we have stored a last price, then we check whether or not it was for the same head
-        if inner.last_price.block_hash == header.hash() {
-            return Ok(inner.last_price.price)
+        if let Some(price) = Self::cached_price_for_head(&header, &inner) {
+            return Ok(price);
         }
 
         // if all responses are empty, then we can return a maximum of 2*check_block blocks' worth
@@ -187,7 +205,7 @@ where
 
             // break when we have enough populated blocks
             if populated_blocks >= self.oracle_config.blocks {
-                break
+                break;
             }
 
             current_hash = parent_hash;
@@ -204,8 +222,8 @@ where
         };
 
         // constrain to the max price
-        if let Some(max_price) = self.oracle_config.max_price &&
-            price > max_price
+        if let Some(max_price) = self.oracle_config.max_price
+            && price > max_price
         {
             price = max_price;
         }
@@ -229,7 +247,7 @@ where
     ) -> EthResult<Option<(B256, Vec<U256>)>> {
         // check the cache (this will hit the disk if the block is not cached)
         let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
-            return Ok(None)
+            return Ok(None);
         };
 
         let base_fee_per_gas = block.base_fee_per_gas();
@@ -254,15 +272,15 @@ where
             };
 
             // ignore transactions with a tip under the configured threshold
-            if let Some(ignore_under) = self.ignore_price &&
-                effective_tip < Some(ignore_under)
+            if let Some(ignore_under) = self.ignore_price
+                && effective_tip < Some(ignore_under)
             {
-                continue
+                continue;
             }
 
             // check if the sender was the coinbase, if so, ignore
             if tx.signer() == block.beneficiary() {
-                continue
+                continue;
             }
 
             // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
@@ -271,7 +289,7 @@ where
 
             // we have enough entries
             if prices.len() >= limit {
-                break
+                break;
             }
         }
 
@@ -288,16 +306,10 @@ where
     /// A block is considered at capacity if its total gas used plus the maximum single transaction
     /// gas would exceed the block's gas limit.
     pub async fn op_suggest_tip_cap(&self, min_suggested_priority_fee: U256) -> EthResult<U256> {
-        let header = self
-            .provider
-            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
-            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+        let (header, mut inner) = self.lock_head_and_inner().await?;
 
-        let mut inner = self.inner.lock().await;
-
-        // if we have stored a last price, then we check whether or not it was for the same head
-        if inner.last_price.block_hash == header.hash() {
-            return Ok(inner.last_price.price);
+        if let Some(price) = Self::cached_price_for_head(&header, &inner) {
+            return Ok(price);
         }
 
         let mut suggestion = min_suggested_priority_fee;
@@ -338,8 +350,8 @@ where
         }
 
         // constrain to the max price
-        if let Some(max_price) = self.oracle_config.max_price &&
-            suggestion > max_price
+        if let Some(max_price) = self.oracle_config.max_price
+            && suggestion > max_price
         {
             suggestion = max_price;
         }
@@ -356,7 +368,7 @@ where
     pub async fn get_block_median_tip(&self, block_hash: B256) -> EthResult<Option<U256>> {
         // check the cache (this will hit the disk if the block is not cached)
         let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
-            return Ok(None)
+            return Ok(None);
         };
 
         let base_fee_per_gas = block.base_fee_per_gas();
