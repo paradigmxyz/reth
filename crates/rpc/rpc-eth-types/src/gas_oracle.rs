@@ -222,8 +222,8 @@ where
         };
 
         // constrain to the max price
-         if let Some(max_price) = self.oracle_config.max_price &&
-             price > max_price
+        if let Some(max_price) = self.oracle_config.max_price &&
+            price > max_price
         {
             price = max_price;
         }
