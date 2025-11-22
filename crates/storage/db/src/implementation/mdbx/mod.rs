@@ -397,7 +397,7 @@ impl DatabaseEnv {
             retry: std::ffi::c_int,
         ) -> HandleSlowReadersReturnCode {
             if space > MAX_SAFE_READER_SPACE {
-                let message = if is_current_process(process_id as u32) {
+                let message = if is_current_process(process_id) {
                     "Current process has a long-lived database transaction that grows the database file."
                 } else {
                     "External process has a long-lived database transaction that grows the database file. \
