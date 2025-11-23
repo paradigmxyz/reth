@@ -1,78 +1,49 @@
 use crate::transactions::config::{AnnouncementFilteringPolicy, TransactionPropagationPolicy};
+use reth_eth_wire::NetworkPrimitives;
 use std::fmt::Debug;
-
-/// A bundle of policies that control the behavior of network components like
-/// the [`TransactionsManager`](super::TransactionsManager).
-///
-/// This trait allows for different collections of policies to be used interchangeably.
-pub trait TransactionPolicies: Send + Sync + Debug + 'static {
-    /// The type of the policy used for transaction propagation.
-    type Propagation: TransactionPropagationPolicy;
-    /// The type of the policy used for filtering transaction announcements.
-    type Announcement: AnnouncementFilteringPolicy;
-
-    /// Returns a reference to the transaction propagation policy.
-    fn propagation_policy(&self) -> &Self::Propagation;
-
-    /// Returns a mutable reference to the transaction propagation policy.
-    fn propagation_policy_mut(&mut self) -> &mut Self::Propagation;
-
-    /// Returns a reference to the announcement filtering policy.
-    fn announcement_filter(&self) -> &Self::Announcement;
-}
 
 /// A container that bundles specific implementations of transaction-related policies,
 ///
-/// This struct implements the [`TransactionPolicies`] trait, providing a complete set of
-/// policies required by components like the [`TransactionsManager`](super::TransactionsManager).
-/// It holds a specific [`TransactionPropagationPolicy`] and an
-/// [`AnnouncementFilteringPolicy`].
-#[derive(Debug, Clone, Default)]
-pub struct NetworkPolicies<P, A> {
-    propagation: P,
-    announcement: A,
+/// This struct provides a complete set of policies required by components like the
+/// [`TransactionsManager`](super::TransactionsManager). It holds a specific
+/// [`TransactionPropagationPolicy`] and an [`AnnouncementFilteringPolicy`].
+#[derive(Debug)]
+pub struct NetworkPolicies<N: NetworkPrimitives> {
+    propagation: Box<dyn TransactionPropagationPolicy<N>>,
+    announcement: Box<dyn AnnouncementFilteringPolicy<N>>,
 }
 
-impl<P, A> NetworkPolicies<P, A> {
+impl<N: NetworkPrimitives> NetworkPolicies<N> {
     /// Creates a new bundle of network policies.
-    pub const fn new(propagation: P, announcement: A) -> Self {
-        Self { propagation, announcement }
+    pub fn new(
+        propagation: impl TransactionPropagationPolicy<N>,
+        announcement: impl AnnouncementFilteringPolicy<N>,
+    ) -> Self {
+        Self { propagation: Box::new(propagation), announcement: Box::new(announcement) }
     }
 
     /// Returns a new `NetworkPolicies` bundle with the `TransactionPropagationPolicy` replaced.
-    pub fn with_propagation<NewP>(self, new_propagation: NewP) -> NetworkPolicies<NewP, A>
-    where
-        NewP: TransactionPropagationPolicy,
-    {
-        NetworkPolicies::new(new_propagation, self.announcement)
+    pub fn with_propagation(self, new_propagation: impl TransactionPropagationPolicy<N>) -> Self {
+        Self { propagation: Box::new(new_propagation), announcement: self.announcement }
     }
 
     /// Returns a new `NetworkPolicies` bundle with the `AnnouncementFilteringPolicy` replaced.
-    pub fn with_announcement<NewA>(self, new_announcement: NewA) -> NetworkPolicies<P, NewA>
-    where
-        NewA: AnnouncementFilteringPolicy,
-    {
-        NetworkPolicies::new(self.propagation, new_announcement)
-    }
-}
-
-impl<P, A> TransactionPolicies for NetworkPolicies<P, A>
-where
-    P: TransactionPropagationPolicy + Debug,
-    A: AnnouncementFilteringPolicy + Debug,
-{
-    type Propagation = P;
-    type Announcement = A;
-
-    fn propagation_policy(&self) -> &Self::Propagation {
-        &self.propagation
+    pub fn with_announcement(self, new_announcement: impl AnnouncementFilteringPolicy<N>) -> Self {
+        Self { propagation: self.propagation, announcement: Box::new(new_announcement) }
     }
 
-    fn propagation_policy_mut(&mut self) -> &mut Self::Propagation {
-        &mut self.propagation
+    /// Returns a reference to the transaction propagation policy.
+    pub fn propagation_policy(&self) -> &dyn TransactionPropagationPolicy<N> {
+        &*self.propagation
     }
 
-    fn announcement_filter(&self) -> &Self::Announcement {
-        &self.announcement
+    /// Returns a mutable reference to the transaction propagation policy.
+    pub fn propagation_policy_mut(&mut self) -> &mut dyn TransactionPropagationPolicy<N> {
+        &mut *self.propagation
+    }
+
+    /// Returns a reference to the announcement filtering policy.
+    pub fn announcement_filter(&self) -> &dyn AnnouncementFilteringPolicy<N> {
+        &*self.announcement
     }
 }

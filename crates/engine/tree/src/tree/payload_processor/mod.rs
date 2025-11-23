@@ -46,7 +46,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, warn};
+use tracing::{debug, debug_span, instrument, warn, Span};
 
 mod configured_sparse_trie;
 pub mod executor;
@@ -209,7 +209,7 @@ where
             + Send
             + 'static,
     {
-        let span = tracing::Span::current();
+        let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
 
         // We rely on the cursor factory to provide whatever DB overlay is necessary to see a
@@ -249,8 +249,9 @@ where
         );
 
         // spawn multi-proof task
+        let parent_span = span.clone();
         self.executor.spawn_blocking(move || {
-            let _enter = span.entered();
+            let _enter = parent_span.entered();
             multi_proof_task.run();
         });
 
@@ -265,6 +266,7 @@ where
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
+            _span: span,
         }
     }
 
@@ -289,6 +291,7 @@ where
             prewarm_handle,
             state_root: None,
             transactions: execution_rx,
+            _span: Span::current(),
         }
     }
 
@@ -368,9 +371,7 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let span = debug_span!(target: "engine::tree::payload_processor", "prewarm task");
             self.executor.spawn_blocking(move || {
-                let _enter = span.entered();
                 prewarm_task.run(transactions, to_prewarm_task);
             });
         }
@@ -434,7 +435,7 @@ where
                 sparse_state_trie,
             );
 
-        let span = tracing::Span::current();
+        let span = Span::current();
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
 
@@ -466,10 +467,12 @@ pub struct PayloadHandle<Tx, Err> {
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle,
-    /// Receiver for the state root
-    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
     /// Stream of block transactions
     transactions: mpsc::Receiver<Result<Tx, Err>>,
+    /// Receiver for the state root
+    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    /// Span for tracing
+    _span: Span,
 }
 
 impl<Tx, Err> PayloadHandle<Tx, Err> {
@@ -481,8 +484,8 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor",
-        skip_all,
-        name = "await_state_root"
+        name = "await_state_root",
+        skip_all
     )]
     pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.state_root

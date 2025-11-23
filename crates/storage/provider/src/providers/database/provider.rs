@@ -13,12 +13,13 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, EitherWriter, HashingWriter, HeaderProvider, HeaderSyncGapProvider,
-    HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter, LatestStateProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, RevertsInit, StageCheckpointReader, StateProviderBox, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieReader, TrieWriter,
+    DBProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider,
+    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
+    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
+    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
+    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    TrieReader, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -325,12 +326,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             self.write_state(&execution_output, OriginalValuesKnown::No)?;
 
             // insert hashes and intermediate merkle nodes
-            self.write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
+            self.write_hashed_state(&hashed_state)?;
 
-            // sort trie updates and insert changesets
-            let trie_updates_sorted = (*trie_updates).clone().into_sorted();
-            self.write_trie_changesets(block_number, &trie_updates_sorted, None)?;
-            self.write_trie_updates_sorted(&trie_updates_sorted)?;
+            self.write_trie_changesets(block_number, &trie_updates, None)?;
+            self.write_trie_updates_sorted(&trie_updates)?;
         }
 
         // update history indices
@@ -681,17 +680,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         HF: Fn(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
         BF: Fn(H, BodyTy<N>, Vec<Address>) -> ProviderResult<B>,
     {
-        let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
-
         self.block_range(range, headers_range, |header, body, tx_range| {
             let senders = if tx_range.is_empty() {
                 Vec::new()
             } else {
-                // fetch senders from the senders table
-                let known_senders =
-                    senders_cursor
-                        .walk_range(tx_range.clone())?
-                        .collect::<Result<HashMap<_, _>, _>>()?;
+                let known_senders: HashMap<TxNumber, Address> =
+                    EitherReader::new_senders(self)?.senders_by_tx_range(tx_range.clone())?;
 
                 let mut senders = Vec::with_capacity(body.transactions().len());
                 for (tx_num, tx) in tx_range.zip(body.transactions()) {
@@ -1344,11 +1338,19 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.cursor_read_collect::<tables::TransactionSenders>(range)
+        if EitherWriterDestination::senders(self).is_static_file() {
+            self.static_file_provider.senders_by_tx_range(range)
+        } else {
+            self.cursor_read_collect::<tables::TransactionSenders>(range)
+        }
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        Ok(self.tx.get::<tables::TransactionSenders>(id)?)
+        if EitherWriterDestination::senders(self).is_static_file() {
+            self.static_file_provider.transaction_sender(id)
+        } else {
+            Ok(self.tx.get::<tables::TransactionSenders>(id)?)
+        }
     }
 }
 
@@ -2824,8 +2826,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// If withdrawals are not empty, this will modify
     /// [`BlockWithdrawals`](tables::BlockWithdrawals).
     ///
-    /// If the provider has __not__ configured full sender pruning, this will modify
-    /// [`TransactionSenders`](tables::TransactionSenders).
+    /// If the provider has __not__ configured full sender pruning, this will modify either:
+    /// * [`StaticFileSegment::TransactionSenders`] if senders are written to static files
+    /// * [`tables::TransactionSenders`] if senders are written to the database
     ///
     /// If the provider has __not__ configured full transaction lookup pruning, this will modify
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
@@ -2834,6 +2837,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         block: RecoveredBlock<Self::Block>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number();
+        let tx_count = block.body().transaction_count() as u64;
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
@@ -2844,29 +2848,30 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);
 
-        let mut next_tx_num = self
+        let first_tx_num = self
             .tx
             .cursor_read::<tables::TransactionBlocks>()?
             .last()?
             .map(|(n, _)| n + 1)
             .unwrap_or_default();
         durations_recorder.record_relative(metrics::Action::GetNextTxNum);
-        let first_tx_num = next_tx_num;
 
-        let tx_count = block.body().transaction_count() as u64;
+        let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
 
-        // Ensures we have all the senders for the block's transactions.
-        for (transaction, sender) in block.body().transactions_iter().zip(block.senders_iter()) {
-            let hash = transaction.tx_hash();
+        if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
+            let mut senders_writer = EitherWriter::new_senders(self, block.number())?;
+            senders_writer.increment_block(block.number())?;
+            senders_writer
+                .append_senders(tx_nums_iter.clone().zip(block.senders_iter().copied()))?;
+            durations_recorder.record_relative(metrics::Action::InsertTransactionSenders);
+        }
 
-            if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
-                self.tx.put::<tables::TransactionSenders>(next_tx_num, *sender)?;
+        if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
+            for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
+                let hash = transaction.tx_hash();
+                self.tx.put::<tables::TransactionHashNumbers>(*hash, tx_num)?;
             }
-
-            if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
-                self.tx.put::<tables::TransactionHashNumbers>(*hash, next_tx_num)?;
-            }
-            next_tx_num += 1;
+            durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
         }
 
         self.append_block_bodies(vec![(block_number, Some(block.into_body()))])?;
@@ -2934,8 +2939,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     }
 
     fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()> {
+        let last_block_number = self.last_block_number()?;
         // Clean up HeaderNumbers for blocks being removed, we must clear all indexes from MDBX.
-        for hash in self.canonical_hashes_range(block + 1, self.last_block_number()? + 1)? {
+        for hash in self.canonical_hashes_range(block + 1, last_block_number + 1)? {
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
         }
 
@@ -2977,7 +2983,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             }
         }
 
-        self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
+        EitherWriter::new_senders(self, last_block_number)?.prune_senders(unwind_tx_from, block)?;
 
         self.remove_bodies_above(block)?;
 
@@ -4754,7 +4760,7 @@ mod tests {
         // Static files mode
         {
             let factory = create_test_provider_factory();
-            let storage_settings = StorageSettings::new().with_receipts_in_static_files();
+            let storage_settings = StorageSettings::legacy().with_receipts_in_static_files(true);
             factory.set_storage_settings_cache(storage_settings);
             let factory = factory.with_prune_modes(PruneModes {
                 receipts: Some(PruneMode::Before(2)),

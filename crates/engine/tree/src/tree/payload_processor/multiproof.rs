@@ -13,9 +13,8 @@ use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
 use reth_trie::{
-    added_removed_keys::MultiAddedRemovedKeys, prefix_set::TriePrefixSetsMut,
-    updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState, HashedPostStateSorted,
-    HashedStorage, MultiProofTargets, TrieInput,
+    added_removed_keys::MultiAddedRemovedKeys, DecodedMultiProof, HashedPostState, HashedStorage,
+    MultiProofTargets,
 };
 use reth_trie_parallel::{
     proof::ParallelProof,
@@ -26,6 +25,10 @@ use reth_trie_parallel::{
 };
 use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
+
+/// The default max targets, for limiting the number of account and storage proof targets to be
+/// fetched by a single worker.
+const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
@@ -53,35 +56,6 @@ impl SparseTrieUpdate {
     pub(super) fn extend(&mut self, other: Self) {
         self.state.extend(other.state);
         self.multiproof.extend(other.multiproof);
-    }
-}
-
-/// Common configuration for multi proof tasks
-#[derive(Debug, Clone, Default)]
-pub(crate) struct MultiProofConfig {
-    /// The sorted collection of cached in-memory intermediate trie nodes that
-    /// can be reused for computation.
-    pub nodes_sorted: Arc<TrieUpdatesSorted>,
-    /// The sorted in-memory overlay hashed state.
-    pub state_sorted: Arc<HashedPostStateSorted>,
-    /// The collection of prefix sets for the computation. Since the prefix sets _always_
-    /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
-    /// if we have cached nodes for them.
-    pub prefix_sets: Arc<TriePrefixSetsMut>,
-}
-
-impl MultiProofConfig {
-    /// Creates a new state root config from the trie input.
-    ///
-    /// This returns a cleared [`TrieInput`] so that we can reuse any allocated space in the
-    /// [`TrieInput`].
-    pub(crate) fn from_input(mut input: TrieInput) -> (TrieInput, Self) {
-        let config = Self {
-            nodes_sorted: Arc::new(input.nodes.drain_into_sorted()),
-            state_sorted: Arc::new(input.state.drain_into_sorted()),
-            prefix_sets: Arc::new(input.prefix_sets.clone()),
-        };
-        (input.cleared(), config)
     }
 }
 
@@ -704,6 +678,10 @@ pub(super) struct MultiProofTask {
     multiproof_manager: MultiproofManager,
     /// multi proof task metrics
     metrics: MultiProofTaskMetrics,
+    /// If this number is exceeded and chunking is enabled, then this will override whether or not
+    /// there are any active workers and force chunking across workers. This is to prevent tasks
+    /// which are very long from hitting a single worker.
+    max_targets_for_chunking: usize,
 }
 
 impl MultiProofTask {
@@ -732,6 +710,7 @@ impl MultiProofTask {
                 proof_result_tx,
             ),
             metrics,
+            max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
         }
     }
 
@@ -921,10 +900,14 @@ impl MultiProofTask {
 
         let mut spawned_proof_targets = MultiProofTargets::default();
 
+        // Chunk regardless if there are many proof targets
+        let many_proof_targets =
+            not_fetched_state_update.chunking_length() > self.max_targets_for_chunking;
+
         // Only chunk if multiple account or storage workers are available to take advantage of
         // parallelism.
-        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
-            1 ||
+        let should_chunk = many_proof_targets ||
+            self.multiproof_manager.proof_worker_handle.available_account_workers() > 1 ||
             self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
 
         let mut dispatch = |hashed_state_update| {

@@ -3,13 +3,12 @@
 use node::NodeTestContext;
 use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
     FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadAttributesBuilder, PayloadTypes,
+    PayloadTypes,
 };
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use reth_tasks::TaskManager;
@@ -54,8 +53,6 @@ pub async fn setup<N>(
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
     N: NodeBuilderHelper,
-    LocalPayloadAttributesBuilder<N::ChainSpec>:
-        PayloadAttributesBuilder<<<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes>,
 {
     E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
         .with_node_config_modifier(move |config| config.set_dev(is_dev))
@@ -77,8 +74,6 @@ pub async fn setup_engine<N>(
 )>
 where
     N: NodeBuilderHelper,
-    LocalPayloadAttributesBuilder<N::ChainSpec>:
-        PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
     setup_engine_with_connection::<N>(
         num_nodes,
@@ -106,8 +101,6 @@ pub async fn setup_engine_with_connection<N>(
 )>
 where
     N: NodeBuilderHelper,
-    LocalPayloadAttributesBuilder<N::ChainSpec>:
-        PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
     E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
         .with_tree_config_modifier(move |_| tree_config.clone())
@@ -160,13 +153,10 @@ where
             >,
             ChainSpec: From<ChainSpec> + Clone,
         >,
-    LocalPayloadAttributesBuilder<Self::ChainSpec>:
-        PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes>,
 {
 }
 
-impl<T> NodeBuilderHelper for T
-where
+impl<T> NodeBuilderHelper for T where
     Self: Default
         + NodeTypesForProvider<
             Payload: PayloadTypes<
@@ -187,8 +177,6 @@ where
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             >,
             ChainSpec: From<ChainSpec> + Clone,
-        >,
-    LocalPayloadAttributesBuilder<Self::ChainSpec>:
-        PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes>,
+        >
 {
 }

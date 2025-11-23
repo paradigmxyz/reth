@@ -339,6 +339,12 @@ impl NetworkArgs {
         self.no_persist_peers.not().then_some(peers_file)
     }
 
+    /// Configures the [`DiscoveryArgs`].
+    pub const fn with_discovery(mut self, discovery: DiscoveryArgs) -> Self {
+        self.discovery = discovery;
+        self
+    }
+
     /// Sets the p2p port to zero, to allow the OS to assign a random unused port when
     /// the network components bind to a socket.
     pub const fn with_unused_p2p_port(mut self) -> Self {
@@ -351,6 +357,12 @@ impl NetworkArgs {
     pub const fn with_unused_ports(mut self) -> Self {
         self = self.with_unused_p2p_port();
         self.discovery = self.discovery.with_unused_discovery_port();
+        self
+    }
+
+    /// Configures the [`NatResolver`]
+    pub const fn with_nat_resolver(mut self, nat: NatResolver) -> Self {
+        self.nat = nat;
         self
     }
 
@@ -602,6 +614,12 @@ impl DiscoveryArgs {
     /// discovery binds to the socket.
     pub const fn with_unused_discovery_port(mut self) -> Self {
         self.port = 0;
+        self
+    }
+
+    /// Set the discovery V5 port
+    pub const fn with_discv5_port(mut self, port: u16) -> Self {
+        self.discv5_port = port;
         self
     }
 
