@@ -10,7 +10,7 @@ use reth_eth_wire::{
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
     EthNetworkPrimitives, EthStream, EthVersion, NetworkPrimitives, P2PStream,
 };
-use reth_eth_wire_types::{RawCapabilityMessage, SnapMessageId};
+use reth_eth_wire_types::{RawCapabilityMessage};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -196,13 +196,11 @@ impl<N: NetworkPrimitives> Sink<EthSnapMessage<N>> for EthRlpxConnection<N> {
             (EthRlpxConnProj::SnapSatellite(mut conn), msg) => {
                 conn.start_send_unpin(msg).map_err(Into::into)
             }
-            // Sending snap message over eth-only connection is unsupported
+            // Sending any snap message over eth-only connection is unsupported
             (
                 EthRlpxConnProj::EthOnly(_) | EthRlpxConnProj::Satellite(_),
-                EthSnapMessage::Snap(_),
-            ) => Err(EthStreamError::UnsupportedMessage {
-                message_id: SnapMessageId::GetAccountRange as u8,
-            }),
+                EthSnapMessage::Snap(msg),
+            ) => Err(EthStreamError::UnsupportedMessage { message_id: msg.message_id() as u8 }),
         }
     }
 

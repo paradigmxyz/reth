@@ -1151,8 +1151,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 .ok();
         }
 
-        let supports_snap =
-            multiplex_stream.shared_capabilities().iter_caps().any(|cap| cap.name() == "snap");
+        let supports_snap = multiplex_stream.shared_capabilities().supports_snap();
 
         let (conn, their_status) = if supports_snap {
             match multiplex_stream

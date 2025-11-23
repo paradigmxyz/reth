@@ -515,7 +515,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     debug!(target: "net", ?msg,  version=?self.conn.version(), "Message is invalid for connection version, skipping");
                 }
             }
-            PeerMessage::EthRequest(req) | PeerMessage::SnapRequest(req) => {
+            PeerMessage::EthRequest(req) => {
                 let deadline = self.request_deadline();
                 self.on_internal_peer_request(req, deadline);
             }

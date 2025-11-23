@@ -61,10 +61,8 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     SendTransactions(SharedTransactions<N::BroadcastedTransaction>),
     /// Send new pooled transactions
     PooledTransactions(NewPooledTransactionHashes),
-    /// All `eth` request variants.
+    /// All protocol request variants (`eth` and `snap` wrapped in `PeerRequest`).
     EthRequest(PeerRequest<N>),
-    /// All `snap` request variants (wrapped in `PeerRequest`).
-    SnapRequest(PeerRequest<N>),
     /// Announces when `BlockRange` is updated.
     BlockRangeUpdated(BlockRangeUpdate),
     /// Any other or manually crafted eth message.

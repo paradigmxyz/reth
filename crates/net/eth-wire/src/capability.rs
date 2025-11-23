@@ -99,6 +99,12 @@ impl SharedCapability {
         matches!(self, Self::Eth { .. })
     }
 
+    /// Returns true if the capability is snap.
+    #[inline]
+    pub fn is_snap(&self) -> bool {
+        matches!(self, Self::UnknownCapability { cap, .. } if cap.name == "snap")
+    }
+
     /// Returns the version of the capability.
     pub const fn version(&self) -> u8 {
         match self {
@@ -180,6 +186,12 @@ impl SharedCapabilities {
     #[inline]
     pub fn contains(&self, cap: &Capability) -> bool {
         self.find(cap).is_some()
+    }
+
+    /// Returns true if the shared capabilities contain the snap capability.
+    #[inline]
+    pub fn supports_snap(&self) -> bool {
+        self.iter_caps().any(SharedCapability::is_snap)
     }
 
     /// Returns the shared capability for the given capability.

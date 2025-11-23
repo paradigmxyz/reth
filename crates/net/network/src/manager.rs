@@ -544,7 +544,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             PeerRequest::SnapGetStorageRanges { .. } |
             PeerRequest::SnapGetByteCodes { .. } |
             PeerRequest::SnapGetTrieNodes { .. }) => {
-                self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::SnapRequest(other));
+                self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::EthRequest(other));
             }
         }
     }
@@ -631,7 +631,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     msg,
                 });
             }
-            PeerMessage::EthRequest(req) | PeerMessage::SnapRequest(req) => {
+            PeerMessage::EthRequest(req) => {
                 self.on_eth_request(peer_id, req);
             }
             PeerMessage::ReceivedTransaction(msg) => {
