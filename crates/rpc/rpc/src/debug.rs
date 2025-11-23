@@ -111,12 +111,6 @@ where
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
-                    let tx_ctx = Some(TransactionContext {
-                        block_hash: Some(block.hash()),
-                        tx_hash: Some(tx_hash),
-                        tx_index: Some(index),
-                    });
-                    inspector.before_tx(tx_ctx)?;
 
                     let res = eth_api.inspect(
                         &mut db,
@@ -124,11 +118,21 @@ where
                         tx_env.clone(),
                         &mut inspector,
                     )?;
-                    let result =
-                        inspector.after_tx(tx_ctx, &tx_env, &evm_env.block_env, &res, &mut db)?;
+                    let result = inspector.get_result(
+                        Some(TransactionContext {
+                            block_hash: Some(block.hash()),
+                            tx_hash: Some(tx_hash),
+                            tx_index: Some(index),
+                        }),
+                        &tx_env,
+                        &evm_env.block_env,
+                        &res,
+                        &mut db,
+                    )?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
+                        inspector.fuse()?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
                         db.commit(res.state)
@@ -243,16 +247,19 @@ where
                 let tx_env = eth_api.evm_config().tx_env(&tx);
 
                 let mut inspector = DebugInspector::new(opts)?;
-                let tx_ctx = Some(TransactionContext {
-                    block_hash: Some(block_hash),
-                    tx_index: Some(index),
-                    tx_hash: Some(*tx.tx_hash()),
-                });
-                inspector.before_tx(tx_ctx)?;
                 let res =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
-                let trace =
-                    inspector.after_tx(tx_ctx, &tx_env, &evm_env.block_env, &res, &mut db)?;
+                let trace = inspector.get_result(
+                    Some(TransactionContext {
+                        block_hash: Some(block_hash),
+                        tx_index: Some(index),
+                        tx_hash: Some(*tx.tx_hash()),
+                    }),
+                    &tx_env,
+                    &evm_env.block_env,
+                    &res,
+                    &mut db,
+                )?;
 
                 Ok(trace)
             })
@@ -294,14 +301,13 @@ where
         self.eth_api()
             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
                 let mut inspector = DebugInspector::new(tracing_options)?;
-                inspector.before_tx(None)?;
                 let res = this.eth_api().inspect(
                     &mut *db,
                     evm_env.clone(),
                     tx_env.clone(),
                     &mut inspector,
                 )?;
-                let trace = inspector.after_tx(None, &tx_env, &evm_env.block_env, &res, db)?;
+                let trace = inspector.get_result(None, &tx_env, &evm_env.block_env, &res, db)?;
                 Ok(trace)
             })
             .await
@@ -357,10 +363,10 @@ where
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
                 let mut inspector = DebugInspector::new(tracing_options)?;
-                inspector.before_tx(None)?;
                 let res =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
-                let trace = inspector.after_tx(None, &tx_env, &evm_env.block_env, &res, &mut db)?;
+                let trace =
+                    inspector.get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)?;
 
                 Ok(trace)
             })
@@ -429,12 +435,12 @@ where
 
                 // Trace all bundles
                 let mut bundles = bundles.into_iter().peekable();
+                let mut inspector = DebugInspector::new(tracing_options.clone())?;
                 while let Some(bundle) = bundles.next() {
                     let mut results = Vec::with_capacity(bundle.transactions.len());
                     let Bundle { transactions, block_override } = bundle;
 
                     let block_overrides = block_override.map(Box::new);
-                    let mut inspector = DebugInspector::new(tracing_options.clone())?;
 
                     let mut transactions = transactions.into_iter().peekable();
                     while let Some(tx) = transactions.next() {
@@ -445,19 +451,24 @@ where
                         let (evm_env, tx_env) =
                             eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
 
-                        inspector.before_tx(None)?;
                         let res = eth_api.inspect(
                             &mut db,
                             evm_env.clone(),
                             tx_env.clone(),
                             &mut inspector,
                         )?;
-                        let trace =
-                            inspector.after_tx(None, &tx_env, &evm_env.block_env, &res, &mut db)?;
+                        let trace = inspector.get_result(
+                            None,
+                            &tx_env,
+                            &evm_env.block_env,
+                            &res,
+                            &mut db,
+                        )?;
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
                         if transactions.peek().is_some() || bundles.peek().is_some() {
+                            inspector.fuse()?;
                             db.commit(res.state);
                         }
                         results.push(trace);
@@ -1066,7 +1077,7 @@ struct DebugApiInner<Eth> {
 /// of [`GethDebugTracerType`].
 ///
 /// This inspector can be re-used for tracing multiple transactions. This is supported by
-/// requiring caller to invoke [`DebugInspector::before_tx`] before each transaction. See method
+/// requiring caller to invoke [`DebugInspector::fuse`] after each transaction. See method
 /// documentation for more details.
 enum DebugInspector {
     FourByte(FourByteInspector),
@@ -1077,7 +1088,7 @@ enum DebugInspector {
     FlatCallTracer(TracingInspector),
     Default(TracingInspector, GethDefaultTracingOptions),
     #[cfg(feature = "js-tracer")]
-    Js(Option<Box<revm_inspectors::tracing::js::JsInspector>>, String, serde_json::Value),
+    Js(Box<revm_inspectors::tracing::js::JsInspector>, String, serde_json::Value),
 }
 
 impl DebugInspector {
@@ -1146,7 +1157,15 @@ impl DebugInspector {
                 #[cfg(feature = "js-tracer")]
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
-                    Self::Js(None, code, config)
+                    Self::Js(
+                        revm_inspectors::tracing::js::JsInspector::new(
+                            code.clone(),
+                            config.clone(),
+                        )?
+                        .into(),
+                        code,
+                        config,
+                    )
                 }
                 _ => {
                     // Note: this match is non-exhaustive in case we need to add support for
@@ -1164,15 +1183,9 @@ impl DebugInspector {
         Ok(this)
     }
 
-    /// Prepares inspector for executing the next transaction.
-    ///
-    /// This will set the [`TransactionContext`] (only for JS tracer) and more importantly, fuse
-    /// the inspector and remove any remaining state from previous transactions.
-    #[allow(unused_variables)]
-    fn before_tx(
-        &mut self,
-        transaction_context: Option<TransactionContext>,
-    ) -> Result<(), EthApiError> {
+    /// Prepares inspector for executing the next transaction. This will remove any state from
+    /// previous transactions.
+    fn fuse(&mut self) -> Result<(), EthApiError> {
         match self {
             Self::FourByte(inspector) => {
                 std::mem::take(inspector);
@@ -1187,14 +1200,9 @@ impl DebugInspector {
             }
             #[cfg(feature = "js-tracer")]
             Self::Js(inspector, code, config) => {
-                *inspector = Some(
-                    revm_inspectors::tracing::js::JsInspector::with_transaction_context(
-                        code.clone(),
-                        config.clone(),
-                        transaction_context.unwrap_or_default(),
-                    )?
-                    .into(),
-                );
+                *inspector =
+                    revm_inspectors::tracing::js::JsInspector::new(code.clone(), config.clone())?
+                        .into();
             }
         }
 
@@ -1202,7 +1210,7 @@ impl DebugInspector {
     }
 
     /// Should be invoked after each transaction to obtain the resulting [`GethTrace`].
-    fn after_tx(
+    fn get_result(
         &mut self,
         tx_context: Option<TransactionContext>,
         tx_env: &impl revm::context::Transaction,
@@ -1251,11 +1259,8 @@ impl DebugInspector {
             }
             #[cfg(feature = "js-tracer")]
             Self::Js(inspector, _, _) => {
-                let res = if let Some(inspector) = inspector {
-                    inspector.json_result(res.clone(), tx_env, block_env, db)?
-                } else {
-                    Default::default()
-                };
+                inspector.set_transaction_context(tx_context.unwrap_or_default());
+                let res = inspector.json_result(res.clone(), tx_env, block_env, db)?;
 
                 GethTrace::JS(res)
             }
@@ -1276,10 +1281,7 @@ macro_rules! delegate {
             Self::Noop($insp) => Inspector::<CTX>::$method($insp, $($arg),*),
             Self::Mux($insp, _) => Inspector::<CTX>::$method($insp, $($arg),*),
             #[cfg(feature = "js-tracer")]
-            Self::Js(Some($insp), _, _) => Inspector::<CTX>::$method($insp, $($arg),*),
-            #[cfg(feature = "js-tracer")]
-            // should be unreachable
-            Self::Js(None, _, _) => Inspector::<CTX>::$method(&mut NoOpInspector, $($arg),*),
+            Self::Js($insp, _, _) => Inspector::<CTX>::$method($insp, $($arg),*),
         }
     };
 }
