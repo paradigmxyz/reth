@@ -14,10 +14,7 @@ use reth_evm::{
 };
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_rpc_eth_types::{
-    cache::db::{StateCacheDb, StateCacheDbRefMutWrapper},
-    EthApiError,
-};
+use reth_rpc_eth_types::{cache::db::StateCacheDb, EthApiError};
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use revm::{context::Block, context_interface::result::ResultAndState, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
@@ -163,7 +160,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
-        Insp: for<'a> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a>> + Send + 'static,
+        Insp: for<'a> InspectorFor<Self::Evm, &'a mut StateCacheDb> + Send + 'static,
         R: Send + 'static,
     {
         async move {
@@ -220,7 +217,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TracingCtx<
                     '_,
                     Recovered<&ProviderTx<Self::Provider>>,
-                    EvmFor<Self::Evm, StateCacheDbRefMutWrapper<'_>, TracingInspector>,
+                    EvmFor<Self::Evm, &mut StateCacheDb, TracingInspector>,
                 >,
             ) -> Result<R, Self::Error>
             + Send
@@ -261,13 +258,13 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TracingCtx<
                     '_,
                     Recovered<&ProviderTx<Self::Provider>>,
-                    EvmFor<Self::Evm, StateCacheDbRefMutWrapper<'_>, Insp>,
+                    EvmFor<Self::Evm, &mut StateCacheDb, Insp>,
                 >,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: Clone + for<'a> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a>>,
+        Insp: Clone + for<'a> InspectorFor<Self::Evm, &'a mut StateCacheDb>,
         R: Send + 'static,
     {
         async move {
@@ -364,7 +361,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TracingCtx<
                     '_,
                     Recovered<&ProviderTx<Self::Provider>>,
-                    EvmFor<Self::Evm, StateCacheDbRefMutWrapper<'_>, TracingInspector>,
+                    EvmFor<Self::Evm, &mut StateCacheDb, TracingInspector>,
                 >,
             ) -> Result<R, Self::Error>
             + Send
@@ -404,13 +401,13 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TracingCtx<
                     '_,
                     Recovered<&ProviderTx<Self::Provider>>,
-                    EvmFor<Self::Evm, StateCacheDbRefMutWrapper<'_>, Insp>,
+                    EvmFor<Self::Evm, &mut StateCacheDb, Insp>,
                 >,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: Clone + for<'a> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a>>,
+        Insp: Clone + for<'a> InspectorFor<Self::Evm, &'a mut StateCacheDb>,
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)

@@ -28,7 +28,7 @@ use reth_primitives_traits::Recovered;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
+    cache::db::StateProviderTraitObjWrapper,
     error::FromEthApiError,
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
@@ -588,7 +588,7 @@ pub trait Call:
     where
         Self: LoadPendingBlock,
         F: FnOnce(
-                StateCacheDbRefMutWrapper<'_>,
+                &mut StateCacheDb,
                 EvmEnvFor<Self::Evm>,
                 TxEnvFor<Self::Evm>,
             ) -> Result<R, Self::Error>

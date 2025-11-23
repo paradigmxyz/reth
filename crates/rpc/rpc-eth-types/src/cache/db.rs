@@ -14,10 +14,10 @@ pub type StateCacheDb = State<StateProviderDatabase<StateProviderTraitObjWrapper
 
 /// Hack to get around 'higher-ranked lifetime error', see
 /// <https://github.com/rust-lang/rust/issues/100013>
-pub type StateCacheDbRefMutWrapper<'a> = &'a mut StateCacheDb;
-
-/// Hack to get around 'higher-ranked lifetime error', see
-/// <https://github.com/rust-lang/rust/issues/100013>
+///
+/// Apparently, when dealing with our RPC code, compiler is struggling to prove lifetimes around
+/// [`StateProvider`] trait objects. This type is a workaround which should help the compiler to
+/// understand that there are no lifetimes involved.
 #[expect(missing_debug_implementations)]
 pub struct StateProviderTraitObjWrapper(pub StateProviderBox);
 
