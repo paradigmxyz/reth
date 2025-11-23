@@ -89,10 +89,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 self.recovered_block(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
             let mut parent = base_block.sealed_header().clone();
 
-            let this = self.clone();
-            self.spawn_with_state_at_block(block, move |state| {
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
+            self.spawn_with_state_at_block(block, move |this, mut db| {
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
                 for block in block_state_calls {
@@ -277,11 +274,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 replay_block_txs = false;
             }
 
-            let this = self.clone();
-            self.spawn_with_state_at_block(at.into(), move |state| {
+            self.spawn_with_state_at_block(at, move |this, mut db| {
                 let mut all_results = Vec::with_capacity(bundles.len());
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -550,16 +544,20 @@ pub trait Call:
     /// Executes the closure with the state that corresponds to the given [`BlockId`] on a new task
     fn spawn_with_state_at_block<F, R>(
         &self,
-        at: BlockId,
+        at: impl Into<BlockId>,
         f: F,
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
-        F: FnOnce(StateProviderTraitObjWrapper) -> Result<R, Self::Error> + Send + 'static,
+        F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
+        let at = at.into();
         self.spawn_blocking_io_fut(move |this| async move {
             let state = this.state_at_block_id(at).await?;
-            f(StateProviderTraitObjWrapper(state))
+            let db = State::builder()
+                .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
+                .build();
+            f(this, db)
         })
     }
 
@@ -598,11 +596,7 @@ pub trait Call:
     {
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
-            let this = self.clone();
-            self.spawn_with_state_at_block(at, move |state| {
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
-
+            self.spawn_with_state_at_block(at, move |this, mut db| {
                 let (evm_env, tx_env) =
                     this.prepare_call_env(evm_env, request, &mut db, overrides)?;
 
@@ -650,10 +644,7 @@ pub trait Call:
             // block the transaction is included in
             let parent_block = block.parent_hash();
 
-            let this = self.clone();
-            self.spawn_with_state_at_block(parent_block.into(), move |state| {
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
+            self.spawn_with_state_at_block(parent_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 // replay all transactions prior to the targeted transaction

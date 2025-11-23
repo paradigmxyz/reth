@@ -96,9 +96,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
     {
-        let this = self.clone();
-        self.spawn_with_state_at_block(at, move |state| {
-            let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
+        self.spawn_with_state_at_block(at, move |this, mut db| {
             let mut inspector = TracingInspector::new(config);
             let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
             f(inspector, res, db)
@@ -176,10 +174,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             // block the transaction is included in
             let parent_block = block.parent_hash();
 
-            let this = self.clone();
-            self.spawn_with_state_at_block(parent_block.into(), move |state| {
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
+            self.spawn_with_state_at_block(parent_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
@@ -287,15 +282,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             // replay all transactions of the block
             // we need to get the state of the parent block because we're replaying this block
             // on top of its parent block's state
-            let this = self.clone();
-            self.spawn_with_state_at_block(block.parent_hash().into(), move |state| {
+            self.spawn_with_state_at_block(block.parent_hash(), move |this, mut db| {
                 let block_hash = block.hash();
 
                 let block_number = evm_env.block_env.number().saturating_to();
                 let base_fee = evm_env.block_env.basefee();
-
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
