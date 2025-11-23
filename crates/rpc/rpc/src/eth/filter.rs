@@ -478,19 +478,22 @@ where
                         .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?
                 };
 
-                // Get receipts - from cache if available, otherwise fetch directly from provider
-                let receipts = match maybe_receipts {
-                    Some(receipts) => receipts,
+                let block_num_hash = BlockNumHash::new(header.number(), block_hash);
+
+                // Get receipts - from cache if available, otherwise use
+                // get_receipts_and_maybe_block
+                let (receipts, maybe_block) = match maybe_receipts {
+                    Some(receipts) => (receipts, maybe_block),
                     None => {
-                        // Not cached - fetch directly from provider
-                        self.provider()
-                            .receipts_by_block(block_hash.into())?
-                            .map(Arc::new)
-                            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?
+                        // Not cached - use get_receipts_and_maybe_block as before
+                        let (receipts, maybe_block) = self
+                            .eth_cache()
+                            .get_receipts_and_maybe_block(block_num_hash.hash)
+                            .await?
+                            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+                        (receipts, maybe_block)
                     }
                 };
-
-                let block_num_hash = BlockNumHash::new(header.number(), block_hash);
 
                 let mut all_logs = Vec::new();
                 append_matching_block_logs(
