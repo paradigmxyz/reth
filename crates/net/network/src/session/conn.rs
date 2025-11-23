@@ -10,7 +10,7 @@ use reth_eth_wire::{
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
     EthNetworkPrimitives, EthStream, EthVersion, NetworkPrimitives, P2PStream,
 };
-use reth_eth_wire_types::{RawCapabilityMessage};
+use reth_eth_wire_types::RawCapabilityMessage;
 use std::{
     pin::Pin,
     task::{Context, Poll},
