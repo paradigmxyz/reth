@@ -39,7 +39,7 @@ pub struct FlashBlockService<
     /// Currently running block build job with start time and result receiver.
     job: Option<BuildJob<N>>,
     /// Manages flashblock sequences with caching and intelligent build selection.
-    sequences: SequenceManager,
+    sequences: SequenceManager<N::SignedTx>,
 
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
