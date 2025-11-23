@@ -102,10 +102,6 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
-                // wrapper is hack to get around 'higher-ranked lifetime error', see
-                // <https://github.com/rust-lang/rust/issues/100013>
-                let db = db.0;
-
                 let res = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
                 let trace_res = inspector
                     .into_parity_builder()

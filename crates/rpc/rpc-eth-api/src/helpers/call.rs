@@ -28,7 +28,7 @@ use reth_primitives_traits::Recovered;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::StateCacheDbRefMutWrapper,
+    cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::FromEthApiError,
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
@@ -554,12 +554,12 @@ pub trait Call:
         f: F,
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
-        F: FnOnce(&dyn StateProvider) -> Result<R, Self::Error> + Send + 'static,
+        F: FnOnce(StateProviderTraitObjWrapper) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
         self.spawn_blocking_io_fut(move |this| async move {
             let state = this.state_at_block_id(at).await?;
-            f(&state)
+            f(StateProviderTraitObjWrapper(state))
         })
     }
 
@@ -588,7 +588,7 @@ pub trait Call:
     where
         Self: LoadPendingBlock,
         F: FnOnce(
-                StateCacheDbRefMutWrapper<'_, '_>,
+                StateCacheDbRefMutWrapper<'_>,
                 EvmEnvFor<Self::Evm>,
                 TxEnvFor<Self::Evm>,
             ) -> Result<R, Self::Error>
@@ -599,15 +599,14 @@ pub trait Call:
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
             let this = self.clone();
-            self.spawn_blocking_io_fut(move |_| async move {
-                let state = this.state_at_block_id(at).await?;
+            self.spawn_with_state_at_block(at, move |state| {
                 let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(&*state)).build();
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 let (evm_env, tx_env) =
                     this.prepare_call_env(evm_env, request, &mut db, overrides)?;
 
-                f(StateCacheDbRefMutWrapper(&mut db), evm_env, tx_env)
+                f(&mut db, evm_env, tx_env)
             })
             .await
         }
@@ -632,7 +631,7 @@ pub trait Call:
         F: FnOnce(
                 TransactionInfo,
                 ResultAndState<HaltReasonFor<Self::Evm>>,
-                StateCacheDb<'_>,
+                StateCacheDb,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,

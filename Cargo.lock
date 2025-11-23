@@ -10410,6 +10410,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
+ "reth-trie",
  "revm",
  "revm-inspectors",
  "schnellru",

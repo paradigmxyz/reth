@@ -33,7 +33,7 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProviderFactory, StateRootProvider, TransactionVariant,
+    StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
@@ -343,10 +343,6 @@ where
                         let frame = self
                             .eth_api()
                             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                                // wrapper is hack to get around 'higher-ranked lifetime error',
-                                // see <https://github.com/rust-lang/rust/issues/100013>
-                                let db = db.0;
-
                                 let gas_limit = tx_env.gas_limit();
                                 let res = this.eth_api().inspect(
                                     &mut *db,
@@ -377,10 +373,6 @@ where
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                                // wrapper is hack to get around 'higher-ranked lifetime error', see
-                                // <https://github.com/rust-lang/rust/issues/100013>
-                                let db = db.0;
-
                                 let tx_info = TransactionInfo {
                                     block_number: Some(evm_env.block_env.number().saturating_to()),
                                     base_fee: Some(evm_env.block_env.basefee()),
@@ -448,10 +440,6 @@ where
                     let res = self
                         .eth_api()
                         .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                            // wrapper is hack to get around 'higher-ranked lifetime error', see
-                            // <https://github.com/rust-lang/rust/issues/100013>
-                            let db = db.0;
-
                             let mut inspector =
                                 revm_inspectors::tracing::js::JsInspector::new(code, config)
                                     .map_err(Eth::Error::from_eth_err)?;
@@ -812,7 +800,7 @@ where
         opts: &GethDebugTracingOptions,
         evm_env: EvmEnvFor<Eth::Evm>,
         tx_env: TxEnvFor<Eth::Evm>,
-        db: &mut StateCacheDb<'_>,
+        db: &mut StateCacheDb,
         transaction_context: Option<TransactionContext>,
         fused_inspector: &mut Option<TracingInspector>,
     ) -> Result<(GethTrace, EvmState), Eth::Error> {
