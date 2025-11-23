@@ -1077,7 +1077,7 @@ enum DebugInspector {
     FlatCallTracer(TracingInspector),
     Default(TracingInspector, GethDefaultTracingOptions),
     #[cfg(feature = "js-tracer")]
-    Js(Option<revm_inspectors::tracing::js::JsInspector>, String, serde_json::Value),
+    Js(Option<Box<revm_inspectors::tracing::js::JsInspector>>, String, serde_json::Value),
 }
 
 impl DebugInspector {
@@ -1141,7 +1141,7 @@ impl DebugInspector {
                 },
                 #[cfg(not(feature = "js-tracer"))]
                 GethDebugTracerType::JsTracer(_) => {
-                    return Err(EthApiError::Unsupported("JS Tracer is not enabled").into())
+                    return Err(EthApiError::Unsupported("JS Tracer is not enabled"))
                 }
                 #[cfg(feature = "js-tracer")]
                 GethDebugTracerType::JsTracer(code) => {
@@ -1164,10 +1164,11 @@ impl DebugInspector {
         Ok(this)
     }
 
-    /// Preapres inspector for executing the next transaction.
+    /// Prepares inspector for executing the next transaction.
     ///
     /// This will set the [`TransactionContext`] (only for JS tracer) and more importantly, fuse
     /// the inspector and remove any remaining state from previous transactions.
+    #[allow(unused_variables)]
     fn before_tx(
         &mut self,
         transaction_context: Option<TransactionContext>,
@@ -1186,12 +1187,14 @@ impl DebugInspector {
             }
             #[cfg(feature = "js-tracer")]
             Self::Js(inspector, code, config) => {
-                *inspector =
-                    Some(revm_inspectors::tracing::js::JsInspector::with_transaction_context(
+                *inspector = Some(
+                    revm_inspectors::tracing::js::JsInspector::with_transaction_context(
                         code.clone(),
                         config.clone(),
                         transaction_context.unwrap_or_default(),
-                    )?);
+                    )?
+                    .into(),
+                );
             }
         }
 
