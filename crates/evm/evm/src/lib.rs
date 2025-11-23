@@ -333,6 +333,23 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Ok(self.create_executor(evm, ctx))
     }
 
+    /// Creates a new [`BlockExecutor`] for executing a given block with the given inspector.
+    fn executor_for_block_with_inspector<'a, DB, I>(
+        &'a self,
+        db: &'a mut State<DB>,
+        block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
+        inspector: I,
+    ) -> Result<impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB, I>, Self::Error>
+    where
+        DB: Database,
+        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+    {
+        let evm_env = self.evm_env(block.header())?;
+        let evm = self.evm_with_env_and_inspector(db, evm_env, inspector);
+        let ctx = self.context_for_block(block)?;
+        Ok(self.create_executor(evm, ctx))
+    }
+
     /// Creates a [`BlockBuilder`]. Should be used when building a new block.
     ///
     /// Block builder wraps an inner [`alloy_evm::block::BlockExecutor`] and has a similar

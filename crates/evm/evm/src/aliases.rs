@@ -4,9 +4,11 @@ use crate::ConfigureEvm;
 use alloy_evm::{block::BlockExecutorFactory, Database, EvmEnv, EvmFactory};
 use revm::{inspector::NoOpInspector, Inspector};
 
+/// Helper to access [`BlockExecutorFactory`] for a given [`ConfigureEvm`].
+pub type ExecFactoryFor<Evm> = <Evm as ConfigureEvm>::BlockExecutorFactory;
+
 /// Helper to access [`EvmFactory`] for a given [`ConfigureEvm`].
-pub type EvmFactoryFor<Evm> =
-    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory;
+pub type EvmFactoryFor<Evm> = <ExecFactoryFor<Evm> as BlockExecutorFactory>::EvmFactory;
 
 /// Helper to access [`EvmFactory::Spec`] for a given [`ConfigureEvm`].
 pub type SpecFor<Evm> = <EvmFactoryFor<Evm> as EvmFactory>::Spec;
@@ -30,8 +32,7 @@ pub type HaltReasonFor<Evm> = <EvmFactoryFor<Evm> as EvmFactory>::HaltReason;
 pub type TxEnvFor<Evm> = <EvmFactoryFor<Evm> as EvmFactory>::Tx;
 
 /// Helper to access [`BlockExecutorFactory::ExecutionCtx`] for a given [`ConfigureEvm`].
-pub type ExecutionCtxFor<'a, Evm> =
-    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>;
+pub type ExecutionCtxFor<'a, Evm> = <ExecFactoryFor<Evm> as BlockExecutorFactory>::ExecutionCtx<'a>;
 
 /// Type alias for [`EvmEnv`] for a given [`ConfigureEvm`].
 pub type EvmEnvFor<Evm> = EvmEnv<SpecFor<Evm>, BlockEnvFor<Evm>>;

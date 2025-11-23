@@ -20,23 +20,24 @@ use alloy_rpc_types_eth::{
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    env::BlockEnvironment, ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor, InspectorFor,
-    TransactionEnv, TxEnvFor,
+    env::BlockEnvironment, execute::BlockExecutor, ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor,
+    InspectorFor, TransactionEnv, TxEnvFor,
 };
 use reth_node_api::BlockBody;
-use reth_primitives_traits::Recovered;
+use reth_primitives_traits::{BlockTy, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::StateProviderTraitObjWrapper,
+    cache::db::{RpcBlockExecutor, StateProviderTraitObjWrapper},
     error::FromEthApiError,
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
+use reth_storage_api::{BlockIdReader, StateProvider};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Transaction},
+    inspector::NoOpInspector,
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
@@ -638,21 +639,15 @@ pub trait Call:
             };
             let (tx, tx_info) = transaction.split();
 
-            let (evm_env, _) = self.evm_env_at(block.hash().into()).await?;
-
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
-            let parent_block = block.parent_hash();
-
-            self.spawn_with_state_at_block(parent_block, move |this, mut db| {
-                let block_txs = block.transactions_recovered();
-
+            self.spawn_with_state_at_block(block.parent_hash(), move |this, mut db| {
                 // replay all transactions prior to the targeted transaction
-                this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
+                let res = this
+                    .executor_at_tx(&mut db, &block, *tx.tx_hash())?
+                    .execute_transaction_without_commit(tx)
+                    .map_err(Self::Error::from_eth_err)?;
 
-                let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
-
-                let res = this.transact(&mut db, evm_env, tx_env)?;
                 f(tx_info, res, db)
             })
             .await
@@ -660,37 +655,54 @@ pub trait Call:
         }
     }
 
-    /// Replays all the transactions until the target transaction is found.
-    ///
-    /// All transactions before the target transaction are executed and their changes are written to
-    /// the _runtime_ db ([`State`]).
-    ///
-    /// Note: This assumes the target transaction is in the given iterator.
-    /// Returns the index of the target transaction in the given iterator.
-    fn replay_transactions_until<'a, DB, I>(
-        &self,
-        db: &mut DB,
-        evm_env: EvmEnvFor<Self::Evm>,
-        transactions: I,
+    /// Same as [`executor_at_tx_with_inspector`](Self::executor_at_tx_with_inspector) but the
+    /// returned executor does not have the inspector enabled.
+    fn executor_at_tx<'a>(
+        &'a self,
+        db: &'a mut StateCacheDb,
+        block: &'a RecoveredBlock<BlockTy<Self::Primitives>>,
         target_tx_hash: B256,
-    ) -> Result<usize, Self::Error>
+    ) -> Result<impl RpcBlockExecutor<'a, Self::Evm>, Self::Error> {
+        let mut executor =
+            self.executor_at_tx_with_inspector(db, block, target_tx_hash, NoOpInspector)?;
+        // disable inspector before returning to avoid perf overhead
+        executor.evm_mut().disable_inspector();
+        Ok(executor)
+    }
+
+    /// Initializes a [`BlockExecutor`] at the given block, applies pre-execution changes and
+    /// executes all transactions prior the target transaction.
+    ///
+    /// After that, returns the [`BlockExecutor`] with the configured inspector.
+    fn executor_at_tx_with_inspector<'a, I>(
+        &'a self,
+        db: &'a mut StateCacheDb,
+        block: &'a RecoveredBlock<BlockTy<Self::Primitives>>,
+        target_tx_hash: B256,
+        inspector: I,
+    ) -> Result<impl RpcBlockExecutor<'a, Self::Evm, I>, Self::Error>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit + core::fmt::Debug,
-        I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
+        I: InspectorFor<Self::Evm, &'a mut StateCacheDb> + 'a,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env);
-        let mut index = 0;
-        for tx in transactions {
+        let mut executor =
+            self.evm_config().executor_for_block_with_inspector(db, block, inspector)?;
+
+        // Disable inspector while handling pre-execution changes
+        executor.evm_mut().disable_inspector();
+        executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+
+        for tx in block.transactions_recovered() {
             if *tx.tx_hash() == target_tx_hash {
                 // reached the target transaction
                 break
             }
 
-            let tx_env = self.evm_config().tx_env(tx);
-            evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
-            index += 1;
+            executor.execute_transaction(tx).map_err(Self::Error::from_eth_err)?;
         }
-        Ok(index)
+
+        // Enable inspector before returning
+        executor.evm_mut().enable_inspector();
+        Ok(executor)
     }
 
     ///

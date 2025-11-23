@@ -220,22 +220,10 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
-                let block_txs = block.transactions_recovered();
-
-                // configure env for the target transaction
-                let tx = transaction.into_recovered();
-
-                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
-
                 // replay all transactions prior to the targeted transaction
-                let index = eth_api.replay_transactions_until(
-                    &mut db,
-                    evm_env.clone(),
-                    block_txs,
-                    *tx.tx_hash(),
-                )?;
+                let executor = eth_api.executor_at_tx(&mut db, &block, *tx.tx_hash())?;
 
-                let tx_env = eth_api.evm_config().tx_env(&tx);
+                let (tx, info) = transaction.split();
 
                 this.trace_transaction(
                     &opts,
@@ -244,7 +232,7 @@ where
                     &mut db,
                     Some(TransactionContext {
                         block_hash: Some(block_hash),
-                        tx_index: Some(index),
+                        tx_index: info.index.map(|index| index as usize),
                         tx_hash: Some(*tx.tx_hash()),
                     }),
                     &mut None,
