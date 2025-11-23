@@ -28,12 +28,12 @@ use reth_primitives_traits::Recovered;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
+    cache::db::StateCacheDbRefMutWrapper,
     error::FromEthApiError,
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx};
+use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Transaction},
@@ -487,13 +487,11 @@ pub trait Call:
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
         R: Send + 'static,
-        F: FnOnce(Self, StateProviderTraitObjWrapper<'_>) -> Result<R, Self::Error>
-            + Send
-            + 'static,
+        F: FnOnce(Self, &dyn StateProvider) -> Result<R, Self::Error> + Send + 'static,
     {
         self.spawn_blocking_io_fut(move |this| async move {
             let state = this.state_at_block_id(at).await?;
-            f(this, StateProviderTraitObjWrapper(&state))
+            f(this, &state)
         })
     }
 
@@ -556,12 +554,12 @@ pub trait Call:
         f: F,
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
-        F: FnOnce(StateProviderTraitObjWrapper<'_>) -> Result<R, Self::Error> + Send + 'static,
+        F: FnOnce(&dyn StateProvider) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
         self.spawn_blocking_io_fut(move |this| async move {
             let state = this.state_at_block_id(at).await?;
-            f(StateProviderTraitObjWrapper(&state))
+            f(&state)
         })
     }
 
@@ -603,9 +601,8 @@ pub trait Call:
             let this = self.clone();
             self.spawn_blocking_io_fut(move |_| async move {
                 let state = this.state_at_block_id(at).await?;
-                let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)))
-                    .build();
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(&*state)).build();
 
                 let (evm_env, tx_env) =
                     this.prepare_call_env(evm_env, request, &mut db, overrides)?;

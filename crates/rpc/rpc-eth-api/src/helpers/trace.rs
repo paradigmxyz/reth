@@ -15,7 +15,7 @@ use reth_evm::{
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{
-    cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
+    cache::db::{StateCacheDb, StateCacheDbRefMutWrapper},
     EthApiError,
 };
 use reth_storage_api::{ProviderBlock, ProviderTx};
@@ -307,9 +307,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
 
                 // now get the state
                 let state = this.state_at_block_id(state_at.into()).await?;
-                let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)))
-                    .build();
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(&*state)).build();
 
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
