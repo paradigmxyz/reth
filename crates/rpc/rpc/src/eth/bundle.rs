@@ -8,7 +8,6 @@ use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTra
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{ConfigureEvm, Evm};
-use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
     EthCallBundleApiServer, FromEthApiError, FromEvmError,
@@ -144,13 +143,10 @@ where
         // use the block number of the request
         evm_env.block_env.inner_mut().number = U256::from(block_number);
 
-        let eth_api = self.eth_api().clone();
-
         self.eth_api()
-            .spawn_with_state_at_block(at, move |state| {
+            .spawn_with_state_at_block(at, move |eth_api, db| {
                 let coinbase = evm_env.block_env.beneficiary();
                 let basefee = evm_env.block_env.basefee();
-                let db = State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 let initial_coinbase = db
                     .basic_ref(coinbase)
