@@ -471,24 +471,19 @@ where
         block_with_parent: BlockWithParent,
         bundle_state: &BundleState,
     ) {
-        debug!(target: "engine::caching", ?block_with_parent, "Updating execution cache for inserted block");
-
         self.execution_cache.update_with_guard(|cached| {
+            if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
+                warn!(
+                    target: "engine::caching",
+                    parent_hash = %block_with_parent.parent,
+                    "Cannot find cache for parent hash, skip updating cache with new state",
+                );
+                return;
+            }
+
             // Take existing cache (if any) or create fresh caches
             let (caches, cache_metrics) = match cached.take() {
                 Some(existing) => {
-                    // Check if existing cache matches parent - if not, restore and skip
-                    if existing.executed_block_hash() != block_with_parent.parent {
-                        warn!(
-                            target: "engine::caching",
-                            cache_hash = %existing.executed_block_hash(),
-                            parent_hash = %block_with_parent.parent,
-                            "Cache parent mismatch for inserted block, skipping cache update"
-                        );
-                        // Restore the cache since we're not updating it
-                        *cached = Some(existing);
-                        return;
-                    }
                     existing.split()
                 }
                 None => (
@@ -508,6 +503,7 @@ where
 
             // Replace with the updated cache
             *cached = Some(new_cache);
+            debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
         });
     }
 }
