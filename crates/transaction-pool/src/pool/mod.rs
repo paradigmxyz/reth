@@ -640,7 +640,7 @@ where
     ///
     /// See also [`Self::add_pending_listener`]
     ///
-    /// CAUTION: This function is only intendend to be used manualy in order to use this type's
+    /// CAUTION: This function is only intended to be used manually in order to use this type's
     /// pending transaction receivers when manually implementing the
     /// [`TransactionPool`](crate::TransactionPool) trait for a custom pool implementation
     /// [`TransactionPool::pending_transactions_listener_for`](crate::TransactionPool).
@@ -664,7 +664,7 @@ where
     ///
     /// See also [`Self::add_new_transaction_listener`]
     ///
-    /// CAUTION: This function is only intendend to be used manualy in order to use this type's
+    /// CAUTION: This function is only intended to be used manually in order to use this type's
     /// transaction receivers when manually implementing the
     /// [`TransactionPool`](crate::TransactionPool) trait for a custom pool implementation
     /// [`TransactionPool::new_transactions_listener_for`](crate::TransactionPool).
@@ -745,7 +745,7 @@ where
     ///
     /// See also [`Self::add_transaction_event_listener`].
     ///
-    /// CAUTION: This function is only intendend to be used manualy in order to use this type's
+    /// CAUTION: This function is only intended to be used manually in order to use this type's
     /// [`TransactionEvents`] receivers when manually implementing the
     /// [`TransactionPool`](crate::TransactionPool) trait for a custom pool implementation
     /// [`TransactionPool::transaction_event_listener`](crate::TransactionPool).
