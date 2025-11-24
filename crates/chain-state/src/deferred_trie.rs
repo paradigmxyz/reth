@@ -20,14 +20,6 @@ pub struct ComputedTrieData {
     pub trie_input: Arc<TrieInputSorted>,
 }
 
-impl PartialEq for ComputedTrieData {
-    fn eq(&self, other: &Self) -> bool {
-        self.hashed_state == other.hashed_state &&
-            self.trie_updates == other.trie_updates &&
-            self.anchor_hash == other.anchor_hash
-    }
-}
-
 /// Shared handle to asynchronously populated trie data.
 ///
 /// A thin wrapper over `Arc<OnceLock<ComputedTrieData>>` that lets producers call
@@ -125,7 +117,10 @@ mod tests {
         });
 
         let result = deferred.wait_cloned();
-        assert_eq!(result, empty_bundle());
+        let expected = empty_bundle();
+        assert_eq!(result.hashed_state, expected.hashed_state);
+        assert_eq!(result.trie_updates, expected.trie_updates);
+        assert_eq!(result.anchor_hash, expected.anchor_hash);
     }
 
     #[test]
@@ -138,7 +133,9 @@ mod tests {
         let result = deferred.wait_cloned();
         let elapsed = start.elapsed();
 
-        assert_eq!(result, bundle);
+        assert_eq!(result.hashed_state, bundle.hashed_state);
+        assert_eq!(result.trie_updates, bundle.trie_updates);
+        assert_eq!(result.anchor_hash, bundle.anchor_hash);
         // Should return essentially immediately; allow some slack to avoid flakiness.
         assert!(elapsed < Duration::from_millis(20));
     }
@@ -172,10 +169,13 @@ mod tests {
         thread::sleep(delay);
         deferred.set_ready(empty_bundle());
 
+        let expected = empty_bundle();
         for (elapsed, data) in rx.into_iter().take(readers) {
             // Each reader should have blocked for at least `delay`.
             assert!(elapsed >= delay);
-            assert_eq!(data, empty_bundle());
+            assert_eq!(data.hashed_state, expected.hashed_state);
+            assert_eq!(data.trie_updates, expected.trie_updates);
+            assert_eq!(data.anchor_hash, expected.anchor_hash);
         }
     }
 
@@ -188,10 +188,7 @@ mod tests {
             anchor_hash: B256::with_last_byte(1),
             ..empty_bundle()
         };
-        let second = ComputedTrieData {
-            anchor_hash: B256::with_last_byte(2),
-            ..empty_bundle()
-        };
+        let second = ComputedTrieData { anchor_hash: B256::with_last_byte(2), ..empty_bundle() };
 
         deferred.set_ready(first.clone());
         deferred.set_ready(second);
@@ -204,10 +201,7 @@ mod tests {
     fn clones_share_state() {
         let deferred = DeferredTrieData::pending();
         let setter = deferred.clone();
-        let bundle = ComputedTrieData {
-            anchor_hash: B256::with_last_byte(3),
-            ..empty_bundle()
-        };
+        let bundle = ComputedTrieData { anchor_hash: B256::with_last_byte(3), ..empty_bundle() };
 
         thread::spawn(move || setter.set_ready(bundle));
 
@@ -224,17 +218,18 @@ mod tests {
             setter.set_ready(empty_bundle());
         });
 
-        assert_eq!(deferred.wait_cloned(), empty_bundle());
+        let result = deferred.wait_cloned();
+        let expected = empty_bundle();
+        assert_eq!(result.hashed_state, expected.hashed_state);
+        assert_eq!(result.trie_updates, expected.trie_updates);
+        assert_eq!(result.anchor_hash, expected.anchor_hash);
     }
 
     #[test]
     /// Ensures fast path when data is set before any waiter calls `wait_cloned`.
     fn set_before_wait() {
         let deferred = DeferredTrieData::pending();
-        let bundle = ComputedTrieData {
-            anchor_hash: B256::with_last_byte(4),
-            ..empty_bundle()
-        };
+        let bundle = ComputedTrieData { anchor_hash: B256::with_last_byte(4), ..empty_bundle() };
 
         deferred.set_ready(bundle.clone());
 
@@ -244,29 +239,5 @@ mod tests {
 
         assert_eq!(result.anchor_hash, bundle.anchor_hash);
         assert!(elapsed < Duration::from_millis(20));
-    }
-
-    #[test]
-    /// Confirms `PartialEq` ignores `trie_input`.
-    fn computed_trie_data_equality_ignores_trie_input() {
-        let hashed_state: Arc<HashedPostStateSorted> = Arc::default();
-        let trie_updates: Arc<TrieUpdatesSorted> = Arc::default();
-        let anchor = B256::with_last_byte(5);
-
-        let a = ComputedTrieData {
-            hashed_state: hashed_state.clone(),
-            trie_updates: trie_updates.clone(),
-            anchor_hash: anchor,
-            trie_input: Arc::new(TrieInputSorted::default()),
-        };
-        let b = ComputedTrieData {
-            hashed_state,
-            trie_updates,
-            anchor_hash: anchor,
-            // different instance should be ignored by PartialEq
-            trie_input: Arc::new(TrieInputSorted::default()),
-        };
-
-        assert_eq!(a, b);
     }
 }
