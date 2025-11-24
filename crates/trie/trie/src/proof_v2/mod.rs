@@ -108,100 +108,6 @@ where
             .unwrap_or_else(|| Vec::with_capacity(16))
     }
 
-    /// Pushes a new branch onto the `branch_stack`, while also pushing the given leaf onto the
-    /// `child_stack`.
-    ///
-    /// This method expects that there already exists a child on the `child_stack`, and that that
-    /// child has a non-zero short key. The new branch is constructed based on the top child from
-    /// the `child_stack` and the given leaf.
-    fn push_new_branch(&mut self, leaf_key: Nibbles, leaf_val: VE::DeferredEncoder) {
-        // First determine the new leaf's shortkey relative to the current branch. If there is no
-        // current branch then the short key is the full key.
-        let leaf_short_key = if self.branch_stack.is_empty() {
-            leaf_key
-        } else {
-            // When there is a current branch then trim off its path as well as the nibble that it
-            // has set for this leaf.
-            trim_nibbles_prefix(&leaf_key, self.branch_path.len() + 1)
-        };
-
-        trace!(
-            target: TRACE_TARGET,
-            ?leaf_short_key,
-            branch_path = ?self.branch_path,
-            "push_new_branch: called",
-        );
-
-        // Get the new branch's first child, which is the child on the top of the stack with which
-        // the new leaf shares the same nibble on the current branch.
-        let first_child = self
-            .child_stack
-            .last_mut()
-            .expect("push_branch can't be called with empty child_stack");
-
-        let first_child_short_key = first_child.short_key();
-        debug_assert!(
-            !first_child_short_key.is_empty(),
-            "push_branch called when top child on stack is not a leaf or extension with a short key",
-        );
-
-        // Determine how many nibbles are shared between the new branch's first child and the new
-        // leaf. This common prefix will be the extension of the new branch
-        let common_prefix_len = first_child_short_key.common_prefix_length(&leaf_short_key);
-
-        // Trim off the common prefix from the first child's short key, plus one nibble which will
-        // stored by the new branch itself in its state mask.
-        let first_child_nibble = first_child_short_key.get_unchecked(common_prefix_len);
-        first_child.trim_short_key_prefix(common_prefix_len + 1);
-
-        // Similarly, trim off the common prefix, plus one nibble for the new branch, from the new
-        // leaf's short key.
-        let leaf_nibble = leaf_short_key.get_unchecked(common_prefix_len);
-        let leaf_short_key = trim_nibbles_prefix(&leaf_short_key, common_prefix_len + 1);
-
-        // Push the new leaf onto the child stack; it will be the second child of the new branch.
-        // The new branch's first child is the child already on the top of the stack, for which
-        // we've already adjusted its short key.
-        self.child_stack
-            .push(ProofTrieBranchChild::Leaf { short_key: leaf_short_key, value: leaf_val });
-
-        // Construct the state mask of the new branch, and push the new branch onto the branch
-        // stack.
-        self.branch_stack.push(ProofTrieBranch {
-            ext_len: common_prefix_len as u8,
-            state_mask: {
-                let mut m = TrieMask::default();
-                m.set_bit(first_child_nibble);
-                m.set_bit(leaf_nibble);
-                m
-            },
-            tree_mask: TrieMask::default(),
-            hash_mask: TrieMask::default(),
-        });
-
-        // Update the branch path to reflect the new branch which was just pushed. Its path will be
-        // the path of the previous branch, plus the nibble shared by each child, plus the parent
-        // extension (denoted by a non-zero `ext_len`). Since the new branch's path is a prefix of
-        // the original leaf_key we can just slice that.
-        //
-        // If the branch is the first branch then we do not add the extra 1, as there is no nibble
-        // in a parent branch to account for.
-        let branch_path_len = self.branch_path.len() +
-            common_prefix_len +
-            if self.branch_stack.len() == 1 { 0 } else { 1 };
-        self.branch_path = leaf_key.slice_unchecked(0, branch_path_len);
-
-        trace!(
-            target: TRACE_TARGET,
-            ?leaf_short_key,
-            ?common_prefix_len,
-            new_branch = ?self.branch_stack.last().expect("branch_stack was just pushed to"),
-            ?branch_path_len,
-            branch_path = ?self.branch_path,
-            "push_new_branch: returning",
-        );
-    }
-
     /// Returns true if the proof of a node at the given path should be retained. This may move the
     /// `targets` iterator forward if the given path comes after the current target.
     fn should_retain(
@@ -242,6 +148,8 @@ where
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
     ) -> Result<RlpNode, StateProofError> {
+        trace!(target: TRACE_TARGET, ?child_path, "commit_child: called");
+
         // If the child is already an `RlpNode` then there is nothing to do.
         if let ProofTrieBranchChild::RlpNode(rlp_node) = child {
             return Ok(rlp_node)
@@ -284,6 +192,164 @@ where
         Ok(child_rlp_node)
     }
 
+    /// Returns the path of the child on top of the `child_stack`, or the root path if the stack is
+    /// empty.
+    fn last_child_path(&self) -> Nibbles {
+        // If there is no branch under construction then the top child must be the root child.
+        let Some(branch) = self.branch_stack.last() else {
+            return Nibbles::new();
+        };
+
+        debug_assert_ne!(branch.state_mask.get(), 0, "branch.state_mask can never be zero");
+        // TODO export BITS off of `TrieMask`.
+        let last_nibble = u16::BITS - branch.state_mask.leading_zeros() - 1;
+
+        let mut child_path = self.branch_path;
+        debug_assert!(child_path.len() < 64);
+        child_path.push_unchecked(last_nibble as u8);
+        child_path
+    }
+
+    /// Calls [`Self::commit_child`] on the last child of `child_stack`, replacing it with a
+    /// [`ProofTrieBranchChild::RlpNode`].
+    ///
+    /// NOTE that this method call relies on the `state_mask` of the top branch of the
+    /// `branch_stack` to determine the last child's path. When committing the last child prior to
+    /// pushing a new child, it's important to set the new child's `state_mask` bit _after_ the call
+    /// to this method.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if the `child_stack` is empty.
+    fn commit_last_child(
+        &mut self,
+        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+    ) -> Result<(), StateProofError> {
+        let child = self
+            .child_stack
+            .pop()
+            .expect("`commit_last_child` cannot be called with empty `child_stack`");
+
+        // If the child is already an `RlpNode` then there is nothing to do, push it back on with no
+        // changes.
+        if let ProofTrieBranchChild::RlpNode(_) = child {
+            self.child_stack.push(child);
+            return Ok(())
+        }
+
+        let child_path = self.last_child_path();
+        let child_rlp_node = self.commit_child(targets, child_path, child)?;
+
+        // Replace the child on the stack
+        self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
+        Ok(())
+    }
+
+    /// Pushes a new branch onto the `branch_stack`, while also pushing the given leaf onto the
+    /// `child_stack`.
+    ///
+    /// This method expects that there already exists a child on the `child_stack`, and that that
+    /// child has a non-zero short key. The new branch is constructed based on the top child from
+    /// the `child_stack` and the given leaf.
+    fn push_new_branch(
+        &mut self,
+        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        leaf_key: Nibbles,
+        leaf_val: VE::DeferredEncoder,
+    ) -> Result<(), StateProofError> {
+        // First determine the new leaf's shortkey relative to the current branch. If there is no
+        // current branch then the short key is the full key.
+        let leaf_short_key = if self.branch_stack.is_empty() {
+            leaf_key
+        } else {
+            // When there is a current branch then trim off its path as well as the nibble that it
+            // has set for this leaf.
+            trim_nibbles_prefix(&leaf_key, self.branch_path.len() + 1)
+        };
+
+        trace!(
+            target: TRACE_TARGET,
+            ?leaf_short_key,
+            branch_path = ?self.branch_path,
+            "push_new_branch: called",
+        );
+
+        // Get the new branch's first child, which is the child on the top of the stack with which
+        // the new leaf shares the same nibble on the current branch.
+        let first_child = self
+            .child_stack
+            .last_mut()
+            .expect("push_new_branch can't be called with empty child_stack");
+
+        let first_child_short_key = first_child.short_key();
+        debug_assert!(
+            !first_child_short_key.is_empty(),
+            "push_new_branch called when top child on stack is not a leaf or extension with a short key",
+        );
+
+        // Determine how many nibbles are shared between the new branch's first child and the new
+        // leaf. This common prefix will be the extension of the new branch
+        let common_prefix_len = first_child_short_key.common_prefix_length(&leaf_short_key);
+
+        // Trim off the common prefix from the first child's short key, plus one nibble which will
+        // stored by the new branch itself in its state mask.
+        let first_child_nibble = first_child_short_key.get_unchecked(common_prefix_len);
+        first_child.trim_short_key_prefix(common_prefix_len + 1);
+
+        // Similarly, trim off the common prefix, plus one nibble for the new branch, from the new
+        // leaf's short key.
+        let leaf_nibble = leaf_short_key.get_unchecked(common_prefix_len);
+        let leaf_short_key = trim_nibbles_prefix(&leaf_short_key, common_prefix_len + 1);
+
+        // Push the new branch onto the branch stack. We do not yet set the `state_mask` bit of the
+        // new leaf so that we can first commit the branch's first child.
+        self.branch_stack.push(ProofTrieBranch {
+            ext_len: common_prefix_len as u8,
+            state_mask: TrieMask::new(1 << first_child_nibble),
+            tree_mask: TrieMask::default(),
+            hash_mask: TrieMask::default(),
+        });
+
+        // Update the branch path to reflect the new branch which was just pushed. Its path will be
+        // the path of the previous branch, plus the nibble shared by each child, plus the parent
+        // extension (denoted by a non-zero `ext_len`). Since the new branch's path is a prefix of
+        // the original leaf_key we can just slice that.
+        //
+        // If the branch is the first branch then we do not add the extra 1, as there is no nibble
+        // in a parent branch to account for.
+        let branch_path_len = self.branch_path.len() +
+            common_prefix_len +
+            if self.branch_stack.len() == 1 { 0 } else { 1 };
+        self.branch_path = leaf_key.slice_unchecked(0, branch_path_len);
+
+        // Before pushing the new leaf onto the `child_stack` we need to commit the previous last
+        // child (ie the first child of this new branch), so that only `child_stack`'s final child
+        // is a non-RlpNode. We have already adjusted this child's short-key to be correct.
+        self.commit_last_child(targets)?;
+
+        // Once the first child is committed we set the new child's bit on the new branch's
+        // `state_mask` and push that child; it will be the second child of the new branch.
+        self.branch_stack
+            .last_mut()
+            .expect("branch was just pushed")
+            .state_mask
+            .set_bit(leaf_nibble);
+
+        self.child_stack
+            .push(ProofTrieBranchChild::Leaf { short_key: leaf_short_key, value: leaf_val });
+
+        trace!(
+            target: TRACE_TARGET,
+            ?leaf_short_key,
+            ?common_prefix_len,
+            new_branch = ?self.branch_stack.last().expect("branch_stack was just pushed to"),
+            ?branch_path_len,
+            branch_path = ?self.branch_path,
+            "push_new_branch: returning",
+        );
+
+        Ok(())
+    }
     /// Pops the top branch off of the `branch_stack`, hashes its children on the `child_stack`, and
     /// replaces those children on the `child_stack`. The `branch_path` field will be updated
     /// accordingly.
@@ -295,15 +361,20 @@ where
         &mut self,
         targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
     ) -> Result<(), StateProofError> {
-        let mut rlp_nodes_buf = self.take_rlp_nodes_buf();
-        let branch = self.branch_stack.pop().expect("branch_stack cannot be empty");
-
         trace!(
             target: TRACE_TARGET,
-            ?branch,
+            branch = ?self.branch_stack.last(),
             branch_path = ?self.branch_path,
+            child_stack_len = ?self.child_stack.len(),
             "pop_branch: called",
         );
+
+        // Ensure the final child on the child stack has been committed, as this method expects all
+        // children of the branch to have been committed.
+        self.commit_last_child(targets)?;
+
+        let mut rlp_nodes_buf = self.take_rlp_nodes_buf();
+        let branch = self.branch_stack.pop().expect("branch_stack cannot be empty");
 
         // Take the branch's children off the stack, using the state mask to determine how many
         // there are.
@@ -311,32 +382,19 @@ where
         debug_assert!(num_children > 1, "A branch must have at least two children");
         debug_assert!(
             self.child_stack.len() >= num_children,
-            "Stack is missing necessary children"
+            "Stack is missing necessary children ({num_children:?})"
         );
 
-        // We have to take the child_stack off self so we can still call other methods while
-        // draining it.
-        let mut child_stack = core::mem::take(&mut self.child_stack);
-        let children = child_stack.drain(child_stack.len() - num_children..);
-
-        // Create an iterator over the paths of each child in the branch.
-        let child_paths = {
-            let branch_path = self.branch_path;
-            TrieMaskIter(branch.state_mask).map(move |nibble| {
-                let mut child_path = branch_path;
-                child_path.push_unchecked(nibble);
-                child_path
-            })
-        };
-
         // Collect children into an `RlpNode` Vec by committing and pushing each of them.
-        for (child_path, child) in child_paths.zip(children) {
-            let child_rlp_node = self.commit_child(targets, child_path, child)?;
+        for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
+            let ProofTrieBranchChild::RlpNode(child_rlp_node) = child else {
+                panic!(
+                    "all branch child must have been committed, found {}",
+                    std::any::type_name_of_val(&child)
+                );
+            };
             rlp_nodes_buf.push(child_rlp_node);
         }
-
-        // Put the child_stack back, now that we're done draining from it.
-        let _ = core::mem::replace(&mut self.child_stack, child_stack);
 
         debug_assert_eq!(
             rlp_nodes_buf.len(),
@@ -385,10 +443,20 @@ where
         val: VE::DeferredEncoder,
     ) -> Result<(), StateProofError> {
         loop {
-            // Get the branch currently being built. If there are no branches on the stack then it
-            // means either the trie is empty or only a single leaf has been added previously.
-            let curr_branch = match self.branch_stack.last_mut() {
-                Some(curr_branch) => curr_branch,
+            trace!(
+                target: TRACE_TARGET,
+                ?key,
+                branch_stack_len = ?self.branch_stack.len(),
+                branch_path = ?self.branch_path,
+                child_stack_len = ?self.child_stack.len(),
+                "add_leaf loop",
+            );
+
+            // Get the `state_mask` of the branch currently being built. If there are no branches on
+            // the stack then it means either the trie is empty or only a single leaf has been added
+            // previously.
+            let curr_branch_state_mask = match self.branch_stack.last() {
+                Some(curr_branch) => curr_branch.state_mask,
                 None if self.child_stack.is_empty() => {
                     // If the child stack is empty then this is the first leaf, push it and be done
                     self.child_stack
@@ -405,7 +473,7 @@ where
                         .expect("already checked for emptiness")
                         .short_key()
                         .is_empty());
-                    self.push_new_branch(key, val);
+                    self.push_new_branch(targets, key, val)?;
                     return Ok(())
                 }
             };
@@ -427,11 +495,21 @@ where
             // directly, otherwise a new branch must be created in-between this branch and that
             // existing child.
             let nibble = key.get_unchecked(common_prefix_len);
-            if curr_branch.state_mask.is_bit_set(nibble) {
+            if curr_branch_state_mask.is_bit_set(nibble) {
                 // This method will also push the new leaf onto the `child_stack`.
-                self.push_new_branch(key, val);
+                self.push_new_branch(targets, key, val)?;
             } else {
-                curr_branch.state_mask.set_bit(nibble);
+                // Commit the previous child of the branch, so that only `child_stack`'s final child
+                // is a non-RlpNode. This must be done prior to setting the `state_mask` bit for the
+                // new child.
+                self.commit_last_child(targets)?;
+
+                // Set `state_mask` bit for the new child.
+                self.branch_stack
+                    .last_mut()
+                    .expect("already checked that `branch_stack` isn't empty")
+                    .state_mask
+                    .set_bit(nibble);
 
                 // Add this leaf as a new child of the current branch (no intermediate branch
                 // needed).
@@ -491,7 +569,18 @@ where
 
         let mut hashed_cursor_current = self.hashed_cursor.seek(B256::ZERO)?;
         loop {
-            trace!(target: TRACE_TARGET, ?hashed_cursor_current, "proof_inner loop");
+            trace!(
+                target: TRACE_TARGET,
+                ?hashed_cursor_current,
+                branch_stack_len = ?self.branch_stack.len(),
+                branch_path = ?self.branch_path,
+                child_stack_len = ?self.child_stack.len(),
+                "proof_inner loop",
+            );
+
+            // Sanity check before making any further changes:
+            // If there is a branch, there must be at least two children
+            debug_assert!(self.branch_stack.last().is_none_or(|_| self.child_stack.len() >= 2));
 
             // Fetch the next leaf from the hashed cursor, converting the key to Nibbles and
             // immediately creating the DeferredValueEncoder so that encoding of the leaf value can
@@ -536,6 +625,11 @@ where
         };
         self.retained_proofs.push(root_node);
 
+        trace!(
+            target: TRACE_TARGET,
+            retained_proofs_len = ?self.retained_proofs.len(),
+            "proof_inner: returning",
+        );
         Ok(core::mem::take(&mut self.retained_proofs))
     }
 }
@@ -614,20 +708,6 @@ where
 
         // Use the static StorageValueEncoder and pass it to proof_inner
         self.proof_inner(&STORAGE_VALUE_ENCODER, targets)
-    }
-}
-
-/// A helper type for iterating over the indexes of the non-zero bits of a [`TrieMask`].
-struct TrieMaskIter(TrieMask);
-
-impl Iterator for TrieMaskIter {
-    type Item = u8;
-    fn next(&mut self) -> Option<Self::Item> {
-        let bit = self.0.first_set_bit_index();
-        if let Some(bit) = bit {
-            self.0.unset_bit(bit);
-        }
-        bit
     }
 }
 
