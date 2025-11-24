@@ -86,7 +86,7 @@ where
                 // Internal transactions: gasUsed should be 0, to should be ArbOS address
                 use alloy_consensus::Transaction;
                 base_receipt.gas_used = 0;
-                base_receipt.to = input.tx.kind().to().copied();
+                base_receipt.to = input.tx.deref().kind().to().copied();
                 tracing::debug!(
                     target: "arb-reth::rpc-receipt",
                     tx_hash = ?input.tx.tx_hash(),
@@ -96,7 +96,7 @@ where
             } else if tx_type_u8 == 0x64 {
                 // Deposit transactions: gasUsed should be 0
                 base_receipt.gas_used = 0;
-                base_receipt.to = input.tx.kind().to().copied();
+                base_receipt.to = input.tx.deref().kind().to().copied();
                 tracing::debug!(
                     target: "arb-reth::rpc-receipt",
                     tx_hash = ?input.tx.tx_hash(),
