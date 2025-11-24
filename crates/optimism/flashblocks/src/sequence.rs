@@ -99,9 +99,9 @@ impl FlashBlockPendingSequence {
         self.cached_reads = Some(cached_reads);
     }
 
-    /// Returns cached reads for this sequence
-    pub const fn cached_reads(&self) -> &Option<CachedReads> {
-        &self.cached_reads
+    /// Removes the cached reads for this sequence
+    pub const fn take_cached_reads(&mut self) -> Option<CachedReads> {
+        self.cached_reads.take()
     }
 
     /// Returns the first block number
@@ -405,12 +405,12 @@ mod tests {
 
             let cached_reads = CachedReads::default();
             sequence.set_cached_reads(cached_reads);
-            assert!(sequence.cached_reads().is_some());
+            assert!(sequence.take_cached_reads().is_some());
 
             let _complete = sequence.finalize().unwrap();
 
             // Cached reads should be cleared
-            assert!(sequence.cached_reads().is_none());
+            assert!(sequence.take_cached_reads().is_none());
         }
 
         #[test]

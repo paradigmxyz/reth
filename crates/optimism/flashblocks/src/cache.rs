@@ -102,6 +102,9 @@ impl<T: SignedTransaction> SequenceManager<T> {
             // Ring buffer automatically evicts oldest entry when full
             let txs = std::mem::take(&mut self.pending_transactions);
             self.completed_cache.push((completed, txs));
+
+            // ensure cache is wiped on new flashblock
+            let _ = self.pending.take_cached_reads();
         }
 
         self.pending_transactions
@@ -123,7 +126,7 @@ impl<T: SignedTransaction> SequenceManager<T> {
     ///
     /// Returns None if nothing is buildable right now.
     pub(crate) fn next_buildable_args(
-        &self,
+        &mut self,
         local_tip_hash: B256,
         local_tip_timestamp: u64,
     ) -> Option<BuildArgs<Vec<WithEncoded<Recovered<T>>>>> {
@@ -132,9 +135,9 @@ impl<T: SignedTransaction> SequenceManager<T> {
         let (base, last_flashblock, transactions, cached_state, source_name) =
             // Priority 1: Try current pending sequence
             if let Some(base) = self.pending.payload_base().filter(|b| b.parent_hash == local_tip_hash) {
+                let cached_state = self.pending.take_cached_reads().map(|r| (base.parent_hash, r));
                 let last_fb = self.pending.last_flashblock()?;
                 let transactions = self.pending_transactions.clone();
-                let cached_state = self.pending.cached_reads().as_ref().map(|r| (base.parent_hash, r.clone()));
                 (base, last_fb, transactions, cached_state, "pending")
             }
             // Priority 2: Try cached sequence with exact parent match
@@ -311,7 +314,7 @@ mod tests {
 
     #[test]
     fn test_next_buildable_args_returns_none_when_empty() {
-        let manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
         let local_tip_hash = B256::random();
         let local_tip_timestamp = 1000;
 
