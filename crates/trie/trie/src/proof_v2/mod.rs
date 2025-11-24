@@ -148,8 +148,6 @@ where
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
     ) -> Result<RlpNode, StateProofError> {
-        trace!(target: TRACE_TARGET, ?child_path, "commit_child: called");
-
         // If the child is already an `RlpNode` then there is nothing to do.
         if let ProofTrieBranchChild::RlpNode(rlp_node) = child {
             return Ok(rlp_node)
@@ -245,6 +243,37 @@ where
         Ok(())
     }
 
+    /// Pushes a new leaf node onto a branch, setting its `state_mask` bit.
+    ///
+    /// # Panics
+    ///
+    /// - If `branch_stack` is empty
+    /// - If the leaf's nibble is already set in the branch's `state_mask`.
+    fn push_new_leaf(
+        &mut self,
+        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        leaf_nibble: u8,
+        leaf_short_key: Nibbles,
+        leaf_val: VE::DeferredEncoder,
+    ) -> Result<(), StateProofError> {
+        // Before pushing the new leaf onto the `child_stack` we need to commit the previous last
+        // child (ie the first child of this new branch), so that only `child_stack`'s final child
+        // is a non-RlpNode.
+        self.commit_last_child(targets)?;
+
+        // Once the first child is committed we set the new child's bit on the top branch's
+        // `state_mask` and push that child.
+        let branch = self.branch_stack.last_mut().expect("branch_stack cannot be empty");
+
+        debug_assert!(!branch.state_mask.is_bit_set(leaf_nibble));
+        branch.state_mask.set_bit(leaf_nibble);
+
+        self.child_stack
+            .push(ProofTrieBranchChild::Leaf { short_key: leaf_short_key, value: leaf_val });
+
+        Ok(())
+    }
+
     /// Pushes a new branch onto the `branch_stack`, while also pushing the given leaf onto the
     /// `child_stack`.
     ///
@@ -302,7 +331,7 @@ where
         let leaf_short_key = trim_nibbles_prefix(&leaf_short_key, common_prefix_len + 1);
 
         // Push the new branch onto the branch stack. We do not yet set the `state_mask` bit of the
-        // new leaf so that we can first commit the branch's first child.
+        // new leaf; `push_new_leaf` will do that.
         self.branch_stack.push(ProofTrieBranch {
             ext_len: common_prefix_len as u8,
             state_mask: TrieMask::new(1 << first_child_nibble),
@@ -322,21 +351,9 @@ where
             if self.branch_stack.len() == 1 { 0 } else { 1 };
         self.branch_path = leaf_key.slice_unchecked(0, branch_path_len);
 
-        // Before pushing the new leaf onto the `child_stack` we need to commit the previous last
-        // child (ie the first child of this new branch), so that only `child_stack`'s final child
-        // is a non-RlpNode. We have already adjusted this child's short-key to be correct.
-        self.commit_last_child(targets)?;
-
-        // Once the first child is committed we set the new child's bit on the new branch's
-        // `state_mask` and push that child; it will be the second child of the new branch.
-        self.branch_stack
-            .last_mut()
-            .expect("branch was just pushed")
-            .state_mask
-            .set_bit(leaf_nibble);
-
-        self.child_stack
-            .push(ProofTrieBranchChild::Leaf { short_key: leaf_short_key, value: leaf_val });
+        // Push the new leaf onto the new branch. This step depends on the top branch being in the
+        // correct state, so must be done last.
+        self.push_new_leaf(targets, leaf_nibble, leaf_short_key, leaf_val)?;
 
         trace!(
             target: TRACE_TARGET,
@@ -449,7 +466,7 @@ where
                 branch_stack_len = ?self.branch_stack.len(),
                 branch_path = ?self.branch_path,
                 child_stack_len = ?self.child_stack.len(),
-                "add_leaf loop",
+                "add_leaf: loop",
             );
 
             // Get the `state_mask` of the branch currently being built. If there are no branches on
@@ -499,24 +516,8 @@ where
                 // This method will also push the new leaf onto the `child_stack`.
                 self.push_new_branch(targets, key, val)?;
             } else {
-                // Commit the previous child of the branch, so that only `child_stack`'s final child
-                // is a non-RlpNode. This must be done prior to setting the `state_mask` bit for the
-                // new child.
-                self.commit_last_child(targets)?;
-
-                // Set `state_mask` bit for the new child.
-                self.branch_stack
-                    .last_mut()
-                    .expect("already checked that `branch_stack` isn't empty")
-                    .state_mask
-                    .set_bit(nibble);
-
-                // Add this leaf as a new child of the current branch (no intermediate branch
-                // needed).
-                self.child_stack.push(ProofTrieBranchChild::Leaf {
-                    short_key: key.slice_unchecked(common_prefix_len + 1, key.len()),
-                    value: val,
-                });
+                let short_key = key.slice_unchecked(common_prefix_len + 1, key.len());
+                self.push_new_leaf(targets, nibble, short_key, val)?;
             }
 
             return Ok(())
@@ -530,7 +531,7 @@ where
         value_encoder: &VE,
         targets: impl IntoIterator<Item = Nibbles>,
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
-        trace!(target: TRACE_TARGET, "proof_inner called");
+        trace!(target: TRACE_TARGET, "proof_inner: called");
 
         // In debug builds, verify that targets are sorted
         #[cfg(debug_assertions)]
@@ -575,7 +576,7 @@ where
                 branch_stack_len = ?self.branch_stack.len(),
                 branch_path = ?self.branch_path,
                 child_stack_len = ?self.child_stack.len(),
-                "proof_inner loop",
+                "proof_inner: loop",
             );
 
             // Sanity check before making any further changes:
