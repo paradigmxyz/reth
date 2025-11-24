@@ -565,7 +565,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
 /// State after applying the given block, this block is part of the canonical chain that partially
 /// stored in memory and can be traced back to a canonical block on disk.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     /// The executed block that determines the state after this block has been executed.
     block: ExecutedBlock<N>,
@@ -740,16 +740,6 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
     }
 }
 
-impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
-    fn eq(&self, other: &Self) -> bool {
-        // Ignore deferred trie data here to avoid blocking comparisons.
-        self.recovered_block == other.recovered_block &&
-            self.execution_output == other.execution_output
-    }
-}
-
-impl<N: NodePrimitives> Eq for ExecutedBlock<N> {}
-
 impl<N: NodePrimitives> ExecutedBlock<N> {
     /// Returns a reference to an inner [`SealedBlock`]
     #[inline]
@@ -771,21 +761,15 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Returns the deferred trie data, blocking until it is available.
     ///
-    /// # Panics
-    ///
-    /// Panics if the background trie computation task failed or panicked.
+    /// This blocks the calling thread until the background trie computation completes.
     #[inline]
     pub fn trie_data(&self) -> ComputedTrieData {
-        self.trie_data
-            .wait_cloned()
-            .unwrap_or_else(|err| panic!("deferred trie data unavailable: {err}"))
+        self.trie_data.wait_cloned()
     }
 
     /// Returns the hashed state result of the execution outcome.
     ///
-    /// # Panics
-    ///
-    /// Panics if the background trie computation task failed or panicked.
+    /// This blocks the calling thread until the deferred trie computation completes.
     #[inline]
     pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
         self.trie_data().hashed_state
@@ -793,9 +777,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Returns the trie updates resulting from the execution outcome.
     ///
-    /// # Panics
-    ///
-    /// Panics if the background trie computation task failed or panicked.
+    /// This blocks the calling thread until the deferred trie computation completes.
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
         self.trie_data().trie_updates
@@ -803,9 +785,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Returns the trie input anchored to the persisted ancestor.
     ///
-    /// # Panics
-    ///
-    /// Panics if the background trie computation task failed or panicked.
+    /// This blocks the calling thread until the deferred trie computation completes.
     #[inline]
     pub fn trie_input(&self) -> Arc<TrieInputSorted> {
         self.trie_data().trie_input
