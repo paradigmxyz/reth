@@ -22,7 +22,7 @@ where
     P: HeaderProvider + Clone + Send + Sync + 'static + core::fmt::Debug,
     N: NodePrimitives,
 {
-    type RpcReceipt = WithOtherFields<TransactionReceipt>;
+    type RpcReceipt = TransactionReceipt<alloy_consensus::ReceiptEnvelope>;
     type Error = crate::error::ArbEthApiError;
 
     fn convert_receipts(
@@ -70,14 +70,10 @@ where
                 alloy_consensus::ReceiptEnvelope::Legacy(consensus_receipt)
             });
 
-            // Wrap with WithOtherFields to ensure the correct transaction type is in the JSON response
-            // The standard receipt envelope doesn't support Arbitrum-specific types like 0x6a
-            let mut wrapped = WithOtherFields::new(base_receipt);
-            // Add the type field explicitly to the "other" fields
-            // This ensures it serializes correctly for Arbitrum transaction types
-            wrapped.other.insert("type".to_string(), serde_json::Value::String(format!("0x{:x}", tx_type_u8)));
-
-            out.push(wrapped);
+            // The base_receipt already has all the data we need
+            // The tx type is encoded in the envelope so no need for WithOtherFields
+            // Convert to the expected type using Into
+            out.push(base_receipt.into());
         }
         Ok(out)
     }
