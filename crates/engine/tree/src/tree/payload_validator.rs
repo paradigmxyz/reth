@@ -1007,8 +1007,8 @@ where
     /// Aggregates multiple in-memory blocks into a single [`TrieInputSorted`] by combining their
     /// state changes.
     ///
-    /// This is done by starting with the newest block's trie data as the base and iterating backwards
-    /// through older blocks, extending the base with their state and trie updates.
+    /// This is done by starting with the newest block's trie data as the base and iterating
+    /// backwards through older blocks, extending the base with their state and trie updates.
     fn merge_overlay_trie_input(blocks: &[ExecutedBlock<N>]) -> TrieInputSorted {
         let mut input = TrieInputSorted::default();
         let mut blocks_iter = blocks.iter().rev().peekable();
