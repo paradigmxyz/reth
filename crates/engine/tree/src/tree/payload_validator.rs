@@ -983,8 +983,8 @@ where
         if let Some(last_block) = blocks.last() {
             let data = last_block.trie_data();
             if let (Some(anchor_hash), Some(trie_input)) =
-                (data.anchor_hash(), data.trie_input().cloned())
-                && anchor_hash == block_hash
+                (data.anchor_hash(), data.trie_input().cloned()) &&
+                anchor_hash == block_hash
             {
                 trace!(target: "engine::tree::payload_validator", %block_hash,"Reusing trie input with matching anchor hash");
                 self.metrics
