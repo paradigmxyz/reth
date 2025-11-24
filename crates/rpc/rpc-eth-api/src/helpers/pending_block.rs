@@ -373,12 +373,12 @@ pub trait LoadPendingBlock:
         Ok(ExecutedBlock {
             recovered_block: block.into(),
             execution_output: Arc::new(execution_outcome),
-            trie_data: DeferredTrieData::ready(ComputedTrieData {
-                hashed_state: Arc::new(hashed_state.into_sorted()),
-                trie_updates: Arc::new(trie_updates.into_sorted()),
-                anchor_hash: B256::ZERO,
-                trie_input: Arc::new(TrieInputSorted::default()),
-            }),
+            trie_data: DeferredTrieData::ready(ComputedTrieData::with_trie_input(
+                Arc::new(hashed_state.into_sorted()),
+                Arc::new(trie_updates.into_sorted()),
+                B256::ZERO,
+                Arc::new(TrieInputSorted::default()),
+            )),
         })
     }
 }

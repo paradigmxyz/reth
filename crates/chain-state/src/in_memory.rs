@@ -824,8 +824,14 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     ///
     /// This blocks the calling thread until the deferred trie computation completes.
     #[inline]
-    pub fn trie_input(&self) -> Arc<TrieInputSorted> {
-        self.trie_data().trie_input
+    pub fn trie_input(&self) -> Option<Arc<TrieInputSorted>> {
+        self.trie_data().trie_input().cloned()
+    }
+
+    /// Returns the anchor hash of the trie input, if present.
+    #[inline]
+    pub fn anchor_hash(&self) -> Option<B256> {
+        self.trie_data().anchor_hash()
     }
 
     /// Returns a [`BlockNumber`] of the block.

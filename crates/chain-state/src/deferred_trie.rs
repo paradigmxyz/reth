@@ -15,9 +15,51 @@ pub struct ComputedTrieData {
     /// Sorted trie updates produced by state root computation.
     pub trie_updates: Arc<TrieUpdatesSorted>,
     /// The persisted ancestor hash this trie input is anchored to.
-    pub anchor_hash: B256,
+    pub anchor_hash: Option<B256>,
     /// Trie input constructed from in-memory overlays.
-    pub trie_input: Arc<TrieInputSorted>,
+    pub trie_input: Option<Arc<TrieInputSorted>>,
+}
+
+impl ComputedTrieData {
+    /// Construct a bundle that includes trie input anchored to a persisted ancestor.
+    pub const fn with_trie_input(
+        hashed_state: Arc<HashedPostStateSorted>,
+        trie_updates: Arc<TrieUpdatesSorted>,
+        anchor_hash: B256,
+        trie_input: Arc<TrieInputSorted>,
+    ) -> Self {
+        Self { hashed_state, trie_updates, anchor_hash: Some(anchor_hash), trie_input: Some(trie_input) }
+    }
+
+    /// Construct a bundle without trie input or anchor information.
+    pub const fn without_trie_input(
+        hashed_state: Arc<HashedPostStateSorted>,
+        trie_updates: Arc<TrieUpdatesSorted>,
+    ) -> Self {
+        Self { hashed_state, trie_updates, anchor_hash: None, trie_input: None }
+    }
+
+    /// Returns the anchor hash, if present.
+    pub const fn anchor_hash(&self) -> Option<B256> {
+        self.anchor_hash
+    }
+
+    /// Returns the trie input, if present.
+    pub const fn trie_input(&self) -> Option<&Arc<TrieInputSorted>> {
+        self.trie_input.as_ref()
+    }
+
+    /// Set the trie input and anchor hash.
+    pub fn set_trie_input(&mut self, anchor_hash: B256, trie_input: Arc<TrieInputSorted>) {
+        self.anchor_hash = Some(anchor_hash);
+        self.trie_input = Some(trie_input);
+    }
+
+    /// Remove trie input and anchor hash.
+    pub fn clear_trie_input(&mut self) {
+        self.anchor_hash = None;
+        self.trie_input = None;
+    }
 }
 
 /// Shared handle to asynchronously populated trie data.
@@ -102,12 +144,13 @@ mod tests {
         ComputedTrieData {
             hashed_state: Arc::default(),
             trie_updates: Arc::default(),
-            anchor_hash: B256::ZERO,
-            trie_input: Arc::new(TrieInputSorted::default()),
+            anchor_hash: None,
+            trie_input: None,
         }
     }
 
     #[test]
+    /// Verifies that `wait_cloned` blocks until `set_ready` is called from another thread.
     fn resolves_after_set() {
         let deferred = DeferredTrieData::pending();
         let deferred_clone = deferred.clone();
@@ -185,10 +228,11 @@ mod tests {
         let deferred = DeferredTrieData::pending();
         let first = ComputedTrieData {
             // Use `with_last_byte` for distinct, deterministic anchors in tests.
-            anchor_hash: B256::with_last_byte(1),
+            anchor_hash: Some(B256::with_last_byte(1)),
             ..empty_bundle()
         };
-        let second = ComputedTrieData { anchor_hash: B256::with_last_byte(2), ..empty_bundle() };
+        let second =
+            ComputedTrieData { anchor_hash: Some(B256::with_last_byte(2)), ..empty_bundle() };
 
         deferred.set_ready(first.clone());
         deferred.set_ready(second);
@@ -201,14 +245,16 @@ mod tests {
     fn clones_share_state() {
         let deferred = DeferredTrieData::pending();
         let setter = deferred.clone();
-        let bundle = ComputedTrieData { anchor_hash: B256::with_last_byte(3), ..empty_bundle() };
+        let bundle =
+            ComputedTrieData { anchor_hash: Some(B256::with_last_byte(3)), ..empty_bundle() };
 
         thread::spawn(move || setter.set_ready(bundle));
 
-        assert_eq!(deferred.wait_cloned().anchor_hash, B256::with_last_byte(3));
+        assert_eq!(deferred.wait_cloned().anchor_hash, Some(B256::with_last_byte(3)));
     }
 
     #[test]
+    /// Ensures default initialization creates a pending handle that requires `set_ready`.
     fn default_is_pending() {
         let deferred: DeferredTrieData = Default::default();
         let setter = deferred.clone();
@@ -229,7 +275,8 @@ mod tests {
     /// Ensures fast path when data is set before any waiter calls `wait_cloned`.
     fn set_before_wait() {
         let deferred = DeferredTrieData::pending();
-        let bundle = ComputedTrieData { anchor_hash: B256::with_last_byte(4), ..empty_bundle() };
+        let bundle =
+            ComputedTrieData { anchor_hash: Some(B256::with_last_byte(4)), ..empty_bundle() };
 
         deferred.set_ready(bundle.clone());
 
