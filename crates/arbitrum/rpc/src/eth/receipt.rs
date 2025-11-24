@@ -4,6 +4,7 @@ use reth_primitives_traits::NodePrimitives;
 use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
 use reth_rpc_eth_types::receipt::build_receipt;
 use alloy_rpc_types_eth::TransactionReceipt;
+use alloy_serde::WithOtherFields;
 
 #[derive(Clone, Debug)]
 pub struct ArbReceiptConverter<P> {
@@ -21,7 +22,7 @@ where
     P: HeaderProvider + Clone + Send + Sync + 'static + core::fmt::Debug,
     N: NodePrimitives,
 {
-    type RpcReceipt = TransactionReceipt;
+    type RpcReceipt = WithOtherFields<TransactionReceipt>;
     type Error = crate::error::ArbEthApiError;
 
     fn convert_receipts(
@@ -30,28 +31,28 @@ where
     ) -> Result<vec::Vec<Self::RpcReceipt>, Self::Error> {
         let mut out = Vec::with_capacity(receipts.len());
         for input in receipts {
-            // Build the receipt using a custom conversion function
-            let rpc_receipt = build_receipt(input, None, |receipt, _next_log_index, _meta| {
-                // For Arbitrum, we need to properly handle the receipt data
-                // The receipt parameter here is N::Receipt, and build_receipt will extract the data
-                // We just need to provide the proper ReceiptEnvelope wrapper
-                // Since we don't have direct access to the inner data here, we'll need to
-                // work with what build_receipt provides
-                //
-                // The issue is that build_receipt extracts the data from the receipt,
-                // but our callback was returning defaults. We need to ensure build_receipt
-                // uses the actual receipt data.
-                //
-                // Actually, looking at build_receipt more carefully, it passes the receipt
-                // to our callback, and we're supposed to convert it to a ReceiptEnvelope.
-                // The TransactionReceipt struct that build_receipt returns will have
-                // the correct gas_used, etc. from the input, not from our envelope.
-                //
-                // So returning a default envelope might actually be okay IF build_receipt
-                // is extracting the data correctly. Let me verify this assumption.
+            // Get the transaction type u8 value using the Typed2718 trait
+            // This preserves Arbitrum-specific types like 0x6a (internal), 0x64 (deposit), etc.
+            let tx_type_u8 = {
+                use alloy_consensus::Typed2718;
+                input.tx.ty()
+            };
+
+            // Build the receipt using the standard build_receipt function
+            let base_receipt = build_receipt(input, None, |receipt, _next_log_index, _meta| {
+                // Return a default envelope - the actual receipt data is extracted by build_receipt
+                // The envelope type doesn't matter since we'll override it with WithOtherFields
                 alloy_consensus::ReceiptEnvelope::Legacy(alloy_consensus::ReceiptWithBloom::default())
             });
-            out.push(rpc_receipt);
+
+            // Wrap with WithOtherFields to ensure the correct transaction type is in the JSON response
+            // The standard receipt envelope doesn't support Arbitrum-specific types like 0x6a
+            let mut wrapped = WithOtherFields::new(base_receipt);
+            // Add the type field explicitly to the "other" fields
+            // This ensures it serializes correctly for Arbitrum transaction types
+            wrapped.other.insert("type".to_string(), serde_json::Value::String(format!("0x{:x}", tx_type_u8)));
+
+            out.push(wrapped);
         }
         Ok(out)
     }
