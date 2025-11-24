@@ -5,7 +5,7 @@ use std::{error::Error, fmt, sync::Arc};
 
 /// Sorted trie data computed for an executed block.
 /// These represent the complete set of sorted trie data required to persist
-/// block state and proof generation for a block.
+/// block state for, and generate proofs on top of a block.
 #[derive(Clone, Debug, Default)]
 pub struct ComputedTrieData {
     /// Sorted hashed post-state produced by execution.
