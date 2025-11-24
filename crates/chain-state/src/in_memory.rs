@@ -573,6 +573,12 @@ pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     parent: Option<Arc<Self>>,
 }
 
+impl<N: NodePrimitives> PartialEq for BlockState<N> {
+    fn eq(&self, other: &Self) -> bool {
+        self.block == other.block && self.parent == other.parent
+    }
+}
+
 impl<N: NodePrimitives> BlockState<N> {
     /// [`BlockState`] constructor.
     pub const fn new(block: ExecutedBlock<N>) -> Self {
@@ -737,6 +743,14 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
             execution_output: Default::default(),
             trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
         }
+    }
+}
+
+impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
+    fn eq(&self, other: &Self) -> bool {
+        // Trie data is computed asynchronously and doesn't define block identity.
+        self.recovered_block == other.recovered_block &&
+            self.execution_output == other.execution_output
     }
 }
 
