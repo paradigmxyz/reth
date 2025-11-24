@@ -338,43 +338,47 @@ where
 
         let mut used_pre_nonce = None;
         let mut maybe_predeploy_result: Option<(revm::context::result::ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>, u64)> = None;
-        if let Some(call_to) = to_addr {
-            let evm = self.inner.evm();
-            let block = alloy_evm::Evm::block(evm);
-            let ctx = PredeployCallContext {
-                block_number: u64::try_from(block.number).unwrap_or(0),
-                block_hashes: alloc::vec::Vec::new(),
-                chain_id: alloy_primitives::U256::from(self.inner.evm().chain_id()),
-                os_version: 0,
-                time: u64::try_from(block.timestamp).unwrap_or(0),
-                origin: sender,
-                caller: sender,
-                depth: 0,
-                basefee: block_basefee,
-            };
-            crate::log_sink::clear();
-            struct SinkEmitter;
-            impl LogEmitter for SinkEmitter {
-                fn emit_log(&mut self, address: alloy_primitives::Address, topics: &[[u8; 32]], data: &[u8]) {
-                    crate::log_sink::push(address, topics, data);
+        // Skip predeploy dispatch for transactions that are fully handled in start_tx
+        // (internal, deposits, submit retryables) to preserve logs emitted in start_tx
+        if !start_hook_result.end_tx_now {
+            if let Some(call_to) = to_addr {
+                let evm = self.inner.evm();
+                let block = alloy_evm::Evm::block(evm);
+                let ctx = PredeployCallContext {
+                    block_number: u64::try_from(block.number).unwrap_or(0),
+                    block_hashes: alloc::vec::Vec::new(),
+                    chain_id: alloy_primitives::U256::from(self.inner.evm().chain_id()),
+                    os_version: 0,
+                    time: u64::try_from(block.timestamp).unwrap_or(0),
+                    origin: sender,
+                    caller: sender,
+                    depth: 0,
+                    basefee: block_basefee,
+                };
+                crate::log_sink::clear();
+                struct SinkEmitter;
+                impl LogEmitter for SinkEmitter {
+                    fn emit_log(&mut self, address: alloy_primitives::Address, topics: &[[u8; 32]], data: &[u8]) {
+                        crate::log_sink::push(address, topics, data);
+                    }
                 }
-            }
-            let mut emitter = SinkEmitter;
-            
-            use crate::retryables::DefaultRetryables;
-            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-            let db: &mut revm::database::State<D> = *db_ref;
-            
-            let arbos_addr = alloy_primitives::Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                              0x00, 0x00, 0x00, 0x64]);
-            let _ = db.basic(arbos_addr);
-            
-            let mut retryables = DefaultRetryables::new(db as *mut _, alloy_primitives::B256::ZERO);
-            
-            if let Ok(mut reg) = self.predeploys.lock() {
-                let calldata_bytes = tx.tx().input().clone();
-                let _ = reg.dispatch_with_emitter(&ctx, call_to, &calldata_bytes, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut retryables, &mut emitter);
+                let mut emitter = SinkEmitter;
+
+                use crate::retryables::DefaultRetryables;
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let db: &mut revm::database::State<D> = *db_ref;
+
+                let arbos_addr = alloy_primitives::Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                                  0x00, 0x00, 0x00, 0x64]);
+                let _ = db.basic(arbos_addr);
+
+                let mut retryables = DefaultRetryables::new(db as *mut _, alloy_primitives::B256::ZERO);
+
+                if let Ok(mut reg) = self.predeploys.lock() {
+                    let calldata_bytes = tx.tx().input().clone();
+                    let _ = reg.dispatch_with_emitter(&ctx, call_to, &calldata_bytes, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut retryables, &mut emitter);
+                }
             }
         }
 
@@ -444,6 +448,9 @@ where
         evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
 
         let wrapped = WithTxEnv { tx_env, tx };
+
+        // For early-terminated transactions, we still execute through EVM to get proper receipt
+        // but the gas will be overridden by hook_gas_override
         let result = self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
             let evm_gas = exec_result.gas_used();
             // Internal transactions (type 0x6a) don't contribute to cumulative gas
@@ -461,6 +468,7 @@ where
                 new_cumulative = new_cumulative,
                 is_internal = is_internal,
                 is_override = hook_gas_override.is_some(),
+                end_tx_now = start_hook_result.end_tx_now,
                 "Storing cumulative gas before receipt creation"
             );
 
