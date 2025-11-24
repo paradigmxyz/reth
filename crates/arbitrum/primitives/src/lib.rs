@@ -1210,7 +1210,7 @@ impl ConsensusTx for ArbTransactionSigned {
                 let addr = alloy_primitives::address!("000000000000000000000000000000000000006e");
                 TxKind::Call(addr)
             },
-            ArbTypedTransaction::Internal(_) => TxKind::Call(alloy_primitives::address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")),
+            ArbTypedTransaction::Internal(_) => TxKind::Call(alloy_primitives::address!("0x00000000000000000000000000000000000A4B05")),
             ArbTypedTransaction::Eip2930(tx) => tx.to,
             ArbTypedTransaction::Eip1559(tx) => tx.to,
             ArbTypedTransaction::Eip4844(tx) => TxKind::Call(tx.to),
