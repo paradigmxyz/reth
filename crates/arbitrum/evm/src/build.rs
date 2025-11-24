@@ -446,28 +446,47 @@ where
         let wrapped = WithTxEnv { tx_env, tx };
         let result = self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
             let evm_gas = exec_result.gas_used();
+            // Internal transactions (type 0x6a) don't contribute to cumulative gas
+            let gas_to_add = if is_internal { 0u64 } else { evm_gas };
             let actual_gas = hook_gas_override.unwrap_or(evm_gas);
-            let new_cumulative = self.cumulative_gas_used + evm_gas;
-            
+            let new_cumulative = self.cumulative_gas_used + gas_to_add;
+
             tracing::debug!(
                 target: "arb-reth::executor",
                 tx_hash = ?tx_hash,
                 evm_gas = evm_gas,
                 actual_gas = actual_gas,
+                gas_to_add = gas_to_add,
                 current_cumulative = self.cumulative_gas_used,
                 new_cumulative = new_cumulative,
+                is_internal = is_internal,
                 is_override = hook_gas_override.is_some(),
                 "Storing cumulative gas before receipt creation"
             );
-            
-            crate::set_early_tx_gas(tx_hash, actual_gas, new_cumulative);
-            
+
+            // For internal txs, store 0 as the gas used in receipt
+            let gas_for_receipt = if is_internal { 0u64 } else { actual_gas };
+            crate::set_early_tx_gas(tx_hash, gas_for_receipt, new_cumulative);
+
             f(exec_result)
         });
-        
+
         if let Ok(Some(evm_gas)) = result {
+            // Internal transactions don't contribute to cumulative gas
+            let gas_to_add = if is_internal { 0u64 } else { evm_gas };
             let actual_gas = hook_gas_override.unwrap_or(evm_gas);
-            self.cumulative_gas_used += actual_gas;
+            let final_gas_to_add = if is_internal { 0u64 } else { actual_gas };
+            self.cumulative_gas_used += final_gas_to_add;
+
+            tracing::info!(
+                target: "arb-reth::executor",
+                tx_hash = ?tx_hash,
+                is_internal = is_internal,
+                evm_gas = evm_gas,
+                final_gas_to_add = final_gas_to_add,
+                new_cumulative = self.cumulative_gas_used,
+                "Updated cumulative gas after transaction"
+            );
         }
 
         let evm = self.inner.evm_mut();
