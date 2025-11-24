@@ -63,11 +63,9 @@ impl<N: NodePrimitives> BuiltPayloadExecutedBlock<N> {
         reth_chain_state::ExecutedBlock {
             recovered_block: self.recovered_block,
             execution_output: self.execution_output,
-            trie_data: DeferredTrieData::ready(ComputedTrieData::with_trie_input(
+            trie_data: DeferredTrieData::ready(ComputedTrieData::without_trie_input(
                 hashed_state,
                 trie_updates,
-                B256::ZERO,
-                Arc::new(reth_trie_common::TrieInputSorted::default()),
             )),
         }
     }

@@ -1,9 +1,6 @@
 use alloy_primitives::B256;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
-use std::{
-    fmt,
-    sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
 
 /// Sorted trie data computed for an executed block.
 /// These represent the complete set of sorted trie data required to persist
@@ -77,7 +74,7 @@ impl ComputedTrieData {
 /// A thin wrapper over `Arc<OnceLock<ComputedTrieData>>` that lets producers call
 /// [`DeferredTrieData::set_ready`] once, and consumers block with [`DeferredTrieData::wait_cloned`]
 /// until the trie data is available.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DeferredTrieData(Arc<OnceLock<ComputedTrieData>>);
 
 impl Default for DeferredTrieData {
@@ -131,13 +128,6 @@ impl DeferredTrieData {
     /// and each receives a cloned `ComputedTrieData` (Arc clones are cheap).
     pub fn wait_cloned(&self) -> ComputedTrieData {
         self.0.wait().clone()
-    }
-}
-
-impl fmt::Debug for DeferredTrieData {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = if self.0.get().is_some() { "ready" } else { "pending" };
-        f.debug_struct("DeferredTrieData").field("state", &state).finish()
     }
 }
 

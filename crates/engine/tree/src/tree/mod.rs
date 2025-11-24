@@ -1801,7 +1801,6 @@ where
         Ok(Some(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
             execution_output: Arc::new(execution_output),
-            // Already computed from DB; expose via the deferred handle type.
             trie_data: DeferredTrieData::ready(trie_data),
         }))
     }

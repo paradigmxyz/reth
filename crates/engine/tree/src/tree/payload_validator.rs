@@ -539,9 +539,6 @@ where
         // Create a deferred handle to store the sorted trie data.
         let deferred_trie_data = DeferredTrieData::pending();
         let deferred_handle_task = deferred_trie_data.clone();
-        let hashed_state_for_trie = hashed_state;
-        let trie_output_for_trie = trie_output;
-        let overlay_blocks_for_trie = overlay_blocks;
         let deferred_compute_duration =
             self.metrics.block_validation.deferred_trie_compute_duration.clone();
 
@@ -553,11 +550,10 @@ where
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
 
-                let mut parent_trie_input =
-                    Self::merge_overlay_trie_input(&overlay_blocks_for_trie);
+                let mut parent_trie_input = Self::merge_overlay_trie_input(&overlay_blocks);
 
-                let sorted_hashed_state = Arc::new(hashed_state_for_trie.into_sorted());
-                let sorted_trie_updates = Arc::new(trie_output_for_trie.into_sorted());
+                let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
+                let sorted_trie_updates = Arc::new(trie_output.into_sorted());
 
                 {
                     let state_mut = Arc::make_mut(&mut parent_trie_input.state);
