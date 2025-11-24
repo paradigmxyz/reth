@@ -518,19 +518,46 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 
                 let old_l1_block_number = blockhashes.l1_block_number().unwrap_or(0);
                 let mut l1_block_number = internal_data.l1_block_number;
-                
+
+                tracing::info!(
+                    target: "arb-evm::startblock",
+                    "StartBlock internal tx: l1_block_number_raw={}, old_l1_block_number={}, arbos_version={}",
+                    l1_block_number, old_l1_block_number, arbos_version
+                );
+
                 if arbos_version < 8 {
                     l1_block_number += 1;
+                    tracing::info!(
+                        target: "arb-evm::startblock",
+                        "Adjusted l1_block_number for arbos_version<8: new_value={}",
+                        l1_block_number
+                    );
                 }
-                
+
                 if l1_block_number > old_l1_block_number {
+                    tracing::info!(
+                        target: "arb-evm::startblock",
+                        "Recording new L1 block: number={}, prev_hash={:?}",
+                        l1_block_number - 1, prev_hash
+                    );
                     if let Err(e) = blockhashes.record_new_l1_block(
                         l1_block_number - 1,
                         prev_hash,
                         arbos_version,
                     ) {
                         tracing::error!("Failed to record new L1 block: {:?}", e);
+                    } else {
+                        tracing::info!(
+                            target: "arb-evm::startblock",
+                            "Successfully recorded L1 block"
+                        );
                     }
+                } else {
+                    tracing::warn!(
+                        target: "arb-evm::startblock",
+                        "Skipping L1 block record: l1_block_number={} <= old_l1_block_number={}",
+                        l1_block_number, old_l1_block_number
+                    );
                 }
                 
                 let retryable_storage = crate::storage::Storage::new(
