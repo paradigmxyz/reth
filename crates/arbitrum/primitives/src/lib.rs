@@ -1175,6 +1175,9 @@ impl ConsensusTx for ArbTransactionSigned {
             ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
             ArbTypedTransaction::Eip1559(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
             ArbTypedTransaction::Eip4844(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
+            // For Arbitrum internal transactions and deposits, use basefee as effectiveGasPrice
+            // This matches the official Nitro implementation behavior
+            ArbTypedTransaction::Internal(_) | ArbTypedTransaction::Deposit(_) => _base_fee.unwrap_or(0) as u128,
             _ => self.max_fee_per_gas(),
         }
     }
