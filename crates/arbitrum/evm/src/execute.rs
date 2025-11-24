@@ -969,15 +969,30 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     create_params,
                     ctx.block_timestamp,
                 );
-                
+
+                // TODO: Compute the correct retry transaction hash
+                // Currently using ZERO as a placeholder, but this causes the RedeemScheduled event
+                // to have incorrect topic[2]. This needs to be fixed to match the actual retry tx hash.
+                //
+                // The retry tx hash should be computed by:
+                // 1. Create ArbRetryTx with: chain_id=421614, nonce=0, from=ctx.sender,
+                //    gas_fee_cap=gas_fee_cap, gas=usergas, to=retry_to, value=retry_value,
+                //    data=retry_data, ticket_id=ticket_id, refund_to=fee_refund_addr,
+                //    max_refund=available_refund, submission_fee_refund=submission_fee_u256
+                // 2. Encode as: 0x68 || RLP([chain_id, nonce, from, gas_fee_cap, gas, to, value, data, ticket_id, refund_to, max_refund, submission_fee_refund])
+                // 3. Hash with keccak256
+                //
+                // For block 1, the expected retry tx hash is:
+                // 0x873c5ee3092c40336006808e249293bf5f4cb3235077a74cac9cafa7cf73cb8b
                 let retry_tx_nonce = 0u64;
                 let retry_tx_hash = B256::ZERO;
+
                 let sequence_num_bytes: [u8; 32] = {
                     let mut bytes = [0u8; 32];
                     bytes[24..].copy_from_slice(&retry_tx_nonce.to_be_bytes());
                     bytes
                 };
-                
+
                 let mut redeem_data = Vec::new();
                 redeem_data.extend_from_slice(&[0u8; 24]);
                 redeem_data.extend_from_slice(&usergas.to_be_bytes());
@@ -987,7 +1002,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 redeem_data.extend_from_slice(&max_refund_bytes);
                 let submission_fee_bytes: [u8; 32] = submission_fee_u256.to_be_bytes();
                 redeem_data.extend_from_slice(&submission_fee_bytes);
-                
+
                 crate::log_sink::push(ARB_RETRYABLE_TX_ADDRESS, &[REDEEM_SCHEDULED_TOPIC, ticket_id.0, retry_tx_hash.0, sequence_num_bytes], &redeem_data);
                 
                 StartTxHookResult {
