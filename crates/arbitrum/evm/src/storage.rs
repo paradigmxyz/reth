@@ -7,9 +7,10 @@ use std::collections::HashMap;
 fn storage_key_map(storage_key: &[u8], offset: u64) -> U256 {
     let boundary = 31usize;
 
-    // Convert offset to a 32-byte key (BE format with the offset in the last byte)
+    // Convert offset to a 32-byte key (BE format with the offset in the last 8 bytes)
+    // This must match uint_to_hash_u64_be in header.rs
     let mut key_bytes = [0u8; 32];
-    key_bytes[31] = (offset & 0xFF) as u8;
+    key_bytes[24..32].copy_from_slice(&offset.to_be_bytes());
 
     let mut data = Vec::with_capacity(storage_key.len() + boundary);
     data.extend_from_slice(storage_key);
