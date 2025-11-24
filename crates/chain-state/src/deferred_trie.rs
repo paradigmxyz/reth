@@ -1,7 +1,9 @@
 use alloy_primitives::B256;
-use parking_lot::{Condvar, Mutex};
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
-use std::{error::Error, fmt, sync::Arc};
+use std::{
+    fmt,
+    sync::{Arc, OnceLock},
+};
 
 /// Sorted trie data computed for an executed block.
 /// These represent the complete set of sorted trie data required to persist
@@ -26,48 +28,13 @@ impl PartialEq for ComputedTrieData {
     }
 }
 
-/// Error returned when deferred trie data computation fails.
-#[derive(Debug, Clone)]
-pub struct DeferredTrieDataError {
-    msg: Arc<str>,
-}
-
-impl DeferredTrieDataError {
-    /// Create a new deferred trie data error from message.
-    pub fn new(msg: impl Into<String>) -> Self {
-        Self { msg: Arc::from(msg.into()) }
-    }
-
-    /// Error raised when the background computation panicked.
-    pub fn panicked() -> Self {
-        Self::new("deferred trie computation panicked")
-    }
-}
-
-impl fmt::Display for DeferredTrieDataError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.msg)
-    }
-}
-
-impl Error for DeferredTrieDataError {}
-
-#[derive(Debug, Default)]
-enum DeferredState {
-    #[default]
-    Pending,
-    Ready(ComputedTrieData),
-    Failed(DeferredTrieDataError),
-}
-
 /// Shared handle to asynchronously populated trie data.
+///
+/// A thin wrapper over `Arc<OnceLock<ComputedTrieData>>` that lets producers call
+/// [`DeferredTrieData::set_ready`] once, and consumers block with [`DeferredTrieData::wait_cloned`]
+/// until the trie data is available.
 #[derive(Clone)]
-pub struct DeferredTrieData {
-    /// Shared deferred state (pending/ready/error) holding the computed trie data.
-    state: Arc<Mutex<DeferredState>>,
-    /// Condition variable used to wake all waiters once the state transitions out of pending.
-    ready: Arc<Condvar>,
-}
+pub struct DeferredTrieData(Arc<OnceLock<ComputedTrieData>>);
 
 impl Default for DeferredTrieData {
     fn default() -> Self {
@@ -76,70 +43,57 @@ impl Default for DeferredTrieData {
 }
 
 impl DeferredTrieData {
-    /// Create a new pending handle.
+    /// Create a new pending handle that will be completed later via [`Self::set_ready`].
     pub fn pending() -> Self {
-        Self {
-            state: Arc::new(Mutex::new(DeferredState::default())),
-            ready: Arc::new(Condvar::new()),
-        }
+        Self(Arc::new(OnceLock::new()))
     }
 
-    /// Creates a new handle that is already populated with the given [`ComputedTrieData`].
+    /// Create a handle that is already populated with the given [`ComputedTrieData`].
     ///
-    /// This is useful when the trie data is already available and does not need to be computed
-    /// asynchronously. Any calls to [`Self::wait_cloned`] will return immediately.
+    /// Useful when trie data is available immediately; [`Self::wait_cloned`] will return without
+    /// blocking.
     pub fn ready(bundle: ComputedTrieData) -> Self {
-        let handle = Self::pending();
-        handle.set_ready(bundle);
-        handle
+        let data = OnceLock::new();
+        data.set(bundle).unwrap(); // Safe: newly created OnceLock
+        Self(Arc::new(data))
     }
 
-    /// Mark the handle as ready, notifying any waiters.
+    /// Populate the handle with the computed trie data.
+    ///
+    /// Safe to call multiple times; only the first value is stored.
     pub fn set_ready(&self, bundle: ComputedTrieData) {
-        let mut state = self.state.lock();
-        if matches!(*state, DeferredState::Pending) {
-            *state = DeferredState::Ready(bundle);
-            self.ready.notify_all();
-        }
+        let _ = self.0.set(bundle);
     }
 
-    /// Mark the handle as failed, notifying any waiters.
-    pub fn set_error(&self, error: DeferredTrieDataError) {
-        let mut state = self.state.lock();
-        if matches!(*state, DeferredState::Pending) {
-            *state = DeferredState::Failed(error);
-            self.ready.notify_all();
-        }
-    }
-
-    /// Wait for data to become ready and clone it.
-    pub fn wait_cloned(&self) -> Result<ComputedTrieData, DeferredTrieDataError> {
-        let mut state = self.state.lock();
-        loop {
-            match &*state {
-                DeferredState::Pending => self.ready.wait(&mut state),
-                DeferredState::Ready(bundle) => return Ok(bundle.clone()),
-                DeferredState::Failed(err) => return Err(err.clone()),
-            }
-        }
+    /// Block until data is available and return an owned clone.
+    ///
+    /// If the value is already set, returns immediately. Multiple callers can wait concurrently and
+    /// all receive the same `ComputedTrieData`.
+    ///
+    /// # Blocking Behavior
+    ///
+    /// This method blocks the calling thread indefinitely until [`Self::set_ready`] is called.
+    /// There is no timeout - if the value is never set, this will block forever.
+    ///
+    /// # Panics
+    ///
+    /// If the background task computing trie data panics before calling [`Self::set_ready`],
+    /// all waiters will block forever. This is intentional - trie computation failures are
+    /// considered unrecoverable and should crash the node.
+    ///
+    /// # Concurrency
+    ///
+    /// Multiple threads can wait concurrently. All waiters wake when the value is set,
+    /// and each receives a cloned `ComputedTrieData` (Arc clones are cheap).
+    pub fn wait_cloned(&self) -> ComputedTrieData {
+        self.0.wait().clone()
     }
 }
 
 impl fmt::Debug for DeferredTrieData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = self.state.lock();
-        match &*state {
-            DeferredState::Pending => {
-                f.debug_struct("DeferredTrieData").field("state", &"pending").finish()
-            }
-            DeferredState::Ready(_) => {
-                f.debug_struct("DeferredTrieData").field("state", &"ready").finish()
-            }
-            DeferredState::Failed(err) => f
-                .debug_struct("DeferredTrieData")
-                .field("state", &format_args!("failed({err})"))
-                .finish(),
-        }
+        let state = if self.0.get().is_some() { "ready" } else { "pending" };
+        f.debug_struct("DeferredTrieData").field("state", &state).finish()
     }
 }
 
@@ -170,17 +124,23 @@ mod tests {
             deferred_clone.set_ready(empty_bundle());
         });
 
-        let result = deferred.wait_cloned().unwrap();
+        let result = deferred.wait_cloned();
         assert_eq!(result, empty_bundle());
     }
 
     #[test]
-    fn propagates_error() {
-        let deferred = DeferredTrieData::pending();
-        deferred.set_error(DeferredTrieDataError::new("boom"));
+    /// Ensures `ready` returns immediately without blocking.
+    fn ready_returns_immediately() {
+        let bundle = empty_bundle();
+        let deferred = DeferredTrieData::ready(bundle.clone());
 
-        let err = deferred.wait_cloned().unwrap_err();
-        assert_eq!(err.to_string(), "boom");
+        let start = Instant::now();
+        let result = deferred.wait_cloned();
+        let elapsed = start.elapsed();
+
+        assert_eq!(result, bundle);
+        // Should return essentially immediately; allow some slack to avoid flakiness.
+        assert!(elapsed < Duration::from_millis(20));
     }
 
     #[test]
@@ -201,7 +161,7 @@ mod tests {
                 // Ensure all readers are queued before any set_ready happens.
                 b.wait();
                 let start = Instant::now();
-                let data = d.wait_cloned().unwrap();
+                let data = d.wait_cloned();
                 let elapsed = start.elapsed();
                 tx.send((elapsed, data)).unwrap();
             });
@@ -217,5 +177,96 @@ mod tests {
             assert!(elapsed >= delay);
             assert_eq!(data, empty_bundle());
         }
+    }
+
+    #[test]
+    /// Confirms only the first `set_ready` value is stored.
+    fn multiple_set_ready_takes_first() {
+        let deferred = DeferredTrieData::pending();
+        let first = ComputedTrieData {
+            // Use `with_last_byte` for distinct, deterministic anchors in tests.
+            anchor_hash: B256::with_last_byte(1),
+            ..empty_bundle()
+        };
+        let second = ComputedTrieData {
+            anchor_hash: B256::with_last_byte(2),
+            ..empty_bundle()
+        };
+
+        deferred.set_ready(first.clone());
+        deferred.set_ready(second);
+
+        assert_eq!(deferred.wait_cloned().anchor_hash, first.anchor_hash);
+    }
+
+    #[test]
+    /// Verifies clones share readiness across handles.
+    fn clones_share_state() {
+        let deferred = DeferredTrieData::pending();
+        let setter = deferred.clone();
+        let bundle = ComputedTrieData {
+            anchor_hash: B256::with_last_byte(3),
+            ..empty_bundle()
+        };
+
+        thread::spawn(move || setter.set_ready(bundle));
+
+        assert_eq!(deferred.wait_cloned().anchor_hash, B256::with_last_byte(3));
+    }
+
+    #[test]
+    fn default_is_pending() {
+        let deferred: DeferredTrieData = Default::default();
+        let setter = deferred.clone();
+
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            setter.set_ready(empty_bundle());
+        });
+
+        assert_eq!(deferred.wait_cloned(), empty_bundle());
+    }
+
+    #[test]
+    /// Ensures fast path when data is set before any waiter calls `wait_cloned`.
+    fn set_before_wait() {
+        let deferred = DeferredTrieData::pending();
+        let bundle = ComputedTrieData {
+            anchor_hash: B256::with_last_byte(4),
+            ..empty_bundle()
+        };
+
+        deferred.set_ready(bundle.clone());
+
+        let start = Instant::now();
+        let result = deferred.wait_cloned();
+        let elapsed = start.elapsed();
+
+        assert_eq!(result.anchor_hash, bundle.anchor_hash);
+        assert!(elapsed < Duration::from_millis(20));
+    }
+
+    #[test]
+    /// Confirms `PartialEq` ignores `trie_input`.
+    fn computed_trie_data_equality_ignores_trie_input() {
+        let hashed_state: Arc<HashedPostStateSorted> = Arc::default();
+        let trie_updates: Arc<TrieUpdatesSorted> = Arc::default();
+        let anchor = B256::with_last_byte(5);
+
+        let a = ComputedTrieData {
+            hashed_state: hashed_state.clone(),
+            trie_updates: trie_updates.clone(),
+            anchor_hash: anchor,
+            trie_input: Arc::new(TrieInputSorted::default()),
+        };
+        let b = ComputedTrieData {
+            hashed_state,
+            trie_updates,
+            anchor_hash: anchor,
+            // different instance should be ignored by PartialEq
+            trie_input: Arc::new(TrieInputSorted::default()),
+        };
+
+        assert_eq!(a, b);
     }
 }
