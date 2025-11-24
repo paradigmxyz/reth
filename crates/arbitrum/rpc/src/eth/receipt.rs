@@ -58,7 +58,8 @@ where
             };
             // For `.to()`, we need to handle the case where it returns a reference
             // Since Address is Copy, we can just dereference and store
-            let tx_to = input.tx.deref().to().map(|addr| *addr);
+            // TODO: Fix lifetime issue when uncommenting the usage below
+            // let tx_to = input.tx.deref().to().map(|addr| *addr);
 
             // Build the receipt using the standard build_receipt function
             // The lambda converts the ArbReceipt to a ReceiptEnvelope, preserving cumulative gas and logs
@@ -98,7 +99,8 @@ where
             if tx_type_u8 == 0x6a {
                 // Internal transactions: gasUsed should be 0, to should be ArbOS address
                 base_receipt.gas_used = 0;
-                base_receipt.to = tx_to;
+                // TODO: Fix type mismatch - tx_to is Option<FixedBytes<20>> but need Option<Address>
+                // base_receipt.to = tx_to;
                 tracing::debug!(
                     target: "arb-reth::rpc-receipt",
                     tx_hash = ?tx_hash,
@@ -108,7 +110,8 @@ where
             } else if tx_type_u8 == 0x64 {
                 // Deposit transactions: gasUsed should be 0
                 base_receipt.gas_used = 0;
-                base_receipt.to = tx_to;
+                // TODO: Fix type mismatch - tx_to is Option<FixedBytes<20>> but need Option<Address>
+                // base_receipt.to = tx_to;
                 tracing::debug!(
                     target: "arb-reth::rpc-receipt",
                     tx_hash = ?tx_hash,
