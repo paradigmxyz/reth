@@ -37,18 +37,15 @@ const NATIVE_TOKEN_OWNER_SUBSPACE: &[u8] = &[10];
 
 pub fn arbos_state_subspace(subspace_id: u8) -> B256 {
     use alloy_primitives::keccak256;
-    
-    let arbos_addr = Address::new([
-        0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF,
-    ]);
-    
-    let mut preimage = Vec::with_capacity(20 + 1);
-    preimage.extend_from_slice(arbos_addr.as_slice());
-    preimage.push(subspace_id);
-    
-    keccak256(&preimage)
+
+    // ArbOS storage uses a subspace-based storage system where each subspace
+    // is derived by hashing (parent_key || subspace_id). The root storage key
+    // for ArbOS is empty ([]), so subspaces are derived as keccak256([] || [subspace_id])
+    // which simplifies to keccak256([subspace_id]).
+    // This matches the Go implementation: storage.OpenSubStorage(id) where
+    // storageKey = keccak256(parent_storageKey, id)
+    let subspace_bytes = [subspace_id];
+    keccak256(&subspace_bytes)
 }
 
 pub struct ArbosState<D> {
