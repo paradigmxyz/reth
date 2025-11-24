@@ -91,7 +91,24 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         header.difficulty = U256::from(1u64);
         header.nonce = B64::from(input.execution_ctx.delayed_messages_read.to_be_bytes()).into();
 
+        reth_tracing::tracing::info!(
+            target: "arb-evm::assemble",
+            block_number = header.number,
+            exec_ctx_l1_block_num = input.execution_ctx.l1_block_number,
+            exec_ctx_delayed_msgs = input.execution_ctx.delayed_messages_read,
+            "Block assembly: execution context values"
+        );
+
         if let Some(mut info) = derive_arb_header_info_from_state(&input) {
+            reth_tracing::tracing::info!(
+                target: "arb-evm::assemble",
+                block_number = header.number,
+                send_count = info.send_count,
+                l1_block_num_from_state = info.l1_block_number,
+                arbos_version = info.arbos_format_version,
+                send_root = %info.send_root,
+                "Derived ArbHeaderInfo from state"
+            );
             if info.arbos_format_version == 0 {
                 if let Some(ver) = read_arbos_version(input.state_provider) {
                     info.arbos_format_version = ver;
@@ -101,10 +118,30 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             }
             // If the L1 block number from state is 0, use the one from execution context
             if info.l1_block_number == 0 && input.execution_ctx.l1_block_number != 0 {
+                reth_tracing::tracing::warn!(
+                    target: "arb-evm::assemble",
+                    block_number = header.number,
+                    l1_block_from_ctx = input.execution_ctx.l1_block_number,
+                    "L1 block number from state is 0, using execution context value as fallback"
+                );
                 info.l1_block_number = input.execution_ctx.l1_block_number;
             }
+            reth_tracing::tracing::info!(
+                target: "arb-evm::assemble",
+                block_number = header.number,
+                final_send_count = info.send_count,
+                final_l1_block_num = info.l1_block_number,
+                final_arbos_version = info.arbos_format_version,
+                "Applying final ArbHeaderInfo to header"
+            );
             info.apply_to_header(&mut header);
         } else {
+            reth_tracing::tracing::error!(
+                target: "arb-evm::assemble",
+                block_number = header.number,
+                l1_block_from_ctx = input.execution_ctx.l1_block_number,
+                "Failed to derive ArbHeaderInfo from state, using fallback"
+            );
             let l1_bn = input.execution_ctx.l1_block_number;
             if l1_bn != 0 {
                 let ver = read_arbos_version(input.state_provider).unwrap_or(10);
