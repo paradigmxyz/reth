@@ -122,8 +122,8 @@ where
     /// a single target at a time. The [`WindowIter`] allows us to look at a current target and the
     /// next target simultaneously, forming an end-exclusive range.
     ///
-    /// ```
-    /// * targets: [ 0x012, 0x045, 0x678 ]
+    /// ```text
+    /// * Given targets: [ 0x012, 0x045, 0x678 ]
     /// * targets.next() returns:
     ///     - (0x012, Some(0x045)): covers (0x012..0x045)
     ///     - (0x045, Some(0x678)): covers (0x045..0x678)
@@ -134,15 +134,17 @@ where
     /// current target. Once the path goes beyond that range (ie path >= next target) then we can be
     /// sure that no further paths will be in the range, and we can iterate forward.
     ///
-    /// ```
+    /// ```text
     /// * Given:
     ///     - path: 0x04
-    ///     - targets returns (0x012, Some(0x045))
+    ///     - targets.peek() returns (0x012, Some(0x045))
     ///
     /// * 0x04 comes _after_ 0x045 in depth-first order, so (0x012..0x045) does not contain 0x04.
     ///
     /// * targets.next() is called.
+    ///
     /// * targets.peek() now returns (0x045, Some(0x678)). This does contain 0x04.
+    ///
     /// * 0x04 is a prefix of 0x045, and so is retained.
     /// ```
     ///
@@ -239,7 +241,6 @@ where
         };
 
         debug_assert_ne!(branch.state_mask.get(), 0, "branch.state_mask can never be zero");
-        // TODO export BITS off of `TrieMask`.
         let last_nibble = u16::BITS - branch.state_mask.leading_zeros() - 1;
 
         let mut child_path = self.branch_path;
