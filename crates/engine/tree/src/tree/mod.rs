@@ -1795,7 +1795,8 @@ where
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
         // Skip building trie input and anchor for DB-loaded blocks.
-        let trie_data = ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
+        let trie_data =
+            ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
 
         Ok(Some(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),

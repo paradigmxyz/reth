@@ -564,12 +564,12 @@ where
                     nodes_mut.extend_ref(sorted_trie_updates.as_ref());
                 }
 
-            let bundle = ComputedTrieData {
-                hashed_state: sorted_hashed_state,
-                trie_updates: sorted_trie_updates,
-                anchor_hash: Some(parent_hash),
-                trie_input: Some(Arc::new(parent_trie_input)),
-            };
+                let bundle = ComputedTrieData {
+                    hashed_state: sorted_hashed_state,
+                    trie_updates: sorted_trie_updates,
+                    anchor_hash: Some(parent_hash),
+                    trie_input: Some(Arc::new(parent_trie_input)),
+                };
 
                 deferred_handle_task.set_ready(bundle);
                 deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
@@ -979,16 +979,15 @@ where
         if let Some(last_block) = blocks.last() {
             let data = last_block.trie_data();
             if let (Some(anchor_hash), Some(trie_input)) =
-                (data.anchor_hash(), data.trie_input().cloned())
+                (data.anchor_hash(), data.trie_input().cloned()) &&
+                anchor_hash == block_hash
             {
-                if anchor_hash == block_hash {
-                    trace!(target: "engine::tree::payload_validator", %block_hash, %anchor_hash, "Reusing trie input with matching anchor hash");
-                    self.metrics
-                        .block_validation
-                        .deferred_trie_wait_duration
-                        .record(wait_start.elapsed().as_secs_f64());
-                    return Ok(((*trie_input).clone(), block_hash));
-                }
+                trace!(target: "engine::tree::payload_validator", %block_hash,"Reusing trie input with matching anchor hash");
+                self.metrics
+                    .block_validation
+                    .deferred_trie_wait_duration
+                    .record(wait_start.elapsed().as_secs_f64());
+                return Ok(((*trie_input).clone(), block_hash));
             }
         }
 

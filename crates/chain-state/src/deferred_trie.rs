@@ -28,7 +28,12 @@ impl ComputedTrieData {
         anchor_hash: B256,
         trie_input: Arc<TrieInputSorted>,
     ) -> Self {
-        Self { hashed_state, trie_updates, anchor_hash: Some(anchor_hash), trie_input: Some(trie_input) }
+        Self {
+            hashed_state,
+            trie_updates,
+            anchor_hash: Some(anchor_hash),
+            trie_input: Some(trie_input),
+        }
     }
 
     /// Construct a bundle without trie input or anchor information.
