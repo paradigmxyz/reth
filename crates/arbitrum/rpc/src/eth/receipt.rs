@@ -7,6 +7,7 @@ use alloy_rpc_types_eth::TransactionReceipt;
 use alloy_serde::WithOtherFields;
 use reth_rpc_eth_api::FromEthApiError;
 use alloy_consensus::transaction::TxHashRef;
+use alloy_consensus::Transaction;
 
 #[derive(Clone, Debug)]
 pub struct ArbReceiptConverter<P> {
@@ -47,6 +48,18 @@ where
             let correct_signer = input.tx.deref().recover_signer()
                 .map_err(|_| crate::error::ArbEthApiError::from_eth_err(reth_rpc_eth_types::EthApiError::InvalidTransactionSignature))?;
 
+            // Extract the transaction hash and 'to' address before moving input
+            // We need to compute these eagerly to avoid lifetime issues
+            let tx_hash = {
+                use alloy_eips::eip2718::Encodable2718;
+                let mut buf = Vec::new();
+                input.tx.encode_2718(&mut buf);
+                alloy_primitives::keccak256(&buf)
+            };
+            // For `.to()`, we need to handle the case where it returns a reference
+            // Since Address is Copy, we can just dereference and store
+            let tx_to = input.tx.deref().to().map(|addr| *addr);
+
             // Build the receipt using the standard build_receipt function
             // The lambda converts the ArbReceipt to a ReceiptEnvelope, preserving cumulative gas and logs
             let mut base_receipt = build_receipt(input, None, |receipt, next_log_index, meta| {
@@ -84,22 +97,21 @@ where
             // These transaction types have special handling in Arbitrum
             if tx_type_u8 == 0x6a {
                 // Internal transactions: gasUsed should be 0, to should be ArbOS address
-                use alloy_consensus::Transaction;
                 base_receipt.gas_used = 0;
-                base_receipt.to = input.tx.deref().kind().to().copied();
+                base_receipt.to = tx_to;
                 tracing::debug!(
                     target: "arb-reth::rpc-receipt",
-                    tx_hash = ?input.tx.tx_hash(),
+                    tx_hash = ?tx_hash,
                     "Fixed internal tx receipt: gasUsed=0, to={:?}",
                     base_receipt.to
                 );
             } else if tx_type_u8 == 0x64 {
                 // Deposit transactions: gasUsed should be 0
                 base_receipt.gas_used = 0;
-                base_receipt.to = input.tx.deref().kind().to().copied();
+                base_receipt.to = tx_to;
                 tracing::debug!(
                     target: "arb-reth::rpc-receipt",
-                    tx_hash = ?input.tx.tx_hash(),
+                    tx_hash = ?tx_hash,
                     "Fixed deposit tx receipt: gasUsed=0"
                 );
             }

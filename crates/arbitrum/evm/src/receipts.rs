@@ -51,14 +51,16 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
 
                 // Internal transactions (type 0x6a) should have gasUsed = 0 in receipts
                 // They are consensus-level operations that don't charge gas
+                // Both individual gas_used and cumulative_gas_used should be 0 for internal txs
                 let (actual_gas_used, cumulative_gas) = if ty == ArbTxType::Internal {
                     tracing::info!(
                         target: "arb-reth::receipt-builder",
                         tx_hash = ?tx_hash,
                         evm_gas = gas_used,
-                        "Internal transaction - setting gasUsed to 0"
+                        ctx_cumulative = ctx.cumulative_gas_used,
+                        "Internal transaction - setting both gasUsed and cumulative to 0"
                     );
-                    (0u64, ctx.cumulative_gas_used)
+                    (0u64, 0u64)
                 } else if let Some((early_gas, early_cumulative)) = crate::get_early_tx_gas(&tx_hash) {
                     tracing::warn!(
                         target: "arb-reth::receipt-builder",
