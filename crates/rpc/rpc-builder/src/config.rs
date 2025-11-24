@@ -190,6 +190,13 @@ impl RethRpcServerConfig for RpcServerArgs {
             );
         }
 
+        if self.ws_api.is_some() && !self.ws {
+            warn!(
+                target: "reth::cli",
+                "The --ws.api flag is set but --ws is not enabled. WS RPC API will not be exposed."
+            );
+        }
+
         if self.http {
             let socket_address = SocketAddr::new(self.http_addr, self.http_port);
             config = config

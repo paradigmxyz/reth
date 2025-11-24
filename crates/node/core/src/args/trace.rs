@@ -3,7 +3,7 @@
 use clap::Parser;
 use eyre::WrapErr;
 use reth_tracing::{tracing_subscriber::EnvFilter, Layers};
-use reth_tracing_otlp::OtlpProtocol;
+use reth_tracing_otlp::{OtlpConfig, OtlpProtocol};
 use url::Url;
 
 /// CLI arguments for configuring `Opentelemetry` trace and span export.
@@ -78,6 +78,23 @@ pub struct TraceArgs {
         help_heading = "Tracing"
     )]
     pub service_name: String,
+
+    /// Trace sampling ratio to control the percentage of traces to export.
+    ///
+    /// Valid range: 0.0 to 1.0
+    /// - 1.0, default: Sample all traces
+    /// - 0.01: Sample 1% of traces
+    /// - 0.0: Disable sampling
+    ///
+    /// Example: --tracing-otlp.sample-ratio=0.0.
+    #[arg(
+        long = "tracing-otlp.sample-ratio",
+        env = "OTEL_TRACES_SAMPLER_ARG",
+        global = true,
+        value_name = "RATIO",
+        help_heading = "Tracing"
+    )]
+    pub sample_ratio: Option<f64>,
 }
 
 impl Default for TraceArgs {
@@ -86,6 +103,7 @@ impl Default for TraceArgs {
             otlp: None,
             protocol: OtlpProtocol::Http,
             otlp_filter: EnvFilter::from_default_env(),
+            sample_ratio: None,
             service_name: "reth".to_string(),
         }
     }
@@ -102,22 +120,24 @@ impl TraceArgs {
     /// Note: even though this function is async, it does not actually perform any async operations.
     /// It's needed only to be able to initialize the gRPC transport of OTLP tracing that needs to
     /// be called inside a tokio runtime context.
-    pub async fn init_otlp_tracing(
-        &mut self,
-        _layers: &mut Layers,
-    ) -> eyre::Result<OtlpInitStatus> {
+    pub async fn init_otlp_tracing(&mut self, layers: &mut Layers) -> eyre::Result<OtlpInitStatus> {
         if let Some(endpoint) = self.otlp.as_mut() {
             self.protocol.validate_endpoint(endpoint)?;
 
             #[cfg(feature = "otlp")]
             {
-                _layers.with_span_layer(
-                    self.service_name.clone(),
-                    endpoint.clone(),
-                    self.otlp_filter.clone(),
-                    self.protocol,
-                )?;
-                Ok(OtlpInitStatus::Started(endpoint.clone()))
+                {
+                    let config = OtlpConfig::new(
+                        self.service_name.clone(),
+                        endpoint.clone(),
+                        self.protocol,
+                        self.sample_ratio,
+                    )?;
+
+                    layers.with_span_layer(config.clone(), self.otlp_filter.clone())?;
+
+                    Ok(OtlpInitStatus::Started(config.endpoint().clone()))
+                }
             }
             #[cfg(not(feature = "otlp"))]
             {

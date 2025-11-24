@@ -126,7 +126,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     }
 
     /// Non-blocking read on the new pending transactions subscription channel
-    fn try_recv(&mut self) -> Option<PendingTransaction<T>> {
+    fn try_recv(&mut self) -> Option<IncomingTransaction<T>> {
         loop {
             match self.new_transaction_receiver.as_mut()?.try_recv() {
                 Ok(tx) => {
@@ -135,9 +135,9 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                     {
                         // we skip transactions if we already yielded a transaction with lower
                         // priority
-                        return None
+                        return Some(IncomingTransaction::Stash(tx))
                     }
-                    return Some(tx)
+                    return Some(IncomingTransaction::Process(tx))
                 }
                 // note TryRecvError::Lagged can be returned here, which is an error that attempts
                 // to correct itself on consecutive try_recv() attempts
@@ -170,16 +170,52 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         for _ in 0..MAX_NEW_TRANSACTIONS_PER_BATCH {
             if let Some(pending_tx) = self.try_recv() {
                 //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
-                let tx_id = *pending_tx.transaction.id();
-                if self.ancestor(&tx_id).is_none() {
-                    self.independent.insert(pending_tx.clone());
+
+                match pending_tx {
+                    IncomingTransaction::Process(tx) => {
+                        let tx_id = *tx.transaction.id();
+                        if self.ancestor(&tx_id).is_none() {
+                            self.independent.insert(tx.clone());
+                        }
+                        self.all.insert(tx_id, tx);
+                    }
+                    IncomingTransaction::Stash(tx) => {
+                        let tx_id = *tx.transaction.id();
+                        self.all.insert(tx_id, tx);
+                    }
                 }
-                self.all.insert(tx_id, pending_tx);
             } else {
                 break;
             }
         }
     }
+}
+
+/// Result of attempting to receive a new transaction from the channel during iteration.
+///
+/// This enum determines how a newly received transaction should be handled based on its priority
+/// relative to transactions already yielded by the iterator.
+enum IncomingTransaction<T: TransactionOrdering> {
+    /// Process the transaction normally: add to both `all` map and potentially to `independent`
+    /// set (if it has no ancestor).
+    ///
+    /// This variant is used when the transaction's priority is lower than or equal to the last
+    /// yielded transaction, meaning it can be safely processed without breaking the descending
+    /// priority order.
+    Process(PendingTransaction<T>),
+
+    /// Stash the transaction: add only to the `all` map, but NOT to the `independent` set.
+    ///
+    /// This variant is used when the transaction has a higher priority than the last yielded
+    /// transaction. We cannot yield it immediately (to maintain strict priority ordering), but we
+    /// must still track it so that:
+    /// - Its descendants can find it via `ancestor()` lookups
+    /// - We prevent those descendants from being incorrectly promoted to `independent`
+    ///
+    /// Without stashing, if a child of this transaction arrives later, it would fail to find its
+    /// parent in `all`, be marked as `independent`, and be yielded out of order (before its
+    /// parent), causing nonce gaps.
+    Stash(PendingTransaction<T>),
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {

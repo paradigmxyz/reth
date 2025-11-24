@@ -24,7 +24,7 @@ use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     utils::{binary_search, recover_raw_transaction},
     EthApiError::{self, TransactionConfirmationTimeout},
-    FillTransactionResult, SignError, TransactionSource,
+    FillTransaction, SignError, TransactionSource,
 };
 use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
@@ -450,7 +450,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn fill_transaction(
         &self,
         mut request: RpcTxReq<Self::NetworkTypes>,
-    ) -> impl Future<Output = Result<FillTransactionResult<TxTy<Self::Primitives>>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<FillTransaction<TxTy<Self::Primitives>>, Self::Error>> + Send
     where
         Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
     {
@@ -511,7 +511,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
             let raw = tx.encoded_2718().into();
 
-            Ok(FillTransactionResult { raw, tx })
+            Ok(FillTransaction { raw, tx })
         }
     }
 

@@ -168,6 +168,7 @@ where
     }
 
     /// Converts a [`BlockOrPayload`] to a recovered block.
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     pub fn convert_to_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: BlockOrPayload<T>,
@@ -372,7 +373,7 @@ where
         debug!(
             target: "engine::tree::payload_validator",
             ?strategy,
-            "Deciding which state root algorithm to run"
+            "Decided which state root algorithm to run"
         );
 
         // use prewarming background task
@@ -409,7 +410,7 @@ where
             Err(err) => return self.handle_execution_error(input, err, &parent_block),
         };
 
-        // after executing the block we can stop executing transactions
+        // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
 
         let block = self.convert_to_block(input)?;
@@ -419,10 +420,7 @@ where
             block
         );
 
-        debug!(target: "engine::tree::payload_validator", "Calculating block state root");
-
         let root_time = Instant::now();
-
         let mut maybe_state_root = None;
 
         match strategy {
@@ -550,6 +548,7 @@ where
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn validate_block_inner(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
@@ -666,6 +665,7 @@ where
     /// - parent header validation
     /// - post-execution consensus validation
     /// - state-root based post-execution validation
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         block: &RecoveredBlock<N::Block>,
@@ -685,21 +685,32 @@ where
         }
 
         // now validate against the parent
+        let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_header_against_parent").entered();
         if let Err(e) =
             self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
         {
             warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
             return Err(e.into())
         }
+        drop(_enter);
 
+        // Validate block post-execution rules
+        let _enter =
+            debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
+                .entered();
         if let Err(err) = self.consensus.validate_block_post_execution(block, output) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
         }
+        drop(_enter);
 
+        let _enter =
+            debug_span!(target: "engine::tree::payload_validator", "hashed_post_state").entered();
         let hashed_state = self.provider.hashed_post_state(&output.state);
+        drop(_enter);
 
+        let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
         if let Err(err) =
             self.validator.validate_block_post_execution_with_hashed_state(&hashed_state, block)
         {
@@ -841,23 +852,14 @@ where
     }
 
     /// Determines the state root computation strategy based on configuration.
-    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    fn plan_state_root_computation(&self) -> StateRootStrategy {
-        let strategy = if self.config.state_root_fallback() {
+    const fn plan_state_root_computation(&self) -> StateRootStrategy {
+        if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
         } else if self.config.use_state_root_task() {
             StateRootStrategy::StateRootTask
         } else {
             StateRootStrategy::Parallel
-        };
-
-        debug!(
-            target: "engine::tree::payload_validator",
-            ?strategy,
-            "Planned state root computation strategy"
-        );
-
-        strategy
+        }
     }
 
     /// Called when an invalid block is encountered during validation.
