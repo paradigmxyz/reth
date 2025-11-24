@@ -14,10 +14,7 @@ use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
-use reth_chain_state::{
-    CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, DeferredTrieDataError,
-    ExecutedBlock,
-};
+use reth_chain_state::{CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -42,7 +39,13 @@ use reth_provider::{
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{collections::HashMap, panic::AssertUnwindSafe, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    panic::{self, AssertUnwindSafe},
+    process,
+    sync::Arc,
+    time::Instant,
+};
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
 /// Context providing access to tree state during validation.
@@ -534,7 +537,6 @@ where
         // Create a deferred handle to store the sorted trie data.
         let deferred_trie_data = DeferredTrieData::pending();
         let deferred_handle_task = deferred_trie_data.clone();
-        let block_hash = block.hash();
         let hashed_state_for_trie = hashed_state;
         let trie_output_for_trie = trie_output;
         let overlay_blocks_for_trie = overlay_blocks;
@@ -944,8 +946,9 @@ where
     /// with in-memory overlays.
     ///
     /// The goal of this function is to take in-memory blocks and generate a [`TrieInputSorted`]
-    /// that extends from the highest persisted ancestor up through the parent. This enables state root
-    /// computation and proof generation without requiring all blocks to be persisted first.
+    /// that extends from the highest persisted ancestor up through the parent. This enables state
+    /// root computation and proof generation without requiring all blocks to be persisted
+    /// first.
     ///
     /// It works as follows:
     /// 1. Collect in-memory overlay blocks using [`crate::tree::TreeState::blocks_by_hash`]. This
@@ -1027,11 +1030,7 @@ where
             }
         }
 
-        self.metrics
-            .block_validation
-            .deferred_trie_wait_duration
-            .record(wait_start.elapsed().as_secs_f64());
-        Ok((input, block_hash))
+        input
     }
 }
 
