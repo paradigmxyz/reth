@@ -1,6 +1,25 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, keccak256};
 use revm::Database;
 use std::collections::HashMap;
+
+/// Calculates a storage slot using the same keccak256-based mapping as Solidity maps.
+/// This matches the calculation in header.rs:storage_key_map
+fn storage_key_map(storage_key: &[u8], offset: u64) -> U256 {
+    let boundary = 31usize;
+
+    // Convert offset to a 32-byte key (BE format with the offset in the last byte)
+    let mut key_bytes = [0u8; 32];
+    key_bytes[31] = (offset & 0xFF) as u8;
+
+    let mut data = Vec::with_capacity(storage_key.len() + boundary);
+    data.extend_from_slice(storage_key);
+    data.extend_from_slice(&key_bytes[..boundary]);
+    let h = keccak256(&data);
+    let mut mapped = [0u8; 32];
+    mapped[..boundary].copy_from_slice(&h.0[..boundary]);
+    mapped[boundary] = key_bytes[boundary];
+    U256::from_be_bytes(mapped)
+}
 
 fn ensure_arbos_account_loaded<D: Database>(state: &mut revm::database::State<D>) {
     use revm_database::{BundleAccount, AccountStatus};
@@ -98,11 +117,9 @@ impl<D: Database> Storage<D> {
     }
 
     fn compute_slot(&self, offset: u64) -> U256 {
-        let mut slot_bytes = [0u8; 32];
-        slot_bytes[..32].copy_from_slice(self.base_key.as_slice());
-        let offset_u256 = U256::from(offset);
-        let base_slot = U256::from_be_bytes(slot_bytes);
-        base_slot.wrapping_add(offset_u256)
+        // Use the same storage_key_map calculation as in header.rs to ensure
+        // writes and reads use the same slots
+        storage_key_map(self.base_key.as_slice(), offset)
     }
 
     pub fn get(&self, key: B256) -> Result<B256, ()> {
@@ -176,10 +193,9 @@ pub struct StorageBackedUint64<D> {
 
 impl<D: Database> StorageBackedUint64<D> {
     pub fn new(storage: *mut revm::database::State<D>, base_key: B256, offset: u64) -> Self {
-        let mut slot_bytes = [0u8; 32];
-        slot_bytes[..32].copy_from_slice(base_key.as_slice());
-        let base_slot = U256::from_be_bytes(slot_bytes);
-        let slot = base_slot.wrapping_add(U256::from(offset));
+        // Use the same storage_key_map calculation as in header.rs to ensure
+        // writes and reads use the same slots
+        let slot = storage_key_map(base_key.as_slice(), offset);
         tracing::info!(target: "arb-storage", "StorageBackedUint64::new base_key={:?} offset={} => slot={}", base_key, offset, slot);
         Self { storage, slot }
     }

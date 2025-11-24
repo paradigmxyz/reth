@@ -177,12 +177,23 @@ where
         Ok(EvmEnv { cfg_env, block_env })
     }
     fn context_for_block(&self, block: &'_ SealedBlock<BlockTy<Self::Primitives>>) -> Result<ArbBlockExecutionCtx, Infallible> {
+        // Extract L1 block number and delayed messages from the block header
+        // mixHash encoding: [send_count(8), l1_block_num(8), arbos_version(8), reserved(8)]
+        let mix_hash_bytes = block.header().mix_hash.0;
+        let l1_block_number = u64::from_be_bytes([
+            mix_hash_bytes[8], mix_hash_bytes[9], mix_hash_bytes[10], mix_hash_bytes[11],
+            mix_hash_bytes[12], mix_hash_bytes[13], mix_hash_bytes[14], mix_hash_bytes[15],
+        ]);
+
+        // Nonce contains delayed_messages_read
+        let delayed_messages_read = u64::from_be_bytes(block.header().nonce.0);
+
         Ok(ArbBlockExecutionCtx {
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             extra_data: block.header().extra_data.clone().into(),
-            delayed_messages_read: 0,
-            l1_block_number: 0,
+            delayed_messages_read,
+            l1_block_number,
         })
     }
 
