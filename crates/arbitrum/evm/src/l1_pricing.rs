@@ -243,6 +243,20 @@ impl<D: Database> L1PricingState<D> {
         self.per_batch_gas_cost.set(cost)
     }
 
+    pub fn parent_gas_floor_per_token(&self) -> Result<u64, ()> {
+        if self.arbos_version < 50 {
+            return Ok(0);
+        }
+        self.gas_floor_per_token.get()
+    }
+
+    pub fn set_parent_gas_floor_per_token(&self, floor: u64) -> Result<(), ()> {
+        if self.arbos_version < 50 {
+            return Err(());
+        }
+        self.gas_floor_per_token.set(floor)
+    }
+
     pub fn get_l1_fees_available(&self) -> Result<U256, ()> {
         self.l1_fees_available.get()
     }

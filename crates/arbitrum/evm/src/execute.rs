@@ -470,13 +470,16 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 use crate::internal_tx::{
                     get_start_block_method_id,
                     get_batch_posting_report_method_id,
+                    get_batch_posting_report_v2_method_id,
                     identify_internal_tx_type,
                     unpack_internal_tx_data_start_block,
                     unpack_internal_tx_data_batch_posting_report,
+                    unpack_internal_tx_data_batch_posting_report_v2,
                 };
-                
+
                 let start_block_id = get_start_block_method_id();
                 let batch_report_id = get_batch_posting_report_method_id();
+                let batch_report_v2_id = get_batch_posting_report_v2_method_id();
                 
                 if selector == start_block_id.as_slice() {
                     let internal_data = match unpack_internal_tx_data_start_block(data) {
@@ -560,6 +563,84 @@ impl ArbOsHooks for DefaultArbOsHooks {
                         }
                     }
                     
+                    StartTxHookResult {
+                        end_tx_now: true,
+                        gas_used: 0,
+                        error: None,
+                    }
+                } else if selector == batch_report_v2_id.as_slice() {
+                    let report_data = match unpack_internal_tx_data_batch_posting_report_v2(data) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            tracing::error!("Failed to unpack batch posting report V2 data: {}", e);
+                            return StartTxHookResult {
+                                end_tx_now: true,
+                                gas_used: 0,
+                                error: Some(format!("invalid batch posting report V2 data: {}", e)),
+                            };
+                        }
+                    };
+
+                    let l1_pricing = crate::l1_pricing::L1PricingState::open(
+                        crate::storage::Storage::new(
+                            state_db as *mut _,
+                            crate::arbosstate::arbos_state_subspace(0),
+                        ),
+                        state.arbos_version,
+                    );
+
+                    // Calculate legacy cost from batch stats
+                    const TX_DATA_ZERO_GAS: u64 = 4;
+                    const TX_DATA_NON_ZERO_GAS: u64 = 16;
+                    const KECCAK256_GAS: u64 = 30;
+                    const KECCAK256_WORD_GAS: u64 = 6;
+                    const SSTORE_SET_GAS: u64 = 20000;
+
+                    let zero_bytes = report_data.batch_calldata_length.saturating_sub(report_data.batch_calldata_non_zeros);
+                    let mut gas_spent = (zero_bytes * TX_DATA_ZERO_GAS) + (report_data.batch_calldata_non_zeros * TX_DATA_NON_ZERO_GAS);
+
+                    // Add keccak cost
+                    let keccak_words = (report_data.batch_calldata_length + 31) / 32;
+                    gas_spent = gas_spent.saturating_add(KECCAK256_GAS).saturating_add(keccak_words * KECCAK256_WORD_GAS);
+
+                    // Add 2 SSTORE costs
+                    gas_spent = gas_spent.saturating_add(2 * SSTORE_SET_GAS);
+
+                    // Add extra gas
+                    gas_spent = gas_spent.saturating_add(report_data.batch_extra_gas);
+
+                    // Add per-batch gas cost
+                    let per_batch_gas_cost = l1_pricing.get_per_batch_gas_cost().unwrap_or(0);
+                    gas_spent = gas_spent.saturating_add(per_batch_gas_cost);
+
+                    // For ArbOS 50+, apply gas floor
+                    if state.arbos_version >= 50 {
+                        const FLOOR_GAS_ADDITIONAL_TOKENS: u64 = 172;
+                        const TX_GAS: u64 = 21000;
+
+                        let gas_floor_per_token = l1_pricing.parent_gas_floor_per_token().unwrap_or(0);
+                        let token_count = report_data.batch_calldata_length + (report_data.batch_calldata_non_zeros * 3) + FLOOR_GAS_ADDITIONAL_TOKENS;
+                        let floor_gas_spent = (gas_floor_per_token * token_count) + TX_GAS;
+
+                        if floor_gas_spent > gas_spent {
+                            gas_spent = floor_gas_spent;
+                        }
+                    }
+
+                    let wei_spent = report_data.l1_base_fee_wei.saturating_mul(U256::from(gas_spent));
+
+                    let batch_timestamp = report_data.batch_timestamp.try_into().unwrap_or(0u64);
+                    let current_time = ctx.block_timestamp;
+
+                    if let Err(e) = l1_pricing.update_for_batch_poster_spending(
+                        gas_spent,
+                        report_data.batch_calldata_length,
+                        report_data.l1_base_fee_wei,
+                        current_time,
+                    ) {
+                        tracing::warn!("Failed to update L1 pricing for batch poster spending (V2): {:?}", e);
+                    }
+
                     StartTxHookResult {
                         end_tx_now: true,
                         gas_used: 0,

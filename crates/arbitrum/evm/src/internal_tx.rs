@@ -13,8 +13,13 @@ pub fn get_batch_posting_report_method_id() -> [u8; 4] {
     compute_method_id("batchPostingReport(uint256,address,uint64,uint64,uint256)")
 }
 
+pub fn get_batch_posting_report_v2_method_id() -> [u8; 4] {
+    compute_method_id("batchPostingReportV2(uint256,address,uint64,uint64,uint64,uint64,uint256)")
+}
+
 pub const INTERNAL_TX_START_BLOCK_METHOD_ID: [u8; 4] = [0x6b, 0xf6, 0xa4, 0x2d];
 pub const INTERNAL_TX_BATCH_POSTING_REPORT_METHOD_ID: [u8; 4] = [0xb6, 0x69, 0x37, 0x71];
+pub const INTERNAL_TX_BATCH_POSTING_REPORT_V2_METHOD_ID: [u8; 4] = [0xa6, 0xf3, 0xde, 0x31];
 
 #[derive(Debug, Clone)]
 pub struct InternalTxStartBlockData {
@@ -33,19 +38,33 @@ pub struct InternalTxBatchPostingReportData {
     pub l1_base_fee_wei: U256,
 }
 
+#[derive(Debug, Clone)]
+pub struct InternalTxBatchPostingReportV2Data {
+    pub batch_timestamp: U256,
+    pub batch_poster_address: Address,
+    pub batch_number: u64,
+    pub batch_calldata_length: u64,
+    pub batch_calldata_non_zeros: u64,
+    pub batch_extra_gas: u64,
+    pub l1_base_fee_wei: U256,
+}
+
 pub fn identify_internal_tx_type(data: &[u8]) -> Option<&'static str> {
     if data.len() < 4 {
         return None;
     }
-    
+
     let selector = &data[0..4];
     let start_block_id = get_start_block_method_id();
     let batch_report_id = get_batch_posting_report_method_id();
-    
+    let batch_report_v2_id = get_batch_posting_report_v2_method_id();
+
     if selector == start_block_id {
         Some("startBlock")
     } else if selector == batch_report_id {
         Some("batchPostingReport")
+    } else if selector == batch_report_v2_id {
+        Some("batchPostingReportV2")
     } else {
         None
     }
@@ -116,6 +135,48 @@ pub fn unpack_internal_tx_data_batch_posting_report(data: &[u8]) -> Result<Inter
         batch_poster_address,
         batch_number,
         batch_data_gas,
+        l1_base_fee_wei,
+    })
+}
+
+pub fn unpack_internal_tx_data_batch_posting_report_v2(data: &[u8]) -> Result<InternalTxBatchPostingReportV2Data, String> {
+    if data.len() < 4 {
+        return Err("Data too short for method selector".to_string());
+    }
+
+    let selector = &data[0..4];
+    let expected_selector = get_batch_posting_report_v2_method_id();
+    if selector != expected_selector {
+        return Err(format!("Invalid method selector: expected {:?}, got {:?}", expected_selector, selector));
+    }
+
+    if data.len() < 228 {
+        return Err(format!("Data too short: expected at least 228 bytes, got {}", data.len()));
+    }
+
+    let batch_timestamp_bytes = &data[4..36];
+    let batch_poster_address_bytes = &data[36..68];
+    let batch_number_bytes = &data[68..100];
+    let batch_calldata_length_bytes = &data[100..132];
+    let batch_calldata_non_zeros_bytes = &data[132..164];
+    let batch_extra_gas_bytes = &data[164..196];
+    let l1_base_fee_wei_bytes = &data[196..228];
+
+    let batch_timestamp = U256::from_be_slice(batch_timestamp_bytes);
+    let batch_poster_address = Address::from_slice(&batch_poster_address_bytes[12..32]);
+    let batch_number = U256::from_be_slice(batch_number_bytes).to::<u64>();
+    let batch_calldata_length = U256::from_be_slice(batch_calldata_length_bytes).to::<u64>();
+    let batch_calldata_non_zeros = U256::from_be_slice(batch_calldata_non_zeros_bytes).to::<u64>();
+    let batch_extra_gas = U256::from_be_slice(batch_extra_gas_bytes).to::<u64>();
+    let l1_base_fee_wei = U256::from_be_slice(l1_base_fee_wei_bytes);
+
+    Ok(InternalTxBatchPostingReportV2Data {
+        batch_timestamp,
+        batch_poster_address,
+        batch_number,
+        batch_calldata_length,
+        batch_calldata_non_zeros,
+        batch_extra_gas,
         l1_base_fee_wei,
     })
 }
