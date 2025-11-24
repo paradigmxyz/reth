@@ -9,7 +9,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs::{self, File, OpenOptions, ReadDir},
-    io::{self, BufWriter, Error, Write},
+    io::{self, BufWriter, Write},
     path::{Path, PathBuf},
 };
 
@@ -338,7 +338,7 @@ where
         Err(err) => {
             // Clean up the temporary file before returning the error
             let _ = fs::remove_file(&tmp_path);
-            return Err(FsPathError::Write { source: Error::other(err.into()), path: tmp_path });
+            return Err(FsPathError::Write { source: io::Error::other(err.into()), path: tmp_path });
         }
     }
 
