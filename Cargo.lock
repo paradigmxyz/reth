@@ -7442,6 +7442,7 @@ dependencies = [
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
+ "alloy-rlp",
  "arb-alloy-consensus",
  "arb-alloy-predeploys 0.1.2",
  "arb-alloy-util",

@@ -970,22 +970,38 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     ctx.block_timestamp,
                 );
 
-                // TODO: Compute the correct retry transaction hash
-                // Currently using ZERO as a placeholder, but this causes the RedeemScheduled event
-                // to have incorrect topic[2]. This needs to be fixed to match the actual retry tx hash.
-                //
-                // The retry tx hash should be computed by:
-                // 1. Create ArbRetryTx with: chain_id=421614, nonce=0, from=ctx.sender,
-                //    gas_fee_cap=gas_fee_cap, gas=usergas, to=retry_to, value=retry_value,
-                //    data=retry_data, ticket_id=ticket_id, refund_to=fee_refund_addr,
-                //    max_refund=available_refund, submission_fee_refund=submission_fee_u256
-                // 2. Encode as: 0x68 || RLP([chain_id, nonce, from, gas_fee_cap, gas, to, value, data, ticket_id, refund_to, max_refund, submission_fee_refund])
-                // 3. Hash with keccak256
-                //
-                // For block 1, the expected retry tx hash is:
-                // 0x873c5ee3092c40336006808e249293bf5f4cb3235077a74cac9cafa7cf73cb8b
+                // Compute the retry transaction hash
+                // The retry transaction is an ArbRetryTx (type 0x68) that gets automatically scheduled
+                // We need to compute its hash to emit in the RedeemScheduled event
                 let retry_tx_nonce = 0u64;
-                let retry_tx_hash = B256::ZERO;
+
+                // Construct the retry transaction
+                use arb_alloy_consensus::tx::ArbRetryTx;
+                let retry_tx = ArbRetryTx {
+                    chain_id: U256::from(421614u64), // Arbitrum Sepolia chain ID
+                    nonce: retry_tx_nonce,
+                    from: ctx.sender,
+                    gas_fee_cap,
+                    gas: usergas,
+                    to: Some(retry_to),
+                    value: retry_value,
+                    data: Bytes::from(retry_data.to_vec()),
+                    ticket_id,
+                    refund_to: fee_refund_addr,
+                    max_refund: available_refund,
+                    submission_fee_refund: submission_fee_u256,
+                };
+
+                // Encode the retry transaction as type 0x68 + RLP encoding
+                // Format: 0x68 || RLP([chain_id, nonce, from, gas_fee_cap, gas, to, value, data, ticket_id, refund_to, max_refund, submission_fee_refund])
+                use alloy_rlp::Encodable;
+                let mut encoded = Vec::new();
+                encoded.push(0x68); // ArbRetryTx type byte
+                retry_tx.encode(&mut encoded);
+
+                // Compute keccak256 hash
+                use alloy_primitives::keccak256;
+                let retry_tx_hash = keccak256(&encoded);
 
                 let sequence_num_bytes: [u8; 32] = {
                     let mut bytes = [0u8; 32];
