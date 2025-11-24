@@ -16,7 +16,7 @@
 //!
 //! ```rust
 //! use alloy_consensus::Header;
-//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedHeader};
+//! use reth_era::{common::decode::DecodeCompressedRlp, era1::types::execution::CompressedHeader};
 //!
 //! let header = Header { number: 100, ..Default::default() };
 //! // Compress the header: rlp encoding and Snappy compression
@@ -32,7 +32,7 @@
 //! ```rust
 //! use alloy_consensus::{BlockBody, Header};
 //! use alloy_primitives::Bytes;
-//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedBody};
+//! use reth_era::{common::decode::DecodeCompressedRlp, era1::types::execution::CompressedBody};
 //! use reth_ethereum_primitives::TransactionSigned;
 //!
 //! let body: BlockBody<Bytes> = BlockBody {
@@ -52,27 +52,25 @@
 //! ## [`CompressedReceipts`]
 //!
 //! ```rust
-//! use alloy_consensus::ReceiptWithBloom;
-//! use reth_era::{common::decode::DecodeCompressed, era1::types::execution::CompressedReceipts};
-//! use reth_ethereum_primitives::{Receipt, TxType};
-//!
-//! let receipt = Receipt {
-//!     tx_type: TxType::Legacy,
-//!     success: true,
-//!     cumulative_gas_used: 21000,
-//!     logs: vec![],
+//! use alloy_consensus::{Eip658Value, Receipt, ReceiptEnvelope, ReceiptWithBloom};
+//! use reth_era::{
+//!     common::decode::DecodeCompressedRlp, era1::types::execution::CompressedReceipts,
 //! };
-//! let receipt_with_bloom = ReceiptWithBloom { receipt, logs_bloom: Default::default() };
+//!
+//! let receipt =
+//!     Receipt { status: Eip658Value::Eip658(true), cumulative_gas_used: 21000, logs: vec![] };
+//! let receipt_with_bloom = ReceiptWithBloom::new(receipt, Default::default());
+//! let enveloped_receipt = ReceiptEnvelope::Legacy(receipt_with_bloom);
 //! // Compress the receipt: rlp encoding and snappy compression
-//! let compressed_receipt_data = CompressedReceipts::from_encodable(&receipt_with_bloom)?;
+//! let compressed_receipt_data = CompressedReceipts::from_encodable(&enveloped_receipt)?;
 //! // Get raw receipt by decoding and decompressing compressed and encoded receipt
-//! let decompressed_receipt = compressed_receipt_data.decode::<ReceiptWithBloom>()?;
-//! assert_eq!(decompressed_receipt.receipt.cumulative_gas_used, 21000);
+//! let decompressed_receipt = compressed_receipt_data.decode::<ReceiptEnvelope>()?;
+//! assert_eq!(decompressed_receipt.cumulative_gas_used(), 21000);
 //! # Ok::<(), reth_era::e2s::error::E2sError>(())
 //! ``````
 
 use crate::{
-    common::decode::DecodeCompressed,
+    common::decode::DecodeCompressedRlp,
     e2s::{error::E2sError, types::Entry},
 };
 use alloy_consensus::{Block, BlockBody, Header};
@@ -227,7 +225,7 @@ impl CompressedHeader {
     }
 }
 
-impl DecodeCompressed for CompressedHeader {
+impl DecodeCompressedRlp for CompressedHeader {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
         let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
@@ -314,7 +312,7 @@ impl CompressedBody {
     }
 }
 
-impl DecodeCompressed for CompressedBody {
+impl DecodeCompressedRlp for CompressedBody {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
         let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
@@ -405,7 +403,7 @@ impl CompressedReceipts {
     }
 }
 
-impl DecodeCompressed for CompressedReceipts {
+impl DecodeCompressedRlp for CompressedReceipts {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
         let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
@@ -697,8 +695,8 @@ mod tests {
             .expect("Failed to compress receipt list");
 
         // Decode the compressed receipts back
-        // Note: most likely the decoding for real era files will be done to reach
-        // `Vec<ReceiptWithBloom>``
+        // Note: For real ERA1 files, use `Vec<ReceiptWithBloom>` before Era ~1520 or use
+        // `Vec<ReceiptEnvelope>` after this era
         let decoded_receipts: Vec<Receipt> =
             compressed_receipts.decode().expect("Failed to decode compressed receipt list");
 

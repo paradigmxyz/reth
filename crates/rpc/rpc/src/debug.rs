@@ -22,7 +22,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock};
-use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
+use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
@@ -91,22 +91,20 @@ where
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
-        // replay all transactions of the block
         let this = self.clone();
+        // replay all transactions of the block
         self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash().into(), move |state| {
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
-                this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector = None;
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
 
-                    let tx_env = this.eth_api().evm_config().tx_env(tx);
+                    let tx_env = eth_api.evm_config().tx_env(tx);
 
                     let (result, state_changes) = this.trace_transaction(
                         &opts,
@@ -221,26 +219,23 @@ where
 
         let this = self.clone();
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |state| {
+            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
-
-                this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 // replay all transactions prior to the targeted transaction
-                let index = this.eth_api().replay_transactions_until(
+                let index = eth_api.replay_transactions_until(
                     &mut db,
                     evm_env.clone(),
                     block_txs,
                     *tx.tx_hash(),
                 )?;
 
-                let tx_env = this.eth_api().evm_config().tx_env(&tx);
+                let tx_env = eth_api.evm_config().tx_env(&tx);
 
                 this.trace_transaction(
                     &opts,
@@ -343,10 +338,6 @@ where
                         let frame = self
                             .eth_api()
                             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                                // wrapper is hack to get around 'higher-ranked lifetime error',
-                                // see <https://github.com/rust-lang/rust/issues/100013>
-                                let db = db.0;
-
                                 let gas_limit = tx_env.gas_limit();
                                 let res = this.eth_api().inspect(
                                     &mut *db,
@@ -377,10 +368,6 @@ where
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                                // wrapper is hack to get around 'higher-ranked lifetime error', see
-                                // <https://github.com/rust-lang/rust/issues/100013>
-                                let db = db.0;
-
                                 let tx_info = TransactionInfo {
                                     block_number: Some(evm_env.block_env.number().saturating_to()),
                                     base_fee: Some(evm_env.block_env.basefee()),
@@ -448,10 +435,6 @@ where
                     let res = self
                         .eth_api()
                         .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                            // wrapper is hack to get around 'higher-ranked lifetime error', see
-                            // <https://github.com/rust-lang/rust/issues/100013>
-                            let db = db.0;
-
                             let mut inspector =
                                 revm_inspectors::tracing::js::JsInspector::new(code, config)
                                     .map_err(Eth::Error::from_eth_err)?;
@@ -531,27 +514,24 @@ where
         let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
 
         // execute after the parent block, replaying `tx_index` transactions
-        let state_at = block.parent_hash().into();
+        let state_at = block.parent_hash();
 
         let this = self.clone();
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |state| {
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
-
+            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
                 // 1. apply pre-execution changes
-                this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 // 2. replay the required number of transactions
                 for tx in block.transactions_recovered().take(tx_index) {
-                    let tx_env = this.eth_api().evm_config().tx_env(tx);
-                    let res = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                     db.commit(res.state);
                 }
 
                 // 3. now execute the trace call on this state
                 let (call_evm_env, call_tx_env) =
-                    this.eth_api().prepare_call_env(evm_env, call, &mut db, overrides)?;
+                    eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
                 // Execute the trace call using trace_transaction
                 let (trace, _) = this.trace_transaction(
@@ -613,11 +593,9 @@ where
         let this = self.clone();
 
         self.eth_api()
-            .spawn_with_state_at_block(at.into(), move |state| {
+            .spawn_with_state_at_block(at, move |eth_api, mut db| {
                 // the outer vec for the bundles
                 let mut all_bundles = Vec::with_capacity(bundles.len());
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -626,8 +604,8 @@ where
 
                     // Execute all transactions until index
                     for tx in transactions {
-                        let tx_env = this.eth_api().evm_config().tx_env(tx);
-                        let res = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
+                        let tx_env = eth_api.evm_config().tx_env(tx);
+                        let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
                 }
@@ -647,12 +625,8 @@ where
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                        let (evm_env, tx_env) = this.eth_api().prepare_call_env(
-                            evm_env.clone(),
-                            tx,
-                            &mut db,
-                            overrides,
-                        )?;
+                        let (evm_env, tx_env) =
+                            eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
 
                         let (trace, state) = this.trace_transaction(
                             &tracing_options,
@@ -722,14 +696,12 @@ where
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
     ) -> Result<ExecutionWitness, Eth::Error> {
-        let this = self.clone();
         let block_number = block.header().number();
 
         let (mut exec_witness, lowest_block_number) = self
             .eth_api()
-            .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
-                let db = StateProviderDatabase::new(&state_provider);
-                let block_executor = this.eth_api().evm_config().executor(db);
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let block_executor = eth_api.evm_config().executor(&mut db);
 
                 let mut witness_record = ExecutionWitnessRecord::default();
 
@@ -742,7 +714,9 @@ where
                 let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
                     witness_record;
 
-                let state = state_provider
+                let state = db
+                    .database
+                    .0
                     .witness(Default::default(), hashed_state)
                     .map_err(EthApiError::from)?;
                 Ok((
@@ -812,7 +786,7 @@ where
         opts: &GethDebugTracingOptions,
         evm_env: EvmEnvFor<Eth::Evm>,
         tx_env: TxEnvFor<Eth::Evm>,
-        db: &mut StateCacheDb<'_>,
+        db: &mut StateCacheDb,
         transaction_context: Option<TransactionContext>,
         fused_inspector: &mut Option<TracingInspector>,
     ) -> Result<(GethTrace, EvmState), Eth::Error> {

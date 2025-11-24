@@ -4,13 +4,10 @@ use super::{
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
-    HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt,
+    EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt,
 };
-use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta},
-    Header,
-};
+use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use dashmap::DashMap;
@@ -21,7 +18,7 @@ use reth_db::{
     lockfile::StorageLock,
     static_file::{
         iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
-        StaticFileCursor, TransactionMask,
+        StaticFileCursor, TransactionMask, TransactionSenderMask,
     },
 };
 use reth_db_api::{
@@ -469,12 +466,37 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn get_segment_provider(
         &self,
         segment: StaticFileSegment,
-        start: u64,
+        number: u64,
     ) -> ProviderResult<StaticFileJarProvider<'_, N>> {
         if segment.is_block_based() {
-            self.get_segment_provider_for_block(segment, start, None)
+            self.get_segment_provider_for_block(segment, number, None)
         } else {
-            self.get_segment_provider_for_transaction(segment, start, None)
+            self.get_segment_provider_for_transaction(segment, number, None)
+        }
+    }
+
+    /// Gets the [`StaticFileJarProvider`] of the requested segment and start index that can be
+    /// either block or transaction.
+    ///
+    /// If the segment is not found, returns [`None`].
+    pub fn get_maybe_segment_provider(
+        &self,
+        segment: StaticFileSegment,
+        number: u64,
+    ) -> ProviderResult<Option<StaticFileJarProvider<'_, N>>> {
+        let provider = if segment.is_block_based() {
+            self.get_segment_provider_for_block(segment, number, None)
+        } else {
+            self.get_segment_provider_for_transaction(segment, number, None)
+        };
+
+        match provider {
+            Ok(provider) => Ok(Some(provider)),
+            Err(
+                ProviderError::MissingStaticFileBlock(_, _) |
+                ProviderError::MissingStaticFileTx(_, _),
+            ) => Ok(None),
+            Err(err) => Err(err),
         }
     }
 
@@ -1030,6 +1052,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         continue;
                     }
                 }
+                StaticFileSegment::TransactionSenders => {
+                    if EitherWriterDestination::senders(provider).is_database() {
+                        continue
+                    }
+                }
             }
 
             let initial_highest_block = self.get_highest_static_file_block(segment);
@@ -1127,6 +1154,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     )?,
                 StaticFileSegment::Receipts => self
                     .ensure_invariants::<_, tables::Receipts<N::Receipt>>(
+                        provider,
+                        segment,
+                        highest_tx,
+                        highest_block,
+                    )?,
+                StaticFileSegment::TransactionSenders => self
+                    .ensure_invariants::<_, tables::TransactionSenders>(
                         provider,
                         segment,
                         highest_tx,
@@ -1232,6 +1266,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             StaticFileSegment::Headers => StageId::Headers,
             StaticFileSegment::Transactions => StageId::Bodies,
             StaticFileSegment::Receipts => StageId::Execution,
+            StaticFileSegment::TransactionSenders => StageId::SenderRecovery,
         };
         let checkpoint_block_number =
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
@@ -1268,7 +1303,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     // TODO(joshie): is_block_meta
                     writer.prune_headers(prune_count)?;
                 }
-                StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
+                StaticFileSegment::Transactions |
+                StaticFileSegment::Receipts |
+                StaticFileSegment::TransactionSenders => {
                     if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
                         let number = highest_static_file_entry - block.last_tx_num();
                         debug!(target: "reth::providers::static_file", ?segment, prune_count = number, checkpoint_block_number, "Pruning transaction based segment");
@@ -1279,6 +1316,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                             }
                             StaticFileSegment::Receipts => {
                                 writer.prune_receipts(number, checkpoint_block_number)?
+                            }
+                            StaticFileSegment::TransactionSenders => {
+                                writer.prune_transaction_senders(number, checkpoint_block_number)?
                             }
                             StaticFileSegment::Headers => unreachable!(),
                         }
@@ -1455,29 +1495,37 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Fetches data within a specified range across multiple static files.
     ///
-    /// Returns an iterator over the data
+    /// Returns an iterator over the data. Yields [`None`] if the data for the specified number is
+    /// not found.
     pub fn fetch_range_iter<'a, T, F>(
         &'a self,
         segment: StaticFileSegment,
         range: Range<u64>,
         get_fn: F,
-    ) -> ProviderResult<impl Iterator<Item = ProviderResult<T>> + 'a>
+    ) -> ProviderResult<impl Iterator<Item = ProviderResult<Option<T>>> + 'a>
     where
         F: Fn(&mut StaticFileCursor<'_>, u64) -> ProviderResult<Option<T>> + 'a,
         T: std::fmt::Debug,
     {
-        let mut provider = Some(self.get_segment_provider(segment, range.start)?);
-        Ok(range.filter_map(move |number| {
-            match get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose() {
-                Some(result) => Some(result),
+        let mut provider = self.get_maybe_segment_provider(segment, range.start)?;
+        Ok(range.map(move |number| {
+            match provider
+                .as_ref()
+                .map(|provider| get_fn(&mut provider.cursor()?, number))
+                .and_then(|result| result.transpose())
+            {
+                Some(result) => result.map(Some),
                 None => {
-                    // There is a very small chance of hitting a deadlock if two consecutive static
-                    // files share the same bucket in the internal dashmap and
-                    // we don't drop the current provider before requesting the
-                    // next one.
+                    // There is a very small chance of hitting a deadlock if two consecutive
+                    // static files share the same bucket in the internal dashmap and we don't drop
+                    // the current provider before requesting the next one.
                     provider.take();
-                    provider = Some(self.get_segment_provider(segment, number).ok()?);
-                    get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose()
+                    provider = self.get_maybe_segment_provider(segment, number)?;
+                    provider
+                        .as_ref()
+                        .map(|provider| get_fn(&mut provider.cursor()?, number))
+                        .and_then(|result| result.transpose())
+                        .transpose()
                 }
             }
         }))
@@ -2014,15 +2062,24 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        let txes = self.transactions_by_tx_range(range)?;
-        Ok(reth_primitives_traits::transaction::recover::recover_signers(&txes)?)
+        self.fetch_range_with_predicate(
+            StaticFileSegment::TransactionSenders,
+            to_range(range),
+            |cursor, number| cursor.get_one::<TransactionSenderMask>(number.into()),
+            |_| true,
+        )
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        match self.transaction_by_id_unhashed(id)? {
-            Some(tx) => Ok(tx.recover_signer().ok()),
-            None => Ok(None),
-        }
+        self.get_segment_provider_for_transaction(StaticFileSegment::TransactionSenders, id, None)
+            .and_then(|provider| provider.transaction_sender(id))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileTx(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 }
 
@@ -2154,6 +2211,10 @@ impl<N: NodePrimitives> StatsReader for StaticFileProvider<N> {
                 .map(|txs| txs + 1)
                 .unwrap_or_default()
                 as usize),
+            tables::TransactionSenders::NAME => Ok(self
+                .get_highest_static_file_tx(StaticFileSegment::TransactionSenders)
+                .map(|txs| txs + 1)
+                .unwrap_or_default() as usize),
             _ => Err(ProviderError::UnsupportedProvider),
         }
     }
