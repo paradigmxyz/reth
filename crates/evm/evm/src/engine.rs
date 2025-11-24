@@ -40,6 +40,7 @@ where
     type Error = Err;
 }
 
+
 pub trait ExecutableTxIterator3<Evm: ConfigureEvm>
 {
     /// The executable transaction type iterator yields.
@@ -58,7 +59,7 @@ pub trait ExecutableTxIterator3<Evm: ConfigureEvm>
     /// A yielded transaction `tx` can appear at most twice:
     ///  - First as [`PreparedTx::Prepared`] if we haven't yielded the previous tx (`tx.index - 1`) as [`PreparedTx::Next`]
     /// - Always as [`PreparedTx::Next`] if it's the next transaction in line.
-    fn next<'a>(&'a mut self) -> Option<Result<PreparedTx<'a, WithTxEnv<TxEnvFor<Evm>, Self::Tx>>, Self::Error>>;
+    fn next(&mut self) -> Option<Result<PreparedTx<WithTxEnv<TxEnvFor<Evm>, Self::Tx>>, Self::Error>>;
 
     /// The total number of transactions in this iterator
     fn total_tx_count(&self) -> usize;
