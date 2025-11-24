@@ -48,7 +48,7 @@ where
             let correct_signer = input.tx.deref().recover_signer()
                 .map_err(|_| crate::error::ArbEthApiError::from_eth_err(reth_rpc_eth_types::EthApiError::InvalidTransactionSignature))?;
 
-            // Extract the transaction hash and 'to' address before moving input
+            // Extract the transaction hash, 'to' address, and next_log_index before moving input
             // We need to compute these eagerly to avoid lifetime issues
             let tx_hash = {
                 use alloy_eips::eip2718::Encodable2718;
@@ -60,10 +60,11 @@ where
             // Since Address is Copy, we can just dereference and store
             // TODO: Fix lifetime issue when uncommenting the usage below
             // let tx_to = input.tx.deref().to().map(|addr| *addr);
+            let next_log_index_val = input.next_log_index;
 
             // Build the receipt using the standard build_receipt function
             // The lambda converts the ArbReceipt to a ReceiptEnvelope, preserving cumulative gas and logs
-            let mut base_receipt = build_receipt(input, None, |receipt, next_log_index, meta| {
+            let mut base_receipt = build_receipt(input, None, |receipt, _next_log_index, _meta| {
                 use alloy_consensus::TxReceipt;
 
                 // Extract receipt data from the ArbReceipt
@@ -120,8 +121,61 @@ where
             }
 
             // The base_receipt now has all correct data including the from field
-            // Convert to the expected type using Into
-            out.push(base_receipt.into());
+            // Convert from TransactionReceipt<ReceiptEnvelope> to TransactionReceipt (with default Log type)
+            // We need to map the inner ReceiptEnvelope type
+            use alloy_consensus::TxReceipt;
+            use alloy_rpc_types_eth::Log as RpcLog;
+
+            // Extract data from the consensus envelope
+            let status = base_receipt.inner.status();
+            let cumulative_gas_used = base_receipt.inner.cumulative_gas_used();
+            let logs_bloom = base_receipt.inner.bloom();
+            let consensus_logs = base_receipt.inner.logs();
+
+            // Convert consensus logs (alloy_primitives::Log) to RPC logs (alloy_rpc_types_eth::Log)
+            let rpc_logs: Vec<RpcLog> = consensus_logs.iter().enumerate().map(|(idx, log)| {
+                RpcLog {
+                    inner: alloy_primitives::Log {
+                        address: log.address,
+                        data: log.data.clone(),
+                    },
+                    block_hash: base_receipt.block_hash,
+                    block_number: base_receipt.block_number,
+                    block_timestamp: None,
+                    transaction_hash: Some(base_receipt.transaction_hash),
+                    transaction_index: base_receipt.transaction_index,
+                    log_index: Some((next_log_index_val + idx) as u64),
+                    removed: false,
+                }
+            }).collect();
+
+            // Create ReceiptEnvelope<RpcLog>
+            let receipt_with_bloom = alloy_consensus::ReceiptWithBloom {
+                receipt: alloy_consensus::Receipt {
+                    status: alloy_consensus::Eip658Value::Eip658(status),
+                    cumulative_gas_used,
+                    logs: rpc_logs.clone(),
+                },
+                logs_bloom,
+            };
+            let inner_envelope = alloy_consensus::ReceiptEnvelope::Legacy(receipt_with_bloom);
+
+            // Construct the TransactionReceipt with the correct type
+            let plain_receipt = TransactionReceipt {
+                inner: inner_envelope,
+                transaction_hash: base_receipt.transaction_hash,
+                transaction_index: base_receipt.transaction_index,
+                block_hash: base_receipt.block_hash,
+                block_number: base_receipt.block_number,
+                gas_used: base_receipt.gas_used,
+                effective_gas_price: base_receipt.effective_gas_price,
+                blob_gas_used: base_receipt.blob_gas_used,
+                blob_gas_price: base_receipt.blob_gas_price,
+                from: base_receipt.from,
+                to: base_receipt.to,
+                contract_address: base_receipt.contract_address,
+            };
+            out.push(plain_receipt);
         }
         Ok(out)
     }
