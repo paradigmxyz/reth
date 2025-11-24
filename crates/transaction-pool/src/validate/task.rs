@@ -181,7 +181,10 @@ impl<V> TransactionValidationTaskExecutor<V> {
     /// Initializes the executor with the provided validator and sets up communication for
     /// validation tasks.
     pub fn new(validator: V) -> Self {
-        let (tx, _) = ValidationTask::new();
+        let (tx, task) = ValidationTask::new();
+        tokio::task::spawn(async move {
+            task.run().await;
+        });
         Self { validator: Arc::new(validator), to_validation_task: Arc::new(sync::Mutex::new(tx)) }
     }
 }
@@ -283,5 +286,60 @@ where
         B: Block,
     {
         self.validator.on_new_head_block(new_tip_block)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        test_utils::MockTransaction,
+        validate::{TransactionValidationOutcome, ValidTransaction},
+        TransactionOrigin,
+    };
+    use alloy_primitives::{Address, U256};
+
+    #[derive(Debug)]
+    struct NoopValidator;
+
+    impl TransactionValidator for NoopValidator {
+        type Transaction = MockTransaction;
+
+        async fn validate_transaction(
+            &self,
+            _origin: TransactionOrigin,
+            transaction: Self::Transaction,
+        ) -> TransactionValidationOutcome<Self::Transaction> {
+            TransactionValidationOutcome::Valid {
+                balance: U256::ZERO,
+                state_nonce: 0,
+                bytecode_hash: None,
+                transaction: ValidTransaction::Valid(transaction),
+                propagate: false,
+                authorities: Some(Vec::<Address>::new()),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn executor_new_spawns_and_validates_single() {
+        let validator = NoopValidator;
+        let executor = TransactionValidationTaskExecutor::new(validator);
+        let tx = MockTransaction::legacy();
+        let out = executor.validate_transaction(TransactionOrigin::External, tx).await;
+        assert!(matches!(out, TransactionValidationOutcome::Valid { .. }));
+    }
+
+    #[tokio::test]
+    async fn executor_new_spawns_and_validates_batch() {
+        let validator = NoopValidator;
+        let executor = TransactionValidationTaskExecutor::new(validator);
+        let txs = vec![
+            (TransactionOrigin::External, MockTransaction::legacy()),
+            (TransactionOrigin::Local, MockTransaction::legacy()),
+        ];
+        let out = executor.validate_transactions(txs).await;
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|o| matches!(o, TransactionValidationOutcome::Valid { .. })));
     }
 }
