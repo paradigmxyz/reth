@@ -296,7 +296,11 @@ where
                 }
             }
 
-            let recovered_ref = tx.with_signer_ref(alloy_primitives::Address::ZERO);
+            // Recover the actual signer from the transaction
+            use alloy_consensus::transaction::SignerRecoverable;
+            let signer = tx.recover_signer()
+                .map_err(|_| Self::Error::from_eth_err(EthApiError::InvalidTransactionSignature))?;
+            let recovered_ref = tx.with_signer_ref(signer);
 
             let input = ConvertReceiptInput {
                 tx: recovered_ref,
