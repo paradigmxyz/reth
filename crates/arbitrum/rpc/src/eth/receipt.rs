@@ -5,6 +5,7 @@ use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
 use reth_rpc_eth_types::receipt::build_receipt;
 use alloy_rpc_types_eth::TransactionReceipt;
 use alloy_serde::WithOtherFields;
+use reth_rpc_eth_api::FromEthApiError;
 
 #[derive(Clone, Debug)]
 pub struct ArbReceiptConverter<P> {
@@ -38,9 +39,16 @@ where
                 input.tx.ty()
             };
 
+            // Recover the signer directly from the inner transaction
+            // This works around an issue where tx.signer() returns Address::ZERO
+            use alloy_consensus::transaction::SignerRecoverable;
+            use core::ops::Deref;
+            let correct_signer = input.tx.deref().recover_signer()
+                .map_err(|_| crate::error::ArbEthApiError::from_eth_err(reth_rpc_eth_types::EthApiError::InvalidTransactionSignature))?;
+
             // Build the receipt using the standard build_receipt function
             // The lambda converts the ArbReceipt to a ReceiptEnvelope, preserving cumulative gas and logs
-            let base_receipt = build_receipt(input, None, |receipt, next_log_index, meta| {
+            let mut base_receipt = build_receipt(input, None, |receipt, next_log_index, meta| {
                 use alloy_consensus::TxReceipt;
 
                 // Extract receipt data from the ArbReceipt
@@ -67,8 +75,11 @@ where
                 alloy_consensus::ReceiptEnvelope::Legacy(consensus_receipt)
             });
 
-            // The base_receipt already has all the data we need
-            // The tx type is encoded in the envelope so no need for WithOtherFields
+            // Fix the 'from' field to use the correctly recovered signer
+            // This is necessary because build_receipt's tx.signer() returns Address::ZERO
+            base_receipt.from = correct_signer;
+
+            // The base_receipt now has all correct data including the from field
             // Convert to the expected type using Into
             out.push(base_receipt.into());
         }
