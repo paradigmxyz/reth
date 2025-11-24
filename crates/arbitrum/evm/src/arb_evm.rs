@@ -261,17 +261,7 @@ impl EvmFactory for ArbEvmFactory {
         db: DB,
         input: EvmEnv<Self::Spec>,
     ) -> Self::Evm<DB, NoOpInspector> {
-        use revm::{MainBuilder, MainContext};
-        // Create EVM with Arbitrum precompiles to intercept predeploy calls
-        let evm = MainContext::mainnet()
-            .with_db(db)
-            .with_cfg(input.cfg_env)
-            .with_block(input.block_env)
-            .build_mainnet_with_inspector(NoOpInspector {})
-            .with_precompiles(PrecompilesMap::from_static(crate::arbitrum_precompiles()));
-
-        let inner = alloy_evm::EthEvm::new(evm, false);
-        ArbEvm::new(inner)
+        ArbEvm::new(self.0.create_evm(db, input))
     }
 
     fn create_evm_with_inspector<DB: Database, I: revm::inspector::Inspector<Self::Context<DB>>>(
@@ -280,17 +270,7 @@ impl EvmFactory for ArbEvmFactory {
         input: EvmEnv<Self::Spec>,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        use revm::{MainBuilder, MainContext};
-        // Create EVM with Arbitrum precompiles and inspector
-        let evm = MainContext::mainnet()
-            .with_db(db)
-            .with_cfg(input.cfg_env)
-            .with_block(input.block_env)
-            .build_mainnet_with_inspector(inspector)
-            .with_precompiles(PrecompilesMap::from_static(crate::arbitrum_precompiles()));
-
-        let inner = alloy_evm::EthEvm::new(evm, true);
-        ArbEvm::new(inner)
+        ArbEvm::new(self.0.create_evm_with_inspector(db, input, inspector))
     }
 }
 impl<DB, I> ArbEvmExt for ArbEvm<DB, I>
