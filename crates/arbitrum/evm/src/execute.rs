@@ -1309,22 +1309,24 @@ pub fn enforce_gas_limit<D: Database>(
     if is_eth_call {
         return Ok(());
     }
-    
+
     if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
         let max = if state.arbos_version < 50 {
             arbos_state.l2_pricing_state.get_per_block_gas_limit().unwrap_or(32_000_000)
         } else {
-            let mut max = arbos_state.l2_pricing_state.get_per_block_gas_limit().unwrap_or(32_000_000);
+            // ArbOS 50 implements a EIP-7825-like per-transaction limit
+            let mut max = arbos_state.l2_pricing_state.get_per_tx_gas_limit().unwrap_or(32_000_000);
+            // Reduce the max by intrinsicGas because it was already charged
             max = max.saturating_sub(intrinsic_gas);
             max
         };
-        
+
         if *gas_remaining > max {
             state.compute_hold_gas = *gas_remaining - max;
             *gas_remaining = max;
         }
     }
-    
+
     Ok(())
 }
 
