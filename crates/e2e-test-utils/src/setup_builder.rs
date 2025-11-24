@@ -4,7 +4,6 @@
 //! configurations through closures that modify `NodeConfig` and `TreeConfig`.
 
 use crate::{node::NodeTestContext, wallet::Wallet, NodeBuilderHelper, NodeHelperType, TmpDB};
-use futures_util::future::TryJoinAll;
 use reth_chainspec::EthChainSpec;
 use reth_node_builder::{
     EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle, NodeTypes, NodeTypesWithDBAdapter,
@@ -15,7 +14,7 @@ use reth_provider::providers::BlockchainProvider;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
-use tracing::{span, Instrument, Level};
+use tracing::{span, Level};
 
 /// Type alias for tree config modifier closure
 type TreeConfigModifier =
@@ -118,71 +117,66 @@ where
             reth_node_api::TreeConfig::default()
         };
 
-        let mut nodes = (0..self.num_nodes)
-            .map(async |idx| {
-                // Create base node config
-                let base_config = NodeConfig::new(self.chain_spec.clone())
-                    .with_network(network_config.clone())
-                    .with_unused_ports()
-                    .with_rpc(
-                        RpcServerArgs::default()
-                            .with_unused_ports()
-                            .with_http()
-                            .with_http_api(RpcModuleSelection::All),
-                    );
-
-                // Apply node config modifier if present
-                let node_config = if let Some(modifier) = &self.node_config_modifier {
-                    modifier(base_config)
-                } else {
-                    base_config
-                };
-
-                let span = span!(Level::INFO, "node", idx);
-                let node = N::default();
-                let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-                    .testing_node(exec.clone())
-                    .with_types_and_provider::<N, BlockchainProvider<_>>()
-                    .with_components(node.components_builder())
-                    .with_add_ons(node.add_ons())
-                    .launch_with_fn(|builder| {
-                        let launcher = EngineNodeLauncher::new(
-                            builder.task_executor().clone(),
-                            builder.config().datadir(),
-                            tree_config.clone(),
-                        );
-                        builder.launch_with(launcher)
-                    })
-                    .instrument(span)
-                    .await?;
-
-                let node = NodeTestContext::new(node, self.attributes_generator).await?;
-
-                let genesis = node.block_hash(0);
-                node.update_forkchoice(genesis, genesis).await?;
-
-                eyre::Ok(node)
-            })
-            .collect::<TryJoinAll<_>>()
-            .await?;
+        let mut nodes: Vec<NodeTestContext<_, _>> = Vec::with_capacity(self.num_nodes);
 
         for idx in 0..self.num_nodes {
-            let (prev, current) = nodes.split_at_mut(idx);
-            let current = current.first_mut().unwrap();
+            // Create base node config
+            let base_config = NodeConfig::new(self.chain_spec.clone())
+                .with_network(network_config.clone())
+                .with_unused_ports()
+                .with_rpc(
+                    RpcServerArgs::default()
+                        .with_unused_ports()
+                        .with_http()
+                        .with_http_api(RpcModuleSelection::All),
+                );
+
+            // Apply node config modifier if present
+            let node_config = if let Some(modifier) = &self.node_config_modifier {
+                modifier(base_config)
+            } else {
+                base_config
+            };
+
+            let span = span!(Level::INFO, "node", idx);
+            let _enter = span.enter();
+            let node = N::default();
+            let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+                .testing_node(exec.clone())
+                .with_types_and_provider::<N, BlockchainProvider<_>>()
+                .with_components(node.components_builder())
+                .with_add_ons(node.add_ons())
+                .launch_with_fn(|builder| {
+                    let launcher = EngineNodeLauncher::new(
+                        builder.task_executor().clone(),
+                        builder.config().datadir(),
+                        tree_config.clone(),
+                    );
+                    builder.launch_with(launcher)
+                })
+                .await?;
+
+            let mut node = NodeTestContext::new(node, self.attributes_generator).await?;
+
+            let genesis = node.block_hash(0);
+            node.update_forkchoice(genesis, genesis).await?;
+
             // Connect nodes if requested
             if self.connect_nodes {
-                if let Some(prev_idx) = idx.checked_sub(1) {
-                    prev[prev_idx].connect(current).await;
+                if let Some(previous_node) = nodes.last_mut() {
+                    previous_node.connect(&mut node).await;
                 }
 
                 // Connect last node with the first if there are more than two
                 if idx + 1 == self.num_nodes &&
                     self.num_nodes > 2 &&
-                    let Some(first) = prev.first_mut()
+                    let Some(first_node) = nodes.first_mut()
                 {
-                    current.connect(first).await;
+                    node.connect(first_node).await;
                 }
             }
+
+            nodes.push(node);
         }
 
         Ok((nodes, tasks, Wallet::default().with_chain_id(self.chain_spec.chain().into())))
