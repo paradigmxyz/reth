@@ -25,7 +25,7 @@ where
     P: HeaderProvider + Clone + Send + Sync + 'static + core::fmt::Debug,
     N: NodePrimitives,
 {
-    type RpcReceipt = TransactionReceipt<alloy_consensus::ReceiptEnvelope>;
+    type RpcReceipt = TransactionReceipt;
     type Error = crate::error::ArbEthApiError;
 
     fn convert_receipts(
