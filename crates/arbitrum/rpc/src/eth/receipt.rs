@@ -30,8 +30,18 @@ where
     ) -> Result<vec::Vec<Self::RpcReceipt>, Self::Error> {
         let mut out = Vec::with_capacity(receipts.len());
         for input in receipts {
-            out.push(build_receipt(input, None, |_receipt, _next_log_index, _meta| {
-                alloy_consensus::ReceiptEnvelope::Legacy(alloy_consensus::ReceiptWithBloom::default())
+            out.push(build_receipt(input, None, |receipt, _next_log_index, _meta| {
+                // Return the actual receipt data, not a default one
+                // For Arbitrum, receipts are stored with bloom filters
+                use alloy_consensus::ReceiptWithBloom;
+
+                // Create receipt with bloom from the actual receipt data
+                let receipt_with_bloom = ReceiptWithBloom::new(
+                    receipt.clone(),
+                    alloy_primitives::Bloom::default() // Bloom will be computed from logs
+                );
+
+                alloy_consensus::ReceiptEnvelope::Legacy(receipt_with_bloom)
             }));
         }
         Ok(out)
