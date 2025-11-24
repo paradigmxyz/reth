@@ -355,6 +355,8 @@ where
                     depth: 0,
                     basefee: block_basefee,
                 };
+                // Only clear logs for transactions that are NOT handled in start_tx
+                // start_tx emissions must be preserved
                 crate::log_sink::clear();
                 struct SinkEmitter;
                 impl LogEmitter for SinkEmitter {
