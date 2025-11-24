@@ -68,12 +68,14 @@ impl ExecutionPayload for CustomExecutionData {
     }
 }
 
-impl From<&reth_optimism_flashblocks::FlashBlockCompleteSequence> for CustomExecutionData {
-    fn from(sequence: &reth_optimism_flashblocks::FlashBlockCompleteSequence) -> Self {
-        let inner = OpExecutionData::from(sequence);
-        // Derive extension from sequence data - using gas_used from last flashblock as an example
-        let extension = sequence.last().diff.gas_used;
-        Self { inner, extension }
+impl TryFrom<&reth_optimism_flashblocks::FlashBlockCompleteSequence> for CustomExecutionData {
+    type Error = &'static str;
+
+    fn try_from(
+        sequence: &reth_optimism_flashblocks::FlashBlockCompleteSequence,
+    ) -> Result<Self, Self::Error> {
+        let inner = OpExecutionData::try_from(sequence)?;
+        Ok(Self { inner, extension: sequence.last().diff.gas_used })
     }
 }
 
