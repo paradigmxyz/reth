@@ -25,7 +25,6 @@ reth-errors.workspace = true
 reth-payload-primitives.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
-reth-trie-common.workspace = true
 reth-metrics.workspace = true
 
 # alloy

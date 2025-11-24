@@ -9514,7 +9514,6 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-storage-api",
  "reth-tasks",
- "reth-trie-common",
  "ringbuffer",
  "serde_json",
  "test-case",

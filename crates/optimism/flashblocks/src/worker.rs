@@ -17,7 +17,6 @@ use reth_primitives_traits::{
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
-use reth_trie_common::TrieInputSorted;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -128,11 +127,9 @@ where
             ExecutedBlock {
                 recovered_block: block.into(),
                 execution_output: Arc::new(execution_outcome),
-                trie_data: DeferredTrieData::ready(ComputedTrieData::with_trie_input(
+                trie_data: DeferredTrieData::ready(ComputedTrieData::without_trie_input(
                     Arc::new(hashed_state.into_sorted()),
                     Arc::default(),
-                    B256::ZERO,
-                    Arc::new(TrieInputSorted::default()),
                 )),
             },
         );
