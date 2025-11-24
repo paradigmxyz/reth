@@ -79,6 +79,30 @@ where
             // This is necessary because build_receipt's tx.signer() returns Address::ZERO
             base_receipt.from = correct_signer;
 
+            // For internal transactions (0x6a) and deposit transactions (0x64), fix the receipt fields
+            // These transaction types have special handling in Arbitrum
+            if tx_type_u8 == 0x6a {
+                // Internal transactions: gasUsed should be 0, to should be ArbOS address
+                use alloy_consensus::Transaction;
+                base_receipt.gas_used = 0;
+                base_receipt.to = input.tx.kind().to().copied();
+                tracing::debug!(
+                    target: "arb-reth::rpc-receipt",
+                    tx_hash = ?input.tx.tx_hash(),
+                    "Fixed internal tx receipt: gasUsed=0, to={:?}",
+                    base_receipt.to
+                );
+            } else if tx_type_u8 == 0x64 {
+                // Deposit transactions: gasUsed should be 0
+                base_receipt.gas_used = 0;
+                base_receipt.to = input.tx.kind().to().copied();
+                tracing::debug!(
+                    target: "arb-reth::rpc-receipt",
+                    tx_hash = ?input.tx.tx_hash(),
+                    "Fixed deposit tx receipt: gasUsed=0"
+                );
+            }
+
             // The base_receipt now has all correct data including the from field
             // Convert to the expected type using Into
             out.push(base_receipt.into());
