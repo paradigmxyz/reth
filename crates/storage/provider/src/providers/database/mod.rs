@@ -40,7 +40,7 @@ use std::{
     sync::Arc,
 };
 
-use tracing::trace;
+use tracing::{info, trace};
 
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
@@ -93,7 +93,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         //
         // Both factory and all providers it creates should share these cached settings.
         let legacy_settings = StorageSettings::legacy();
-        let storage_settings = DatabaseProvider::<_, N>::new(
+        let stored_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
             static_file_provider.clone(),
@@ -101,8 +101,16 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Default::default(),
             Arc::new(RwLock::new(legacy_settings)),
         )
-        .storage_settings()?
-        .unwrap_or(legacy_settings);
+        .storage_settings()?;
+        let storage_settings = Arc::new(RwLock::new(stored_settings.unwrap_or(legacy_settings)));
+
+        info!(
+            target: "reth::storage",
+            legacy = ?legacy_settings,
+            stored = ?stored_settings,
+            current = ?storage_settings.read(),
+            "Storage settings"
+        );
 
         Ok(Self {
             db,
@@ -110,7 +118,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             static_file_provider,
             prune_modes: PruneModes::default(),
             storage: Default::default(),
-            storage_settings: Arc::new(RwLock::new(storage_settings)),
+            storage_settings,
         })
     }
 }
