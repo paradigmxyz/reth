@@ -49,19 +49,16 @@ where
                 let logs = receipt.logs();
                 let bloom = receipt.bloom();
 
-                // Convert logs to RPC format
-                let rpc_logs = alloy_rpc_types_eth::Log::collect_for_receipt(
-                    next_log_index,
-                    meta,
-                    logs.to_vec()
-                );
+                // Use the logs directly (they're already alloy_primitives::Log)
+                // Don't convert to RPC format here - that happens in build_receipt
+                let primitive_logs = logs.to_vec();
 
                 // Create a consensus receipt with the actual data
                 let consensus_receipt = alloy_consensus::ReceiptWithBloom {
                     receipt: alloy_consensus::Receipt {
                         status: alloy_consensus::Eip658Value::Eip658(status),
                         cumulative_gas_used,
-                        logs: rpc_logs,
+                        logs: primitive_logs,
                     },
                     logs_bloom: bloom,
                 };
