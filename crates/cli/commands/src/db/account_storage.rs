@@ -5,6 +5,11 @@ use reth_codecs::Compact;
 use reth_db_api::{cursor::DbDupCursorRO, database::Database, tables, transaction::DbTx};
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
+use std::time::{Duration, Instant};
+use tracing::info;
+
+/// Log progress every 5 seconds
+const LOG_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The arguments for the `reth db account-storage` command
 #[derive(Parser, Debug)]
@@ -16,13 +21,15 @@ pub struct Command {
 impl Command {
     /// Execute `db account-storage` command
     pub fn execute<N: NodeTypesWithDB>(self, tool: &DbTool<N>) -> eyre::Result<()> {
+        let address = self.address;
         let (slot_count, plain_size) = tool.provider_factory.db_ref().view(|tx| {
             let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
             let mut count = 0usize;
             let mut total_value_bytes = 0usize;
+            let mut last_log = Instant::now();
 
             // Walk all storage entries for this address
-            let walker = cursor.walk_dup(Some(self.address), None)?;
+            let walker = cursor.walk_dup(Some(address), None)?;
             for entry in walker {
                 let (_, storage_entry) = entry?;
                 count += 1;
@@ -30,6 +37,17 @@ impl Command {
                 let mut buf = Vec::new();
                 let entry_len = storage_entry.to_compact(&mut buf);
                 total_value_bytes += entry_len;
+
+                if last_log.elapsed() >= LOG_INTERVAL {
+                    info!(
+                        target: "reth::cli",
+                        address = %address,
+                        slots = count,
+                        key = %storage_entry.key,
+                        "Processing storage slots"
+                    );
+                    last_log = Instant::now();
+                }
             }
 
             // Add 20 bytes for the Address key (stored once per account in dupsort)
@@ -42,9 +60,9 @@ impl Command {
         let hashed_size_estimate = if slot_count > 0 { plain_size + 12 } else { 0 };
         let total_estimate = plain_size + hashed_size_estimate;
 
-        let hashed_address = keccak256(self.address);
+        let hashed_address = keccak256(address);
 
-        println!("Account: {}", self.address);
+        println!("Account: {address}");
         println!("Hashed address: {hashed_address}");
         println!("Storage slots: {slot_count}");
         println!("Plain storage size: {} (estimated)", human_bytes(plain_size as f64));
