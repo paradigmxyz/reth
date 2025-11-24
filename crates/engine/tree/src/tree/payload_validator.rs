@@ -14,7 +14,9 @@ use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
-use reth_chain_state::{CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock};
+use reth_chain_state::{
+    AnchoredTrieInput, CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock,
+};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -567,8 +569,10 @@ where
                 let bundle = ComputedTrieData {
                     hashed_state: sorted_hashed_state,
                     trie_updates: sorted_trie_updates,
-                    anchor_hash: Some(parent_hash),
-                    trie_input: Some(Arc::new(parent_trie_input)),
+                    anchored_trie_input: Some(AnchoredTrieInput {
+                        anchor_hash: parent_hash,
+                        trie_input: Arc::new(parent_trie_input),
+                    }),
                 };
 
                 deferred_handle_task.set_ready(bundle);
@@ -979,8 +983,8 @@ where
         if let Some(last_block) = blocks.last() {
             let data = last_block.trie_data();
             if let (Some(anchor_hash), Some(trie_input)) =
-                (data.anchor_hash(), data.trie_input().cloned()) &&
-                anchor_hash == block_hash
+                (data.anchor_hash(), data.trie_input().cloned())
+                && anchor_hash == block_hash
             {
                 trace!(target: "engine::tree::payload_validator", %block_hash,"Reusing trie input with matching anchor hash");
                 self.metrics
