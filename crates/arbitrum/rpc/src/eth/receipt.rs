@@ -39,10 +39,35 @@ where
             };
 
             // Build the receipt using the standard build_receipt function
-            let base_receipt = build_receipt(input, None, |receipt, _next_log_index, _meta| {
-                // Return a default envelope - the actual receipt data is extracted by build_receipt
-                // The envelope type doesn't matter since we'll override it with WithOtherFields
-                alloy_consensus::ReceiptEnvelope::Legacy(alloy_consensus::ReceiptWithBloom::default())
+            // The lambda converts the ArbReceipt to a ReceiptEnvelope, preserving cumulative gas and logs
+            let base_receipt = build_receipt(input, None, |receipt, next_log_index, meta| {
+                use alloy_consensus::TxReceipt;
+
+                // Extract receipt data from the ArbReceipt
+                let status = receipt.status();
+                let cumulative_gas_used = receipt.cumulative_gas_used();
+                let logs = receipt.logs();
+                let bloom = receipt.bloom();
+
+                // Convert logs to RPC format
+                let rpc_logs = alloy_rpc_types_eth::Log::collect_for_receipt(
+                    next_log_index,
+                    meta,
+                    logs.to_vec()
+                );
+
+                // Create a consensus receipt with the actual data
+                let consensus_receipt = alloy_consensus::ReceiptWithBloom {
+                    receipt: alloy_consensus::Receipt {
+                        status: alloy_consensus::Eip658Value::Eip658(status),
+                        cumulative_gas_used,
+                        logs: rpc_logs,
+                    },
+                    logs_bloom: bloom,
+                };
+
+                // Wrap in a Legacy envelope (Arbitrum uses legacy receipt format for most txs)
+                alloy_consensus::ReceiptEnvelope::Legacy(consensus_receipt)
             });
 
             // Wrap with WithOtherFields to ensure the correct transaction type is in the JSON response
