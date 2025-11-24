@@ -6,6 +6,7 @@ use reth_rpc_eth_types::receipt::build_receipt;
 use alloy_rpc_types_eth::TransactionReceipt;
 use alloy_serde::WithOtherFields;
 use reth_rpc_eth_api::FromEthApiError;
+use alloy_consensus::transaction::TxHashRef;
 
 #[derive(Clone, Debug)]
 pub struct ArbReceiptConverter<P> {
