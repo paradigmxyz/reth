@@ -741,6 +741,29 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
 }
 
 impl<N: NodePrimitives> ExecutedBlock<N> {
+    /// Create a new [`ExecutedBlock`] with deferred trie data.
+    ///
+    /// Use this constructor when trie data will be computed asynchronously.
+    pub const fn new(
+        recovered_block: Arc<RecoveredBlock<N::Block>>,
+        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+        trie_data: DeferredTrieData,
+    ) -> Self {
+        Self { recovered_block, execution_output, trie_data }
+    }
+
+    /// Create a new [`ExecutedBlock`] with already-computed trie data.
+    ///
+    /// Use this constructor when trie data is available immediately.
+    /// The trie data will be wrapped in a ready [`DeferredTrieData`] handle.
+    pub fn with_trie_data(
+        recovered_block: Arc<RecoveredBlock<N::Block>>,
+        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+        trie_data: ComputedTrieData,
+    ) -> Self {
+        Self { recovered_block, execution_output, trie_data: DeferredTrieData::ready(trie_data) }
+    }
+
     /// Returns a reference to an inner [`SealedBlock`]
     #[inline]
     pub fn sealed_block(&self) -> &SealedBlock<N::Block> {
