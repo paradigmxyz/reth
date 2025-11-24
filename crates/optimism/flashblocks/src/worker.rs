@@ -107,6 +107,7 @@ where
         // if the real state root should be computed
         let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
             if args.compute_state_root {
+                trace!(target: "flashblocks", "Computing block state root");
                 builder.finish(&state_provider)?
             } else {
                 builder.finish(NoopProvider::default())?
@@ -124,7 +125,7 @@ where
             ExecutedBlock {
                 recovered_block: block.into(),
                 execution_output: Arc::new(execution_outcome),
-                hashed_state: Arc::new(hashed_state),
+                hashed_state: Arc::new(hashed_state.into_sorted()),
                 trie_updates: Arc::default(),
             },
         );

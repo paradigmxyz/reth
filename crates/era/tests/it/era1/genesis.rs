@@ -4,7 +4,7 @@
 //! from different networks.
 
 use crate::{
-    Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES, MAINNET, SEPOLIA,
+    EraTestDownloader, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES, MAINNET, SEPOLIA,
 };
 use alloy_consensus::{BlockBody, Header};
 use reth_era::{e2s::types::IndexEntry, era1::types::execution::CompressedBody};
@@ -13,7 +13,7 @@ use reth_ethereum_primitives::TransactionSigned;
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]
 async fn test_mainnet_genesis_block_decompression() -> eyre::Result<()> {
-    let downloader = Era1TestDownloader::new().await?;
+    let downloader = EraTestDownloader::new().await?;
 
     let file = downloader.open_era1_file(ERA1_MAINNET_FILES_NAMES[0], MAINNET).await?;
 
@@ -65,7 +65,7 @@ async fn test_mainnet_genesis_block_decompression() -> eyre::Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]
 async fn test_sepolia_genesis_block_decompression() -> eyre::Result<()> {
-    let downloader = Era1TestDownloader::new().await?;
+    let downloader = EraTestDownloader::new().await?;
 
     let file = downloader.open_era1_file(ERA1_SEPOLIA_FILES_NAMES[0], SEPOLIA).await?;
 

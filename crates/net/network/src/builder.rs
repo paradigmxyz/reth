@@ -1,7 +1,5 @@
 //! Builder support for configuring the entire setup.
 
-use std::fmt::Debug;
-
 use crate::{
     eth_requests::EthRequestHandler,
     transactions::{
@@ -77,15 +75,7 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         self,
         pool: Pool,
         transactions_manager_config: TransactionsManagerConfig,
-    ) -> NetworkBuilder<
-        TransactionsManager<
-            Pool,
-            N,
-            NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter>,
-        >,
-        Eth,
-        N,
-    > {
+    ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
         self.transactions_with_policy(
             pool,
             transactions_manager_config,
@@ -94,19 +84,12 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
     }
 
     /// Creates a new [`TransactionsManager`] and wires it to the network.
-    pub fn transactions_with_policy<
-        Pool: TransactionPool,
-        P: TransactionPropagationPolicy + Debug,
-    >(
+    pub fn transactions_with_policy<Pool: TransactionPool>(
         self,
         pool: Pool,
         transactions_manager_config: TransactionsManagerConfig,
-        propagation_policy: P,
-    ) -> NetworkBuilder<
-        TransactionsManager<Pool, N, NetworkPolicies<P, StrictEthAnnouncementFilter>>,
-        Eth,
-        N,
-    > {
+        propagation_policy: impl TransactionPropagationPolicy<N>,
+    ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
         let Self { mut network, request_handler, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_transactions(tx);
