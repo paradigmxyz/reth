@@ -43,6 +43,8 @@ mod retryables;
 pub use retryables::*;
 mod arb_evm;
 pub use arb_evm::{ArbTransaction, ArbEvm, ArbEvmFactory};
+mod arb_precompiles;
+pub use arb_precompiles::arbitrum_precompiles;
 
 mod log_sink;
 mod early_tx_state;
