@@ -222,7 +222,7 @@ where
         }
 
         // 3. check local pool
-        if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.clone().into_consensus()) {
+        if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.clone_into_consensus()) {
             return Ok(Some(TransactionSource::Pool(tx)));
         }
 
