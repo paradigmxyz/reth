@@ -780,15 +780,16 @@ impl<I: Iterator<Item: Copy>> Iterator for WindowIter<I> {
     type Item = (I::Item, Option<I::Item>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        match (self.prev, self.iter.next()) {
-            (None, None) => None,
-            (None, Some(v)) => {
-                self.prev = Some(v);
-                self.next()
-            }
-            (Some(v), next) => {
-                self.prev = next;
-                Some((v, next))
+        loop {
+            match (self.prev, self.iter.next()) {
+                (None, None) => return None,
+                (None, Some(v)) => {
+                    self.prev = Some(v);
+                }
+                (Some(v), next) => {
+                    self.prev = next;
+                    return Some((v, next))
+                }
             }
         }
     }
