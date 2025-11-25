@@ -99,8 +99,8 @@ fn blocking_runtime() -> Arc<Runtime> {
             Arc::new(
                 Builder::new_multi_thread()
                     .enable_all()
-                    // Core worker threads for async task polling
-                    .worker_threads(MAX_BLOCKING_WORKERS)
+                    // Minimal workers - we only use spawn_blocking, not async tasks
+                    .worker_threads(1)
                     // Blocking threads for spawn_blocking calls (one per concurrent block)
                     .max_blocking_threads(MAX_BLOCKING_WORKERS)
                     // Keep threads alive to avoid respawn overhead between blocks
