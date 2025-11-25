@@ -115,7 +115,7 @@ where
             .unwrap_or_else(|| Vec::with_capacity(16))
     }
 
-    /// Returns true if the proof of a node at the given path should be retained. 
+    /// Returns true if the proof of a node at the given path should be retained.
     /// A node is retained if its path is a prefix of any target.
     /// This may move the
     /// `targets` iterator forward if the given path comes after the current target.
@@ -168,17 +168,19 @@ where
             self.retained_proofs.last().map(|n| n.path),
         );
 
+        let &(mut lower, mut upper) = targets.peek().expect("targets is never exhausted");
+
         // If the path isn't in the current range then iterate forward until it is (or until there
         // is no upper bound, indicating unbounded).
-        while let Some((_, Some(upper))) = targets.peek() &&
-            depth_first::cmp(path, upper) != Ordering::Less
-        {
+        while upper.is_some_and(|upper| depth_first::cmp(path, &upper) != Ordering::Less) {
             targets.next();
             trace!(target: TRACE_TARGET, target = ?targets.peek(), "upper target <= path, next target");
+            let &(l, u) = targets.peek().expect("targets is never exhausted");
+            (lower, upper) = (l, u);
         }
 
         // If the node in question is a prefix of the target then we retain
-        targets.peek().is_some_and(|(lower, _)| lower.starts_with(path))
+        lower.starts_with(path)
     }
 
     /// Takes a child which has been removed from the `child_stack` and converts it to an
