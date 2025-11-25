@@ -921,43 +921,17 @@ where
                 vec![tx]
             }
             13 => {
-                let mut cur = &l2_owned[..];
-                let batch_timestamp = read_u256_be32(&mut cur)?;
-                let batch_poster = read_address20(&mut cur)?;
-                let _data_hash = read_u256_be32(&mut cur)?; // Skip data hash
-                let batch_num_u256 = read_u256_be32(&mut cur)?;
-                let batch_num = u256_to_u64_checked(&batch_num_u256, "batch_num")?;
-                let l1_base_fee_wei = read_u256_be32(&mut cur)?;
-                let extra_gas = if cur.len() >= 8 {
-                    read_u64_be(&mut cur)?
-                } else {
-                    0u64
-                };
-                
-                let batch_data_gas = if let Some(gas) = batch_gas_cost {
-                    gas.saturating_add(extra_gas)
-                } else {
-                    extra_gas
-                };
-                
-                let batch_report_data = encode_batch_posting_report_data(
-                    batch_timestamp,
-                    batch_poster,
-                    batch_num,
-                    batch_data_gas,
-                    l1_base_fee_wei,
+                // BatchPostingReport messages should be grouped with the next message at the
+                // engine_adapter level and should never be executed standalone.
+                // If we reach here with kind=13, the grouping failed or wasn't implemented.
+                // BatchPostingReport should NOT create a user-visible transaction.
+                // It only updates internal ArbOS state during execution.
+                reth_tracing::tracing::error!(
+                    target: "arb-reth::follower",
+                    "CRITICAL: execute_message_to_block called with kind=13 (BatchPostingReport). This should be grouped at engine_adapter level and never reach here."
                 );
-                
-                let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
-                    arb_alloy_consensus::tx::ArbInternalTx {
-                        chain_id: chain_id_u256,
-                        data: batch_report_data,
-                    }
-                );
-                let mut enc = env.encode_typed();
-                let mut s = enc.as_slice();
-                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                    .map_err(|_| eyre::eyre!("decode Internal failed for BatchPostingReport"))?]
+                // Return empty transaction list - no user-visible transaction should be created
+                Vec::new()
             }
             0xff => {
                 reth_tracing::tracing::info!(target: "arb-reth::follower", "follower: skipping invalid placeholder message kind=0xff");
@@ -1125,150 +1099,8 @@ where
                 "follower: finalized txs after finish()"
             );
         }
-        reth_tracing::tracing::warn!(
-            target: "arb-reth::BLOCK_FILTER",
-            "🔍 FILTER_START: block={} about to filter transactions",
-            next_block_number
-        );
-
         let sealed_block0 = outcome.block.sealed_block().clone();
-        let (mut header_unsealed, mut body_unsealed) = sealed_block0.clone().split_header_body();
-
-        // Filter out BatchPostingReport transactions from the block
-        // They should execute (for state changes) but not appear in block.transactions[]
-        let original_tx_count = body_unsealed.transactions.len();
-        let original_senders = outcome.block.senders().to_vec();
-
-        reth_tracing::tracing::warn!(
-            target: "arb-reth::BLOCK_FILTER",
-            "🔍 FILTER_BEFORE: block={} has {} transactions before filtering",
-            next_block_number,
-            original_tx_count
-        );
-
-        // Identify which indices to keep
-        let mut indices_to_keep: Vec<usize> = Vec::new();
-        for (idx, tx) in body_unsealed.transactions.iter().enumerate() {
-            use reth_primitives_traits::SignedTransaction;
-            use alloy_consensus::Transaction;
-
-            let tx_hash = tx.tx_hash();
-            let tx_type = tx.tx_type();
-            let input = tx.input();
-
-            reth_tracing::tracing::warn!(
-                target: "arb-reth::BLOCK_FILTER",
-                "🔍 FILTER_CHECKING: block={} tx[{}] hash={:?} type={:?} input_len={}",
-                next_block_number,
-                idx,
-                tx_hash,
-                tx_type,
-                input.len()
-            );
-
-            // Keep the transaction unless it's a BatchPostingReport
-            let is_internal = matches!(tx.tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
-            if !is_internal {
-                reth_tracing::tracing::warn!(
-                    target: "arb-reth::BLOCK_FILTER",
-                    "🔍 FILTER_KEEP: block={} tx[{}] is NOT internal, keeping it",
-                    next_block_number,
-                    idx
-                );
-                indices_to_keep.push(idx);
-                continue;
-            }
-
-            // Check if it's a BatchPostingReport by examining the method selector
-            if input.len() < 4 {
-                reth_tracing::tracing::warn!(
-                    target: "arb-reth::BLOCK_FILTER",
-                    "🔍 FILTER_KEEP: block={} tx[{}] has no method selector, keeping it",
-                    next_block_number,
-                    idx
-                );
-                indices_to_keep.push(idx);
-                continue;
-            }
-
-            let selector = &input.as_ref()[0..4];
-            let batch_report_id = reth_arbitrum_evm::internal_tx::get_batch_posting_report_method_id();
-            let batch_report_v2_id = reth_arbitrum_evm::internal_tx::get_batch_posting_report_v2_method_id();
-
-            reth_tracing::tracing::warn!(
-                target: "arb-reth::BLOCK_FILTER",
-                "🔍 FILTER_SELECTOR: block={} tx[{}] selector={:02x?} batch_report_id={:02x?} batch_report_v2_id={:02x?}",
-                next_block_number,
-                idx,
-                selector,
-                batch_report_id,
-                batch_report_v2_id
-            );
-
-            // Filter out BatchPostingReport transactions
-            let is_batch_report = selector == batch_report_id || selector == batch_report_v2_id;
-
-            if is_batch_report {
-                reth_tracing::tracing::warn!(
-                    target: "arb-reth::BLOCK_FILTER",
-                    "🔍 FILTERING_OUT BatchPostingReport tx from block {} idx={} hash={:?}",
-                    next_block_number,
-                    idx,
-                    tx.tx_hash()
-                );
-            } else {
-                reth_tracing::tracing::warn!(
-                    target: "arb-reth::BLOCK_FILTER",
-                    "🔍 FILTER_KEEP: block={} tx[{}] is internal but NOT BatchPostingReport, keeping it",
-                    next_block_number,
-                    idx
-                );
-                indices_to_keep.push(idx);
-            }
-        }
-
-        // Filter transactions and senders using the same indices
-        reth_tracing::tracing::warn!(
-            target: "arb-reth::BLOCK_FILTER",
-            "🔍 FILTER_APPLY: block={} keeping {} out of {} transactions (indices: {:?})",
-            next_block_number,
-            indices_to_keep.len(),
-            original_tx_count,
-            indices_to_keep
-        );
-
-        let filtered_transactions: Vec<_> = indices_to_keep.iter()
-            .map(|&idx| body_unsealed.transactions[idx].clone())
-            .collect();
-        let filtered_senders: Vec<_> = indices_to_keep.iter()
-            .map(|&idx| original_senders[idx])
-            .collect();
-
-        body_unsealed.transactions = filtered_transactions;
-
-        let filtered_tx_count = body_unsealed.transactions.len();
-        reth_tracing::tracing::warn!(
-            target: "arb-reth::BLOCK_FILTER",
-            "🔍 FILTER_AFTER: block={} has {} transactions after filtering (was {})",
-            next_block_number,
-            filtered_tx_count,
-            original_tx_count
-        );
-
-        if original_tx_count != filtered_tx_count {
-            reth_tracing::tracing::warn!(
-                target: "arb-reth::BLOCK_FILTER",
-                "🔍 FILTERED_TRANSACTIONS: block={} SUCCESSFULLY FILTERED {} transactions",
-                next_block_number,
-                original_tx_count - filtered_tx_count
-            );
-        } else {
-            reth_tracing::tracing::warn!(
-                target: "arb-reth::BLOCK_FILTER",
-                "🔍 NO_FILTERING: block={} no transactions were filtered out",
-                next_block_number
-            );
-        }
+        let (mut header_unsealed, body_unsealed) = sealed_block0.clone().split_header_body();
 
         header_unsealed.nonce = alloy_primitives::B64::new(delayed_messages_read.to_be_bytes());
         type ArbBlock = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned, alloy_consensus::Header>;
@@ -1278,7 +1110,8 @@ where
         let header = sealed_block.header();
         let new_block_hash = sealed_block.hash();
 
-        let modified_block = reth_primitives_traits::block::RecoveredBlock::new_sealed(sealed_block.clone(), filtered_senders);
+        let senders = outcome.block.senders().to_vec();
+        let modified_block = reth_primitives_traits::block::RecoveredBlock::new_sealed(sealed_block.clone(), senders);
         
         let header_hash_hex = format!("{:#x}", new_block_hash);
         let header_mix_hex = format!("{:#x}", header.mix_hash);
