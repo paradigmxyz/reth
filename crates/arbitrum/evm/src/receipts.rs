@@ -49,6 +49,44 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                 let status_flag = ctx.result.is_success();
                 let gas_used = ctx.result.gas_used();
 
+                // Log execution result details for debugging
+                use revm::context::result::ExecutionResult;
+                match &ctx.result {
+                    ExecutionResult::Success { reason, gas_used, .. } => {
+                        tracing::warn!(
+                            target: "arb-reth::receipt-builder",
+                            tx_hash = ?tx_hash,
+                            status = true,
+                            tx_type = ?ty,
+                            reason = ?reason,
+                            gas = gas_used,
+                            "TX Result: Success"
+                        );
+                    }
+                    ExecutionResult::Revert { gas_used, output } => {
+                        tracing::warn!(
+                            target: "arb-reth::receipt-builder",
+                            tx_hash = ?tx_hash,
+                            status = false,
+                            tx_type = ?ty,
+                            gas = gas_used,
+                            output_len = output.len(),
+                            "TX Result: Revert"
+                        );
+                    }
+                    ExecutionResult::Halt { reason, gas_used } => {
+                        tracing::warn!(
+                            target: "arb-reth::receipt-builder",
+                            tx_hash = ?tx_hash,
+                            status = false,
+                            tx_type = ?ty,
+                            reason = ?reason,
+                            gas = gas_used,
+                            "TX Result: Halt"
+                        );
+                    }
+                }
+
                 // Internal transactions (type 0x6a) should have gasUsed = 0 in receipts
                 // They are consensus-level operations that don't charge gas
                 // Both individual gas_used and cumulative_gas_used should be 0 for internal txs
