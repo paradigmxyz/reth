@@ -812,6 +812,16 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         self.trie_data.wait_cloned()
     }
 
+    /// Returns a clone of the deferred trie data handle.
+    ///
+    /// A handle is a lightweight reference that can be passed to descendants without
+    /// forcing trie data to be computed immediately. The actual work runs when
+    /// `wait_cloned()` is called by a consumer (e.g. when merging overlays).
+    #[inline]
+    pub fn trie_data_handle(&self) -> DeferredTrieData {
+        self.trie_data.clone()
+    }
+
     /// Returns the hashed state result of the execution outcome.
     ///
     /// May compute trie data synchronously if the deferred task hasn't completed.
