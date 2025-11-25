@@ -345,6 +345,13 @@ where
         }
 
         let next_block_number = sealed_parent.number() + 1;
+        reth_tracing::tracing::warn!(
+            target: "arb-reth::BLOCK_ASSEMBLY",
+            "🔍 BLOCK_START: Creating block {} from message kind {}, delayed_messages_read {}",
+            next_block_number,
+            kind,
+            delayed_messages_read
+        );
         reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: keeping suggested_fee_recipient from attrs");
 
         let mut builder = evm_config
