@@ -17,6 +17,24 @@ use std::{
 };
 use tokio::sync::broadcast;
 
+/// Internal event type for pending pool state changes.
+#[derive(Debug)]
+pub enum PendingPoolEvent<T: TransactionOrdering> {
+    /// Transaction was added.
+    Added(PendingTransaction<T>),
+    /// Transaction was removed.
+    Removed(TransactionId),
+}
+
+impl<T: TransactionOrdering> Clone for PendingPoolEvent<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Added(tx) => Self::Added(tx.clone()),
+            Self::Removed(id) => Self::Removed(*id),
+        }
+    }
+}
+
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
 /// and are waiting to be included in a block.
 ///
@@ -47,11 +65,8 @@ pub struct PendingPool<T: TransactionOrdering> {
     ///
     /// See also [`reth_primitives_traits::InMemorySize::size`].
     size_of: SizeTracker,
-    /// Used to broadcast new transactions that have been added to the `PendingPool` to existing
-    /// `static_files` of this pool.
-    new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
-    /// Used to broadcast transaction removals to existing iterators of this pool.
-    removed_transaction_notifier: broadcast::Sender<TransactionId>,
+    /// Used to broadcast pool events (additions and removals) to existing iterators.
+    event_notifier: broadcast::Sender<PendingPoolEvent<T>>,
 }
 
 // === impl PendingPool ===
@@ -64,8 +79,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Create a new pool instance with the given buffer capacity.
     pub fn with_buffer(ordering: T, buffer_capacity: usize) -> Self {
-        let (new_transaction_notifier, _) = broadcast::channel(buffer_capacity);
-        let (removed_transaction_notifier, _) = broadcast::channel(buffer_capacity);
+        let (event_notifier, _) = broadcast::channel(buffer_capacity);
         Self {
             ordering,
             submission_id: 0,
@@ -73,8 +87,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             independent_transactions: Default::default(),
             highest_nonces: Default::default(),
             size_of: Default::default(),
-            new_transaction_notifier,
-            removed_transaction_notifier,
+            event_notifier,
         }
     }
 
@@ -114,8 +127,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             all: self.by_id.clone(),
             independent: self.independent_transactions.values().cloned().collect(),
             invalid: Default::default(),
-            new_transaction_receiver: Some(self.new_transaction_notifier.subscribe()),
-            removed_transaction_receiver: Some(self.removed_transaction_notifier.subscribe()),
+            event_receiver: Some(self.event_notifier.subscribe()),
             last_priority: None,
             skip_blobs: false,
         }
@@ -310,9 +322,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         self.update_independents_and_highest_nonces(&tx);
 
-        // send the new transaction to any existing pendingpool static file iterators
-        if self.new_transaction_notifier.receiver_count() > 0 {
-            let _ = self.new_transaction_notifier.send(tx.clone());
+        // send the new transaction to any existing iterators
+        if self.event_notifier.receiver_count() > 0 {
+            let _ = self.event_notifier.send(PendingPoolEvent::Added(tx.clone()));
         }
 
         self.by_id.insert(tx_id, tx);
@@ -340,8 +352,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.size_of -= tx.transaction.size();
 
         // Broadcast the removal to any existing iterators
-        if self.removed_transaction_notifier.receiver_count() > 0 {
-            let _ = self.removed_transaction_notifier.send(*id);
+        if self.event_notifier.receiver_count() > 0 {
+            let _ = self.event_notifier.send(PendingPoolEvent::Removed(*id));
         }
 
         match self.highest_nonces.entry(id.sender) {
@@ -546,9 +558,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &self.independent_transactions
     }
 
-    /// Subscribes to new transactions
-    pub fn new_transaction_receiver(&self) -> broadcast::Receiver<PendingTransaction<T>> {
-        self.new_transaction_notifier.subscribe()
+    /// Subscribes to pool events (additions and removals)
+    pub fn event_receiver(&self) -> broadcast::Receiver<PendingPoolEvent<T>> {
+        self.event_notifier.subscribe()
     }
 
     /// Whether the pool is empty

@@ -1,7 +1,7 @@
 use crate::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     identifier::{SenderId, TransactionId},
-    pool::pending::PendingTransaction,
+    pool::pending::{PendingPoolEvent, PendingTransaction},
     PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
 };
 use alloy_consensus::Transaction;
@@ -93,17 +93,11 @@ pub struct BestTransactions<T: TransactionOrdering> {
     pub(crate) independent: BTreeSet<PendingTransaction<T>>,
     /// There might be the case where a yielded transactions is invalid, this will track it.
     pub(crate) invalid: HashSet<SenderId>,
-    /// Used to receive any new pending transactions that have been added to the pool after this
-    /// iterator was static filtered
+    /// Used to receive pool events (additions and removals) after this iterator was created.
     ///
-    /// These new pending transactions are inserted into this iterator's pool before yielding the
-    /// next value
-    pub(crate) new_transaction_receiver: Option<Receiver<PendingTransaction<T>>>,
-    /// Used to receive transaction removals from the pool after this iterator was created.
-    ///
-    /// Removed transactions are deleted from this iterator's snapshot before yielding the next
-    /// value, preventing inclusion of transactions that were removed by maintenance jobs.
-    pub(crate) removed_transaction_receiver: Option<Receiver<TransactionId>>,
+    /// New transactions are inserted and removed transactions are deleted from this iterator's
+    /// snapshot before yielding the next value.
+    pub(crate) event_receiver: Option<Receiver<PendingPoolEvent<T>>>,
     /// The priority value of most recently yielded transaction.
     ///
     /// This is required if new pending transactions are fed in while it yields new values.
@@ -130,19 +124,20 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         self.all.get(&id.unchecked_ancestor()?)
     }
 
-    /// Non-blocking read on the new pending transactions subscription channel
-    fn try_recv(&mut self) -> Option<PendingTransaction<T>> {
+    /// Non-blocking read on the pool event subscription channel
+    fn try_recv_event(&mut self) -> Option<PendingPoolEvent<T>> {
         loop {
-            match self.new_transaction_receiver.as_mut()?.try_recv() {
-                Ok(tx) => {
-                    if let Some(last_priority) = &self.last_priority &&
-                        &tx.priority > last_priority
+            match self.event_receiver.as_mut()?.try_recv() {
+                Ok(event) => {
+                    if let PendingPoolEvent::Added(ref tx) = event
+                        && let Some(last_priority) = &self.last_priority
+                        && &tx.priority > last_priority
                     {
-                        // we skip transactions if we already yielded a transaction with lower
-                        // priority
-                        return None
+                        // we skip transactions if we already yielded a transaction with
+                        // lower priority, but still need to process removals
+                        continue
                     }
-                    return Some(tx)
+                    return Some(event)
                 }
                 // note TryRecvError::Lagged can be returned here, which is an error that attempts
                 // to correct itself on consecutive try_recv() attempts
@@ -161,19 +156,6 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         }
     }
 
-    /// Non-blocking read on the removed transactions subscription channel
-    fn try_recv_removed(&mut self) -> Option<TransactionId> {
-        loop {
-            match self.removed_transaction_receiver.as_mut()?.try_recv() {
-                Ok(tx_id) => return Some(tx_id),
-                Err(TryRecvError::Lagged(_)) => {
-                    // Handle the case where the receiver lagged too far behind.
-                }
-                Err(_) => return None,
-            }
-        }
-    }
-
     /// Removes the currently best independent transaction from the independent set and the total
     /// set.
     fn pop_best(&mut self) -> Option<PendingTransaction<T>> {
@@ -182,32 +164,27 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         })
     }
 
-    /// Removes transactions that have been removed from the `PendingPool` after this iterator was
-    /// created
-    fn remove_removed_transactions(&mut self) {
+    /// Processes pool events (additions and removals) that occurred after this iterator was created
+    fn process_pool_events(&mut self) {
         for _ in 0..MAX_NEW_TRANSACTIONS_PER_BATCH {
-            if let Some(tx_id) = self.try_recv_removed() {
-                // Remove from both the snapshot and independent set
-                if let Some(tx) = self.all.remove(&tx_id) {
-                    self.independent.remove(&tx);
+            if let Some(event) = self.try_recv_event() {
+                match event {
+                    PendingPoolEvent::Added(pending_tx) => {
+                        // same logic as
+                        // PendingPool::add_transaction/PendingPool::best_with_unlocked
+                        let tx_id = *pending_tx.transaction.id();
+                        if self.ancestor(&tx_id).is_none() {
+                            self.independent.insert(pending_tx.clone());
+                        }
+                        self.all.insert(tx_id, pending_tx);
+                    }
+                    PendingPoolEvent::Removed(tx_id) => {
+                        // Remove from both the snapshot and independent set
+                        if let Some(tx) = self.all.remove(&tx_id) {
+                            self.independent.remove(&tx);
+                        }
+                    }
                 }
-            } else {
-                break;
-            }
-        }
-    }
-
-    /// Checks for new transactions that have come into the `PendingPool` after this iterator was
-    /// created and inserts them
-    fn add_new_transactions(&mut self) {
-        for _ in 0..MAX_NEW_TRANSACTIONS_PER_BATCH {
-            if let Some(pending_tx) = self.try_recv() {
-                //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
-                let tx_id = *pending_tx.transaction.id();
-                if self.ancestor(&tx_id).is_none() {
-                    self.independent.insert(pending_tx.clone());
-                }
-                self.all.insert(tx_id, pending_tx);
             } else {
                 break;
             }
@@ -221,8 +198,7 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
     }
 
     fn no_updates(&mut self) {
-        self.new_transaction_receiver.take();
-        self.removed_transaction_receiver.take();
+        self.event_receiver.take();
         self.last_priority.take();
     }
 
@@ -240,8 +216,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            self.add_new_transactions();
-            self.remove_removed_transactions();
+            self.process_pool_events();
             // Remove the next independent tx with the highest priority
             let best = self.pop_best()?;
             let sender_id = best.transaction.sender_id();
@@ -271,7 +246,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                     ),
                 )
             } else {
-                if self.new_transaction_receiver.is_some() {
+                if self.event_receiver.is_some() {
                     self.last_priority = Some(best.priority.clone())
                 }
                 return Some(best.transaction)
@@ -693,10 +668,10 @@ mod tests {
         // Create a BestTransactions iterator from the pool
         let mut best = pool.best();
 
-        // Use a broadcast channel for transaction updates
-        let (tx_sender, tx_receiver) =
-            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
-        best.new_transaction_receiver = Some(tx_receiver);
+        // Use a broadcast channel for pool events
+        let (event_sender, event_receiver) =
+            tokio::sync::broadcast::channel::<PendingPoolEvent<MockOrdering>>(1000);
+        best.event_receiver = Some(event_receiver);
 
         // Create a new transaction with nonce 5 and validate it
         let new_tx = MockTransaction::eip1559().rng_hash().with_nonce(5);
@@ -708,10 +683,10 @@ mod tests {
             transaction: Arc::new(valid_new_tx.clone()),
             priority: Priority::Value(1000),
         };
-        tx_sender.send(pending_tx.clone()).unwrap();
+        event_sender.send(PendingPoolEvent::Added(pending_tx.clone())).unwrap();
 
-        // Add new transactions to the iterator
-        best.add_new_transactions();
+        // Process pool events
+        best.process_pool_events();
 
         // Verify that the new transaction has been added to the 'all' map
         assert_eq!(best.all.len(), 6);
@@ -740,10 +715,10 @@ mod tests {
         // Create a BestTransactions iterator from the pool
         let mut best = pool.best();
 
-        // Use a broadcast channel for transaction updates
-        let (tx_sender, tx_receiver) =
-            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
-        best.new_transaction_receiver = Some(tx_receiver);
+        // Use a broadcast channel for pool events
+        let (event_sender, event_receiver) =
+            tokio::sync::broadcast::channel::<PendingPoolEvent<MockOrdering>>(1000);
+        best.event_receiver = Some(event_receiver);
 
         // Create a new transaction with nonce 5 and validate it
         let base_tx1 = MockTransaction::eip1559().rng_hash().with_nonce(5);
@@ -755,10 +730,10 @@ mod tests {
             transaction: Arc::new(valid_new_tx1.clone()),
             priority: Priority::Value(1000),
         };
-        tx_sender.send(pending_tx1.clone()).unwrap();
+        event_sender.send(PendingPoolEvent::Added(pending_tx1.clone())).unwrap();
 
-        // Add new transactions to the iterator
-        best.add_new_transactions();
+        // Process pool events
+        best.process_pool_events();
 
         // Verify that the new transaction has been added to the 'all' map
         assert_eq!(best.all.len(), 6);
@@ -778,10 +753,10 @@ mod tests {
             transaction: Arc::new(valid_new_tx2.clone()),
             priority: Priority::Value(1000),
         };
-        tx_sender.send(pending_tx2.clone()).unwrap();
+        event_sender.send(PendingPoolEvent::Added(pending_tx2.clone())).unwrap();
 
-        // Add new transactions to the iterator
-        best.add_new_transactions();
+        // Process pool events
+        best.process_pool_events();
 
         // Verify that the new transaction has been added to 'all'
         assert_eq!(best.all.len(), 7);
@@ -963,7 +938,7 @@ mod tests {
     #[test]
     fn test_best_transactions_no_updates() {
         // Tests the no_updates functionality to ensure it properly clears the
-        // new_transaction_receiver.
+        // event_receiver.
         let mut pool = PendingPool::new(MockOrdering::default());
         let mut f = MockTransactionFactory::default();
 
@@ -974,19 +949,19 @@ mod tests {
 
         let mut best = pool.best();
 
-        // Use a broadcast channel for transaction updates
-        let (_tx_sender, tx_receiver) =
-            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
-        best.new_transaction_receiver = Some(tx_receiver);
+        // Use a broadcast channel for pool events
+        let (_event_sender, event_receiver) =
+            tokio::sync::broadcast::channel::<PendingPoolEvent<MockOrdering>>(1000);
+        best.event_receiver = Some(event_receiver);
 
         // Ensure receiver is set
-        assert!(best.new_transaction_receiver.is_some());
+        assert!(best.event_receiver.is_some());
 
         // Call no_updates to clear the receiver
         best.no_updates();
 
         // Ensure receiver is cleared
-        assert!(best.new_transaction_receiver.is_none());
+        assert!(best.event_receiver.is_none());
     }
 
     #[test]
@@ -1006,10 +981,10 @@ mod tests {
         // Create a BestTransactions iterator from the pool
         let mut best = pool.best();
 
-        // Use a broadcast channel for transaction updates
-        let (tx_sender, tx_receiver) =
-            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
-        best.new_transaction_receiver = Some(tx_receiver);
+        // Use a broadcast channel for pool events
+        let (event_sender, event_receiver) =
+            tokio::sync::broadcast::channel::<PendingPoolEvent<MockOrdering>>(1000);
+        best.event_receiver = Some(event_receiver);
 
         // yield one tx, effectively locking in the highest prio
         let first = best.next().unwrap();
@@ -1024,7 +999,7 @@ mod tests {
             transaction: Arc::new(valid_new_higher_fee_tx.clone()),
             priority: Priority::Value(u128::MAX),
         };
-        tx_sender.send(pending_tx).unwrap();
+        event_sender.send(PendingPoolEvent::Added(pending_tx)).unwrap();
 
         // ensure that the higher prio tx is skipped since we yielded a lower one
         for tx in best {
