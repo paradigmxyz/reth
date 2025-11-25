@@ -99,6 +99,11 @@ pub struct BestTransactions<T: TransactionOrdering> {
     /// These new pending transactions are inserted into this iterator's pool before yielding the
     /// next value
     pub(crate) new_transaction_receiver: Option<Receiver<PendingTransaction<T>>>,
+    /// Used to receive transaction removals from the pool after this iterator was created.
+    ///
+    /// Removed transactions are deleted from this iterator's snapshot before yielding the next
+    /// value, preventing inclusion of transactions that were removed by maintenance jobs.
+    pub(crate) removed_transaction_receiver: Option<Receiver<TransactionId>>,
     /// The priority value of most recently yielded transaction.
     ///
     /// This is required if new pending transactions are fed in while it yields new values.
@@ -156,12 +161,40 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         }
     }
 
+    /// Non-blocking read on the removed transactions subscription channel
+    fn try_recv_removed(&mut self) -> Option<TransactionId> {
+        loop {
+            match self.removed_transaction_receiver.as_mut()?.try_recv() {
+                Ok(tx_id) => return Some(tx_id),
+                Err(TryRecvError::Lagged(_)) => {
+                    // Handle the case where the receiver lagged too far behind.
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+
     /// Removes the currently best independent transaction from the independent set and the total
     /// set.
     fn pop_best(&mut self) -> Option<PendingTransaction<T>> {
         self.independent.pop_last().inspect(|best| {
             self.all.remove(best.transaction.id());
         })
+    }
+
+    /// Removes transactions that have been removed from the `PendingPool` after this iterator was
+    /// created
+    fn remove_removed_transactions(&mut self) {
+        for _ in 0..MAX_NEW_TRANSACTIONS_PER_BATCH {
+            if let Some(tx_id) = self.try_recv_removed() {
+                // Remove from both the snapshot and independent set
+                if let Some(tx) = self.all.remove(&tx_id) {
+                    self.independent.remove(&tx);
+                }
+            } else {
+                break;
+            }
+        }
     }
 
     /// Checks for new transactions that have come into the `PendingPool` after this iterator was
@@ -225,6 +258,7 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
 
     fn no_updates(&mut self) {
         self.new_transaction_receiver.take();
+        self.removed_transaction_receiver.take();
         self.last_priority.take();
     }
 
@@ -243,6 +277,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             self.add_new_transactions();
+            self.remove_removed_transactions();
             // Remove the next independent tx with the highest priority
             let best = self.pop_best()?;
             let sender_id = best.transaction.sender_id();

@@ -50,6 +50,8 @@ pub struct PendingPool<T: TransactionOrdering> {
     /// Used to broadcast new transactions that have been added to the `PendingPool` to existing
     /// `static_files` of this pool.
     new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
+    /// Used to broadcast transaction removals to existing iterators of this pool.
+    removed_transaction_notifier: broadcast::Sender<TransactionId>,
 }
 
 // === impl PendingPool ===
@@ -63,6 +65,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Create a new pool instance with the given buffer capacity.
     pub fn with_buffer(ordering: T, buffer_capacity: usize) -> Self {
         let (new_transaction_notifier, _) = broadcast::channel(buffer_capacity);
+        let (removed_transaction_notifier, _) = broadcast::channel(buffer_capacity);
         Self {
             ordering,
             submission_id: 0,
@@ -71,6 +74,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             highest_nonces: Default::default(),
             size_of: Default::default(),
             new_transaction_notifier,
+            removed_transaction_notifier,
         }
     }
 
@@ -111,6 +115,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             independent: self.independent_transactions.values().cloned().collect(),
             invalid: Default::default(),
             new_transaction_receiver: Some(self.new_transaction_notifier.subscribe()),
+            removed_transaction_receiver: Some(self.removed_transaction_notifier.subscribe()),
             last_priority: None,
             skip_blobs: false,
         }
@@ -333,6 +338,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         let tx = self.by_id.remove(id)?;
         self.size_of -= tx.transaction.size();
+
+        // Broadcast the removal to any existing iterators
+        if self.removed_transaction_notifier.receiver_count() > 0 {
+            let _ = self.removed_transaction_notifier.send(*id);
+        }
 
         match self.highest_nonces.entry(id.sender) {
             Entry::Occupied(mut entry) => {
