@@ -354,8 +354,8 @@ where
         Self { pool: Arc::new(PoolInner::new(validator, ordering, blob_store, config)) }
     }
 
-    /// Returns the wrapped pool.
-    pub(crate) fn inner(&self) -> &PoolInner<V, T, S> {
+    /// Returns the wrapped pool internals.
+    pub fn inner(&self) -> &PoolInner<V, T, S> {
         &self.pool
     }
 
