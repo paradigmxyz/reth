@@ -219,7 +219,7 @@ impl DefaultArbOsHooks {
         q.try_into().unwrap_or(u64::MAX)
     }
 
-    pub fn mint_balance<D>(state: &mut revm::database::State<D>, address: Address, amount: U256) 
+    pub fn mint_balance<D>(state: &mut revm::database::State<D>, address: Address, amount: U256)
     where
         D: revm::Database,
     {
@@ -227,7 +227,8 @@ impl DefaultArbOsHooks {
             return;
         }
         let _ = state.load_cache_account(address);
-        let amount_u128: u128 = amount.try_into().unwrap_or(u128::MAX);
+        // Convert U256 to u128, panic if it doesn't fit (should never happen in practice)
+        let amount_u128: u128 = amount.try_into().expect("mint amount exceeds u128::MAX");
         let _ = state.increment_balances(core::iter::once((address, amount_u128)));
     }
 
@@ -256,8 +257,9 @@ impl DefaultArbOsHooks {
         if from_balance < amount {
             return Err(());
         }
-        
-        let amount_u128: u128 = amount.try_into().unwrap_or(u128::MAX);
+
+        // Convert U256 to u128, return error if it doesn't fit
+        let amount_u128: u128 = amount.try_into().map_err(|_| ())?;
         let _ = state.increment_balances(core::iter::once((from, amount_u128.wrapping_neg())));
         let _ = state.increment_balances(core::iter::once((to, amount_u128)));
         Ok(())
@@ -286,8 +288,9 @@ impl DefaultArbOsHooks {
         if from_balance < amount {
             return Err(());
         }
-        
-        let amount_u128: u128 = amount.try_into().unwrap_or(u128::MAX);
+
+        // Convert U256 to u128, return error if it doesn't fit
+        let amount_u128: u128 = amount.try_into().map_err(|_| ())?;
         let _ = state.increment_balances(core::iter::once((from, amount_u128.wrapping_neg())));
         Ok(())
     }
