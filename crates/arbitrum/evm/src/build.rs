@@ -542,6 +542,12 @@ where
         evm.cfg_mut().disable_balance_check = prev_disable;
 
         if used_pre_nonce.is_some() {
+            tracing::info!(
+                target: "arb-reth::nonce-debug",
+                result_is_ok = result.is_ok(),
+                result_is_some = matches!(&result, Ok(Some(_))),
+                "Checking if should decrement nonce"
+            );
             if let Ok(Some(_)) = result {
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
@@ -559,7 +565,18 @@ where
                             "Decremented nonce after EVM execution"
                         );
                     }
+                } else {
+                    tracing::warn!(
+                        target: "arb-reth::nonce-debug",
+                        sender = ?sender,
+                        "Could not find sender account in bundle state"
+                    );
                 }
+            } else {
+                tracing::warn!(
+                    target: "arb-reth::nonce-debug",
+                    "Transaction result was not Ok(Some(_)), skipping nonce decrement"
+                );
             }
         }
 
