@@ -1,10 +1,24 @@
 use alloy_primitives::B256;
 use parking_lot::Mutex;
+use reth_metrics::{metrics::Counter, Metrics};
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, TrieInputSorted,
 };
-use std::{fmt, sync::Arc};
+use std::{
+    fmt,
+    sync::{Arc, LazyLock},
+};
+
+/// Metrics for deferred trie computation.
+#[derive(Metrics)]
+#[metrics(scope = "sync.block_validation")]
+struct DeferredTrieMetrics {
+    /// Number of times deferred trie data was ready (async task completed first).
+    deferred_trie_async_ready: Counter,
+    /// Number of times deferred trie data required synchronous computation (fallback path).
+    deferred_trie_sync_fallback: Counter,
+}
 
 /// Shared handle to asynchronously populated trie data.
 ///
@@ -16,6 +30,9 @@ pub struct DeferredTrieData {
     /// Shared deferred state holding either raw inputs (pending) or computed result (ready).
     state: Arc<Mutex<DeferredState>>,
 }
+
+static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
+    LazyLock::new(DeferredTrieMetrics::default);
 
 impl fmt::Debug for DeferredTrieData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -90,10 +107,14 @@ impl DeferredTrieData {
         if let Some(mut state) = self.state.try_lock() {
             match &*state {
                 // The async task has completed, return the cached result.
-                DeferredState::Ready(bundle) => return bundle.clone(),
+                DeferredState::Ready(bundle) => {
+                    DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
+                    return bundle.clone();
+                }
                 // The async task is still pending, compute the trie data synchronously from the
                 // stored inputs.
                 DeferredState::Pending(inputs) => {
+                    DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
                     let computed = Self::compute_from_inputs(inputs);
                     *state = DeferredState::Ready(computed.clone());
                     return computed;
@@ -115,10 +136,14 @@ impl DeferredTrieData {
         let mut state = self.state.lock();
         match &*state {
             // The async task has completed, return the cached result.
-            DeferredState::Ready(bundle) => bundle.clone(),
+            DeferredState::Ready(bundle) => {
+                DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
+                bundle.clone()
+            }
             // The async task is still pending, compute the trie data synchronously from the stored
             // inputs.
             DeferredState::Pending(inputs) => {
+                DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
                 let computed = Self::compute_from_inputs(inputs);
                 *state = DeferredState::Ready(computed.clone());
                 computed
