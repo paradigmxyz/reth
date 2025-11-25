@@ -880,6 +880,10 @@ Engine:
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory
 
+          This represents the number of most recent blocks to keep in memory for quick access and reorgs.
+
+          This target is maintained after flushing canonical blocks to disk (controlled by --engine.persistence-threshold).
+
           [default: 0]
 
       --engine.legacy-state-root
