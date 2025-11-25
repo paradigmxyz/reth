@@ -523,9 +523,19 @@ where
 
                         // SignedTx messages can contain either:
                         // 1. Legacy RLP transactions (first byte >= 0xc0) - no type byte
-                        // 2. Typed transactions (first byte 0x00-0x04) - has type byte
+                        // 2. Typed transactions (first byte 0x00-0x7f) - has type byte
                         // We need to use the appropriate decoding method for each.
-                        let tx = if s.len() >= 1 && s[0] >= 0xc0 {
+                        let first_byte = if s.len() >= 1 { s[0] } else { 0xff };
+                        let is_legacy_rlp = first_byte >= 0xc0;
+
+                        reth_tracing::tracing::debug!(
+                            target: "arb-reth::decode",
+                            first_byte = format!("0x{:02x}", first_byte),
+                            is_legacy = is_legacy_rlp,
+                            "SignedTx segment first byte analysis"
+                        );
+
+                        let tx = if is_legacy_rlp {
                             // Legacy RLP transaction - decode directly without type byte
                             use alloy_rlp::Decodable;
                             reth_arbitrum_primitives::ArbTransactionSigned::decode(&mut s)
