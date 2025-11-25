@@ -87,8 +87,20 @@ where
                     logs_bloom: bloom,
                 };
 
-                // Wrap in a Legacy envelope (Arbitrum uses legacy receipt format for most txs)
-                alloy_consensus::ReceiptEnvelope::Legacy(consensus_receipt)
+                // Wrap in the correct envelope type based on transaction type
+                // Note: alloy_consensus::ReceiptEnvelope only supports standard Ethereum types
+                // Arbitrum-specific types (0x64-0x6a) will use Legacy for now as a workaround
+                match tx_type_u8 {
+                    0 => alloy_consensus::ReceiptEnvelope::Legacy(consensus_receipt),
+                    1 => alloy_consensus::ReceiptEnvelope::Eip2930(consensus_receipt),
+                    2 => alloy_consensus::ReceiptEnvelope::Eip1559(consensus_receipt),
+                    3 => alloy_consensus::ReceiptEnvelope::Eip4844(consensus_receipt),
+                    4 => alloy_consensus::ReceiptEnvelope::Eip7702(consensus_receipt),
+                    // Arbitrum types: 0x64 (Deposit), 0x65 (Unsigned), 0x66 (Contract),
+                    // 0x68 (Retry), 0x69 (SubmitRetryable), 0x6a (Internal)
+                    // These need proper envelope variants - for now use Legacy as placeholder
+                    _ => alloy_consensus::ReceiptEnvelope::Legacy(consensus_receipt),
+                }
             });
 
             // Fix the 'from' field to use the correctly recovered signer
@@ -158,7 +170,16 @@ where
                 },
                 logs_bloom,
             };
-            let inner_envelope = alloy_consensus::ReceiptEnvelope::Legacy(receipt_with_bloom);
+            // Create the correct envelope type based on transaction type
+            // Same workaround as above - Arbitrum types use Legacy until proper support is added
+            let inner_envelope = match tx_type_u8 {
+                0 => alloy_consensus::ReceiptEnvelope::Legacy(receipt_with_bloom),
+                1 => alloy_consensus::ReceiptEnvelope::Eip2930(receipt_with_bloom),
+                2 => alloy_consensus::ReceiptEnvelope::Eip1559(receipt_with_bloom),
+                3 => alloy_consensus::ReceiptEnvelope::Eip4844(receipt_with_bloom),
+                4 => alloy_consensus::ReceiptEnvelope::Eip7702(receipt_with_bloom),
+                _ => alloy_consensus::ReceiptEnvelope::Legacy(receipt_with_bloom),
+            };
 
             // Construct the TransactionReceipt with the correct type
             let plain_receipt = TransactionReceipt {
