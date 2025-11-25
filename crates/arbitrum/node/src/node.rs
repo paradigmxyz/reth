@@ -520,6 +520,18 @@ where
                     let mut s = cur;
                     while !s.is_empty() {
                         let before_len = s.len();
+
+                        // Diagnostic logging: Show first byte of transaction (should be 0x00-0x04 for standard Ethereum txs)
+                        if s.len() >= 1 {
+                            reth_tracing::tracing::warn!(
+                                target: "arb-reth::decode",
+                                first_byte = format!("0x{:02x}", s[0]),
+                                total_len = s.len(),
+                                first_10_bytes = format!("{:02x?}", &s[..std::cmp::min(10, s.len())]),
+                                "SignedTx (0x04) message - checking transaction type byte"
+                            );
+                        }
+
                         let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                             .map_err(|_| eyre::eyre!("decode_2718 failed for SignedTx"))?;
                         reth_tracing::tracing::info!(
