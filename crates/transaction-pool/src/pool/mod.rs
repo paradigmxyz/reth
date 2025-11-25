@@ -1070,13 +1070,13 @@ impl<V, T: TransactionOrdering, S> fmt::Debug for PoolInner<V, T, S> {
 #[derive(Debug, Clone)]
 pub struct AddedPendingTransaction<T: PoolTransaction> {
     /// Inserted transaction.
-    transaction: Arc<ValidPoolTransaction<T>>,
+    pub transaction: Arc<ValidPoolTransaction<T>>,
     /// Replaced transaction.
-    replaced: Option<Arc<ValidPoolTransaction<T>>>,
+    pub replaced: Option<Arc<ValidPoolTransaction<T>>>,
     /// transactions promoted to the pending queue
-    promoted: Vec<Arc<ValidPoolTransaction<T>>>,
+    pub promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     /// transactions that failed and became discarded
-    discarded: Vec<Arc<ValidPoolTransaction<T>>>,
+    pub discarded: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
