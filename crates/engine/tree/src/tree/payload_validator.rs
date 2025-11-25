@@ -915,9 +915,9 @@ where
         let (block_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
-        // Fast path: if last block's anchor matches the persisted ancestor hash, reuse its
-        // TrieInput This means that the TrieInputSorted already aggregates all in-memory
-        // overlays from that ancestor, so we can avoid re-aggregation.
+        // Fast path: if the tip block's anchor matches the persisted ancestor hash, reuse its
+        // TrieInput. This means the TrieInputSorted already aggregates all in-memory overlays
+        // from that ancestor, so we can avoid re-aggregation.
         if let Some(tip_block) = blocks.first() {
             let data = tip_block.trie_data();
             if let (Some(anchor_hash), Some(trie_input)) =
