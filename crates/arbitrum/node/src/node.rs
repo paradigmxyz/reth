@@ -806,60 +806,21 @@ where
                 let mut s = enc.as_slice();
                 let submit_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                     .map_err(|_| eyre::eyre!("decode submit-retryable failed"))?;
-                let ticket_id = *submit_tx.tx_hash();
 
-                let retry_gas_price = block_base_fee.unwrap_or(alloy_primitives::U256::ZERO);
-                let max_refund = retry_gas_price
-                    .saturating_mul(alloy_primitives::U256::from(gas))
-                    .saturating_add(max_submission_fee);
-
-                let retry_env = arb_alloy_consensus::tx::ArbTxEnvelope::Retry(
-                    arb_alloy_consensus::tx::ArbRetryTx {
-                        chain_id: chain_id_u256,
-                        nonce: 0,
-                        from: poster,
-                        gas_fee_cap: retry_gas_price,
-                        gas,
-                        to: retry_to_opt,
-                        value: callvalue,
-                        data: alloy_primitives::Bytes::from(retry_data.clone()),
-                        ticket_id,
-                        refund_to: fee_refund_addr,
-                        max_refund,
-                        submission_fee_refund: max_submission_fee,
-                    },
-                );
-                
-                reth_tracing::tracing::info!(
-                    target: "arb-reth::follower",
-                    "Creating Retry transaction: retry_data_len={}, retry_data_prefix={:02x?}",
-                    retry_data.len(),
-                    &retry_data[..std::cmp::min(4, retry_data.len())]
-                );
-                
-                let mut retry_enc = retry_env.encode_typed();
-                
-                reth_tracing::tracing::info!(
-                    target: "arb-reth::follower",
-                    "Retry envelope encoded: type_byte={:02x}, total_len={}, first_4_bytes={:02x?}",
-                    retry_enc[0],
-                    retry_enc.len(),
-                    &retry_enc[..std::cmp::min(5, retry_enc.len())]
-                );
-                
-                let mut rs = retry_enc.as_slice();
-                let retry_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut rs)
-                    .map_err(|_| eyre::eyre!("decode retry failed"))?;
-                
                 use reth_primitives_traits::SignedTransaction;
                 reth_tracing::tracing::info!(
                     target: "arb-reth::follower",
-                    "Decoded Retry transaction: tx_type={:?}, tx_hash={:?}",
-                    retry_tx.tx_type(),
-                    retry_tx.tx_hash()
+                    "Created SubmitRetryable transaction: tx_type={:?}, tx_hash={:?}, retry_to={:?}",
+                    submit_tx.tx_type(),
+                    submit_tx.tx_hash(),
+                    retry_to_opt
                 );
-                
-                vec![submit_tx, retry_tx]
+
+                // NOTE: Only return the SubmitRetryable transaction, NOT the Retry transaction.
+                // The Retry transaction is created later by ArbOS when the retryable is actually
+                // redeemed/executed. Creating it here would cause duplicate transactions in blocks.
+                // This matches the Go implementation: nitro/arbos/parse_l2.go:356-371
+                vec![submit_tx]
             }
             10 => return Err(eyre::eyre!("BatchForGasEstimation unimplemented")),
             11 => {
