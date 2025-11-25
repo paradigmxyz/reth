@@ -452,11 +452,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// This applies to both standard gas fees and, for blob-carrying transactions (EIP-4844),
     /// the blob-specific fees.
     #[inline]
-    pub(crate) fn is_underpriced(
-        &self,
-        maybe_replacement: &Self,
-        price_bumps: &PriceBumpConfig,
-    ) -> bool {
+    pub fn is_underpriced(&self, maybe_replacement: &Self, price_bumps: &PriceBumpConfig) -> bool {
         // Retrieve the required price bump percentage for this type of transaction.
         //
         // The bump is different for EIP-4844 and other transactions. See `PriceBumpConfig`.
