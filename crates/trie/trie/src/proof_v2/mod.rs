@@ -59,7 +59,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     /// Children on the `child_stack` are converted to [`ProofTrieBranchChild::RlpNode`]s via the
     /// [`Self::commit_child`] method. Committing a child indicates that no further changes are
     /// expected to happen to it (e.g. splitting its short key when inserting a new branch). Given
-    /// that keys are consumed in lexicographical order, only the most last child on the stack can
+    /// that keys are consumed in lexicographical order, only the last child on the stack can
     /// ever be modified, and therefore all children besides the last are expected to be
     /// [`ProofTrieBranchChild::RlpNode`]s.
     child_stack: Vec<ProofTrieBranchChild<VE::DeferredEncoder>>,
@@ -115,7 +115,9 @@ where
             .unwrap_or_else(|| Vec::with_capacity(16))
     }
 
-    /// Returns true if the proof of a node at the given path should be retained. This may move the
+    /// Returns true if the proof of a node at the given path should be retained. 
+    /// A node is retained if its path is a prefix of any target.
+    /// This may move the
     /// `targets` iterator forward if the given path comes after the current target.
     ///
     /// This method takes advantage of the [`WindowIter`] component of [`TargetsIter`] to only check
@@ -149,7 +151,7 @@ where
     /// ```
     ///
     /// Because paths in the trie are visited in depth-first order, it's imperative that targets are
-    /// given in depth-first order as well. If the targets where generated off of B256s, which is
+    /// given in depth-first order as well. If the targets were generated off of B256s, which is
     /// the common-case, then this is equivalent to lexicographical order.
     fn should_retain(
         &self,

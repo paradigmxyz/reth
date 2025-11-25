@@ -26,7 +26,7 @@ pub(crate) enum ProofTrieBranchChild<RF> {
     },
     /// A branch node whose children have already been flattened into [`RlpNode`]s.
     Branch(BranchNode),
-    // A node whose type is not known, as it has already been converted to an [`RlpNode`].
+    /// A node whose type is not known, as it has already been converted to an [`RlpNode`].
     RlpNode(RlpNode),
 }
 
