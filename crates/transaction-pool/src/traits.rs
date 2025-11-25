@@ -1215,6 +1215,11 @@ pub trait PoolTransaction:
             Ok(())
         }
     }
+
+    /// Allows to communicate to the pool that the transaction doesn't require a nonce check.
+    fn requires_nonce_check(&self) -> bool {
+        true
+    }
 }
 
 /// Super trait for transactions that can be converted to and from Eth transactions intended for the
