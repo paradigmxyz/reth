@@ -56,7 +56,9 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         };
 
         let transactions_root = alloy_consensus::proofs::calculate_transaction_root(&input.transactions);
-        let receipts_root = alloy_consensus::proofs::calculate_receipt_root(&receipts);
+        // Wrap receipts in ReceiptWithBloom before calculating root, as per EIP-2718 encoding
+        let receipts_with_bloom = receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>();
+        let receipts_root = alloy_consensus::proofs::calculate_receipt_root(&receipts_with_bloom);
         let logs_bloom = alloy_primitives::logs_bloom(receipts.iter().flat_map(|r| r.logs()));
 
         let mut header = alloy_consensus::Header {
