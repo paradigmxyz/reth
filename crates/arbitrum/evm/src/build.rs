@@ -457,9 +457,10 @@ where
         // The predeploy address 0x6e has empty code (not 0xFE) to avoid INVALID opcode.
         let result = self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
             let evm_gas = exec_result.gas_used();
-            // Internal transactions (type 0x6a) don't contribute to cumulative gas
-            let gas_to_add = if is_internal { 0u64 } else { evm_gas };
             let actual_gas = hook_gas_override.unwrap_or(evm_gas);
+            // Internal transactions (type 0x6a) don't contribute to cumulative gas
+            // Use actual_gas (which includes hook overrides) not evm_gas for cumulative calculation
+            let gas_to_add = if is_internal { 0u64 } else { actual_gas };
             let new_cumulative = self.cumulative_gas_used + gas_to_add;
 
             tracing::debug!(
