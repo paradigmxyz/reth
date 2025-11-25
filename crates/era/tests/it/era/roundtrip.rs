@@ -29,6 +29,40 @@ async fn test_era_file_roundtrip(
 
     let original_file = downloader.open_era_file(filename, network).await?;
 
+    if original_file.group.is_genesis() {
+        println!("Genesis era detected, using special handling");
+        // Genesis has no blocks
+        assert_eq!(original_file.group.blocks.len(), 0, "Genesis should have no blocks");
+        assert!(
+            original_file.group.slot_index.is_none(),
+            "Genesis should not have block slot index"
+        );
+
+        // Test genesis state decompression
+        let state_data = original_file.group.era_state.decompress()?;
+        assert!(!state_data.is_empty(), "Genesis state should decompress to non-empty data");
+        println!("  Genesis state decompressed: {} bytes", state_data.len());
+
+        // Write to buffer and read back
+        let mut buffer = Vec::new();
+        {
+            let mut writer = EraWriter::new(&mut buffer);
+            writer.write_file(&original_file)?;
+        }
+
+        let reader = EraReader::new(Cursor::new(&buffer));
+        let roundtrip_file = reader.read(network.to_string())?;
+
+        assert_eq!(
+            original_file.group.era_state.decompress()?,
+            roundtrip_file.group.era_state.decompress()?,
+            "Genesis state data should be identical after roundtrip"
+        );
+
+        println!("Genesis era verified successfully");
+        return Ok(());
+    }
+
     // Write the entire file to a buffer
     let mut buffer = Vec::new();
     {
@@ -55,12 +89,43 @@ async fn test_era_file_roundtrip(
     );
 
     // Select a few blocks to test
-    let _test_block_indices = [
+    let test_block_indices = [
         0,                                    // First block
         original_file.group.blocks.len() / 2, // Middle block
         original_file.group.blocks.len() - 1, // Last block
     ];
 
+    // Test individual beacon blocks
+    for &block_idx in &test_block_indices {
+        let original_block = &original_file.group.blocks[block_idx];
+        let roundtrip_block = &roundtrip_file.group.blocks[block_idx];
+        let slot = original_file.group.starting_slot() + block_idx as u64;
+
+        println!("Testing roundtrip for beacon block at slot {slot}");
+
+        // Test beacon block decompression
+        let original_block_data = original_block.decompress()?;
+        let roundtrip_block_data = roundtrip_block.decompress()?;
+
+        assert_eq!(
+            original_block_data, roundtrip_block_data,
+            "Beacon block at slot {slot} data should be identical after roundtrip"
+        );
+
+        println!("  Beacon block at slot {slot} verified: {} bytes", original_block_data.len());
+    }
+
+    // Test era state decompression
+    let original_state_data = original_file.group.era_state.decompress()?;
+    let roundtrip_state_data = roundtrip_file.group.era_state.decompress()?;
+
+    assert_eq!(
+        original_state_data, roundtrip_state_data,
+        "Era state data should be identical after roundtrip"
+    );
+    println!("  Era state verified: {} bytes", original_state_data.len());
+
+    println!("File {filename} roundtrip successful");
     Ok(())
 }
 
