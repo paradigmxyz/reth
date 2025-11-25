@@ -364,7 +364,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                                 base_fee: base_fee_per_gas,
                                 index: Some(index as u64),
                             };
-                            self.tx_resp_builder().fill(tx.clone().with_signer(*signer), tx_info)
+                            Ok(self
+                                .tx_resp_builder()
+                                .fill(tx.clone().with_signer(*signer), tx_info)?)
                         })
                 })
                 .ok_or(EthApiError::HeaderNotFound(block_id))?

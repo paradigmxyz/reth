@@ -551,7 +551,8 @@ where
         Ok(EthTransactions::transaction_by_hash(self, hash)
             .await?
             .map(|tx| tx.into_transaction(self.tx_resp_builder()))
-            .transpose()?)
+            .transpose()
+            .map_err(T::Error::from)?)
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
