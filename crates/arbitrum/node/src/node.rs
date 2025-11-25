@@ -1062,12 +1062,15 @@ where
         {
             use reth_primitives_traits::SignedTransaction;
             let tx_hashes: Vec<alloy_primitives::B256> = txs.iter().map(|t| *t.tx_hash()).collect();
-            reth_tracing::tracing::info!(
-                target: "arb-reth::follower",
-                l2_block = next_block_number,
-                tx_count = txs.len(),
-                tx_hashes = ?tx_hashes,
-                "BLOCK_TX_LIST: Transaction hashes for this block"
+            let tx_types: Vec<String> = txs.iter().map(|t| format!("{:?}", t.tx_type())).collect();
+            reth_tracing::tracing::warn!(
+                target: "arb-reth::BLOCK_TX_FINAL",
+                "🔍 FINAL_TX_LIST: block={} kind={} tx_count={} types={:?} hashes={:?}",
+                next_block_number,
+                kind,
+                txs.len(),
+                tx_types,
+                tx_hashes
             );
         }
 
