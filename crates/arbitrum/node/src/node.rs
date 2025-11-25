@@ -896,7 +896,6 @@ where
                 reth_tracing::tracing::warn!(
                     target: "arb-reth::ETHDEPOSIT-DEBUG",
                     enc_len = enc.len(),
-                    enc_hex = %hex::encode(&enc[..std::cmp::min(64, enc.len())]),
                     "🔍 ETHDEPOSIT: Encoded deposit tx"
                 );
                 let mut s = enc.as_slice();
