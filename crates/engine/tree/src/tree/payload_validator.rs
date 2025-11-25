@@ -970,6 +970,21 @@ where
             debug!(target: "engine::tree::payload_validator", historical = ?block_hash, blocks = blocks.len(), "Parent found in memory");
         }
 
+        // Fast path: if last block's anchor matches the persisted ancestor hash, reuse its
+        // TrieInput. This means that the TrieInputSorted already aggregates all in-memory
+        // overlays from that ancestor, so we can avoid re-aggregation.
+        if let Some(last_block) = blocks.last() {
+            let data = last_block.trie_data();
+            if data.anchor_hash == block_hash {
+                trace!(target: "engine::tree::payload_validator", %block_hash, %data.anchor_hash, "Reusing trie input with matching anchor hash");
+                self.metrics
+                    .block_validation
+                    .deferred_trie_wait_duration
+                    .record(wait_start.elapsed().as_secs_f64());
+                return Ok((data.trie_input.as_ref().clone(), block_hash));
+            }
+        }
+
         // Merge overlay trie input from in-memory blocks
         let input = Self::merge_overlay_trie_input(&blocks);
 
