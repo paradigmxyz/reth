@@ -74,6 +74,14 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
         }
     }
 
+    /// Returns the [`ValidTransaction`] if this is a [`TransactionValidationOutcome::Valid`].
+    pub const fn as_valid_transaction(&self) -> Option<&ValidTransaction<T>> {
+        match self {
+            Self::Valid { transaction, .. } => Some(transaction),
+            _ => None,
+        }
+    }
+
     /// Returns true if the transaction is valid.
     pub const fn is_valid(&self) -> bool {
         matches!(self, Self::Valid { .. })
