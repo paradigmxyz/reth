@@ -8,7 +8,7 @@ mod trie;
 pub use trie::*;
 
 mod lower;
-use lower::*;
+pub(crate) use lower::LowerSparseSubtrie;
 
 #[cfg(feature = "metrics")]
 mod metrics;
