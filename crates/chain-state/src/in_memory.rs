@@ -565,7 +565,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
 /// State after applying the given block, this block is part of the canonical chain that partially
 /// stored in memory and can be traced back to a canonical block on disk.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     /// The executed block that determines the state after this block has been executed.
     block: ExecutedBlock<N>,
@@ -747,8 +747,6 @@ impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
             self.execution_output == other.execution_output
     }
 }
-
-impl<N: NodePrimitives> Eq for ExecutedBlock<N> {}
 
 impl<N: NodePrimitives> ExecutedBlock<N> {
     /// Returns a reference to an inner [`SealedBlock`]
