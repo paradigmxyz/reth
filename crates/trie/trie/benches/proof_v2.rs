@@ -3,19 +3,15 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     B256, U256,
 };
-use alloy_rlp::Decodable;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use itertools::Itertools;
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_trie::{
     hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
     proof::StorageProof,
     proof_v2::StorageProofCalculator,
-    trie_cursor::{depth_first, mock::MockTrieCursorFactory, TrieCursorFactory},
+    trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
 };
-use reth_trie_common::{
-    HashedPostState, HashedStorage, Nibbles, ProofTrieNode, TrieMasks, TrieNode,
-};
+use reth_trie_common::{HashedPostState, HashedStorage, Nibbles};
 use std::collections::BTreeMap;
 
 /// Generate test data for benchmarking.
@@ -126,8 +122,8 @@ fn create_cursor_factories(
 // Benchmark comparing legacy and V2 implementations
 fn bench_proof_algos(c: &mut Criterion) {
     let mut group = c.benchmark_group("Proof");
-    for dataset_size in [10240 /* 128, 1024, 10240, 102400 */] {
-        for num_targets in [512 /* 1, 8, 16, 64, 128, 512, 2048 */] {
+    for dataset_size in [128, 1024, 10240] {
+        for num_targets in [1, 16, 64, 128, 512, 2048] {
             let (hashed_address, hashed_post_state, targets, legacy_targets) =
                 generate_test_data(dataset_size, num_targets);
 
@@ -141,41 +137,13 @@ fn bench_proof_algos(c: &mut Criterion) {
                 b.iter_batched(
                     || legacy_targets.clone(),
                     |targets| {
-                        let proof_result = StorageProof::new_hashed(
+                        StorageProof::new_hashed(
                             trie_cursor_factory.clone(),
                             hashed_cursor_factory.clone(),
                             hashed_address,
                         )
                         .storage_multiproof(targets)
                         .expect("Legacy proof generation failed");
-
-                        // Decode and sort legacy proof nodes, so output is the same as V2
-                        let _proof_nodes: Vec<ProofTrieNode> = proof_result
-                            .subtree
-                            .iter()
-                            .map(|(path, node_enc)| {
-                                let mut buf = node_enc.as_ref();
-                                let node = TrieNode::decode(&mut buf).expect(
-                                    "legacy implementation should produce valid proof nodes",
-                                );
-
-                                ProofTrieNode {
-                                    path: *path,
-                                    node,
-                                    masks: TrieMasks {
-                                        hash_mask: proof_result
-                                            .branch_node_hash_masks
-                                            .get(path)
-                                            .copied(),
-                                        tree_mask: proof_result
-                                            .branch_node_tree_masks
-                                            .get(path)
-                                            .copied(),
-                                    },
-                                }
-                            })
-                            .sorted_by(|a, b| depth_first::cmp(&a.path, &b.path))
-                            .collect();
                     },
                     BatchSize::SmallInput,
                 );

@@ -28,6 +28,9 @@ use node::*;
 /// Target to use with the `tracing` crate.
 static TRACE_TARGET: &str = "trie::proof_v2";
 
+/// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
+const RLP_ENCODE_BUF_SIZE: usize = 1024;
+
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
@@ -78,7 +81,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
 
 impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
     /// Create a new [`ProofCalculator`] instance for calculating account proofs.
-    pub const fn new(trie_cursor: TC, hashed_cursor: HC) -> Self {
+    pub fn new(trie_cursor: TC, hashed_cursor: HC) -> Self {
         Self {
             trie_cursor,
             hashed_cursor,
@@ -87,7 +90,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             child_stack: Vec::<_>::new(),
             retained_proofs: Vec::<_>::new(),
             rlp_nodes_bufs: Vec::<_>::new(),
-            rlp_encode_buf: Vec::<_>::new(),
+            rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
         }
     }
 }
@@ -205,11 +208,8 @@ where
 
             // Convert to `ProofTrieNode`, which will be what is retained.
             //
-            // If this node is a leaf then the `rlp_encode_buf` is taken by it and a new one will be
-            // allocated by the next encode call.
-            //
-            // If it is a branch then its `rlp_nodes_buf` will be taken and not returned to the
-            // `rlp_nodes_bufs` free-list.
+            // If this node is a branch then its `rlp_nodes_buf` will be taken and not returned to
+            // the `rlp_nodes_bufs` free-list.
             self.rlp_encode_buf.clear();
             let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
 
@@ -716,7 +716,7 @@ where
     HC: HashedStorageCursor<Value = U256>,
 {
     /// Create a new [`StorageProofCalculator`] instance.
-    pub const fn new_storage(trie_cursor: TC, hashed_cursor: HC) -> Self {
+    pub fn new_storage(trie_cursor: TC, hashed_cursor: HC) -> Self {
         Self::new(trie_cursor, hashed_cursor)
     }
 
