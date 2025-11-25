@@ -517,6 +517,12 @@ where
                     }
                 }
                 0x04 => {
+                    // ⚠️ CRITICAL FIX ENTRY POINT - SignedTx parsing (commit 81ba70691)
+                    reth_tracing::tracing::warn!(
+                        target: "arb-reth::FIX-VERIFICATION",
+                        "🔍 SIGNEDTX_FIX_CALLED: Processing 0x04 SignedTx message - SINGLE transaction (not loop)"
+                    );
+
                     // SignedTx message contains a SINGLE transaction (not multiple like Batch)
                     // The Go implementation reads all remaining bytes and unmarshals as one transaction
                     // See: nitro/arbos/parse_l2.go:159-174
@@ -527,12 +533,12 @@ where
                     let first_byte = if cur.len() >= 1 { cur[0] } else { 0xff };
                     let is_legacy_rlp = first_byte >= 0xc0;
 
-                    reth_tracing::tracing::debug!(
-                        target: "arb-reth::decode",
+                    reth_tracing::tracing::warn!(
+                        target: "arb-reth::FIX-VERIFICATION",
                         first_byte = format!("0x{:02x}", first_byte),
                         is_legacy = is_legacy_rlp,
                         data_len = cur.len(),
-                        "SignedTx message - decoding single transaction"
+                        "🔍 SIGNEDTX_FIX: Parsing SINGLE transaction (NO LOOP) - this is the fix"
                     );
 
                     let mut s = cur;
@@ -548,13 +554,13 @@ where
                             .map_err(|e| eyre::eyre!("Failed to decode typed transaction: {:?}", e))?
                     };
 
-                    reth_tracing::tracing::info!(
-                        target: "arb-reth::decode",
+                    reth_tracing::tracing::warn!(
+                        target: "arb-reth::FIX-VERIFICATION",
                         tx_type = ?tx.tx_type(),
                         tx_hash = %tx.tx_hash(),
                         consumed = cur.len() - s.len(),
                         remaining = s.len(),
-                        "decoded SignedTx message transaction"
+                        "🔍 SIGNEDTX_FIX: Successfully parsed 1 transaction (NOT multiple) - fix applied"
                     );
 
                     // SignedTx contains exactly ONE transaction - push it to output
