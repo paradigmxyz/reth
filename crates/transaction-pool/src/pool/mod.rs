@@ -1199,7 +1199,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the hash of the transaction
-    pub(crate) fn hash(&self) -> &TxHash {
+    pub fn hash(&self) -> &TxHash {
         match self {
             Self::Pending(tx) => tx.transaction.hash(),
             Self::Parked { transaction, .. } => transaction.hash(),
@@ -1207,7 +1207,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Converts this type into the event type for listeners
-    pub(crate) fn into_new_transaction_event(self) -> NewTransactionEvent<T> {
+    pub fn into_new_transaction_event(self) -> NewTransactionEvent<T> {
         match self {
             Self::Pending(tx) => {
                 NewTransactionEvent { subpool: SubPool::Pending, transaction: tx.transaction }
@@ -1236,7 +1236,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the queued reason if the transaction is parked with a queued reason.
-    pub(crate) const fn queued_reason(&self) -> Option<&QueuedReason> {
+    pub const fn queued_reason(&self) -> Option<&QueuedReason> {
         match self {
             Self::Pending(_) => None,
             Self::Parked { queued_reason, .. } => queued_reason.as_ref(),
@@ -1244,7 +1244,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the transaction state based on the subpool and queued reason.
-    pub(crate) fn transaction_state(&self) -> AddedTransactionState {
+    pub fn transaction_state(&self) -> AddedTransactionState {
         match self.subpool() {
             SubPool::Pending => AddedTransactionState::Pending,
             _ => {
