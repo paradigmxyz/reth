@@ -89,7 +89,10 @@ impl DeferredTrieData {
         // Try to get the lock
         if let Some(mut state) = self.state.try_lock() {
             match &*state {
+                // The async task has completed, return the cached result.
                 DeferredState::Ready(bundle) => return bundle.clone(),
+                // The async task is still pending, compute the trie data synchronously from the
+                // stored inputs.
                 DeferredState::Pending(inputs) => {
                     let computed = Self::compute_from_inputs(inputs);
                     *state = DeferredState::Ready(computed.clone());
@@ -104,13 +107,17 @@ impl DeferredTrieData {
         //
         // Possible outcomes after acquiring lock:
         // 1. State is Ready - another computation finished first, return cached result
-        // 2. State is Pending - we're first to compute after contention, compute and cache
+        // 2. State is Pending - we acquired the lock and found the state still pending, so we
+        //    compute and cache
         //
         // Duplication is acceptable: if multiple threads compute simultaneously before
         // any caches the result, only the first to acquire the lock will store it
         let mut state = self.state.lock();
         match &*state {
+            // The async task has completed, return the cached result.
             DeferredState::Ready(bundle) => bundle.clone(),
+            // The async task is still pending, compute the trie data synchronously from the stored
+            // inputs.
             DeferredState::Pending(inputs) => {
                 let computed = Self::compute_from_inputs(inputs);
                 *state = DeferredState::Ready(computed.clone());
