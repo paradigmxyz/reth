@@ -859,9 +859,27 @@ where
                 Vec::new()
             }
             12 => {
+                reth_tracing::tracing::warn!(
+                    target: "arb-reth::ETHDEPOSIT-DEBUG",
+                    data_len = l2_owned.len(),
+                    "🔍 ETHDEPOSIT: Parsing message, data_len={} bytes",
+                    l2_owned.len()
+                );
                 let mut cur = &l2_owned[..];
                 let to = read_address20(&mut cur)?;
+                reth_tracing::tracing::warn!(
+                    target: "arb-reth::ETHDEPOSIT-DEBUG",
+                    to = %to,
+                    remaining = cur.len(),
+                    "🔍 ETHDEPOSIT: Read to address"
+                );
                 let balance = read_u256_be32(&mut cur)?;
+                reth_tracing::tracing::warn!(
+                    target: "arb-reth::ETHDEPOSIT-DEBUG",
+                    balance = %balance,
+                    remaining = cur.len(),
+                    "🔍 ETHDEPOSIT: Read balance"
+                );
                 let req = request_id.ok_or_else(|| {
                     eyre::eyre!("cannot issue deposit tx without L1 request id")
                 })?;
@@ -875,9 +893,26 @@ where
                     },
                 );
                 let mut enc = env.encode_typed();
+                reth_tracing::tracing::warn!(
+                    target: "arb-reth::ETHDEPOSIT-DEBUG",
+                    enc_len = enc.len(),
+                    enc_hex = %hex::encode(&enc[..std::cmp::min(64, enc.len())]),
+                    "🔍 ETHDEPOSIT: Encoded deposit tx"
+                );
                 let mut s = enc.as_slice();
-                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                    .map_err(|_| eyre::eyre!("decode deposit failed"))?]
+                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    .map_err(|_| eyre::eyre!("decode deposit failed"))?;
+                use reth_primitives_traits::SignedTransaction;
+                reth_tracing::tracing::warn!(
+                    target: "arb-reth::ETHDEPOSIT-DEBUG",
+                    tx_hash = %tx.tx_hash(),
+                    tx_type = ?tx.tx_type(),
+                    from = %poster,
+                    to_addr = %to,
+                    value = %balance,
+                    "🔍 ETHDEPOSIT: Created deposit transaction"
+                );
+                vec![tx]
             }
             13 => {
                 let mut cur = &l2_owned[..];
