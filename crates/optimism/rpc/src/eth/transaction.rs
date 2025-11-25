@@ -1,7 +1,6 @@
 //! Loads and formats OP transaction RPC response.
 
 use crate::{OpEthApi, OpEthApiError, SequencerClient};
-use alloy_consensus::BlockHeader;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use futures::StreamExt;
@@ -212,19 +211,13 @@ where
         if let Ok(Some(pending_block)) = self.pending_flashblock().await &&
             let Some(indexed_tx) = pending_block.block().find_indexed(hash)
         {
-            let recovered_tx = pending_block
-                .block()
-                .recovered_transaction(indexed_tx.index())
-                .expect("transaction must exist at index returned by find_indexed")
-                .cloned();
-
             let meta = indexed_tx.meta();
             return Ok(Some(TransactionSource::Block {
-                transaction: recovered_tx,
+                transaction: indexed_tx.recovered_tx().cloned(),
                 index: meta.index,
                 block_hash: meta.block_hash,
                 block_number: meta.block_number,
-                base_fee: pending_block.block().header().base_fee_per_gas(),
+                base_fee: meta.base_fee,
             }));
         }
 
