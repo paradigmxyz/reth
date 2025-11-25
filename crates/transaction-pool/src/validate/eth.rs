@@ -531,7 +531,9 @@ where
         };
 
         // Checks for nonce
-        if let Err(err) = self.validate_sender_nonce(&transaction, &account) {
+        if transaction.requires_nonce_check() &&
+            let Err(err) = self.validate_sender_nonce(&transaction, &account)
+        {
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
 
