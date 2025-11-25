@@ -186,7 +186,8 @@ where
         };
         let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
         let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
-        let needs_precredit = is_sequenced;
+        // Internal transactions need precredit logic for nonce handling
+        let needs_precredit = is_sequenced || is_internal;
 
         let paid_gas_price = {
             use reth_arbitrum_primitives::ArbTxType::*;
