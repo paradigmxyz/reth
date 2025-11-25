@@ -3,7 +3,7 @@ use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag};
 use alloy_primitives::B256;
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::{
-    CanonStateSubscriptions, ComputedTrieData, DeferredTrieData, ExecutedBlock,
+    CanonStateSubscriptions, ComputedTrieData, DeferredTrieData, ExecutedBlock, ExecutedBlock
 };
 use reth_errors::RethError;
 use reth_evm::{
@@ -54,7 +54,6 @@ where
     N: NodePrimitives,
     EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>,
     Provider: StateProviderFactory
-        + CanonStateSubscriptions<Primitives = N>
         + BlockReaderIdExt<
             Header = HeaderTy<N>,
             Block = BlockTy<N>,

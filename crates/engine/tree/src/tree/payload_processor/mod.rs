@@ -214,6 +214,10 @@ where
             + Send
             + 'static,
     {
+        // start preparing transactions immediately
+        let (prewarm_rx, execution_rx, transaction_count_hint) =
+            self.spawn_tx_iterator(transactions);
+
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
 
@@ -241,9 +245,6 @@ where
 
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
-
-        let (prewarm_rx, execution_rx, transaction_count_hint) =
-            self.spawn_tx_iterator(transactions);
 
         let prewarm_handle = self.spawn_caching_with(
             env,
