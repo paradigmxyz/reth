@@ -82,7 +82,7 @@ enum DeferredState {
 
 /// Shared handle to asynchronously populated trie data.
 ///
-/// Uses `Mutex + Condvar` from parking_lot for synchronization. When waiting,
+/// Uses `Mutex + Condvar` from `parking_lot` for synchronization. When waiting,
 /// `Condvar::wait()` releases the mutex and yields to the scheduler, allowing
 /// other tasks to make progress on the same thread pool.
 #[derive(Clone)]
