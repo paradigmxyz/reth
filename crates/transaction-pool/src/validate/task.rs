@@ -180,12 +180,15 @@ impl<V> TransactionValidationTaskExecutor<V> {
     ///
     /// Initializes the executor with the provided validator and sets up communication for
     /// validation tasks.
-    pub fn new(validator: V) -> Self {
+    pub fn new(validator: V) -> (Self, ValidationTask) {
         let (tx, task) = ValidationTask::new();
-        tokio::task::spawn(async move {
-            task.run().await;
-        });
-        Self { validator: Arc::new(validator), to_validation_task: Arc::new(sync::Mutex::new(tx)) }
+        (
+            Self {
+                validator: Arc::new(validator),
+                to_validation_task: Arc::new(sync::Mutex::new(tx)),
+            },
+            task,
+        )
     }
 }
 
@@ -324,7 +327,8 @@ mod tests {
     #[tokio::test]
     async fn executor_new_spawns_and_validates_single() {
         let validator = NoopValidator;
-        let executor = TransactionValidationTaskExecutor::new(validator);
+        let (executor, task) = TransactionValidationTaskExecutor::new(validator);
+        tokio::spawn(task.run());
         let tx = MockTransaction::legacy();
         let out = executor.validate_transaction(TransactionOrigin::External, tx).await;
         assert!(matches!(out, TransactionValidationOutcome::Valid { .. }));
@@ -333,7 +337,8 @@ mod tests {
     #[tokio::test]
     async fn executor_new_spawns_and_validates_batch() {
         let validator = NoopValidator;
-        let executor = TransactionValidationTaskExecutor::new(validator);
+        let (executor, task) = TransactionValidationTaskExecutor::new(validator);
+        tokio::spawn(task.run());
         let txs = vec![
             (TransactionOrigin::External, MockTransaction::legacy()),
             (TransactionOrigin::Local, MockTransaction::legacy()),
