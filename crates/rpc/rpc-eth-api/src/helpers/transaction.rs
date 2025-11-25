@@ -24,7 +24,7 @@ use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     utils::{binary_search, recover_raw_transaction},
     EthApiError::{self, TransactionConfirmationTimeout},
-    FillTransactionResult, SignError, TransactionSource,
+    FillTransaction, SignError, TransactionSource,
 };
 use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
@@ -450,7 +450,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn fill_transaction(
         &self,
         mut request: RpcTxReq<Self::NetworkTypes>,
-    ) -> impl Future<Output = Result<FillTransactionResult<TxTy<Self::Primitives>>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<FillTransaction<TxTy<Self::Primitives>>, Self::Error>> + Send
     where
         Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
     {
@@ -511,7 +511,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
             let raw = tx.encoded_2718().into();
 
-            Ok(FillTransactionResult { raw, tx })
+            Ok(FillTransaction { raw, tx })
         }
     }
 
@@ -609,45 +609,37 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
     > + Send {
         async move {
             // Try to find the transaction on disk
-            let mut resp = self
+            if let Some((tx, meta)) = self
                 .spawn_blocking_io(move |this| {
-                    match this
-                        .provider()
+                    this.provider()
                         .transaction_by_hash_with_meta(hash)
-                        .map_err(Self::Error::from_eth_err)?
-                    {
-                        None => Ok(None),
-                        Some((tx, meta)) => {
-                            // Note: we assume this transaction is valid, because it's mined (or
-                            // part of pending block) and already. We don't need to
-                            // check for pre EIP-2 because this transaction could be pre-EIP-2.
-                            let transaction = tx
-                                .try_into_recovered_unchecked()
-                                .map_err(|_| EthApiError::InvalidTransactionSignature)?;
-
-                            let tx = TransactionSource::Block {
-                                transaction,
-                                index: meta.index,
-                                block_hash: meta.block_hash,
-                                block_number: meta.block_number,
-                                base_fee: meta.base_fee,
-                            };
-                            Ok(Some(tx))
-                        }
-                    }
+                        .map_err(Self::Error::from_eth_err)
                 })
-                .await?;
+                .await?
+            {
+                // Note: we assume this transaction is valid, because it's mined (or
+                // part of pending block) and already. We don't need to
+                // check for pre EIP-2 because this transaction could be pre-EIP-2.
+                let transaction = tx
+                    .try_into_recovered_unchecked()
+                    .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
-            if resp.is_none() {
-                // tx not found on disk, check pool
-                if let Some(tx) =
-                    self.pool().get(&hash).map(|tx| tx.transaction.clone().into_consensus())
-                {
-                    resp = Some(TransactionSource::Pool(tx.into()));
-                }
+                return Ok(Some(TransactionSource::Block {
+                    transaction,
+                    index: meta.index,
+                    block_hash: meta.block_hash,
+                    block_number: meta.block_number,
+                    base_fee: meta.base_fee,
+                }));
             }
 
-            Ok(resp)
+            // tx not found on disk, check pool
+            if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.clone_into_consensus())
+            {
+                return Ok(Some(TransactionSource::Pool(tx.into())));
+            }
+
+            Ok(None)
         }
     }
 

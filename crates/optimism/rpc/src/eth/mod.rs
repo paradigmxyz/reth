@@ -332,7 +332,7 @@ impl<N, Rpc> Trace for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError, Evm = N::Evm>,
 {
 }
 
@@ -525,8 +525,9 @@ where
                 ctx.components.evm_config().clone(),
                 ctx.components.provider().clone(),
                 ctx.components.task_executor().clone(),
-            )
-            .compute_state_root(flashblock_consensus); // enable state root calculation if flashblock_consensus if enabled.
+                // enable state root calculation if flashblock_consensus is enabled.
+                flashblock_consensus,
+            );
 
             let flashblocks_sequence = service.block_sequence_broadcaster().clone();
             let received_flashblocks = service.flashblocks_broadcaster().clone();

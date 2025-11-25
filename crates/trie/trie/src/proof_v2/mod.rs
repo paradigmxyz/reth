@@ -864,7 +864,6 @@ mod tests {
             let targets_vec: Vec<B256> = targets.into_iter().collect();
             let nibbles_targets: Vec<Nibbles> =
                 targets_vec.iter().map(|b256| Nibbles::unpack(b256.as_slice())).sorted().collect();
-
             // Convert B256 targets to MultiProofTargets for legacy implementation
             // For account-only proofs, each account maps to an empty storage set
             let legacy_targets = targets_vec

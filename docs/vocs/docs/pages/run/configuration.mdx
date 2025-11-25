@@ -111,7 +111,7 @@ The sender recovery stage recovers the address of transaction senders using tran
 #
 # Lower thresholds correspond to more frequent disk I/O (writes),
 # but lowers memory usage
-commit_threshold = 100000
+commit_threshold = 5000000
 ```
 
 ### `execution`
@@ -129,7 +129,7 @@ max_blocks = 500000
 # The maximum number of state changes to keep in memory before the execution stage commits.
 max_changes = 5000000
 # The maximum cumulative amount of gas to process before the execution stage commits.
-max_cumulative_gas = 1500000000000 # 30_000_000 * 50_000_000
+max_cumulative_gas = 1500000000 # 30_000_000 * 50_000
 # The maximum time spent on blocks processing before the execution stage commits.
 max_duration = '10m'
 ```
@@ -180,10 +180,13 @@ The merkle stage uses the indexes built in the hashing stages (storage and accou
 
 ```toml
 [stages.merkle]
+# The number of blocks to run the incremental root method for when catching up.
+# When syncing a large number of blocks, incremental root building is limited
+# to prevent memory issues.
+incremental_threshold = 7000
 # The threshold in number of blocks before the stage starts from scratch
-# and re-computes the state root, discarding the trie that has already been built,
-# as opposed to incrementally updating the trie.
-clean_threshold = 5000
+# and rebuilds the entire trie, discarding the existing trie.
+rebuild_threshold = 100000
 ```
 
 ### `transaction_lookup`
@@ -248,7 +251,7 @@ In the top level of the section you can configure trusted nodes, and how often r
 [peers]
 # How often reth will attempt to make outgoing connections,
 # if there is room for more peers
-refill_slots_interval = '1s'
+refill_slots_interval = '5s'
 # A list of ENRs for trusted peers, which are peers reth will always try to connect to.
 trusted_nodes = []
 # Whether reth will only attempt to connect to the peers specified above,
