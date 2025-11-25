@@ -35,6 +35,11 @@ pub fn get_early_tx_gas(tx_hash: &B256) -> Option<(u64, u64)> {
 }
 
 pub fn clear_early_tx_gas(tx_hash: &B256) {
+    tracing::info!(
+        target: "arb-reth::gas-tracking",
+        tx_hash = ?tx_hash,
+        "CLEARING early_tx_gas"
+    );
     EARLY_TX_GAS.with(|map| {
         map.borrow_mut().remove(tx_hash);
     });
