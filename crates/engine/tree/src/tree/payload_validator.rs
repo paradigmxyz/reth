@@ -896,7 +896,7 @@ where
     /// 1. Collect in-memory overlay blocks using [`crate::tree::TreeState::blocks_by_hash`]. This
     ///    returns the highest persisted ancestor hash (`block_hash`) and the list of in-memory
     ///    blocks building on top of it.
-    /// 2. Fast path: If the oldest in-memory block's trie input is already anchored to `block_hash`
+    /// 2. Fast path: If the tip in-memory block's trie input is already anchored to `block_hash`
     ///    (its `anchor_hash` matches `block_hash`), reuse it directly.
     /// 3. Slow path: Build a new [`TrieInputSorted`] by aggregating the overlay blocks (from oldest
     ///    to newest) on top of the database state at `block_hash`.
@@ -1004,11 +1004,6 @@ where
             .blocks_by_hash(block.parent_hash())
             .unwrap_or_else(|| (block.parent_hash(), Vec::new()));
 
-        // Called outside spawn_blocking because `merge_overlay_trie_input` calls `trie_data()`
-        // which may block. If this ran inside spawn_blocking, blocking threads could wait on
-        // each other's trie_data() and deadlock by exhausting the thread pool.
-        let parent_trie_input = Self::merge_overlay_trie_input(&overlay_blocks);
-
         // Create a deferred handle to store the sorted trie data.
         let deferred_trie_data = DeferredTrieData::pending();
         let deferred_handle_task = deferred_trie_data.clone();
@@ -1019,7 +1014,8 @@ where
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
 
-                let mut parent_trie_input = parent_trie_input;
+                // Merge parent overlay trie input with the current block's trie input.
+                let mut parent_trie_input = Self::merge_overlay_trie_input(&overlay_blocks);
 
                 let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
                 let sorted_trie_updates = Arc::new(trie_output.into_sorted());
