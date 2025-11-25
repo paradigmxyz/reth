@@ -428,8 +428,10 @@ where
         }
 
         if needs_precredit {
-            if is_sequenced || is_internal || is_retry {
-                // Set used_pre_nonce for sequenced, internal, and retry transactions
+            // Only Internal and Retry transactions should have nonce decremented
+            // Sequenced transactions (including SubmitRetryable) should increment nonce normally
+            if is_internal || is_retry {
+                // Set used_pre_nonce for internal and retry transactions
                 // Internal (0x6a) and Retry (0x68) transactions should NOT increment sender nonce
                 // This ensures nonce gets decremented after EVM execution to compensate
                 used_pre_nonce = Some(current_nonce);
@@ -438,7 +440,6 @@ where
                     tx_type = ?tx.tx().tx_type(),
                     is_internal = is_internal,
                     is_retry = is_retry,
-                    is_sequenced = is_sequenced,
                     current_nonce = current_nonce,
                     "Setting used_pre_nonce for nonce decrement"
                 );
