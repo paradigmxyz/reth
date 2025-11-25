@@ -18,14 +18,6 @@ pub struct ComputedTrieData {
     pub trie_input: Arc<TrieInputSorted>,
 }
 
-impl PartialEq for ComputedTrieData {
-    fn eq(&self, other: &Self) -> bool {
-        self.hashed_state == other.hashed_state &&
-            self.trie_updates == other.trie_updates &&
-            self.anchor_hash == other.anchor_hash
-    }
-}
-
 /// Error returned when deferred trie data computation fails.
 #[derive(Debug, Clone)]
 pub struct DeferredTrieDataError {
@@ -171,7 +163,10 @@ mod tests {
         });
 
         let result = deferred.wait_cloned().unwrap();
-        assert_eq!(result, empty_bundle());
+        let expected = empty_bundle();
+        assert_eq!(result.hashed_state, expected.hashed_state);
+        assert_eq!(result.trie_updates, expected.trie_updates);
+        assert_eq!(result.anchor_hash, expected.anchor_hash);
     }
 
     #[test]
@@ -212,10 +207,13 @@ mod tests {
         thread::sleep(delay);
         deferred.set_ready(empty_bundle());
 
+        let expected = empty_bundle();
         for (elapsed, data) in rx.into_iter().take(readers) {
             // Each reader should have blocked for at least `delay`.
             assert!(elapsed >= delay);
-            assert_eq!(data, empty_bundle());
+            assert_eq!(data.hashed_state, expected.hashed_state);
+            assert_eq!(data.trie_updates, expected.trie_updates);
+            assert_eq!(data.anchor_hash, expected.anchor_hash);
         }
     }
 }
