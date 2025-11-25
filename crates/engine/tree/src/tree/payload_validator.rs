@@ -523,72 +523,13 @@ where
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(&output.state));
 
-        // Capture parent hash and ancestor overlays for deferred trie input construction.
-        let (parent_hash, overlay_blocks) = ctx
-            .state()
-            .tree_state
-            .blocks_by_hash(block.parent_hash())
-            .unwrap_or_else(|| (block.parent_hash(), Vec::new()));
-
-        // Create a deferred handle to store the sorted trie data.
-        let deferred_trie_data = DeferredTrieData::pending();
-        let deferred_handle_task = deferred_trie_data.clone();
-        let hashed_state_for_trie = hashed_state;
-        let trie_output_for_trie = trie_output;
-        let overlay_blocks_for_trie = overlay_blocks;
-        let deferred_compute_duration =
-            self.metrics.block_validation.deferred_trie_compute_duration.clone();
-
-        // Defer trie sorting and compute trie input to a background task so the validation hot path
-        // can return once the state root is checked. Consumers (DB writes, overlay
-        // providers, proofs) block on the handle only when they actually need the sorted
-        // trie data.
-        let task = move || {
-            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                let compute_start = Instant::now();
-
-                let mut parent_trie_input =
-                    Self::merge_overlay_trie_input(&overlay_blocks_for_trie);
-
-                let sorted_hashed_state = Arc::new(hashed_state_for_trie.into_sorted());
-                let sorted_trie_updates = Arc::new(trie_output_for_trie.into_sorted());
-
-                {
-                    let state_mut = Arc::make_mut(&mut parent_trie_input.state);
-                    state_mut.extend_ref(sorted_hashed_state.as_ref());
-                    let nodes_mut = Arc::make_mut(&mut parent_trie_input.nodes);
-                    nodes_mut.extend_ref(sorted_trie_updates.as_ref());
-                }
-
-                let bundle = ComputedTrieData {
-                    hashed_state: sorted_hashed_state,
-                    trie_updates: sorted_trie_updates,
-                    anchored_trie_input: Some(AnchoredTrieInput {
-                        anchor_hash: parent_hash,
-                        trie_input: Arc::new(parent_trie_input),
-                    }),
-                };
-
-                deferred_handle_task.set_ready(bundle);
-                deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
-            }));
-
-            if result.is_err() {
-                error!(
-                    target: "engine::tree::payload_validator",
-                    ?parent_hash,
-                    "Deferred trie task panicked; aborting"
-                );
-                std::process::abort();
-            }
-        };
-
-        self.payload_processor.executor().spawn_blocking(task);
-
-        Ok(ExecutedBlock::with_deferred_trie_data(
-            Arc::new(block),
-            Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
-            deferred_trie_data,
+        Ok(self.spawn_deferred_trie_task(
+            block,
+            output,
+            block_num_hash.number,
+            &ctx,
+            hashed_state,
+            trie_output,
         ))
     }
 
@@ -1028,6 +969,91 @@ where
             }
         }
         input
+    }
+
+    /// Spawns a background task to compute and sort trie data for the executed block.
+    ///
+    /// This function creates a [`DeferredTrieData`] handle and spawns a blocking task that:
+    /// 1. Merges the block's hashed state and trie updates with parent overlay data
+    /// 2. Creates an [`AnchoredTrieInput`] for efficient future trie computations
+    /// 3. Calls `set_ready()` on the handle when computation is complete
+    ///
+    /// The validation hot path can return immediately after state root verification,
+    /// while consumers (DB writes, overlay providers, proofs) block on the handle
+    /// only when they actually need the sorted trie data.
+    fn spawn_deferred_trie_task(
+        &self,
+        block: RecoveredBlock<N::Block>,
+        output: BlockExecutionOutput<N::Receipt>,
+        block_number: u64,
+        ctx: &TreeCtx<'_, N>,
+        hashed_state: HashedPostState,
+        trie_output: TrieUpdates,
+    ) -> ExecutedBlock<N> {
+        // Capture parent hash and ancestor overlays for deferred trie input construction.
+        let (parent_hash, overlay_blocks) = ctx
+            .state()
+            .tree_state
+            .blocks_by_hash(block.parent_hash())
+            .unwrap_or_else(|| (block.parent_hash(), Vec::new()));
+
+        // Create a deferred handle to store the sorted trie data.
+        let deferred_trie_data = DeferredTrieData::pending();
+        let deferred_handle_task = deferred_trie_data.clone();
+        let deferred_compute_duration =
+            self.metrics.block_validation.deferred_trie_compute_duration.clone();
+
+        // Defer trie sorting and computation task that computes the trie data to a background task so that the validation hot path can return immediately.
+        // Consumers will block on `deferred_trie_data.set_ready()` when they need the sorted trie data.
+        let task = move || {
+            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                let compute_start = Instant::now();
+
+                // Merge parent overlay trie input with the current block's trie input.
+                let mut parent_trie_input = Self::merge_overlay_trie_input(&overlay_blocks);
+
+                let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
+                let sorted_trie_updates = Arc::new(trie_output.into_sorted());
+
+                {
+                    let state_mut = Arc::make_mut(&mut parent_trie_input.state);
+                    state_mut.extend_ref(sorted_hashed_state.as_ref());
+                    let nodes_mut = Arc::make_mut(&mut parent_trie_input.nodes);
+                    nodes_mut.extend_ref(sorted_trie_updates.as_ref());
+                }
+
+                let bundle = ComputedTrieData {
+                    hashed_state: sorted_hashed_state,
+                    trie_updates: sorted_trie_updates,
+                    anchored_trie_input: Some(AnchoredTrieInput {
+                        anchor_hash: parent_hash,
+                        trie_input: Arc::new(parent_trie_input),
+                    }),
+                };
+
+                deferred_handle_task.set_ready(bundle);
+                deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
+            }));
+
+            if result.is_err() {
+                error!(
+                    target: "engine::tree::payload_validator",
+                    ?parent_hash,
+                    "Deferred trie task panicked; aborting"
+                );
+                std::process::abort();
+            }
+        };
+
+        // Spawn task that computes trie data and calls `deferred_trie_data.set_ready()` when
+        // complete.
+        self.payload_processor.executor().spawn_blocking(task);
+
+        ExecutedBlock::with_deferred_trie_data(
+            Arc::new(block),
+            Arc::new(ExecutionOutcome::from((output, block_number))),
+            deferred_trie_data,
+        )
     }
 }
 
