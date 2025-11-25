@@ -1126,7 +1126,73 @@ where
             );
         }
         let sealed_block0 = outcome.block.sealed_block().clone();
-        let (mut header_unsealed, body_unsealed) = sealed_block0.clone().split_header_body();
+        let (mut header_unsealed, mut body_unsealed) = sealed_block0.clone().split_header_body();
+
+        // Filter out BatchPostingReport transactions from the block
+        // They should execute (for state changes) but not appear in block.transactions[]
+        let original_tx_count = body_unsealed.transactions.len();
+        let original_senders = outcome.block.senders().to_vec();
+
+        // Identify which indices to keep
+        let mut indices_to_keep: Vec<usize> = Vec::new();
+        for (idx, tx) in body_unsealed.transactions.iter().enumerate() {
+            use reth_primitives_traits::SignedTransaction;
+            use alloy_consensus::Transaction;
+
+            // Keep the transaction unless it's a BatchPostingReport
+            let is_internal = matches!(tx.tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
+            if !is_internal {
+                indices_to_keep.push(idx);
+                continue;
+            }
+
+            // Check if it's a BatchPostingReport by examining the method selector
+            let input = tx.input();
+            if input.len() < 4 {
+                indices_to_keep.push(idx);
+                continue;
+            }
+
+            let selector = &input.as_ref()[0..4];
+            let batch_report_id = reth_arbitrum_evm::internal_tx::get_batch_posting_report_method_id();
+            let batch_report_v2_id = reth_arbitrum_evm::internal_tx::get_batch_posting_report_v2_method_id();
+
+            // Filter out BatchPostingReport transactions
+            let is_batch_report = selector == batch_report_id || selector == batch_report_v2_id;
+
+            if is_batch_report {
+                reth_tracing::tracing::warn!(
+                    target: "arb-reth::BLOCK_FILTER",
+                    "🔍 FILTERING_OUT BatchPostingReport tx from block {} (hash={:?})",
+                    next_block_number,
+                    tx.tx_hash()
+                );
+            } else {
+                indices_to_keep.push(idx);
+            }
+        }
+
+        // Filter transactions and senders using the same indices
+        let filtered_transactions: Vec<_> = indices_to_keep.iter()
+            .map(|&idx| body_unsealed.transactions[idx].clone())
+            .collect();
+        let filtered_senders: Vec<_> = indices_to_keep.iter()
+            .map(|&idx| original_senders[idx])
+            .collect();
+
+        body_unsealed.transactions = filtered_transactions;
+
+        let filtered_tx_count = body_unsealed.transactions.len();
+        if original_tx_count != filtered_tx_count {
+            reth_tracing::tracing::warn!(
+                target: "arb-reth::BLOCK_FILTER",
+                "🔍 FILTERED_TRANSACTIONS: block={} original={} filtered={}",
+                next_block_number,
+                original_tx_count,
+                filtered_tx_count
+            );
+        }
+
         header_unsealed.nonce = alloy_primitives::B64::new(delayed_messages_read.to_be_bytes());
         type ArbBlock = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned, alloy_consensus::Header>;
         let sealed_block: reth_primitives_traits::block::SealedBlock<ArbBlock> =
@@ -1134,9 +1200,8 @@ where
 
         let header = sealed_block.header();
         let new_block_hash = sealed_block.hash();
-        
-        let senders = outcome.block.senders().to_vec();
-        let modified_block = reth_primitives_traits::block::RecoveredBlock::new_sealed(sealed_block.clone(), senders);
+
+        let modified_block = reth_primitives_traits::block::RecoveredBlock::new_sealed(sealed_block.clone(), filtered_senders);
         
         let header_hash_hex = format!("{:#x}", new_block_hash);
         let header_mix_hex = format!("{:#x}", header.mix_hash);
