@@ -9,6 +9,7 @@ use crate::{
 };
 use alloy_primitives::{map::B256Map, B256};
 use reth_storage_errors::db::DatabaseError;
+use reth_trie_common::updates::TrieUpdates;
 
 /// Mock trie cursor factory.
 #[derive(Clone, Default, Debug)]
@@ -35,6 +36,27 @@ impl MockTrieCursorFactory {
             visited_account_keys: Default::default(),
             visited_storage_keys: Arc::new(visited_storage_keys),
         }
+    }
+
+    /// Creates a new mock trie cursor factory from `TrieUpdates`.
+    pub fn from_trie_updates(updates: TrieUpdates) -> Self {
+        // Convert account nodes from HashMap to BTreeMap
+        let account_trie_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
+            updates.account_nodes.into_iter().collect();
+
+        // Convert storage tries
+        let storage_tries: B256Map<BTreeMap<Nibbles, BranchNodeCompact>> = updates
+            .storage_tries
+            .into_iter()
+            .map(|(addr, storage_updates)| {
+                // Convert storage nodes from HashMap to BTreeMap
+                let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
+                    storage_updates.storage_nodes.into_iter().collect();
+                (addr, storage_nodes)
+            })
+            .collect();
+
+        Self::new(account_trie_nodes, storage_tries)
     }
 
     /// Returns a reference to the list of visited account keys.

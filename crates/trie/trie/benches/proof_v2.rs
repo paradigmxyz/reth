@@ -90,28 +90,12 @@ fn generate_test_data(
 fn create_cursor_factories(
     post_state: &HashedPostState,
 ) -> (MockTrieCursorFactory, MockHashedCursorFactory) {
-    // Extract storage tries from post state
-    let hashed_storage_tries: B256Map<BTreeMap<B256, U256>> = post_state
-        .storages
-        .iter()
-        .map(|(addr, hashed_storage)| {
-            // Convert HashedStorage to BTreeMap, filtering out zero values (deletions)
-            let storage_map: BTreeMap<B256, U256> = hashed_storage
-                .storage
-                .iter()
-                .filter_map(|(slot, value)| (*value != U256::ZERO).then_some((*slot, *value)))
-                .collect();
-            (*addr, storage_map)
-        })
-        .collect();
-
     // Ensure that there's a storage trie dataset for every storage trie, even if empty
     let storage_trie_nodes: B256Map<BTreeMap<_, _>> =
-        hashed_storage_tries.keys().copied().map(|addr| (addr, Default::default())).collect();
+        post_state.storages.keys().copied().map(|addr| (addr, Default::default())).collect();
 
-    // Create mock hashed cursor factory populated with the storage data
-    // No accounts needed for storage trie testing
-    let hashed_cursor_factory = MockHashedCursorFactory::new(BTreeMap::new(), hashed_storage_tries);
+    // Create mock hashed cursor factory from the post state
+    let hashed_cursor_factory = MockHashedCursorFactory::from_hashed_post_state(post_state.clone());
 
     // Create empty trie cursor factory (leaf-only calculator doesn't need trie nodes)
     let trie_cursor_factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_trie_nodes);
