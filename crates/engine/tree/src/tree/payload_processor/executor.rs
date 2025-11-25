@@ -9,6 +9,13 @@ use tokio::{
     task::JoinHandle,
 };
 
+/// Maximum number of worker threads for the dedicated blocking runtime.
+///
+/// Each block validation spawns a single trie computation task, so 4 workers
+/// can handle 4 concurrent block trie computations. This is sufficient for
+/// normal operation while keeping resource usage bounded.
+const MAX_BLOCKING_WORKERS: usize = 4;
+
 /// An executor for mixed I/O and CPU workloads.
 ///
 /// This type uses tokio to spawn blocking tasks and will reuse an existing tokio
@@ -89,14 +96,14 @@ fn blocking_runtime() -> Arc<Runtime> {
 
     BLOCKING_RT
         .get_or_init(|| {
-            let worker_threads =
-                std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1).max(2);
-
             Arc::new(
                 Builder::new_multi_thread()
                     .enable_all()
-                    .worker_threads(worker_threads)
-                    .max_blocking_threads(worker_threads.saturating_mul(4))
+                    // Core worker threads for async task polling
+                    .worker_threads(MAX_BLOCKING_WORKERS)
+                    // Blocking threads for spawn_blocking calls (one per concurrent block)
+                    .max_blocking_threads(MAX_BLOCKING_WORKERS)
+                    // Keep threads alive to avoid respawn overhead between blocks
                     .thread_keep_alive(Duration::from_secs(15))
                     .thread_name("reth-blocking")
                     .build()
