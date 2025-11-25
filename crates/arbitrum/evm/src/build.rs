@@ -426,7 +426,11 @@ where
         }
 
         if needs_precredit {
-            if is_sequenced {
+            if is_sequenced || is_internal {
+                // Set used_pre_nonce for both sequenced and internal transactions
+                // Internal transactions (type 0x6a StartBlock) need this to ensure
+                // nonce gets decremented after EVM execution (at line 536)
+                // Without this, the nonce would be incorrectly incremented by EVM
                 used_pre_nonce = Some(current_nonce);
             }
 
