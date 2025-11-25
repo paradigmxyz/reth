@@ -831,7 +831,14 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     Ok(Some(acc)) => U256::from(acc.balance),
                     _ => U256::ZERO,
                 };
-                
+
+                tracing::info!(
+                    sender = ?ctx.sender,
+                    deposit_value = ?deposit_value,
+                    balance_after_mint = ?balance_after_mint,
+                    "SubmitRetryable: minted deposit value"
+                );
+
                 if balance_after_mint < max_submission_fee {
                     return StartTxHookResult {
                         end_tx_now: true,
@@ -1021,7 +1028,29 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 redeem_data.extend_from_slice(&submission_fee_bytes);
 
                 crate::log_sink::push(ARB_RETRYABLE_TX_ADDRESS, &[REDEEM_SCHEDULED_TOPIC, ticket_id.0, retry_tx_hash.0, sequence_num_bytes], &redeem_data);
-                
+
+                // Log final sender balance and burn any remaining balance
+                // The sender should end up with exactly 0 balance after all transfers
+                // since we minted deposit_value and transferred it all away
+                let final_balance = match state_db.basic(ctx.sender) {
+                    Ok(Some(acc)) => U256::from(acc.balance),
+                    _ => U256::ZERO,
+                };
+
+                if final_balance > U256::ZERO {
+                    tracing::warn!(
+                        sender = ?ctx.sender,
+                        final_balance = ?final_balance,
+                        "SubmitRetryable: burning remaining balance to reach 0"
+                    );
+                    let _ = Self::burn_balance(state_db, ctx.sender, final_balance);
+                } else {
+                    tracing::info!(
+                        sender = ?ctx.sender,
+                        "SubmitRetryable: final balance correctly at 0"
+                    );
+                }
+
                 StartTxHookResult {
                     end_tx_now: true,
                     gas_used: usergas,
