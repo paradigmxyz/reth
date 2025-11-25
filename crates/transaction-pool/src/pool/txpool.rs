@@ -708,6 +708,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let mut eip1559_count = 0;
         let mut eip4844_count = 0;
         let mut eip7702_count = 0;
+        let mut other_count = 0;
 
         for tx in self.all_transactions.transactions_iter() {
             match tx.transaction.ty() {
@@ -716,7 +717,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 EIP1559_TX_TYPE_ID => eip1559_count += 1,
                 EIP4844_TX_TYPE_ID => eip4844_count += 1,
                 EIP7702_TX_TYPE_ID => eip7702_count += 1,
-                _ => {} // Ignore other types
+                _ => other_count += 1,
             }
         }
 
@@ -725,6 +726,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.total_eip1559_transactions.set(eip1559_count as f64);
         self.metrics.total_eip4844_transactions.set(eip4844_count as f64);
         self.metrics.total_eip7702_transactions.set(eip7702_count as f64);
+        self.metrics.total_other_transactions.set(other_count as f64);
     }
 
     pub(crate) fn add_transaction(
