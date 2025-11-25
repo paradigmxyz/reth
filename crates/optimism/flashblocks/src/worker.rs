@@ -55,7 +55,6 @@ where
     N: NodePrimitives,
     EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>,
     Provider: StateProviderFactory
-        + CanonStateSubscriptions<Primitives = N>
         + BlockReaderIdExt<
             Header = HeaderTy<N>,
             Block = BlockTy<N>,

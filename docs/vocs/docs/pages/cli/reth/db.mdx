@@ -111,10 +111,20 @@ Static Files:
       --static-files.blocks-per-file.receipts <BLOCKS_PER_FILE_RECEIPTS>
           Number of blocks per file for the receipts segment
 
+      --static-files.blocks-per-file.transaction-senders <BLOCKS_PER_FILE_TRANSACTION_SENDERS>
+          Number of blocks per file for the transaction senders segment
+
       --static-files.receipts
           Store receipts in static files instead of the database.
 
           When enabled, receipts will be written to static files on disk instead of the database.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+      --static-files.transaction-senders
+          Store transaction senders in static files instead of the database.
+
+          When enabled, transaction senders will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
@@ -232,4 +242,13 @@ Tracing:
           Defaults to TRACE if not specified.
 
           [default: debug]
+
+      --tracing-otlp.sample-ratio <RATIO>
+          Trace sampling ratio to control the percentage of traces to export.
+
+          Valid range: 0.0 to 1.0 - 1.0, default: Sample all traces - 0.01: Sample 1% of traces - 0.0: Disable sampling
+
+          Example: --tracing-otlp.sample-ratio=0.0.
+
+          [env: OTEL_TRACES_SAMPLER_ARG=]
 ```
