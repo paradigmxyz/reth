@@ -40,6 +40,14 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
 {
         let reth_execution_types::BlockExecutionResult { receipts, gas_used, .. } = input.output;
 
+        reth_tracing::tracing::info!(
+            target: "arb-evm::assemble",
+            number = input.evm_env.block_env.number.saturating_to::<u64>(),
+            gas_used_from_result = gas_used,
+            receipts_count = receipts.len(),
+            "Block assembly: gas_used from BlockExecutionResult"
+        );
+
         let gas_adjustment = crate::get_and_clear_gas_adjustment();
         let adjusted_gas_used = if gas_adjustment != 0 {
             let new_gas = (*gas_used as i64 + gas_adjustment) as u64;
@@ -84,6 +92,13 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             excess_blob_gas: None,
             requests_hash: None,
         };
+        reth_tracing::tracing::info!(
+            target: "arb-evm::assemble",
+            number = header.number,
+            gas_used = adjusted_gas_used,
+            receipts_count = receipts.len(),
+            "ArbBlockAssembler: header created with gas_used"
+        );
         reth_tracing::tracing::info!(
             target: "arb-evm::assemble",
             number = header.number,
