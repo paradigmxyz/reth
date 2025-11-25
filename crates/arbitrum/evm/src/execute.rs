@@ -1269,53 +1269,61 @@ impl ArbOsHooks for DefaultArbOsHooks {
         
         let mut compute_cost = total_cost.saturating_sub(state.poster_fee);
         if compute_cost > total_cost {
-            tracing::error!("total cost < poster cost, gasUsed={} basefee={} posterFee={}", 
+            tracing::error!("total cost < poster cost, gasUsed={} basefee={} posterFee={}",
                 gas_used, ctx.basefee, state.poster_fee);
             state.poster_fee = U256::ZERO;
             compute_cost = total_cost;
         }
-        
+
         if state.arbos_version > 4 && !state.infra_fee_account.is_zero() {
             let infra_fee = state.min_base_fee.min(ctx.basefee);
-            
+
             let compute_gas = gas_used.saturating_sub(state.poster_gas);
-            
+
             let infra_compute_cost = infra_fee.saturating_mul(U256::from(compute_gas));
-            
+
             Self::mint_balance(state_db, state.infra_fee_account, infra_compute_cost);
-            
+
             compute_cost = compute_cost.saturating_sub(infra_compute_cost);
         }
-        
+
         if compute_cost > U256::ZERO {
             Self::mint_balance(state_db, state.network_fee_account, compute_cost);
         }
-        
+
         let poster_fee_dest = if state.arbos_version >= 2 {
             crate::l1_pricing::L1_PRICER_FUNDS_POOL_ADDRESS
         } else {
             Address::ZERO
         };
-        
+
         if state.poster_fee > U256::ZERO && !poster_fee_dest.is_zero() {
             Self::mint_balance(state_db, poster_fee_dest, state.poster_fee);
-            
+
             if state.arbos_version >= 10 {
                 if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
                     let _ = arbos_state.l1_pricing_state.add_to_l1_fees_available(state.poster_fee);
                 }
             }
         }
-        
+
+        // Only update gas pool if basefee is positive (matches Go's check for msg.GasPrice.Sign() > 0)
         if ctx.basefee > U256::ZERO {
             let compute_gas = if gas_used > state.poster_gas {
+                // Don't include posterGas in computeGas as it doesn't represent processing time
                 gas_used - state.poster_gas
             } else {
-                tracing::error!("total gas used < poster gas component, gasUsed={} posterGas={}", 
-                    gas_used, state.poster_gas);
+                // Somehow, the core message transition succeeded, but we didn't burn the posterGas.
+                // An invariant was violated. To be safe, subtract the entire gas used from the gas pool.
+                // Note: This can happen legitimately when both gas_used and poster_gas are 0 for
+                // transactions that end early (e.g., internal txs)
+                if gas_used > 0 || state.poster_gas > 0 {
+                    tracing::error!("total gas used < poster gas component, gasUsed={} posterGas={}",
+                        gas_used, state.poster_gas);
+                }
                 gas_used
             };
-            
+
             if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
                 let compute_gas_i64 = -(compute_gas as i64);
                 let _ = arbos_state.l2_pricing_state.add_to_gas_pool(compute_gas_i64);
