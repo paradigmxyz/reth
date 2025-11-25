@@ -63,12 +63,7 @@ impl<N: NodePrimitives> BuiltPayloadExecutedBlock<N> {
         reth_chain_state::ExecutedBlock::new(
             self.recovered_block,
             self.execution_output,
-            ComputedTrieData {
-                hashed_state,
-                trie_updates,
-                anchor_hash: B256::ZERO,
-                trie_input: Arc::new(reth_trie_common::TrieInputSorted::default()),
-            },
+            ComputedTrieData { hashed_state, trie_updates, anchored_trie_input: None },
         )
     }
 }

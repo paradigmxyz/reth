@@ -14,8 +14,8 @@ use alloy_rpc_types_engine::{
 };
 use error::{InsertBlockError, InsertBlockFatalError};
 use reth_chain_state::{
-    CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, MemoryOverlayStateProvider,
-    NewCanonicalChain,
+    AnchoredTrieInput, CanonicalInMemoryState, ComputedTrieData, ExecutedBlock,
+    MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -1806,8 +1806,10 @@ where
         let trie_data = ComputedTrieData {
             hashed_state: sorted_hashed_state,
             trie_updates: sorted_trie_updates,
-            anchor_hash: block.parent_hash(),
-            trie_input,
+            anchored_trie_input: Some(AnchoredTrieInput {
+                anchor_hash: block.parent_hash(),
+                trie_input,
+            }),
         };
 
         Ok(Some(ExecutedBlock::new(

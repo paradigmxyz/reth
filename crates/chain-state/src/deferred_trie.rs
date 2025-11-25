@@ -3,6 +3,18 @@ use parking_lot::{Condvar, Mutex};
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use std::{error::Error, fmt, sync::Arc};
 
+/// Trie input anchored to a persisted ancestor block.
+///
+/// This groups together the anchor hash (the persisted block this input is relative to)
+/// and the sorted trie input data constructed from in-memory overlays.
+#[derive(Clone, Debug)]
+pub struct AnchoredTrieInput {
+    /// The persisted ancestor hash this trie input is anchored to.
+    pub anchor_hash: B256,
+    /// Trie input constructed from in-memory overlays.
+    pub trie_input: Arc<TrieInputSorted>,
+}
+
 /// Sorted trie data computed for an executed block.
 /// These represent the complete set of sorted trie data required to persist
 /// block state and proof generation for a block.
@@ -12,10 +24,12 @@ pub struct ComputedTrieData {
     pub hashed_state: Arc<HashedPostStateSorted>,
     /// Sorted trie updates produced by state root computation.
     pub trie_updates: Arc<TrieUpdatesSorted>,
-    /// The persisted ancestor hash this trie input is anchored to.
-    pub anchor_hash: B256,
-    /// Trie input constructed from in-memory overlays.
-    pub trie_input: Arc<TrieInputSorted>,
+    /// Anchored trie input for in-memory blocks.
+    ///
+    /// This is `Some` when the block is part of the in-memory chain and needs
+    /// trie input data anchored to a persisted ancestor. It is `None` for blocks
+    /// where trie input is not needed (e.g., pending blocks, payload building).
+    pub anchored_trie_input: Option<AnchoredTrieInput>,
 }
 
 /// Error returned when deferred trie data computation fails.
@@ -148,8 +162,7 @@ mod tests {
         ComputedTrieData {
             hashed_state: Arc::default(),
             trie_updates: Arc::default(),
-            anchor_hash: B256::ZERO,
-            trie_input: Arc::new(TrieInputSorted::default()),
+            anchored_trie_input: None,
         }
     }
 
@@ -166,7 +179,7 @@ mod tests {
         let expected = empty_bundle();
         assert_eq!(result.hashed_state, expected.hashed_state);
         assert_eq!(result.trie_updates, expected.trie_updates);
-        assert_eq!(result.anchor_hash, expected.anchor_hash);
+        assert!(result.anchored_trie_input.is_none());
     }
 
     #[test]
@@ -213,7 +226,7 @@ mod tests {
             assert!(elapsed >= delay);
             assert_eq!(data.hashed_state, expected.hashed_state);
             assert_eq!(data.trie_updates, expected.trie_updates);
-            assert_eq!(data.anchor_hash, expected.anchor_hash);
+            assert!(data.anchored_trie_input.is_none());
         }
     }
 }

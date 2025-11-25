@@ -14,7 +14,9 @@ use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
-use reth_chain_state::{CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock};
+use reth_chain_state::{
+    AnchoredTrieInput, CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock,
+};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -561,8 +563,10 @@ where
                 let bundle = ComputedTrieData {
                     hashed_state: sorted_hashed_state,
                     trie_updates: sorted_trie_updates,
-                    anchor_hash: parent_hash,
-                    trie_input: Arc::new(parent_trie_input),
+                    anchored_trie_input: Some(AnchoredTrieInput {
+                        anchor_hash: parent_hash,
+                        trie_input: Arc::new(parent_trie_input),
+                    }),
                 };
 
                 deferred_handle_task.set_ready(bundle);
@@ -976,13 +980,15 @@ where
         // Note: blocks_by_hash returns [tip, parent, ..., oldest], so first() is the tip.
         if let Some(tip_block) = blocks.first() {
             let data = tip_block.trie_data();
-            if data.anchor_hash == block_hash {
-                trace!(target: "engine::tree::payload_validator", %block_hash, %data.anchor_hash, "Reusing trie input with matching anchor hash");
+            if let Some(anchored) = &data.anchored_trie_input &&
+                anchored.anchor_hash == block_hash
+            {
+                trace!(target: "engine::tree::payload_validator", %block_hash, anchor_hash = %anchored.anchor_hash, "Reusing trie input with matching anchor hash");
                 self.metrics
                     .block_validation
                     .deferred_trie_wait_duration
                     .record(wait_start.elapsed().as_secs_f64());
-                return Ok((data.trie_input.as_ref().clone(), block_hash));
+                return Ok((anchored.trie_input.as_ref().clone(), block_hash));
             }
         }
 

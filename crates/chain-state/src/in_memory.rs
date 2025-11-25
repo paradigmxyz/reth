@@ -1,8 +1,9 @@
 //! Types for tracking the canonical chain state in memory.
 
 use crate::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainInfoTracker, ComputedTrieData, DeferredTrieData, MemoryOverlayStateProvider,
+    AnchoredTrieInput, CanonStateNotification, CanonStateNotificationSender,
+    CanonStateNotifications, ChainInfoTracker, ComputedTrieData, DeferredTrieData,
+    MemoryOverlayStateProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
@@ -17,7 +18,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -826,14 +827,17 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         self.trie_data().trie_updates
     }
 
-    /// Returns the trie input anchored to the persisted ancestor.
+    /// Returns the anchored trie input if present.
+    ///
+    /// This is `Some` for in-memory blocks that have anchored trie input data,
+    /// and `None` for pending blocks or blocks where trie input is not needed.
     ///
     /// # Panics
     ///
     /// Panics if the background trie computation task failed or panicked.
     #[inline]
-    pub fn trie_input(&self) -> Arc<TrieInputSorted> {
-        self.trie_data().trie_input
+    pub fn anchored_trie_input(&self) -> Option<AnchoredTrieInput> {
+        self.trie_data().anchored_trie_input
     }
 
     /// Returns a [`BlockNumber`] of the block.
