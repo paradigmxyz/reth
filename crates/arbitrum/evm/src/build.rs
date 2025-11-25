@@ -395,6 +395,19 @@ where
 
 
         let mut tx_env = tx.to_tx_env();
+
+        // Log tx_env for Retry transactions to debug value transfer issue
+        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry) {
+            tracing::warn!(
+                target: "arb-reth::retry-debug",
+                tx_hash = ?tx_hash,
+                tx_env_to = ?tx_env.transact_to,
+                tx_env_value = ?tx_env.value,
+                tx_original_value = ?tx.tx().value(),
+                "Retry transaction tx_env before EVM execution"
+            );
+        }
+
         if is_internal {
             reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
         } else if is_deposit {
