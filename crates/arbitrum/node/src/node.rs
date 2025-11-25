@@ -988,7 +988,13 @@ where
         {
             use reth_primitives_traits::SignedTransaction;
             let tx_hashes: Vec<alloy_primitives::B256> = txs.iter().map(|t| *t.tx_hash()).collect();
-            reth_tracing::tracing::info!(target: "arb-reth::follower", tx_hashes = ?tx_hashes, "follower: built tx hashes before execution");
+            reth_tracing::tracing::info!(
+                target: "arb-reth::follower",
+                l2_block = l2_block_number,
+                tx_count = txs.len(),
+                tx_hashes = ?tx_hashes,
+                "BLOCK_TX_LIST: Transaction hashes for this block"
+            );
         }
 
         reth_tracing::tracing::info!(target: "arb-reth::follower", txs_len = txs.len(), "follower: executing txs (including StartBlock)");
