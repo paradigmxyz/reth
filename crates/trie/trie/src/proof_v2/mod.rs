@@ -55,6 +55,13 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     /// The children for the bottom branch in `branch_stack` are found at the bottom of this stack,
     /// and so on. When a branch is removed from `branch_stack` its children are removed from this
     /// one, and the branch is pushed onto this stack in their place (see [`Self::pop_branch`].
+    ///
+    /// Children on the `child_stack` are converted to [`ProofTrieBranchChild::RlpNode`]s via the
+    /// [`Self::commit_child`] method. Committing a child indicates that no further changes are
+    /// expected to happen to it (e.g. splitting its short key when inserting a new branch). Given
+    /// that keys are consumed in lexicographical order, only the last child on the stack can
+    /// ever be modified, and therefore all children besides the last are expected to be
+    /// [`ProofTrieBranchChild::RlpNode`]s.
     child_stack: Vec<ProofTrieBranchChild<VE::DeferredEncoder>>,
     /// The proofs which will be returned from the calculation. This gets taken at the end of every
     /// proof call.
@@ -108,8 +115,44 @@ where
             .unwrap_or_else(|| Vec::with_capacity(16))
     }
 
-    /// Returns true if the proof of a node at the given path should be retained. This may move the
+    /// Returns true if the proof of a node at the given path should be retained.
+    /// A node is retained if its path is a prefix of any target.
+    /// This may move the
     /// `targets` iterator forward if the given path comes after the current target.
+    ///
+    /// This method takes advantage of the [`WindowIter`] component of [`TargetsIter`] to only check
+    /// a single target at a time. The [`WindowIter`] allows us to look at a current target and the
+    /// next target simultaneously, forming an end-exclusive range.
+    ///
+    /// ```text
+    /// * Given targets: [ 0x012, 0x045, 0x678 ]
+    /// * targets.next() returns:
+    ///     - (0x012, Some(0x045)): covers (0x012..0x045)
+    ///     - (0x045, Some(0x678)): covers (0x045..0x678)
+    ///     - (0x678, None): covers (0x678..)
+    /// ```
+    ///
+    /// As long as the path which is passed in lies within that range we can continue to use the
+    /// current target. Once the path goes beyond that range (ie path >= next target) then we can be
+    /// sure that no further paths will be in the range, and we can iterate forward.
+    ///
+    /// ```text
+    /// * Given:
+    ///     - path: 0x04
+    ///     - targets.peek() returns (0x012, Some(0x045))
+    ///
+    /// * 0x04 comes _after_ 0x045 in depth-first order, so (0x012..0x045) does not contain 0x04.
+    ///
+    /// * targets.next() is called.
+    ///
+    /// * targets.peek() now returns (0x045, Some(0x678)). This does contain 0x04.
+    ///
+    /// * 0x04 is a prefix of 0x045, and so is retained.
+    /// ```
+    ///
+    /// Because paths in the trie are visited in depth-first order, it's imperative that targets are
+    /// given in depth-first order as well. If the targets were generated off of B256s, which is
+    /// the common-case, then this is equivalent to lexicographical order.
     fn should_retain(
         &self,
         targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
@@ -125,16 +168,19 @@ where
             self.retained_proofs.last().map(|n| n.path),
         );
 
-        // TODO docs
-        while let Some((_, Some(upper))) = targets.peek() &&
-            depth_first::cmp(path, upper) != Ordering::Less
-        {
+        let &(mut lower, mut upper) = targets.peek().expect("targets is never exhausted");
+
+        // If the path isn't in the current range then iterate forward until it is (or until there
+        // is no upper bound, indicating unbounded).
+        while upper.is_some_and(|upper| depth_first::cmp(path, &upper) != Ordering::Less) {
             targets.next();
             trace!(target: TRACE_TARGET, target = ?targets.peek(), "upper target <= path, next target");
+            let &(l, u) = targets.peek().expect("targets is never exhausted");
+            (lower, upper) = (l, u);
         }
 
         // If the node in question is a prefix of the target then we retain
-        targets.peek().is_some_and(|(lower, _)| lower.starts_with(path))
+        lower.starts_with(path)
     }
 
     /// Takes a child which has been removed from the `child_stack` and converts it to an
@@ -199,7 +245,6 @@ where
         };
 
         debug_assert_ne!(branch.state_mask.get(), 0, "branch.state_mask can never be zero");
-        // TODO export BITS off of `TrieMask`.
         let last_nibble = u16::BITS - branch.state_mask.leading_zeros() - 1;
 
         let mut child_path = self.branch_path;
@@ -243,7 +288,8 @@ where
         Ok(())
     }
 
-    /// Pushes a new leaf node onto a branch, setting its `state_mask` bit.
+    /// Creates a new leaf node on a branch, setting its `state_mask` bit and pushing the leaf onto
+    /// the `child_stack`.
     ///
     /// # Panics
     ///
@@ -540,8 +586,8 @@ where
             targets.into_iter().inspect(move |target| {
                 if let Some(prev) = prev {
                     debug_assert!(
-                        prev <= *target,
-                        "targets must be sorted lexicographically: {:?} > {:?}",
+                        depth_first::cmp(&prev, target) != Ordering::Greater,
+                        "targets must be sorted depth-first, instead {:?} > {:?}",
                         prev,
                         target
                     );
@@ -643,8 +689,8 @@ where
 {
     /// Generate a proof for the given targets.
     ///
-    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
-    /// target. The returned nodes will be sorted lexicographically by path.
+    /// Given depth-first sorted targets, returns nodes whose paths are a prefix of any target. The
+    /// returned nodes will be sorted lexicographically by path.
     ///
     /// # Panics
     ///
@@ -676,8 +722,8 @@ where
 
     /// Generate a proof for a storage trie at the given hashed address.
     ///
-    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
-    /// target. The returned nodes will be sorted lexicographically by path.
+    /// Given depth-first sorted targets, returns nodes whose paths are a prefix of any target. The
+    /// returned nodes will be sorted lexicographically by path.
     ///
     /// # Panics
     ///
@@ -734,15 +780,16 @@ impl<I: Iterator<Item: Copy>> Iterator for WindowIter<I> {
     type Item = (I::Item, Option<I::Item>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        match (self.prev, self.iter.next()) {
-            (None, None) => None,
-            (None, Some(v)) => {
-                self.prev = Some(v);
-                self.next()
-            }
-            (Some(v), next) => {
-                self.prev = next;
-                Some((v, next))
+        loop {
+            match (self.prev, self.iter.next()) {
+                (None, None) => return None,
+                (None, Some(v)) => {
+                    self.prev = Some(v);
+                }
+                (Some(v), next) => {
+                    self.prev = next;
+                    return Some((v, next))
+                }
             }
         }
     }
@@ -935,7 +982,7 @@ mod tests {
 
         /// Generate a strategy for `HashedPostState` with random accounts
         fn hashed_post_state_strategy() -> impl Strategy<Value = HashedPostState> {
-            prop::collection::vec((any::<[u8; 32]>(), account_strategy()), 0..20).prop_map(
+            prop::collection::vec((any::<[u8; 32]>(), account_strategy()), 0..40).prop_map(
                 |accounts| {
                     let account_map = accounts
                         .into_iter()
@@ -980,7 +1027,7 @@ mod tests {
         }
 
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(5000))]
+            #![proptest_config(ProptestConfig::with_cases(8000))]
 
             /// Tests that ProofCalculator produces valid proofs for randomly generated
             /// HashedPostState with proof targets.
