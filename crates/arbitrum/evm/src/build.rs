@@ -549,27 +549,38 @@ where
                 "Checking if should decrement nonce"
             );
             if let Ok(Some(_)) = result {
-                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-                let state: &mut revm::database::State<D> = *db_ref;
-                if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
-                    if let Some(info) = acc.info.as_mut() {
-                        let old_nonce = info.nonce;
-                        if info.nonce > 0 {
-                            info.nonce -= 1;
-                        }
+                // Access the EVM's state database to modify the sender's nonce
+                let evm = self.inner.evm_mut();
+                let db = evm.db_mut();
+
+                // Load the sender account and modify its nonce
+                if let Ok(Some(mut account_info)) = db.basic(sender) {
+                    let old_nonce = account_info.nonce;
+                    if account_info.nonce > 0 {
+                        account_info.nonce -= 1;
+                        // Update the account in the database
+                        // We need to mark it as changed
+                        db.set_account(sender, account_info);
                         tracing::info!(
                             target: "arb-reth::nonce-debug",
                             sender = ?sender,
                             old_nonce = old_nonce,
-                            new_nonce = info.nonce,
-                            "Decremented nonce after EVM execution"
+                            new_nonce = account_info.nonce,
+                            "Decremented nonce after EVM execution via db.set_account"
+                        );
+                    } else {
+                        tracing::warn!(
+                            target: "arb-reth::nonce-debug",
+                            sender = ?sender,
+                            old_nonce = old_nonce,
+                            "Nonce was already 0, cannot decrement"
                         );
                     }
                 } else {
                     tracing::warn!(
                         target: "arb-reth::nonce-debug",
                         sender = ?sender,
-                        "Could not find sender account in bundle state"
+                        "Could not load sender account from database"
                     );
                 }
             } else {
