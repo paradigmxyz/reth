@@ -126,7 +126,7 @@ pub struct MockTrieCursor {
 
 impl MockTrieCursor {
     /// Creates a new mock trie cursor for accounts with the given trie nodes and key tracking.
-    pub fn new(
+    pub const fn new(
         trie_nodes: Arc<BTreeMap<Nibbles, BranchNodeCompact>>,
         visited_keys: Arc<Mutex<Vec<KeyVisit<Nibbles>>>>,
     ) -> Self {

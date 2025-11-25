@@ -129,7 +129,7 @@ pub struct MockHashedCursor<T> {
 
 impl<T> MockHashedCursor<T> {
     /// Creates a new mock hashed cursor for accounts with the given values and key tracking.
-    pub fn new(
+    pub const fn new(
         values: Arc<BTreeMap<B256, T>>,
         visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>,
     ) -> Self {
