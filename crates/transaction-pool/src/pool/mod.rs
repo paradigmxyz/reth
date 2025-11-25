@@ -1199,7 +1199,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the hash of the transaction
-    pub(crate) fn hash(&self) -> &TxHash {
+    pub fn hash(&self) -> &TxHash {
         match self {
             Self::Pending(tx) => tx.transaction.hash(),
             Self::Parked { transaction, .. } => transaction.hash(),
@@ -1207,7 +1207,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Converts this type into the event type for listeners
-    pub(crate) fn into_new_transaction_event(self) -> NewTransactionEvent<T> {
+    pub fn into_new_transaction_event(self) -> NewTransactionEvent<T> {
         match self {
             Self::Pending(tx) => {
                 NewTransactionEvent { subpool: SubPool::Pending, transaction: tx.transaction }
