@@ -1170,7 +1170,7 @@ pub enum AddedTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AddedTransaction<T> {
     /// Returns whether the transaction has been added to the pending pool.
-    pub(crate) const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
+    pub const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
         match self {
             Self::Pending(tx) => Some(tx),
             _ => None,
@@ -1178,7 +1178,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the replaced transaction if there was one
-    pub(crate) const fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
+    pub const fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
         match self {
             Self::Pending(tx) => tx.replaced.as_ref(),
             Self::Parked { replaced, .. } => replaced.as_ref(),
