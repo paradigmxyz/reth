@@ -797,6 +797,13 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Returns the deferred trie data, blocking until it is available.
     ///
+    /// # Warning
+    ///
+    /// Do not call this from within a `spawn_blocking` task that processes blocks in a chain.
+    /// Since child blocks depend on parent `trie_data()`, calling this inside `spawn_blocking`
+    /// can cause deadlock: child tasks hold thread pool slots while waiting for parent tasks
+    /// that cannot start because the pool is exhausted.
+    ///
     /// # Panics
     ///
     /// Panics if the background trie computation task failed or panicked.

@@ -1003,11 +1003,9 @@ where
         let deferred_compute_duration =
             self.metrics.block_validation.deferred_trie_compute_duration.clone();
 
-        // Merge parent overlay trie input with the current block's trie input.
-        // This is done outside the spawn_blocking task because `merge_overlay_trie_input` calls
-        // `trie_data()` which may block. If this ran inside spawn_blocking, blocking
-        // threads could wait on each other's trie_data() and deadlock by exhausting the
-        // thread pool.
+        // Called outside `spawn_blocking` because `merge_overlay_trie_input` calls `trie_data()`
+        // which may block. If this ran inside `spawn_blocking`, blocking threads could wait on
+        // each other's `trie_data()` and deadlock by exhausting the thread pool.
         let parent_trie_input = Self::merge_overlay_trie_input(&overlay_blocks);
 
         // Defer trie sorting and computation task that computes the trie data to a background task
