@@ -91,7 +91,6 @@ impl DeferredTrieData {
         if matches!(&*state, DeferredState::Pending(_)) {
             *state = DeferredState::Ready(bundle);
         }
-        // Already Ready - ignore (first-write-wins)
     }
 
     /// Returns trie data, computing synchronously if the async task hasn't completed.
