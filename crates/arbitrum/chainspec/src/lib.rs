@@ -719,14 +719,16 @@ pub fn sepolia_baked_genesis_from_header(
     genesis.number = Some(0);
 
     let mut alloc = BTreeMap::new();
-    #[cfg(feature = "std")]
-    {
-        if let Ok(embedded) = crate::embedded_alloc::load_sepolia_secure_alloc_accounts() {
-            if !embedded.is_empty() {
-                alloc = embedded;
-            }
-        }
-    }
+    // DISABLED: Don't use embedded allocation because it has incorrect code for 0x6e
+    // We need to use the code-generated allocation below which has empty code for 0x6e
+    // #[cfg(feature = "std")]
+    // {
+    //     if let Ok(embedded) = crate::embedded_alloc::load_sepolia_secure_alloc_accounts() {
+    //         if !embedded.is_empty() {
+    //             alloc = embedded;
+    //         }
+    //     }
+    // }
 
     let chain_cfg_bytes = chain_config_bytes.map(|b| alloy_primitives::Bytes::from(b.to_vec()));
 
