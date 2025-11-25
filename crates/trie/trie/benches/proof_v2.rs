@@ -7,55 +7,62 @@ use alloy_rlp::Decodable;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use itertools::Itertools;
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
-use reth_primitives_traits::Account;
 use reth_trie::{
     hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
-    proof::Proof,
-    proof_v2::{ProofCalculator, SyncAccountValueEncoder},
+    proof::StorageProof,
+    proof_v2::StorageProofCalculator,
     trie_cursor::{depth_first, mock::MockTrieCursorFactory, TrieCursorFactory},
 };
 use reth_trie_common::{
-    HashedPostState, MultiProofTargets, Nibbles, ProofTrieNode, TrieMasks, TrieNode,
+    HashedPostState, HashedStorage, Nibbles, ProofTrieNode, TrieMasks, TrieNode,
 };
 use std::collections::BTreeMap;
 
 /// Generate test data for benchmarking.
 ///
 /// Returns a tuple of:
-/// - `HashedPostState` with random accounts
-/// - Proof targets (Nibbles) that are 80% from existing accounts, 20% random
-/// - Equivalent [`MultiProofTargets`] for legacy implementation
+/// - Hashed address for the storage trie
+/// - `HashedPostState` with random storage slots
+/// - Proof targets (Nibbles) that are 80% from existing slots, 20% random
+/// - Equivalent [`B256Set`] for legacy implementation
 fn generate_test_data(
     dataset_size: usize,
     num_targets: usize,
-) -> (HashedPostState, Vec<Nibbles>, MultiProofTargets) {
+) -> (B256, HashedPostState, Vec<Nibbles>, B256Set) {
     let mut runner = TestRunner::deterministic();
 
-    // Generate random accounts
-    let accounts_strategy =
-        proptest::collection::vec((any::<[u8; 32]>(), account_strategy()), dataset_size);
+    // Use a fixed hashed address for the storage trie
+    let hashed_address = B256::from([0x42; 32]);
 
-    let accounts = accounts_strategy.new_tree(&mut runner).unwrap().current();
+    // Generate random storage slots (key -> value)
+    let storage_strategy =
+        proptest::collection::vec((any::<[u8; 32]>(), any::<u64>()), dataset_size);
 
-    // Convert to HashedPostState
-    let account_map: B256Map<_> = accounts
+    let storage_entries = storage_strategy.new_tree(&mut runner).unwrap().current();
+
+    // Convert to storage map
+    let storage_map: B256Map<U256> = storage_entries
         .iter()
-        .map(|(addr_bytes, account)| (B256::from(*addr_bytes), Some(*account)))
+        .map(|(slot_bytes, value)| (B256::from(*slot_bytes), U256::from(*value)))
         .collect();
 
-    // All accounts have empty storages
-    let storages =
-        account_map.keys().copied().map(|addr| (addr, Default::default())).collect::<B256Map<_>>();
+    // Create HashedPostState with single account's storage
+    let mut storages = B256Map::default();
+    let hashed_storage = HashedStorage {
+        wiped: false,
+        storage: storage_map.iter().map(|(k, v)| (*k, *v)).collect(),
+    };
+    storages.insert(hashed_address, hashed_storage);
 
-    let hashed_post_state = HashedPostState { accounts: account_map.clone(), storages };
+    let hashed_post_state = HashedPostState { accounts: B256Map::default(), storages };
 
-    // Generate proof targets: 80% from existing accounts, 20% random
-    let account_keys: Vec<B256> = account_map.keys().copied().collect();
+    // Generate proof targets: 80% from existing slots, 20% random
+    let slot_keys: Vec<B256> = storage_map.keys().copied().collect();
 
     let targets_strategy = proptest::collection::vec(
-        prop::bool::weighted(0.8).prop_flat_map(move |from_accounts| {
-            if from_accounts && !account_keys.is_empty() {
-                prop::sample::select(account_keys.clone()).boxed()
+        prop::bool::weighted(0.8).prop_flat_map(move |from_slots| {
+            if from_slots && !slot_keys.is_empty() {
+                prop::sample::select(slot_keys.clone()).boxed()
             } else {
                 any::<[u8; 32]>().prop_map(B256::from).boxed()
             }
@@ -65,7 +72,7 @@ fn generate_test_data(
 
     let target_b256s = targets_strategy.new_tree(&mut runner).unwrap().current();
 
-    // Convert B256 targets to sorted Nibbles
+    // Convert B256 targets to sorted Nibbles for V2
     let mut targets: Vec<Nibbles> = target_b256s
         .iter()
         .map(|b256| {
@@ -75,32 +82,18 @@ fn generate_test_data(
         .collect();
     targets.sort();
 
-    let legacy_targets: MultiProofTargets =
-        target_b256s.iter().map(|addr| (*addr, B256Set::default())).collect();
+    // Create B256Set for legacy
+    let legacy_targets: B256Set = target_b256s.into_iter().collect();
 
-    (hashed_post_state, targets, legacy_targets)
+    (hashed_address, hashed_post_state, targets, legacy_targets)
 }
 
-/// Generate a strategy for Account values
-fn account_strategy() -> impl Strategy<Value = Account> {
-    (any::<u64>(), any::<u64>(), any::<[u8; 32]>()).prop_map(|(nonce, balance, code_hash)| {
-        Account { nonce, balance: U256::from(balance), bytecode_hash: Some(B256::from(code_hash)) }
-    })
-}
-
-/// Create cursor factories from a `HashedPostState`.
+/// Create cursor factories from a `HashedPostState` for storage trie testing.
 ///
 /// This mimics the test harness pattern from the proof_v2 tests.
 fn create_cursor_factories(
     post_state: &HashedPostState,
 ) -> (MockTrieCursorFactory, MockHashedCursorFactory) {
-    // Extract accounts from post state, filtering out None (deleted accounts)
-    let hashed_accounts: BTreeMap<B256, _> = post_state
-        .accounts
-        .iter()
-        .filter_map(|(addr, account)| account.map(|acc| (*addr, acc)))
-        .collect();
-
     // Extract storage tries from post state
     let hashed_storage_tries: B256Map<BTreeMap<B256, U256>> = post_state
         .storages
@@ -120,8 +113,9 @@ fn create_cursor_factories(
     let storage_trie_nodes: B256Map<BTreeMap<_, _>> =
         hashed_storage_tries.keys().copied().map(|addr| (addr, Default::default())).collect();
 
-    // Create mock hashed cursor factory populated with the post state data
-    let hashed_cursor_factory = MockHashedCursorFactory::new(hashed_accounts, hashed_storage_tries);
+    // Create mock hashed cursor factory populated with the storage data
+    // No accounts needed for storage trie testing
+    let hashed_cursor_factory = MockHashedCursorFactory::new(BTreeMap::new(), hashed_storage_tries);
 
     // Create empty trie cursor factory (leaf-only calculator doesn't need trie nodes)
     let trie_cursor_factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_trie_nodes);
@@ -134,7 +128,7 @@ fn bench_proof_algos(c: &mut Criterion) {
     let mut group = c.benchmark_group("Proof");
     for dataset_size in [10240 /* 128, 1024, 10240, 102400 */] {
         for num_targets in [512 /* 1, 8, 16, 64, 128, 512, 2048 */] {
-            let (hashed_post_state, targets, legacy_targets) =
+            let (hashed_address, hashed_post_state, targets, legacy_targets) =
                 generate_test_data(dataset_size, num_targets);
 
             // Create mock cursor factories from the hashed post state
@@ -147,14 +141,17 @@ fn bench_proof_algos(c: &mut Criterion) {
                 b.iter_batched(
                     || legacy_targets.clone(),
                     |targets| {
-                        let proof_result =
-                            Proof::new(trie_cursor_factory.clone(), hashed_cursor_factory.clone())
-                                .multiproof(targets)
-                                .expect("Legacy proof generation failed");
+                        let proof_result = StorageProof::new_hashed(
+                            trie_cursor_factory.clone(),
+                            hashed_cursor_factory.clone(),
+                            hashed_address,
+                        )
+                        .storage_multiproof(targets)
+                        .expect("Legacy proof generation failed");
 
                         // Decode and sort legacy proof nodes, so output is the same as V2
                         let _proof_nodes: Vec<ProofTrieNode> = proof_result
-                            .account_subtree
+                            .subtree
                             .iter()
                             .map(|(path, node_enc)| {
                                 let mut buf = node_enc.as_ref();
@@ -185,25 +182,21 @@ fn bench_proof_algos(c: &mut Criterion) {
             });
 
             group.bench_function(BenchmarkId::new("V2", &bench_name), |b| {
-                let value_encoder = SyncAccountValueEncoder::new(
-                    trie_cursor_factory.clone(),
-                    hashed_cursor_factory.clone(),
-                );
-
                 let trie_cursor = trie_cursor_factory
-                    .account_trie_cursor()
+                    .storage_trie_cursor(hashed_address)
                     .expect("Failed to create trie cursor");
                 let hashed_cursor = hashed_cursor_factory
-                    .hashed_account_cursor()
+                    .hashed_storage_cursor(hashed_address)
                     .expect("Failed to create hashed cursor");
 
-                let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
+                let mut proof_calculator =
+                    StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
                 b.iter_batched(
                     || targets.clone(),
                     |targets| {
                         proof_calculator
-                            .proof(&value_encoder, targets.into_iter())
+                            .storage_proof(hashed_address, targets.into_iter())
                             .expect("Proof generation failed");
                     },
                     BatchSize::SmallInput,
