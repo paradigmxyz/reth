@@ -226,9 +226,15 @@ impl ArbReceipt {
         if buf.len() + header.payload_length != remaining {
             return Err(alloy_rlp::Error::UnexpectedLength);
         }
+        let receipt = AlloyReceipt { status, cumulative_gas_used, logs };
         match tx_type {
             arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx => Ok(Self::Deposit(ArbDepositReceipt)),
-            _ => Ok(Self::Legacy(AlloyReceipt { status, cumulative_gas_used, logs })),
+            arb_alloy_consensus::tx::ArbTxType::ArbitrumUnsignedTx => Ok(Self::Unsigned(receipt)),
+            arb_alloy_consensus::tx::ArbTxType::ArbitrumContractTx => Ok(Self::Contract(receipt)),
+            arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx => Ok(Self::Retry(receipt)),
+            arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx => Ok(Self::SubmitRetryable(receipt)),
+            arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx => Ok(Self::Internal(receipt)),
+            arb_alloy_consensus::tx::ArbTxType::ArbitrumLegacyTx => Ok(Self::Legacy(receipt)),
         }
     }
 }
