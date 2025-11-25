@@ -3,7 +3,7 @@
 use clap::Parser;
 use eyre::WrapErr;
 use reth_tracing::{tracing_subscriber::EnvFilter, Layers};
-use reth_tracing_otlp::{OtlpConfig, OtlpProtocol};
+use reth_tracing_otlp::OtlpProtocol;
 use url::Url;
 
 /// CLI arguments for configuring `Opentelemetry` trace and span export.
@@ -120,21 +120,24 @@ impl TraceArgs {
     /// Note: even though this function is async, it does not actually perform any async operations.
     /// It's needed only to be able to initialize the gRPC transport of OTLP tracing that needs to
     /// be called inside a tokio runtime context.
-    pub async fn init_otlp_tracing(&mut self, layers: &mut Layers) -> eyre::Result<OtlpInitStatus> {
+    pub async fn init_otlp_tracing(
+        &mut self,
+        _layers: &mut Layers,
+    ) -> eyre::Result<OtlpInitStatus> {
         if let Some(endpoint) = self.otlp.as_mut() {
             self.protocol.validate_endpoint(endpoint)?;
 
             #[cfg(feature = "otlp")]
             {
                 {
-                    let config = OtlpConfig::new(
+                    let config = reth_tracing_otlp::OtlpConfig::new(
                         self.service_name.clone(),
                         endpoint.clone(),
                         self.protocol,
                         self.sample_ratio,
                     )?;
 
-                    layers.with_span_layer(config.clone(), self.otlp_filter.clone())?;
+                    _layers.with_span_layer(config.clone(), self.otlp_filter.clone())?;
 
                     Ok(OtlpInitStatus::Started(config.endpoint().clone()))
                 }
