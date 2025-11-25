@@ -451,73 +451,37 @@ where
 
         let wrapped = WithTxEnv { tx_env, tx };
 
-        // For early-terminated transactions (end_tx_now=true with no error),
-        // create a synthetic Success result instead of executing through EVM.
-        // These transactions are fully processed in start_tx hook.
-        let result = if start_hook_result.end_tx_now && start_hook_result.error.is_none() {
-            // Create synthetic Success ExecutionResult
-            use revm::context::result::{ExecutionResult, SuccessReason, Output};
-
-            let gas_used = start_hook_result.gas_used;
-            let synthetic_result = ExecutionResult::Success {
-                reason: SuccessReason::Stop,
-                gas_used,
-                gas_refunded: 0,
-                output: Output::Call(alloy_primitives::Bytes::new()),
-                logs: alloc::vec::Vec::new(), // Logs are in log_sink from start_tx
-            };
-
-            // Store gas for receipt
-            let gas_to_add = if is_internal { 0u64 } else { gas_used };
+        // Execute transaction through EVM
+        // For early-terminated transactions (end_tx_now=true), the state was already
+        // modified in start_tx hook, but we still execute through EVM to build receipt.
+        // The predeploy address 0x6e has empty code (not 0xFE) to avoid INVALID opcode.
+        let result = self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
+            let evm_gas = exec_result.gas_used();
+            // Internal transactions (type 0x6a) don't contribute to cumulative gas
+            let gas_to_add = if is_internal { 0u64 } else { evm_gas };
+            let actual_gas = hook_gas_override.unwrap_or(evm_gas);
             let new_cumulative = self.cumulative_gas_used + gas_to_add;
-            let gas_for_receipt = if is_internal { 0u64 } else { gas_used };
-            crate::set_early_tx_gas(tx_hash, gas_for_receipt, new_cumulative);
 
-            tracing::info!(
+            tracing::debug!(
                 target: "arb-reth::executor",
                 tx_hash = ?tx_hash,
-                gas_used = gas_used,
-                is_internal = is_internal,
+                evm_gas = evm_gas,
+                actual_gas = actual_gas,
+                gas_to_add = gas_to_add,
+                current_cumulative = self.cumulative_gas_used,
                 new_cumulative = new_cumulative,
-                "Created synthetic success result for early-terminated transaction"
+                is_internal = is_internal,
+                is_override = hook_gas_override.is_some(),
+                end_tx_now = start_hook_result.end_tx_now,
+                "Storing cumulative gas before receipt creation"
             );
 
-            // Call the commit condition function with synthetic result
-            // The state changes were already made in start_tx hook
-            f(&synthetic_result);
+            // For internal txs, store 0 as the gas used in receipt
+            let gas_for_receipt = if is_internal { 0u64 } else { actual_gas };
+            crate::set_early_tx_gas(tx_hash, gas_for_receipt, new_cumulative);
 
-            // Return success - state is already committed from start_tx
-            Ok(Some(gas_used))
-        } else {
-            // Normal execution through EVM
-            self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
-                let evm_gas = exec_result.gas_used();
-                // Internal transactions (type 0x6a) don't contribute to cumulative gas
-                let gas_to_add = if is_internal { 0u64 } else { evm_gas };
-                let actual_gas = hook_gas_override.unwrap_or(evm_gas);
-                let new_cumulative = self.cumulative_gas_used + gas_to_add;
-
-                tracing::debug!(
-                    target: "arb-reth::executor",
-                    tx_hash = ?tx_hash,
-                    evm_gas = evm_gas,
-                    actual_gas = actual_gas,
-                    gas_to_add = gas_to_add,
-                    current_cumulative = self.cumulative_gas_used,
-                    new_cumulative = new_cumulative,
-                    is_internal = is_internal,
-                    is_override = hook_gas_override.is_some(),
-                    end_tx_now = start_hook_result.end_tx_now,
-                    "Storing cumulative gas before receipt creation"
-                );
-
-                // For internal txs, store 0 as the gas used in receipt
-                let gas_for_receipt = if is_internal { 0u64 } else { actual_gas };
-                crate::set_early_tx_gas(tx_hash, gas_for_receipt, new_cumulative);
-
-                f(exec_result)
-            })
-        };
+            f(exec_result)
+        });
 
         if let Ok(Some(evm_gas)) = result {
             // Internal transactions don't contribute to cumulative gas
