@@ -560,7 +560,7 @@ where
                         account_info.nonce -= 1;
                         // Update the account in the database
                         // We need to mark it as changed
-                        db.set_account(sender, account_info);
+                        db.insert_account(sender, account_info);
                         tracing::info!(
                             target: "arb-reth::nonce-debug",
                             sender = ?sender,
