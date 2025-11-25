@@ -364,6 +364,11 @@ where
         self.inner().config()
     }
 
+    /// Get the validator reference.
+    pub fn validator(&self) -> &V {
+        self.inner().validator()
+    }
+
     /// Validates the given transaction
     async fn validate(
         &self,
