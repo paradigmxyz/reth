@@ -1,6 +1,6 @@
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions, ComputedTrieData, DeferredTrieData,
+    CanonStateSubscriptions, ComputedTrieData,
 };
 use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::{
@@ -208,17 +208,16 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let block_with_senders = self.generate_random_block(block_number, parent_hash);
 
         let (block, senders) = block_with_senders.split_sealed();
-        let trie_data = ComputedTrieData::default();
-        ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
-            execution_output: Arc::new(ExecutionOutcome::new(
+        ExecutedBlock::new(
+            Arc::new(RecoveredBlock::new_sealed(block, senders)),
+            Arc::new(ExecutionOutcome::new(
                 BundleState::default(),
                 receipts,
                 block_number,
                 vec![Requests::default()],
             )),
-            trie_data: DeferredTrieData::ready(trie_data),
-        }
+            ComputedTrieData::default(),
+        )
     }
 
     /// Generates an [`ExecutedBlock`] that includes the given receipts.

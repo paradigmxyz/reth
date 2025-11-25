@@ -18,9 +18,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{
-    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, DeferredTrieData,
-};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, ComputedTrieData};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -826,20 +824,20 @@ fn test_tree_state_on_new_head_deep_fork() {
     let empty_trie_data = ComputedTrieData::default;
 
     for block in &chain_a {
-        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
-            recovered_block: Arc::new(block.clone()),
-            execution_output: Arc::new(ExecutionOutcome::default()),
-            trie_data: DeferredTrieData::ready(empty_trie_data()),
-        });
+        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
+            Arc::new(block.clone()),
+            Arc::new(ExecutionOutcome::default()),
+            empty_trie_data(),
+        ));
     }
     test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
 
     for block in &chain_b {
-        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
-            recovered_block: Arc::new(block.clone()),
-            execution_output: Arc::new(ExecutionOutcome::default()),
-            trie_data: DeferredTrieData::ready(empty_trie_data()),
-        });
+        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
+            Arc::new(block.clone()),
+            Arc::new(ExecutionOutcome::default()),
+            empty_trie_data(),
+        ));
     }
 
     // for each block in chain_b, reorg to it and then back to canonical

@@ -8,7 +8,7 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
-use reth_chain_state::{BlockState, ComputedTrieData, DeferredTrieData, ExecutedBlock};
+use reth_chain_state::{BlockState, ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
@@ -370,16 +370,16 @@ pub trait LoadPendingBlock:
             vec![execution_result.requests],
         );
 
-        Ok(ExecutedBlock {
-            recovered_block: block.into(),
-            execution_output: Arc::new(execution_outcome),
-            trie_data: DeferredTrieData::ready(ComputedTrieData {
+        Ok(ExecutedBlock::new(
+            block.into(),
+            Arc::new(execution_outcome),
+            ComputedTrieData {
                 hashed_state: Arc::new(hashed_state.into_sorted()),
                 trie_updates: Arc::new(trie_updates.into_sorted()),
                 anchor_hash: B256::ZERO,
                 trie_input: Arc::new(TrieInputSorted::default()),
-            }),
-        })
+            },
+        ))
     }
 }
 
