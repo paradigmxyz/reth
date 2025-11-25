@@ -802,7 +802,15 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Returns the deferred trie data, blocking until it is available.
     ///
-    /// This blocks the calling thread until the background trie computation completes.
+    /// # Warning
+    ///
+    /// Do not call this from within a `spawn_blocking` task unless the underlying wait mechanism
+    /// yields to the scheduler (e.g. `parking_lot::Condvar`). Otherwise, child tasks holding
+    /// thread pool slots while waiting for parents can cause thread starvation deadlock.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the background trie computation task failed or panicked.
     #[inline]
     pub fn trie_data(&self) -> ComputedTrieData {
         self.trie_data.wait_cloned()

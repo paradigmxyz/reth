@@ -1010,12 +1010,19 @@ where
         let deferred_compute_duration =
             self.metrics.block_validation.deferred_trie_compute_duration.clone();
 
+        // Called outside `spawn_blocking` because `merge_overlay_trie_input` calls `trie_data()`
+        // which may block. If this ran inside `spawn_blocking`, blocking threads could wait on
+        // each other's `trie_data()` and deadlock by exhausting the thread pool.
+        let parent_trie_input = Self::merge_overlay_trie_input(&overlay_blocks);
+
+        // Defer trie sorting and computation task that computes the trie data to a background task
+        // so that the validation hot path can return immediately. Consumers will block on
+        // `deferred_trie_data.set_ready()` when they need the sorted trie data.
         let task = move || {
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
 
-                // Merge parent overlay trie input with the current block's trie input.
-                let mut parent_trie_input = Self::merge_overlay_trie_input(&overlay_blocks);
+                let mut parent_trie_input = parent_trie_input;
 
                 let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
                 let sorted_trie_updates = Arc::new(trie_output.into_sorted());
