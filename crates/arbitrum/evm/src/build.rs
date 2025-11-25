@@ -538,9 +538,7 @@ where
             );
         }
 
-        let evm = self.inner.evm_mut();
-        evm.cfg_mut().disable_balance_check = prev_disable;
-
+        // Decrement nonce BEFORE restoring balance check, while state is still accessible
         if used_pre_nonce.is_some() {
             tracing::info!(
                 target: "arb-reth::nonce-debug",
@@ -548,13 +546,14 @@ where
                 result_is_some = matches!(&result, Ok(Some(_))),
                 "Checking if should decrement nonce"
             );
-            if let Ok(Some(ref mut result_and_state)) = result {
-                // Access the state from the execution result
-                // The state contains the bundle_state with all account changes
-                let state = &mut result_and_state.state;
+            if result.is_ok() {
+                // Access the EVM's database state directly
+                let evm = self.inner.evm_mut();
+                let (db_ref, _insp, _precompiles) = evm.components_mut();
+                let state: &mut revm::database::State<D> = *db_ref;
 
                 // Try to find and modify the sender account in the bundle_state
-                if let Some(acc) = state.state.get_mut(&sender) {
+                if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
                     // acc is a BundleAccount
                     if let Some(info) = acc.info.as_mut() {
                         let old_nonce = info.nonce;
@@ -586,16 +585,19 @@ where
                     tracing::warn!(
                         target: "arb-reth::nonce-debug",
                         sender = ?sender,
-                        "Could not find sender account in result's bundle_state"
+                        "Could not find sender account in bundle_state"
                     );
                 }
             } else {
                 tracing::warn!(
                     target: "arb-reth::nonce-debug",
-                    "Transaction result was not Ok(Some(_)), skipping nonce decrement"
+                    "Transaction result was not Ok, skipping nonce decrement"
                 );
             }
         }
+
+        let evm = self.inner.evm_mut();
+        evm.cfg_mut().disable_balance_check = prev_disable;
 
         let tx_type_u8 = match tx_type {
             ArbTxType::Deposit => 0x64,
