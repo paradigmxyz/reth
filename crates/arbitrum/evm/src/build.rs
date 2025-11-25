@@ -180,14 +180,15 @@ where
         let is_sequenced = {
             use reth_arbitrum_primitives::ArbTxType::*;
             match tx.tx().tx_type() {
-                Deposit | Internal => false,
+                Deposit | Internal | Retry => false,
                 _ => true,
             }
         };
         let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
         let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
-        // Internal transactions need precredit logic for nonce handling
-        let needs_precredit = is_sequenced || is_internal;
+        let is_retry = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry);
+        // Internal and Retry transactions need precredit logic for nonce handling
+        let needs_precredit = is_sequenced || is_internal || is_retry;
 
         let paid_gas_price = {
             use reth_arbitrum_primitives::ArbTxType::*;
@@ -427,16 +428,16 @@ where
         }
 
         if needs_precredit {
-            if is_sequenced || is_internal {
-                // Set used_pre_nonce for both sequenced and internal transactions
-                // Internal transactions (type 0x6a StartBlock) need this to ensure
-                // nonce gets decremented after EVM execution (at line 536)
-                // Without this, the nonce would be incorrectly incremented by EVM
+            if is_sequenced || is_internal || is_retry {
+                // Set used_pre_nonce for sequenced, internal, and retry transactions
+                // Internal (0x6a) and Retry (0x68) transactions should NOT increment sender nonce
+                // This ensures nonce gets decremented after EVM execution to compensate
                 used_pre_nonce = Some(current_nonce);
                 tracing::info!(
                     target: "arb-reth::nonce-debug",
                     tx_type = ?tx.tx().tx_type(),
                     is_internal = is_internal,
+                    is_retry = is_retry,
                     is_sequenced = is_sequenced,
                     current_nonce = current_nonce,
                     "Setting used_pre_nonce for nonce decrement"
