@@ -1,6 +1,7 @@
 use alloy_primitives::B256;
+use parking_lot::{Condvar, Mutex};
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
-use std::sync::{Arc, OnceLock};
+use std::{fmt, sync::Arc};
 
 /// Sorted trie data computed for an executed block.
 /// These represent the complete set of sorted trie data required to persist
@@ -69,13 +70,28 @@ impl ComputedTrieData {
     }
 }
 
+/// Internal state for deferred trie data.
+#[derive(Debug, Default)]
+enum DeferredState {
+    /// Data is not yet available.
+    #[default]
+    Pending,
+    /// Data has been computed and is ready.
+    Ready(ComputedTrieData),
+}
+
 /// Shared handle to asynchronously populated trie data.
 ///
-/// A thin wrapper over `Arc<OnceLock<ComputedTrieData>>` that lets producers call
-/// [`DeferredTrieData::set_ready`] once, and consumers block with [`DeferredTrieData::wait_cloned`]
-/// until the trie data is available.
-#[derive(Clone, Debug)]
-pub struct DeferredTrieData(Arc<OnceLock<ComputedTrieData>>);
+/// Uses `Mutex + Condvar` from parking_lot for synchronization. When waiting,
+/// `Condvar::wait()` releases the mutex and yields to the scheduler, allowing
+/// other tasks to make progress on the same thread pool.
+#[derive(Clone)]
+pub struct DeferredTrieData {
+    /// Shared deferred state (pending/ready) holding the computed trie data.
+    state: Arc<Mutex<DeferredState>>,
+    /// Condition variable used to wake all waiters once the state transitions to ready.
+    ready: Arc<Condvar>,
+}
 
 impl Default for DeferredTrieData {
     fn default() -> Self {
@@ -86,7 +102,10 @@ impl Default for DeferredTrieData {
 impl DeferredTrieData {
     /// Create a new pending handle that will be completed later via [`Self::set_ready`].
     pub fn pending() -> Self {
-        Self(Arc::new(OnceLock::new()))
+        Self {
+            state: Arc::new(Mutex::new(DeferredState::default())),
+            ready: Arc::new(Condvar::new()),
+        }
     }
 
     /// Create a handle that is already populated with the given [`ComputedTrieData`].
@@ -94,16 +113,21 @@ impl DeferredTrieData {
     /// Useful when trie data is available immediately; [`Self::wait_cloned`] will return without
     /// blocking.
     pub fn ready(bundle: ComputedTrieData) -> Self {
-        let data = OnceLock::new();
-        data.set(bundle).unwrap(); // Safe: newly created OnceLock
-        Self(Arc::new(data))
+        Self {
+            state: Arc::new(Mutex::new(DeferredState::Ready(bundle))),
+            ready: Arc::new(Condvar::new()),
+        }
     }
 
     /// Populate the handle with the computed trie data.
     ///
     /// Safe to call multiple times; only the first value is stored.
     pub fn set_ready(&self, bundle: ComputedTrieData) {
-        let _ = self.0.set(bundle);
+        let mut state = self.state.lock();
+        if matches!(*state, DeferredState::Pending) {
+            *state = DeferredState::Ready(bundle);
+            self.ready.notify_all();
+        }
     }
 
     /// Block until data is available and return an owned clone.
@@ -113,8 +137,10 @@ impl DeferredTrieData {
     ///
     /// # Blocking Behavior
     ///
-    /// This method blocks the calling thread indefinitely until [`Self::set_ready`] is called.
-    /// There is no timeout - if the value is never set, this will block forever.
+    /// This method blocks the calling thread until [`Self::set_ready`] is called.
+    /// The `Condvar::wait()` call releases the mutex while waiting, allowing other
+    /// tasks to acquire the lock and make progress. This cooperative waiting prevents
+    /// deadlocks in thread pools with limited workers.
     ///
     /// # Panics
     ///
@@ -127,7 +153,27 @@ impl DeferredTrieData {
     /// Multiple threads can wait concurrently. All waiters wake when the value is set,
     /// and each receives a cloned `ComputedTrieData` (Arc clones are cheap).
     pub fn wait_cloned(&self) -> ComputedTrieData {
-        self.0.wait().clone()
+        let mut state = self.state.lock();
+        loop {
+            match &*state {
+                DeferredState::Pending => self.ready.wait(&mut state),
+                DeferredState::Ready(bundle) => return bundle.clone(),
+            }
+        }
+    }
+}
+
+impl fmt::Debug for DeferredTrieData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let state = self.state.lock();
+        match &*state {
+            DeferredState::Pending => {
+                f.debug_struct("DeferredTrieData").field("state", &"pending").finish()
+            }
+            DeferredState::Ready(_) => {
+                f.debug_struct("DeferredTrieData").field("state", &"ready").finish()
+            }
+        }
     }
 }
 
