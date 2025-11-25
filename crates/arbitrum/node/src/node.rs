@@ -521,19 +521,21 @@ where
                     while !s.is_empty() {
                         let before_len = s.len();
 
-                        // Diagnostic logging: Show first byte of transaction (should be 0x00-0x04 for standard Ethereum txs)
-                        if s.len() >= 1 {
-                            reth_tracing::tracing::warn!(
-                                target: "arb-reth::decode",
-                                first_byte = format!("0x{:02x}", s[0]),
-                                total_len = s.len(),
-                                first_10_bytes = format!("{:02x?}", &s[..std::cmp::min(10, s.len())]),
-                                "SignedTx (0x04) message - checking transaction type byte"
-                            );
-                        }
-
-                        let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                            .map_err(|_| eyre::eyre!("decode_2718 failed for SignedTx"))?;
+                        // SignedTx messages can contain either:
+                        // 1. Legacy RLP transactions (first byte >= 0xc0) - no type byte
+                        // 2. Typed transactions (first byte 0x00-0x04) - has type byte
+                        // We need to use the appropriate decoding method for each.
+                        let tx = if s.len() >= 1 && s[0] >= 0xc0 {
+                            // Legacy RLP transaction - decode directly without type byte
+                            use alloy_rlp::Decodable;
+                            reth_arbitrum_primitives::ArbTransactionSigned::decode(&mut s)
+                                .map_err(|e| eyre::eyre!("Failed to decode Legacy RLP transaction: {}", e))?
+                        } else {
+                            // Typed transaction (EIP-2718) - use decode_2718
+                            use alloy_eips::eip2718::Decodable2718;
+                            reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                                .map_err(|e| eyre::eyre!("Failed to decode typed transaction: {:?}", e))?
+                        };
                         reth_tracing::tracing::info!(
                             target: "arb-reth::decode",
                             tx_type = ?tx.tx_type(),
