@@ -26,6 +26,12 @@ pub enum ArbReceipt {
     Eip2930(AlloyReceipt),
     Eip7702(AlloyReceipt),
     Deposit(ArbDepositReceipt),
+    // Arbitrum-specific transaction types
+    Unsigned(AlloyReceipt),        // 0x65
+    Contract(AlloyReceipt),        // 0x66
+    Retry(AlloyReceipt),           // 0x68
+    SubmitRetryable(AlloyReceipt), // 0x69
+    Internal(AlloyReceipt),        // 0x6a
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -64,6 +70,11 @@ impl ArbReceipt {
             | ArbReceipt::Eip1559(_)
             | ArbReceipt::Eip7702(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumLegacyTx,
             ArbReceipt::Deposit(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx,
+            ArbReceipt::Unsigned(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumUnsignedTx,
+            ArbReceipt::Contract(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumContractTx,
+            ArbReceipt::Retry(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx,
+            ArbReceipt::SubmitRetryable(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx,
+            ArbReceipt::Internal(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx,
         }
     }
 
@@ -72,7 +83,12 @@ impl ArbReceipt {
             ArbReceipt::Legacy(r)
             | ArbReceipt::Eip2930(r)
             | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r,
+            | ArbReceipt::Eip7702(r)
+            | ArbReceipt::Unsigned(r)
+            | ArbReceipt::Contract(r)
+            | ArbReceipt::Retry(r)
+            | ArbReceipt::SubmitRetryable(r)
+            | ArbReceipt::Internal(r) => r,
             ArbReceipt::Deposit(_) => {
                 unreachable!()
             }
@@ -84,7 +100,12 @@ impl ArbReceipt {
             ArbReceipt::Legacy(r)
             | ArbReceipt::Eip2930(r)
             | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.rlp_encoded_fields_length_with_bloom(bloom),
+            | ArbReceipt::Eip7702(r)
+            | ArbReceipt::Unsigned(r)
+            | ArbReceipt::Contract(r)
+            | ArbReceipt::Retry(r)
+            | ArbReceipt::SubmitRetryable(r)
+            | ArbReceipt::Internal(r) => r.rlp_encoded_fields_length_with_bloom(bloom),
             ArbReceipt::Deposit(_) => {
                 alloy_rlp::Encodable::length(&alloy_consensus::Eip658Value::Eip658(true)) +
                     alloy_rlp::Encodable::length(&0u64) +
@@ -98,7 +119,12 @@ impl ArbReceipt {
             ArbReceipt::Legacy(r)
             | ArbReceipt::Eip2930(r)
             | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.rlp_encode_fields_with_bloom(bloom, out),
+            | ArbReceipt::Eip7702(r)
+            | ArbReceipt::Unsigned(r)
+            | ArbReceipt::Contract(r)
+            | ArbReceipt::Retry(r)
+            | ArbReceipt::SubmitRetryable(r)
+            | ArbReceipt::Internal(r) => r.rlp_encode_fields_with_bloom(bloom, out),
             ArbReceipt::Deposit(_) => {
                 alloy_consensus::Eip658Value::Eip658(true).encode(out);
                 (0u64).encode(out);
@@ -117,7 +143,12 @@ impl ArbReceipt {
             ArbReceipt::Legacy(r)
             | ArbReceipt::Eip2930(r)
             | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => {
+            | ArbReceipt::Eip7702(r)
+            | ArbReceipt::Unsigned(r)
+            | ArbReceipt::Contract(r)
+            | ArbReceipt::Retry(r)
+            | ArbReceipt::SubmitRetryable(r)
+            | ArbReceipt::Internal(r) => {
                 r.status.encode(out);
                 r.cumulative_gas_used.encode(out);
                 r.logs.encode(out);
@@ -136,7 +167,12 @@ impl ArbReceipt {
             ArbReceipt::Legacy(r)
             | ArbReceipt::Eip2930(r)
             | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => {
+            | ArbReceipt::Eip7702(r)
+            | ArbReceipt::Unsigned(r)
+            | ArbReceipt::Contract(r)
+            | ArbReceipt::Retry(r)
+            | ArbReceipt::SubmitRetryable(r)
+            | ArbReceipt::Internal(r) => {
                 r.status.length() + r.cumulative_gas_used.length() + r.logs.length()
             }
             ArbReceipt::Deposit(_) => {
@@ -321,7 +357,12 @@ mod compact_receipt {
                 ArbReceipt::Legacy(r)
                 | ArbReceipt::Eip2930(r)
                 | ArbReceipt::Eip1559(r)
-                | ArbReceipt::Eip7702(r) => Self {
+                | ArbReceipt::Eip7702(r)
+                | ArbReceipt::Unsigned(r)
+                | ArbReceipt::Contract(r)
+                | ArbReceipt::Retry(r)
+                | ArbReceipt::SubmitRetryable(r)
+                | ArbReceipt::Internal(r) => Self {
                     is_legacy_like: true,
                     success: r.status().into(),
                     cumulative_gas_used: r.cumulative_gas_used(),
@@ -537,7 +578,12 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
             ArbReceipt::Legacy(r)
             | ArbReceipt::Eip2930(r)
             | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.status_or_post_state(),
+            | ArbReceipt::Eip7702(r)
+            | ArbReceipt::Unsigned(r)
+            | ArbReceipt::Contract(r)
+            | ArbReceipt::Retry(r)
+            | ArbReceipt::SubmitRetryable(r)
+            | ArbReceipt::Internal(r) => r.status_or_post_state(),
             ArbReceipt::Deposit(_) => alloy_consensus::Eip658Value::Eip658(true),
         }
     }
@@ -547,7 +593,12 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
             ArbReceipt::Legacy(r)
             | ArbReceipt::Eip2930(r)
             | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.status(),
+            | ArbReceipt::Eip7702(r)
+            | ArbReceipt::Unsigned(r)
+            | ArbReceipt::Contract(r)
+            | ArbReceipt::Retry(r)
+            | ArbReceipt::SubmitRetryable(r)
+            | ArbReceipt::Internal(r) => r.status(),
             ArbReceipt::Deposit(_) => true,
         }
     }
@@ -557,7 +608,12 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
             ArbReceipt::Legacy(r)
             | ArbReceipt::Eip2930(r)
             | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.bloom(),
+            | ArbReceipt::Eip7702(r)
+            | ArbReceipt::Unsigned(r)
+            | ArbReceipt::Contract(r)
+            | ArbReceipt::Retry(r)
+            | ArbReceipt::SubmitRetryable(r)
+            | ArbReceipt::Internal(r) => r.bloom(),
             ArbReceipt::Deposit(_) => alloy_primitives::Bloom::ZERO,
         }
     }
@@ -567,7 +623,12 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
             ArbReceipt::Legacy(r)
             | ArbReceipt::Eip2930(r)
             | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.cumulative_gas_used(),
+            | ArbReceipt::Eip7702(r)
+            | ArbReceipt::Unsigned(r)
+            | ArbReceipt::Contract(r)
+            | ArbReceipt::Retry(r)
+            | ArbReceipt::SubmitRetryable(r)
+            | ArbReceipt::Internal(r) => r.cumulative_gas_used(),
             ArbReceipt::Deposit(_) => 0,
         }
     }
@@ -577,7 +638,12 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
             ArbReceipt::Legacy(r)
             | ArbReceipt::Eip2930(r)
             | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.logs(),
+            | ArbReceipt::Eip7702(r)
+            | ArbReceipt::Unsigned(r)
+            | ArbReceipt::Contract(r)
+            | ArbReceipt::Retry(r)
+            | ArbReceipt::SubmitRetryable(r)
+            | ArbReceipt::Internal(r) => r.logs(),
             ArbReceipt::Deposit(_) => &[],
         }
     }
@@ -587,7 +653,12 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
             ArbReceipt::Legacy(r)
             | ArbReceipt::Eip2930(r)
             | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.logs,
+            | ArbReceipt::Eip7702(r)
+            | ArbReceipt::Unsigned(r)
+            | ArbReceipt::Contract(r)
+            | ArbReceipt::Retry(r)
+            | ArbReceipt::SubmitRetryable(r)
+            | ArbReceipt::Internal(r) => r.logs,
             ArbReceipt::Deposit(_) => alloc::vec::Vec::new(),
         }
     }

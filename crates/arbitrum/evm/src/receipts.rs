@@ -151,16 +151,16 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     "Created receipt with cumulative_gas_used"
                 );
                 let out = match ty {
-                    ArbTxType::Unsigned => ArbReceipt::Legacy(receipt),
-                    ArbTxType::Contract => ArbReceipt::Legacy(receipt),
-                    ArbTxType::Retry => ArbReceipt::Legacy(receipt),
-                    ArbTxType::SubmitRetryable => ArbReceipt::Legacy(receipt),
-                    ArbTxType::Internal => ArbReceipt::Legacy(receipt),
+                    ArbTxType::Unsigned => ArbReceipt::Unsigned(receipt),
+                    ArbTxType::Contract => ArbReceipt::Contract(receipt),
+                    ArbTxType::Retry => ArbReceipt::Retry(receipt),
+                    ArbTxType::SubmitRetryable => ArbReceipt::SubmitRetryable(receipt),
+                    ArbTxType::Internal => ArbReceipt::Internal(receipt),
                     ArbTxType::Legacy => ArbReceipt::Legacy(receipt),
-                    ArbTxType::Eip2930 => ArbReceipt::Legacy(receipt),
-                    ArbTxType::Eip1559 => ArbReceipt::Legacy(receipt),
-                    ArbTxType::Eip4844 => ArbReceipt::Legacy(receipt),
-                    ArbTxType::Eip7702 => ArbReceipt::Legacy(receipt),
+                    ArbTxType::Eip2930 => ArbReceipt::Eip2930(receipt),
+                    ArbTxType::Eip1559 => ArbReceipt::Eip1559(receipt),
+                    ArbTxType::Eip4844 => ArbReceipt::Legacy(receipt),  // No Eip4844 variant, use Legacy
+                    ArbTxType::Eip7702 => ArbReceipt::Eip7702(receipt),
                     ArbTxType::Deposit => unreachable!(),
                 };
                 Ok(out)
