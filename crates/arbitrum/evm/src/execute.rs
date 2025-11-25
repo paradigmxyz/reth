@@ -976,12 +976,13 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 let retry_tx_nonce = 0u64;
 
                 // Construct the retry transaction
+                // The retry transaction uses baseFeePerGas as gas_fee_cap, not the submit retryable's maxFeePerGas
                 use arb_alloy_consensus::tx::ArbRetryTx;
                 let retry_tx = ArbRetryTx {
                     chain_id: U256::from(421614u64), // Arbitrum Sepolia chain ID
                     nonce: retry_tx_nonce,
                     from: ctx.sender,
-                    gas_fee_cap,
+                    gas_fee_cap: ctx.basefee, // Use baseFeePerGas, not the submit retryable's maxFeePerGas
                     gas: usergas,
                     to: Some(retry_to),
                     value: retry_value,
