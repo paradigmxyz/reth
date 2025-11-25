@@ -617,6 +617,9 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                 })
                 .await?
             {
+                // Note: we assume this transaction is valid, because it's mined (or
+                // part of pending block) and already. We don't need to
+                // check for pre EIP-2 because this transaction could be pre-EIP-2.
                 let transaction = tx
                     .try_into_recovered_unchecked()
                     .map_err(|_| EthApiError::InvalidTransactionSignature)?;
