@@ -656,8 +656,15 @@ where
                 let first = l2_owned.first().copied().unwrap_or(0xff);
                 let len = l2_owned.len();
                 reth_tracing::tracing::info!(target: "arb-reth::follower", l2_payload_len = len, l2_first_byte = first, "follower: L2_MESSAGE payload summary");
-                parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id)
-                    .map_err(|e| eyre::eyre!("parse_l2_message_to_txs error: {e}"))?
+                let parsed_txs = parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id)
+                    .map_err(|e| eyre::eyre!("parse_l2_message_to_txs error: {e}"))?;
+                reth_tracing::tracing::info!(
+                    target: "arb-reth::follower",
+                    tx_count = parsed_txs.len(),
+                    "L2_MESSAGE_PARSED: Derived {} transactions from L1 message",
+                    parsed_txs.len()
+                );
+                parsed_txs
             },
             6 => Vec::new(),
             7 => {
@@ -928,6 +935,14 @@ where
                 let has_selector = input.as_ref().len() >= 4 && &input.as_ref()[0..4] == &selector.0[..4];
                 is_internal && has_selector
             }).unwrap_or(false);
+
+            reth_tracing::tracing::info!(
+                target: "arb-reth::follower",
+                l2_block = next_block_number,
+                tx_count_before_startblock = txs.len(),
+                is_first_startblock = is_first_startblock,
+                "STARTBLOCK_CHECK: About to check if we need to create StartBlock"
+            );
 
             if !is_first_startblock {
                 let parent_number = sealed_parent.number();
