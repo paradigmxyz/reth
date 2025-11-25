@@ -115,10 +115,32 @@ where
             let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
             let state_db: &mut revm::database::State<_> = *db_ref;
             if let Ok(arbos_state) = crate::arbosstate::ArbosState::open(state_db as *mut _) {
+                // Load brotli compression level
                 if let Ok(level) = arbos_state.get_brotli_compression_level() {
                     self.tx_state.brotli_compression_level = level as u32;
                 } else {
                     self.tx_state.brotli_compression_level = 0;
+                }
+
+                // CRITICAL FIX: Load network fee account from ArbOS state
+                // If not set, fees were incorrectly going to address zero
+                if let Ok(network_fee) = arbos_state.get_network_fee_account() {
+                    self.tx_state.network_fee_account = network_fee;
+                }
+
+                // Load infra fee account
+                if let Ok(infra_fee) = arbos_state.get_infra_fee_account() {
+                    self.tx_state.infra_fee_account = infra_fee;
+                }
+
+                // Load ArbOS version
+                if let Ok(version) = arbos_state.get_arbos_version() {
+                    self.tx_state.arbos_version = version;
+                }
+
+                // Load min base fee for infra fee calculations
+                if let Ok(min_fee) = arbos_state.l2_pricing_state.get_min_base_fee_wei() {
+                    self.tx_state.min_base_fee = min_fee;
                 }
             } else {
                 self.tx_state.brotli_compression_level = 0;
@@ -395,18 +417,6 @@ where
 
 
         let mut tx_env = tx.to_tx_env();
-
-        // Log tx_env for Retry transactions to debug value transfer issue
-        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry) {
-            tracing::warn!(
-                target: "arb-reth::retry-debug",
-                tx_hash = ?tx_hash,
-                tx_env_to = ?tx_env.transact_to,
-                tx_env_value = ?tx_env.value,
-                tx_original_value = ?tx.tx().value(),
-                "Retry transaction tx_env before EVM execution"
-            );
-        }
 
         if is_internal {
             reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
