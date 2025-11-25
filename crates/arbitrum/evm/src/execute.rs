@@ -229,6 +229,15 @@ impl DefaultArbOsHooks {
         let _ = state.load_cache_account(address);
         // Convert U256 to u128, panic if it doesn't fit (should never happen in practice)
         let amount_u128: u128 = amount.try_into().expect("mint amount exceeds u128::MAX");
+
+        // CRITICAL FIX MARKER - If you see this log, commit 3cdeeafe5 is ACTIVE
+        tracing::info!(
+            target: "arbitrum::balance",
+            ?address,
+            ?amount,
+            "mint_balance: CRITICAL FIX ACTIVE - using .expect() instead of .unwrap_or(u128::MAX)"
+        );
+
         let _ = state.increment_balances(core::iter::once((address, amount_u128)));
     }
 
