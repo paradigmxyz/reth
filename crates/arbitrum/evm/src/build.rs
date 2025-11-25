@@ -433,6 +433,14 @@ where
                 // nonce gets decremented after EVM execution (at line 536)
                 // Without this, the nonce would be incorrectly incremented by EVM
                 used_pre_nonce = Some(current_nonce);
+                tracing::info!(
+                    target: "arb-reth::nonce-debug",
+                    tx_type = ?tx.tx().tx_type(),
+                    is_internal = is_internal,
+                    is_sequenced = is_sequenced,
+                    current_nonce = current_nonce,
+                    "Setting used_pre_nonce for nonce decrement"
+                );
             }
 
             let mut effective_gas_limit = gas_limit;
@@ -537,9 +545,17 @@ where
                 let state: &mut revm::database::State<D> = *db_ref;
                 if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
                     if let Some(info) = acc.info.as_mut() {
+                        let old_nonce = info.nonce;
                         if info.nonce > 0 {
                             info.nonce -= 1;
                         }
+                        tracing::info!(
+                            target: "arb-reth::nonce-debug",
+                            sender = ?sender,
+                            old_nonce = old_nonce,
+                            new_nonce = info.nonce,
+                            "Decremented nonce after EVM execution"
+                        );
                     }
                 }
             }
