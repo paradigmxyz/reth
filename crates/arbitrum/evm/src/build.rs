@@ -451,35 +451,63 @@ where
 
         let wrapped = WithTxEnv { tx_env, tx };
 
-        // For early-terminated transactions, we still execute through EVM to get proper receipt
-        // but the gas will be overridden by hook_gas_override
-        let result = self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
-            let evm_gas = exec_result.gas_used();
-            // Internal transactions (type 0x6a) don't contribute to cumulative gas
-            let gas_to_add = if is_internal { 0u64 } else { evm_gas };
-            let actual_gas = hook_gas_override.unwrap_or(evm_gas);
+        // For early-terminated successful transactions, skip EVM execution
+        // The transaction has already been fully processed in start_tx hook
+        let result = if start_hook_result.end_tx_now && start_hook_result.error.is_none() {
+            tracing::info!(
+                target: "arb-reth::executor",
+                tx_hash = ?tx_hash,
+                gas_used = start_hook_result.gas_used,
+                "Skipping EVM execution for early-terminated successful transaction"
+            );
+
+            // Store gas for receipt
+            let gas_to_add = if is_internal { 0u64 } else { start_hook_result.gas_used };
             let new_cumulative = self.cumulative_gas_used + gas_to_add;
+            let gas_for_receipt = if is_internal { 0u64 } else { start_hook_result.gas_used };
+            crate::set_early_tx_gas(tx_hash, gas_for_receipt, new_cumulative);
 
             tracing::debug!(
                 target: "arb-reth::executor",
                 tx_hash = ?tx_hash,
-                evm_gas = evm_gas,
-                actual_gas = actual_gas,
+                gas_used = start_hook_result.gas_used,
                 gas_to_add = gas_to_add,
-                current_cumulative = self.cumulative_gas_used,
                 new_cumulative = new_cumulative,
-                is_internal = is_internal,
-                is_override = hook_gas_override.is_some(),
-                end_tx_now = start_hook_result.end_tx_now,
-                "Storing cumulative gas before receipt creation"
+                "Stored gas for early-terminated transaction"
             );
 
-            // For internal txs, store 0 as the gas used in receipt
-            let gas_for_receipt = if is_internal { 0u64 } else { actual_gas };
-            crate::set_early_tx_gas(tx_hash, gas_for_receipt, new_cumulative);
+            // Return success with gas used (will create receipt with success status)
+            Ok(Some(start_hook_result.gas_used))
+        } else {
+            // For normal transactions or early-terminated errors, execute through EVM
+            self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
+                let evm_gas = exec_result.gas_used();
+                // Internal transactions (type 0x6a) don't contribute to cumulative gas
+                let gas_to_add = if is_internal { 0u64 } else { evm_gas };
+                let actual_gas = hook_gas_override.unwrap_or(evm_gas);
+                let new_cumulative = self.cumulative_gas_used + gas_to_add;
 
-            f(exec_result)
-        });
+                tracing::debug!(
+                    target: "arb-reth::executor",
+                    tx_hash = ?tx_hash,
+                    evm_gas = evm_gas,
+                    actual_gas = actual_gas,
+                    gas_to_add = gas_to_add,
+                    current_cumulative = self.cumulative_gas_used,
+                    new_cumulative = new_cumulative,
+                    is_internal = is_internal,
+                    is_override = hook_gas_override.is_some(),
+                    end_tx_now = start_hook_result.end_tx_now,
+                    "Storing cumulative gas before receipt creation"
+                );
+
+                // For internal txs, store 0 as the gas used in receipt
+                let gas_for_receipt = if is_internal { 0u64 } else { actual_gas };
+                crate::set_early_tx_gas(tx_hash, gas_for_receipt, new_cumulative);
+
+                f(exec_result)
+            })
+        };
 
         if let Ok(Some(evm_gas)) = result {
             // Internal transactions don't contribute to cumulative gas
