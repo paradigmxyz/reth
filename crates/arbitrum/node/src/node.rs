@@ -646,17 +646,36 @@ where
             out.extend_from_slice(&abi_encode_u256(&l1_base_fee));
             alloy_primitives::Bytes::from(out)
         }
-        reth_tracing::tracing::info!(target: "arb-reth::follower", %kind, "follower: deriving txs for message kind");
+        // 🔍 MESSAGE TYPE TRACKING - Show which message types are actually used
+        let kind_name = match kind {
+            3 => "L2Message/Batch",
+            4 => "SignedTx",
+            6 => "Heartbeat",
+            7 => "L2FundedByL1",
+            8 => "Reserved",
+            9 => "SubmitRetryable",
+            13 => "BatchPostingReport",
+            _ => "Unknown",
+        };
+        reth_tracing::tracing::warn!(
+            target: "arb-reth::MESSAGE-TYPE-TRACKING",
+            kind = %kind,
+            kind_name = %kind_name,
+            data_len = l2_owned.len(),
+            "🔍 PROCESSING_MESSAGE_KIND: {} (0x{:02x}) with {} bytes",
+            kind_name, kind, l2_owned.len()
+        );
+
         let chain_id_u256 =
             alloy_primitives::U256::from(evm_config.chain_spec().chain().id());
-        
+
         reth_tracing::tracing::info!(
             target: "arb-reth::follower",
             "Before match: l2_owned len={}, l2_owned first bytes={:02x?}",
             l2_owned.len(),
             &l2_owned[..std::cmp::min(32, l2_owned.len())]
         );
-        
+
         let mut txs: Vec<reth_arbitrum_primitives::ArbTransactionSigned> = match kind {
             3 => {
                 let first = l2_owned.first().copied().unwrap_or(0xff);
