@@ -918,8 +918,8 @@ where
         // Fast path: if last block's anchor matches the persisted ancestor hash, reuse its
         // TrieInput This means that the TrieInputSorted already aggregates all in-memory
         // overlays from that ancestor, so we can avoid re-aggregation.
-        if let Some(last_block) = blocks.last() {
-            let data = last_block.trie_data();
+        if let Some(tip_block) = blocks.first() {
+            let data = tip_block.trie_data();
             if let (Some(anchor_hash), Some(trie_input)) =
                 (data.anchor_hash(), data.trie_input().cloned()) &&
                 anchor_hash == block_hash
