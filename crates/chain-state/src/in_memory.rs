@@ -800,17 +800,12 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         &self.execution_output
     }
 
-    /// Returns the deferred trie data, blocking until it is available.
+    /// Returns the trie data, computing it synchronously if the deferred task hasn't completed.
     ///
-    /// # Warning
-    ///
-    /// Do not call this from within a `spawn_blocking` task unless the underlying wait mechanism
-    /// yields to the scheduler (e.g. `parking_lot::Condvar`). Otherwise, child tasks holding
-    /// thread pool slots while waiting for parents can cause thread starvation deadlock.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the background trie computation task failed or panicked.
+    /// This method uses a try-lock approach:
+    /// - If the deferred task has completed, returns the cached result immediately.
+    /// - If the task is still pending or the lock is contended, computes the trie data
+    ///   synchronously from the stored unsorted inputs.
     #[inline]
     pub fn trie_data(&self) -> ComputedTrieData {
         self.trie_data.wait_cloned()
@@ -818,7 +813,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Returns the hashed state result of the execution outcome.
     ///
-    /// This blocks the calling thread until the deferred trie computation completes.
+    /// May compute trie data synchronously if the deferred task hasn't completed.
     #[inline]
     pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
         self.trie_data().hashed_state
@@ -826,7 +821,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Returns the trie updates resulting from the execution outcome.
     ///
-    /// This blocks the calling thread until the deferred trie computation completes.
+    /// May compute trie data synchronously if the deferred task hasn't completed.
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
         self.trie_data().trie_updates
@@ -834,7 +829,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Returns the trie input anchored to the persisted ancestor.
     ///
-    /// This blocks the calling thread until the deferred trie computation completes.
+    /// May compute trie data synchronously if the deferred task hasn't completed.
     #[inline]
     pub fn trie_input(&self) -> Option<Arc<TrieInputSorted>> {
         self.trie_data().trie_input().cloned()
