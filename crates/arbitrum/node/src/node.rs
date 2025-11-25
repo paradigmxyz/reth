@@ -517,48 +517,48 @@ where
                     }
                 }
                 0x04 => {
+                    // SignedTx message contains a SINGLE transaction (not multiple like Batch)
+                    // The Go implementation reads all remaining bytes and unmarshals as one transaction
+                    // See: nitro/arbos/parse_l2.go:159-174
+
+                    // SignedTx messages can contain either:
+                    // 1. Legacy RLP transactions (first byte >= 0xc0) - no type byte
+                    // 2. Typed transactions (first byte 0x00-0x7f) - has type byte
+                    let first_byte = if cur.len() >= 1 { cur[0] } else { 0xff };
+                    let is_legacy_rlp = first_byte >= 0xc0;
+
+                    reth_tracing::tracing::debug!(
+                        target: "arb-reth::decode",
+                        first_byte = format!("0x{:02x}", first_byte),
+                        is_legacy = is_legacy_rlp,
+                        data_len = cur.len(),
+                        "SignedTx message - decoding single transaction"
+                    );
+
                     let mut s = cur;
-                    while !s.is_empty() {
-                        let before_len = s.len();
+                    let tx = if is_legacy_rlp {
+                        // Legacy RLP transaction - decode directly without type byte
+                        use alloy_rlp::Decodable;
+                        reth_arbitrum_primitives::ArbTransactionSigned::decode(&mut s)
+                            .map_err(|e| eyre::eyre!("Failed to decode Legacy RLP transaction: {}", e))?
+                    } else {
+                        // Typed transaction (EIP-2718) - use decode_2718
+                        use alloy_eips::eip2718::Decodable2718;
+                        reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                            .map_err(|e| eyre::eyre!("Failed to decode typed transaction: {:?}", e))?
+                    };
 
-                        // SignedTx messages can contain either:
-                        // 1. Legacy RLP transactions (first byte >= 0xc0) - no type byte
-                        // 2. Typed transactions (first byte 0x00-0x7f) - has type byte
-                        // We need to use the appropriate decoding method for each.
-                        let first_byte = if s.len() >= 1 { s[0] } else { 0xff };
-                        let is_legacy_rlp = first_byte >= 0xc0;
+                    reth_tracing::tracing::info!(
+                        target: "arb-reth::decode",
+                        tx_type = ?tx.tx_type(),
+                        tx_hash = %tx.tx_hash(),
+                        consumed = cur.len() - s.len(),
+                        remaining = s.len(),
+                        "decoded SignedTx message transaction"
+                    );
 
-                        reth_tracing::tracing::debug!(
-                            target: "arb-reth::decode",
-                            first_byte = format!("0x{:02x}", first_byte),
-                            is_legacy = is_legacy_rlp,
-                            "SignedTx segment first byte analysis"
-                        );
-
-                        let tx = if is_legacy_rlp {
-                            // Legacy RLP transaction - decode directly without type byte
-                            use alloy_rlp::Decodable;
-                            reth_arbitrum_primitives::ArbTransactionSigned::decode(&mut s)
-                                .map_err(|e| eyre::eyre!("Failed to decode Legacy RLP transaction: {}", e))?
-                        } else {
-                            // Typed transaction (EIP-2718) - use decode_2718
-                            use alloy_eips::eip2718::Decodable2718;
-                            reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                                .map_err(|e| eyre::eyre!("Failed to decode typed transaction: {:?}", e))?
-                        };
-                        reth_tracing::tracing::info!(
-                            target: "arb-reth::decode",
-                            tx_type = ?tx.tx_type(),
-                            tx_hash = %tx.tx_hash(),
-                            remaining = s.len(),
-                            "decoded 0x04 segment tx"
-                        );
-
-                        out.push(tx);
-                        if s.len() == before_len {
-                            break;
-                        }
-                    }
+                    // SignedTx contains exactly ONE transaction - push it to output
+                    out.push(tx);
                 }
                 _ => {}
             }
