@@ -558,6 +558,7 @@ where
                     let old_nonce = account_info.nonce;
                     if account_info.nonce > 0 {
                         account_info.nonce -= 1;
+                        let new_nonce = account_info.nonce;
                         // Update the account in the database
                         // We need to mark it as changed
                         db.insert_account(sender, account_info);
@@ -565,8 +566,8 @@ where
                             target: "arb-reth::nonce-debug",
                             sender = ?sender,
                             old_nonce = old_nonce,
-                            new_nonce = account_info.nonce,
-                            "Decremented nonce after EVM execution via db.set_account"
+                            new_nonce = new_nonce,
+                            "Decremented nonce after EVM execution via db.insert_account"
                         );
                     } else {
                         tracing::warn!(
