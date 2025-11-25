@@ -548,40 +548,45 @@ where
                 result_is_some = matches!(&result, Ok(Some(_))),
                 "Checking if should decrement nonce"
             );
-            if let Ok(Some(_)) = result {
-                // Access the EVM's state database to modify the sender's nonce
-                let evm = self.inner.evm_mut();
-                let db = evm.db_mut();
+            if let Ok(Some(ref mut result_and_state)) = result {
+                // Access the state from the execution result
+                // The state contains the bundle_state with all account changes
+                let state = &mut result_and_state.state;
 
-                // Load the sender account and modify its nonce
-                if let Ok(Some(mut account_info)) = db.basic(sender) {
-                    let old_nonce = account_info.nonce;
-                    if account_info.nonce > 0 {
-                        account_info.nonce -= 1;
-                        let new_nonce = account_info.nonce;
-                        // Update the account in the database
-                        // We need to mark it as changed
-                        db.insert_account(sender, account_info);
-                        tracing::info!(
-                            target: "arb-reth::nonce-debug",
-                            sender = ?sender,
-                            old_nonce = old_nonce,
-                            new_nonce = new_nonce,
-                            "Decremented nonce after EVM execution via db.insert_account"
-                        );
+                // Try to find and modify the sender account in the bundle_state
+                if let Some(acc) = state.state.get_mut(&sender) {
+                    // acc is a BundleAccount
+                    if let Some(info) = acc.info.as_mut() {
+                        let old_nonce = info.nonce;
+                        if info.nonce > 0 {
+                            info.nonce -= 1;
+                            tracing::info!(
+                                target: "arb-reth::nonce-debug",
+                                sender = ?sender,
+                                old_nonce = old_nonce,
+                                new_nonce = info.nonce,
+                                "Decremented nonce in bundle_state after EVM execution"
+                            );
+                        } else {
+                            tracing::warn!(
+                                target: "arb-reth::nonce-debug",
+                                sender = ?sender,
+                                old_nonce = old_nonce,
+                                "Nonce was already 0, cannot decrement"
+                            );
+                        }
                     } else {
                         tracing::warn!(
                             target: "arb-reth::nonce-debug",
                             sender = ?sender,
-                            old_nonce = old_nonce,
-                            "Nonce was already 0, cannot decrement"
+                            "Account in bundle_state but info is None"
                         );
                     }
                 } else {
                     tracing::warn!(
                         target: "arb-reth::nonce-debug",
                         sender = ?sender,
-                        "Could not load sender account from database"
+                        "Could not find sender account in result's bundle_state"
                     );
                 }
             } else {
