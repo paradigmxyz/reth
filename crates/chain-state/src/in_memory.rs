@@ -755,27 +755,31 @@ impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
 }
 
 impl<N: NodePrimitives> ExecutedBlock<N> {
-    /// Create a new [`ExecutedBlock`] with deferred trie data.
-    ///
-    /// Use this constructor when trie data will be computed asynchronously.
-    pub const fn new(
-        recovered_block: Arc<RecoveredBlock<N::Block>>,
-        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
-        trie_data: DeferredTrieData,
-    ) -> Self {
-        Self { recovered_block, execution_output, trie_data }
-    }
-
     /// Create a new [`ExecutedBlock`] with already-computed trie data.
     ///
-    /// Use this constructor when trie data is available immediately.
-    /// The trie data will be wrapped in a ready [`DeferredTrieData`] handle.
-    pub fn with_trie_data(
+    /// Use this constructor when trie data is available immediately (e.g., sequencers,
+    /// payload builders). This is the safe default path.
+    pub fn new(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<ExecutionOutcome<N::Receipt>>,
         trie_data: ComputedTrieData,
     ) -> Self {
         Self { recovered_block, execution_output, trie_data: DeferredTrieData::ready(trie_data) }
+    }
+
+    /// Create a new [`ExecutedBlock`] with deferred trie data.
+    ///
+    /// **IMPORTANT**: The caller MUST ensure that `trie_data.set_ready()` is called,
+    /// otherwise calls to `trie_data()` will block forever.
+    ///
+    /// Use this constructor only when trie data will be computed asynchronously
+    /// by a background task (e.g., during block validation).
+    pub const fn with_deferred_trie_data(
+        recovered_block: Arc<RecoveredBlock<N::Block>>,
+        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+        trie_data: DeferredTrieData,
+    ) -> Self {
+        Self { recovered_block, execution_output, trie_data }
     }
 
     /// Returns a reference to an inner [`SealedBlock`]

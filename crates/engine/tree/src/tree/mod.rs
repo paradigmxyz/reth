@@ -14,7 +14,7 @@ use alloy_rpc_types_engine::{
 };
 use error::{InsertBlockError, InsertBlockFatalError};
 use reth_chain_state::{
-    CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock,
+    CanonicalInMemoryState, ComputedTrieData, ExecutedBlock,
     MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
@@ -1798,11 +1798,11 @@ where
         let trie_data =
             ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
 
-        Ok(Some(ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
-            execution_output: Arc::new(execution_output),
-            trie_data: DeferredTrieData::ready(trie_data),
-        }))
+        Ok(Some(ExecutedBlock::new(
+            Arc::new(RecoveredBlock::new_sealed(block, senders)),
+            Arc::new(execution_output),
+            trie_data,
+        )))
     }
 
     /// Return sealed block header from in-memory state or database by hash.

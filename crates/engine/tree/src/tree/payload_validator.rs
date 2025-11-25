@@ -585,13 +585,14 @@ where
             }
         };
 
+        // Spawn task that computes trie data and calls `deferred_trie_data.set_ready()` when computation is complete.
         self.payload_processor.executor().spawn_blocking(task);
 
-        Ok(ExecutedBlock {
-            recovered_block: Arc::new(block),
-            execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
-            trie_data: deferred_trie_data,
-        })
+        Ok(ExecutedBlock::with_deferred_trie_data(
+            Arc::new(block),
+            Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
+            deferred_trie_data,
+        ))
     }
 
     /// Return sealed block header from database or in-memory state by hash.
