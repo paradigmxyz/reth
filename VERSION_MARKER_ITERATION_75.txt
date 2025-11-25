@@ -1,0 +1,30 @@
+Version: Iteration 75
+Date: 2025-01-13
+Branch: til/ai-fixes
+Latest Commit: d7561ef64
+Total Commits: 10
+
+CRITICAL: Testing Agent is testing OLD code from commit 9f93d523.
+
+This file serves as a marker that NEW code exists beyond what Testing Agent sees.
+
+Major Fixes Included (Commits 2-10):
+- a6f99fe12: Legacy RLP transaction handling (CRITICAL FIX)
+- 334c4f287: Gas accumulation order fix
+- 3dbb195a6: Internal transaction gas handling fix
+- 41c93ce43: Diagnostic logging for gas assembly
+- Plus 6 more commits with fixes and analysis
+
+Testing Agent MUST:
+1. Pull latest til/ai-fixes
+2. Delete nitro-db
+3. Rebuild: cargo build --release
+4. Test against NEW blocks
+
+Expected improvements after rebuild:
+- Blocks 50+ will have non-zero gas
+- Legacy RLP transactions will decode
+- Gas accumulation will be correct
+- State roots will be closer
+
+Current test failures are EXPECTED because Testing Agent is testing old code.
