@@ -23,7 +23,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitComman
 
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
-        // X Layer fix: Use genesis block number from chainspec
         let genesis_block_number = provider_factory.chain_spec().genesis_header().number();
         let hash = provider_factory
             .block_hash(genesis_block_number)?
