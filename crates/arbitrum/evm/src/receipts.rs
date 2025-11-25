@@ -113,14 +113,17 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     );
                     (0u64, ctx.cumulative_gas_used)
                 } else {
+                    // No early gas data - calculate cumulative by adding gas_used to current
+                    let cumulative = ctx.cumulative_gas_used + gas_used;
                     tracing::warn!(
                         target: "arb-reth::receipt-builder",
                         tx_hash = ?tx_hash,
                         evm_gas = gas_used,
-                        ctx_cumulative = ctx.cumulative_gas_used,
-                        "!!!! No early gas found - using ctx cumulative"
+                        ctx_cumulative_before = ctx.cumulative_gas_used,
+                        cumulative_after = cumulative,
+                        "!!!! No early gas found - calculating cumulative as ctx + gas_used"
                     );
-                    (gas_used, ctx.cumulative_gas_used)
+                    (gas_used, cumulative)
                 };
                 
                 let mut logs = ctx.result.into_logs();
