@@ -619,8 +619,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
             {
                 let transaction = tx
                     .try_into_recovered_unchecked()
-                    .map_err(|_| EthApiError::InvalidTransactionSignature)
-                    .map_err(Self::Error::from_eth_err)?;
+                    .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
                 return Ok(Some(TransactionSource::Block {
                     transaction,
