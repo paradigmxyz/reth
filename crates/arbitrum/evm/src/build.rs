@@ -133,10 +133,8 @@ where
                     self.tx_state.infra_fee_account = infra_fee;
                 }
 
-                // Load ArbOS version
-                if let Ok(version) = arbos_state.get_arbos_version() {
-                    self.tx_state.arbos_version = version;
-                }
+                // Load ArbOS version (direct field access)
+                self.tx_state.arbos_version = arbos_state.arbos_version;
 
                 // Load min base fee for infra fee calculations
                 if let Ok(min_fee) = arbos_state.l2_pricing_state.get_min_base_fee_wei() {
