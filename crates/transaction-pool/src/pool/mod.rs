@@ -1236,7 +1236,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the queued reason if the transaction is parked with a queued reason.
-    pub(crate) const fn queued_reason(&self) -> Option<&QueuedReason> {
+    pub const fn queued_reason(&self) -> Option<&QueuedReason> {
         match self {
             Self::Pending(_) => None,
             Self::Parked { queued_reason, .. } => queued_reason.as_ref(),
@@ -1244,7 +1244,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the transaction state based on the subpool and queued reason.
-    pub(crate) fn transaction_state(&self) -> AddedTransactionState {
+    pub fn transaction_state(&self) -> AddedTransactionState {
         match self.subpool() {
             SubPool::Pending => AddedTransactionState::Pending,
             _ => {
