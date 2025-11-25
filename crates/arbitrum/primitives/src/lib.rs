@@ -242,15 +242,18 @@ impl ArbReceipt {
 impl alloy_consensus::Eip2718EncodableReceipt for ArbReceipt {
     fn eip2718_encoded_length_with_bloom(&self, bloom: &alloy_primitives::Bloom) -> usize {
         let inner_len = self.rlp_header_inner(bloom).length_with_payload();
-        match self {
-            ArbReceipt::Deposit(_) => 1 + inner_len,
-            _ => inner_len,
+        // All non-legacy receipts have a type byte prepended
+        if !self.is_legacy() {
+            1 + inner_len
+        } else {
+            inner_len
         }
     }
 
     fn eip2718_encode_with_bloom(&self, bloom: &alloy_primitives::Bloom, out: &mut dyn alloy_rlp::bytes::BufMut) {
-        if matches!(self, ArbReceipt::Deposit(_)) {
-            out.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx.as_u8());
+        // All non-legacy receipts have a type byte prepended
+        if !self.is_legacy() {
+            out.put_u8(self.ty());
         }
         self.rlp_header_inner(bloom).encode(out);
         self.rlp_encode_fields(bloom, out);
