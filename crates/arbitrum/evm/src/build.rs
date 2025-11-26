@@ -183,14 +183,14 @@ where
         let is_sequenced = {
             use reth_arbitrum_primitives::ArbTxType::*;
             match tx.tx().tx_type() {
-                Deposit | Internal | Retry | SubmitRetryable => false,
+                Deposit | Internal | Retry => false,
                 _ => true,
             }
         };
         let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
         let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
-        let is_retry = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry | reth_arbitrum_primitives::ArbTxType::SubmitRetryable);
-        // Internal, Retry, and SubmitRetryable transactions need precredit logic for nonce handling
+        let is_retry = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry);
+        // Internal and Retry transactions need precredit logic for nonce handling
         let needs_precredit = is_sequenced || is_internal || is_retry;
 
         let paid_gas_price = {
