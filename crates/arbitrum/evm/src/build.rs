@@ -558,55 +558,50 @@ where
                     "Account nonce after transaction execution"
                 );
 
-                // Now modify the nonce directly in cached state
-                // We access the DB's cache which holds the modified accounts
+                // Access state to modify the nonce directly
+                // We'll modify the cache which we know works, and also try to mark it in bundle_state
                 let (db_ref, _insp, _precompiles) = evm.components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
 
-                // Modify nonce in BOTH cache and bundle_state
-                // Cache is used during execution, bundle_state is what gets committed
-                let mut nonce_decremented = false;
-
-                // First, modify the cache
+                // Modify the nonce in cache
                 if let Some(cached_account) = state.cache.accounts.get_mut(&sender) {
                     if let Some(ref mut info) = cached_account.account {
+                        let old_nonce = info.info.nonce;
                         if info.info.nonce > 0 {
                             info.info.nonce -= 1;
-                            nonce_decremented = true;
-                            tracing::info!(
-                                target: "arb-reth::nonce-debug",
-                                sender = ?sender,
-                                old_nonce = info.info.nonce + 1,
-                                new_nonce = info.info.nonce,
-                                "Decremented nonce in cache for Internal transaction"
-                            );
+
+                            // Also mark the account as changed in bundle_state if it exists there
+                            // This ensures the cache modification persists to the database
+                            if let Some(bundle_account) = state.bundle_state.state.get_mut(&sender) {
+                                if let Some(ref mut bundle_info) = bundle_account.info {
+                                    bundle_info.nonce = info.info.nonce;
+                                    tracing::info!(
+                                        target: "arb-reth::nonce-debug",
+                                        sender = ?sender,
+                                        old_nonce = old_nonce,
+                                        new_nonce = info.info.nonce,
+                                        "Decremented nonce in cache AND bundle_state for Internal transaction"
+                                    );
+                                } else {
+                                    tracing::info!(
+                                        target: "arb-reth::nonce-debug",
+                                        sender = ?sender,
+                                        old_nonce = old_nonce,
+                                        new_nonce = info.info.nonce,
+                                        "Decremented nonce in cache only (bundle_state.info is None)"
+                                    );
+                                }
+                            } else {
+                                tracing::info!(
+                                    target: "arb-reth::nonce-debug",
+                                    sender = ?sender,
+                                    old_nonce = old_nonce,
+                                    new_nonce = info.info.nonce,
+                                    "Decremented nonce in cache only (account not in bundle_state)"
+                                );
+                            }
                         }
                     }
-                }
-
-                // Second, modify the bundle_state (this is what gets committed to DB)
-                if let Some(bundle_account) = state.bundle_state.state.get_mut(&sender) {
-                    if let Some(ref mut info) = bundle_account.info {
-                        if info.nonce > 0 {
-                            info.nonce -= 1;
-                            nonce_decremented = true;
-                            tracing::info!(
-                                target: "arb-reth::nonce-debug",
-                                sender = ?sender,
-                                old_nonce = info.nonce + 1,
-                                new_nonce = info.nonce,
-                                "Decremented nonce in bundle_state for Internal transaction"
-                            );
-                        }
-                    }
-                }
-
-                if !nonce_decremented {
-                    tracing::warn!(
-                        target: "arb-reth::nonce-debug",
-                        sender = ?sender,
-                        "Could not decrement nonce - account not found in cache or bundle_state"
-                    );
                 }
             }
         }
