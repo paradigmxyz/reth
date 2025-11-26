@@ -626,12 +626,14 @@ where
             );
         }
 
-        // ITERATION 40: Restore nonce IMMEDIATELY after transaction execution
+        // ITERATION 81: Nonce restoration for Internal (0x6a) and Retry (0x68) transactions
+        //
         // EVM increments nonce during execution even with disable_nonce_check=true.
-        // ITERATION 47: Instead of restoring immediately, add to pending restorations
-        // ITER40-46 failed because immediate restoration in cache doesn't persist across
-        // transaction boundaries - next transaction reads nonce from wrong source (bundle/db).
-        // Solution: Defer ALL nonce restorations until finish(), right before bundle_state creation.
+        // For Internal (ArbOS) and Retry transactions, we must restore the nonce to prevent increment.
+        //
+        // We defer all nonce restorations until finish() where we modify BOTH:
+        // - state.cache.accounts (for any reads within the block)
+        // - state.transition_state.transitions (for bundle_state creation via merge_transitions)
         if let Some(pre_nonce) = pre_exec_nonce {
             // Access the EVM state to check current nonce after execution
             let evm = self.inner.evm_mut();
@@ -659,7 +661,7 @@ where
                 is_internal = is_internal,
                 is_retry = is_retry,
                 tx_type = ?tx_type,
-                "[req-1] ITER47: Added nonce restoration to pending list (will apply in finish())"
+                "[req-1] ITER81: Added nonce restoration to pending list (will update both cache AND transition_state in finish())"
             );
         }
 
@@ -703,14 +705,20 @@ where
     }
 
     fn finish(mut self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
-        // ITERATION 47: Apply ALL pending nonce restorations NOW, before calling inner.finish()
-        // This ensures nonces are correct when bundle_state is created from cache.
+        // ITERATION 81: Apply ALL pending nonce restorations NOW, before calling inner.finish()
+        //
+        // CRITICAL FIX: We must modify BOTH:
+        // 1. state.cache.accounts[sender].account.info.nonce - for subsequent tx reads (done in ITER47)
+        // 2. state.transition_state.transitions[sender].info.nonce - for bundle_state creation!
+        //
+        // The bundle_state is created via merge_transitions() which reads from transition_state,
+        // NOT from the cache. ITER47 only modified the cache, which is why nonces weren't persisting.
         let restoration_count = self.pending_nonce_restorations.len();
         if restoration_count > 0 {
             tracing::info!(
                 target: "arb-reth::executor",
                 restoration_count = restoration_count,
-                "[req-1] ITER47: Applying {} pending nonce restorations before inner.finish()",
+                "[req-1] ITER81: Applying {} pending nonce restorations to BOTH cache AND transition_state",
                 restoration_count
             );
 
@@ -720,36 +728,65 @@ where
             let state: &mut revm::database::State<D> = *db_ref;
 
             for (sender, target_nonce) in &self.pending_nonce_restorations {
+                let mut cache_updated = false;
+                let mut transition_updated = false;
+
+                // 1. Update the cache (for any subsequent reads within this block)
                 if let Some(cached_acc) = state.cache.accounts.get_mut(sender) {
                     if let Some(ref mut account) = cached_acc.account {
                         let wrong_nonce = account.info.nonce;
                         account.info.nonce = *target_nonce;
+                        cache_updated = true;
 
-                        tracing::warn!(
+                        tracing::info!(
                             target: "arb-reth::executor",
                             sender = ?sender,
                             wrong_nonce = wrong_nonce,
                             restored_nonce = target_nonce,
-                            "[req-1] ITER47: Applied nonce restoration in finish() before bundle_state creation"
-                        );
-                    } else {
-                        tracing::error!(
-                            target: "arb-reth::executor",
-                            sender = ?sender,
-                            "[req-1] ITER47: Account in cache but account field is None!"
+                            "[req-1] ITER81: Updated cache nonce"
                         );
                     }
-                } else {
-                    tracing::error!(
+                }
+
+                // 2. CRITICAL: Update the transition_state (for bundle_state creation)
+                // This is what ITER47 was missing!
+                if let Some(ref mut transition_state) = state.transition_state {
+                    if let Some(transition_acc) = transition_state.transitions.get_mut(sender) {
+                        if let Some(ref mut info) = transition_acc.info {
+                            let wrong_nonce = info.nonce;
+                            info.nonce = *target_nonce;
+                            transition_updated = true;
+
+                            tracing::warn!(
+                                target: "arb-reth::executor",
+                                sender = ?sender,
+                                wrong_nonce = wrong_nonce,
+                                restored_nonce = target_nonce,
+                                "[req-1] ITER81: Updated transition_state nonce (THIS IS THE KEY FIX!)"
+                            );
+                        }
+                    }
+                }
+
+                if !cache_updated {
+                    tracing::warn!(
                         target: "arb-reth::executor",
                         sender = ?sender,
-                        "[req-1] ITER47: Sender not in cache at finish()!"
+                        "[req-1] ITER81: Sender not in cache or account is None"
+                    );
+                }
+
+                if !transition_updated {
+                    tracing::warn!(
+                        target: "arb-reth::executor",
+                        sender = ?sender,
+                        "[req-1] ITER81: Sender not in transition_state or info is None"
                     );
                 }
             }
         }
 
-        // NOW call inner.finish() which will create bundle_state from the corrected cache
+        // NOW call inner.finish() which will create bundle_state from the corrected transition_state
         let (mut evm, mut result) = self.inner.finish()?;
 
         tracing::info!(
