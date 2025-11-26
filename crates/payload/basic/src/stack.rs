@@ -240,19 +240,13 @@ where
         &self,
         config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        match config.attributes {
-            Either::Left(left_attr) => {
-                let left_config = PayloadConfig {
-                    parent_header: config.parent_header.clone(),
-                    attributes: left_attr,
-                };
+        match config {
+            PayloadConfig { parent_header, attributes: Either::Left(left_attr) } => {
+                let left_config = PayloadConfig { parent_header, attributes: left_attr };
                 self.left.build_empty_payload(left_config).map(Either::Left)
             }
-            Either::Right(right_attr) => {
-                let right_config = PayloadConfig {
-                    parent_header: config.parent_header.clone(),
-                    attributes: right_attr,
-                };
+            PayloadConfig { parent_header, attributes: Either::Right(right_attr) } => {
+                let right_config = PayloadConfig { parent_header, attributes: right_attr };
                 self.right.build_empty_payload(right_config).map(Either::Right)
             }
         }
