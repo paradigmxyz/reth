@@ -76,6 +76,14 @@ impl ExportConfig {
             return Err(eyre!("Max blocks per file cannot be zero"));
         }
 
+        if self.first_block_number > self.last_block_number {
+            return Err(eyre!(
+                "First block ({}) must be less than or equal to last block ({})",
+                self.first_block_number,
+                self.last_block_number
+            ));
+        }
+
         Ok(())
     }
 }
@@ -96,6 +104,14 @@ where
     // Determine the actual last block to export
     // best_block_number() might be outdated, so check actual block availability
     let last_block_number = determine_export_range(provider, config)?;
+
+    if config.first_block_number > last_block_number {
+        return Err(eyre!(
+            "First block ({}) is greater than the highest available block ({}) after clamping to head. Reduce --first-block-number or sync further.",
+            config.first_block_number,
+            last_block_number
+        ));
+    }
 
     info!(
         target: "era::history::export",
