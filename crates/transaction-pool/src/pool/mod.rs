@@ -1070,13 +1070,13 @@ impl<V, T: TransactionOrdering, S> fmt::Debug for PoolInner<V, T, S> {
 #[derive(Debug, Clone)]
 pub struct AddedPendingTransaction<T: PoolTransaction> {
     /// Inserted transaction.
-    transaction: Arc<ValidPoolTransaction<T>>,
+    pub transaction: Arc<ValidPoolTransaction<T>>,
     /// Replaced transaction.
-    replaced: Option<Arc<ValidPoolTransaction<T>>>,
+    pub replaced: Option<Arc<ValidPoolTransaction<T>>>,
     /// transactions promoted to the pending queue
-    promoted: Vec<Arc<ValidPoolTransaction<T>>>,
+    pub promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     /// transactions that failed and became discarded
-    discarded: Vec<Arc<ValidPoolTransaction<T>>>,
+    pub discarded: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
@@ -1170,7 +1170,7 @@ pub enum AddedTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AddedTransaction<T> {
     /// Returns whether the transaction has been added to the pending pool.
-    pub(crate) const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
+    pub const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
         match self {
             Self::Pending(tx) => Some(tx),
             _ => None,
@@ -1178,7 +1178,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the replaced transaction if there was one
-    pub(crate) const fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
+    pub const fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
         match self {
             Self::Pending(tx) => tx.replaced.as_ref(),
             Self::Parked { replaced, .. } => replaced.as_ref(),
@@ -1199,7 +1199,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the hash of the transaction
-    pub(crate) fn hash(&self) -> &TxHash {
+    pub fn hash(&self) -> &TxHash {
         match self {
             Self::Pending(tx) => tx.transaction.hash(),
             Self::Parked { transaction, .. } => transaction.hash(),
@@ -1207,7 +1207,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Converts this type into the event type for listeners
-    pub(crate) fn into_new_transaction_event(self) -> NewTransactionEvent<T> {
+    pub fn into_new_transaction_event(self) -> NewTransactionEvent<T> {
         match self {
             Self::Pending(tx) => {
                 NewTransactionEvent { subpool: SubPool::Pending, transaction: tx.transaction }
@@ -1236,7 +1236,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the queued reason if the transaction is parked with a queued reason.
-    pub(crate) const fn queued_reason(&self) -> Option<&QueuedReason> {
+    pub const fn queued_reason(&self) -> Option<&QueuedReason> {
         match self {
             Self::Pending(_) => None,
             Self::Parked { queued_reason, .. } => queued_reason.as_ref(),
@@ -1244,7 +1244,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the transaction state based on the subpool and queued reason.
-    pub(crate) fn transaction_state(&self) -> AddedTransactionState {
+    pub fn transaction_state(&self) -> AddedTransactionState {
         match self.subpool() {
             SubPool::Pending => AddedTransactionState::Pending,
             _ => {
