@@ -553,21 +553,31 @@ where
         // For Internal and Retry transactions, EVM increments nonce even with disable_nonce_check=true
         // (that flag only skips validation, not increment). We need to manually restore it.
         //
-        // CRITICAL FIX (Iteration 31): Restore nonce REGARDLESS of success or failure!
-        // When a transaction FAILS, the state changes (including nonce increment) still persist.
-        // This causes retry attempts to see the wrong nonce, creating an infinite failure loop.
-        // We MUST restore the nonce even for failed transactions to ensure retries start with correct state.
+        // CRITICAL FIX (Iteration 32): IMMEDIATE restoration instead of deferred!
+        // Root cause identified: finish() is NEVER called when execution fails.
+        // Failed executions leave nonce increments without restoration, causing retry loops.
+        // Solution: Restore nonce IMMEDIATELY after transaction execution, ensuring it happens
+        // even if execution fails later. This prevents state corruption across retry attempts.
         if let Some(pre_nonce) = used_pre_nonce {
-            // ALWAYS defer restoration, regardless of success/failure
-            self.pending_nonce_restorations.push((sender, pre_nonce));
+            // IMMEDIATE restoration: modify state cache right now
+            let (db_ref, _, _) = self.inner.evm_mut().components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
 
-            tracing::info!(
-                target: "arb-reth::nonce-fix",
-                sender = ?sender,
-                pre_nonce = pre_nonce,
-                success = result.is_ok(),
-                "[req-1] Deferred nonce restoration for Internal/Retry tx (will apply at block end, regardless of tx result)"
-            );
+            if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
+                if let Some(account) = cached_acc.account.as_mut() {
+                    let post_exec_nonce = account.info.nonce;
+                    account.info.nonce = pre_nonce;
+
+                    tracing::info!(
+                        target: "arb-reth::nonce-fix",
+                        sender = ?sender,
+                        pre_nonce = pre_nonce,
+                        post_exec_nonce = post_exec_nonce,
+                        success = result.is_ok(),
+                        "[req-1] IMMEDIATELY restored nonce after transaction (success or failure)"
+                    );
+                }
+            }
         }
 
         let evm = self.inner.evm_mut();
@@ -612,34 +622,12 @@ where
     fn finish(mut self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
         tracing::info!(
             target: "arb-reth::executor",
-            pending_restorations = self.pending_nonce_restorations.len(),
-            "ArbBlockExecutor::finish() called - applying deferred nonce restorations"
+            "ArbBlockExecutor::finish() called - nonce restorations now happen immediately after each tx"
         );
 
-        // Apply all deferred nonce restorations BEFORE calling inner.finish()
-        // This ensures all state modifications happen before final commit
-        if !self.pending_nonce_restorations.is_empty() {
-            let (db_ref, _, _) = self.inner.evm_mut().components_mut();
-            let state: &mut revm::database::State<_> = *db_ref;
-
-            for (sender, target_nonce) in &self.pending_nonce_restorations {
-                // Try cache first
-                if let Some(cached_acc) = state.cache.accounts.get_mut(sender) {
-                    if let Some(account) = cached_acc.account.as_mut() {
-                        let current_nonce = account.info.nonce;
-                        account.info.nonce = *target_nonce;
-
-                        tracing::info!(
-                            target: "arb-reth::nonce-fix",
-                            sender = ?sender,
-                            from_nonce = current_nonce,
-                            to_nonce = target_nonce,
-                            "[req-1] Applied deferred nonce restoration in cache at block end"
-                        );
-                    }
-                }
-            }
-        }
+        // ITERATION 32: Deferred restoration removed - nonces are now restored IMMEDIATELY
+        // after each transaction execution. This ensures restoration happens even if
+        // finish() is never called (which occurs when execution fails).
 
         let (evm, mut result) = self.inner.finish()?;
         
