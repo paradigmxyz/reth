@@ -76,6 +76,22 @@ impl BlockingTaskPool {
         Self::builder().build().map(Self::new)
     }
 
+    fn prepare_task<F, R>(
+        &self,
+        func: F,
+    ) -> (BlockingTaskHandle<R>, impl FnOnce() + Send + 'static)
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let job = move || {
+            let _result = tx.send(catch_unwind(AssertUnwindSafe(func)));
+        };
+
+        (BlockingTaskHandle { rx }, job)
+    }
+
     /// Asynchronous wrapper around Rayon's
     /// [`ThreadPool::spawn`](rayon::ThreadPool::spawn).
     ///
@@ -88,13 +104,9 @@ impl BlockingTaskPool {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        let (tx, rx) = oneshot::channel();
-
-        self.pool.spawn(move || {
-            let _result = tx.send(catch_unwind(AssertUnwindSafe(func)));
-        });
-
-        BlockingTaskHandle { rx }
+        let (handle, job) = self.prepare_task(func);
+        self.pool.spawn(job);
+        handle
     }
 
     /// Asynchronous wrapper around Rayon's
@@ -109,13 +121,9 @@ impl BlockingTaskPool {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        let (tx, rx) = oneshot::channel();
-
-        self.pool.spawn_fifo(move || {
-            let _result = tx.send(catch_unwind(AssertUnwindSafe(func)));
-        });
-
-        BlockingTaskHandle { rx }
+        let (handle, job) = self.prepare_task(func);
+        self.pool.spawn_fifo(job);
+        handle
     }
 }
 
