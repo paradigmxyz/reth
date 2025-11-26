@@ -769,9 +769,8 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Create a new [`ExecutedBlock`] with deferred trie data.
     ///
-    /// **Note**: The caller SHOULD ensure `set_ready()` is called for efficiency.
-    /// If the background task hasn't completed, `trie_data()` will compute
-    /// synchronously from stored inputs (no blocking risk).
+    /// If the background task hasn't completed when `trie_data()` is called,
+    /// computation occurs synchronously from stored inputs (no blocking risk).
     ///
     /// Use this constructor only when trie data will be computed asynchronously
     /// by a background task (e.g., during block validation).

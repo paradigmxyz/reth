@@ -51,7 +51,7 @@ impl fmt::Debug for DeferredTrieData {
 }
 
 impl DeferredTrieData {
-    /// Create a new pending handle with fallback inputs for synchronous computation.
+    /// Create a new pending handle with inputs for deferred computation.
     ///
     /// # Safety Invariant
     /// The `ancestors` list must form a DAG (directed acyclic graph). Self-references
@@ -343,127 +343,30 @@ mod tests {
         assert_eq!(first.anchor_hash(), second.anchor_hash());
     }
 
-    /// Verifies that `set_ready` value takes precedence when called before `wait_cloned`.
+    /// Verifies concurrent wait_cloned calls: one computes, others wait and get cached result.
     #[test]
-    fn set_ready_wins_over_fallback() {
-        let deferred = empty_pending();
+    fn concurrent_wait_cloned_shares_result() {
+        let deferred = empty_pending_with_anchor(B256::with_last_byte(100));
 
-        let bundle = ComputedTrieData {
-            anchored_trie_input: Some(AnchoredTrieInput {
-                anchor_hash: B256::with_last_byte(42),
-                trie_input: Arc::new(TrieInputSorted::default()),
-            }),
-            ..empty_bundle()
-        };
+        // Spawn multiple threads that all call wait_cloned concurrently
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let d = deferred.clone();
+                thread::spawn(move || d.wait_cloned())
+            })
+            .collect();
 
-        // Set ready before wait_cloned
-        deferred.set_ready(bundle);
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
-        let result = deferred.wait_cloned();
-        assert_eq!(result.anchor_hash(), Some(B256::with_last_byte(42)));
-    }
+        // All results should have the same anchor (computed from inputs)
+        for result in &results {
+            assert_eq!(result.anchor_hash(), Some(B256::with_last_byte(100)));
+        }
 
-    /// Verifies first-write-wins semantics: only the first `set_ready` value is stored.
-    #[test]
-    fn multiple_set_ready_takes_first() {
-        let deferred = empty_pending();
-
-        let first = ComputedTrieData {
-            anchored_trie_input: Some(AnchoredTrieInput {
-                anchor_hash: B256::with_last_byte(1),
-                trie_input: Arc::new(TrieInputSorted::default()),
-            }),
-            ..empty_bundle()
-        };
-        let second = ComputedTrieData {
-            anchored_trie_input: Some(AnchoredTrieInput {
-                anchor_hash: B256::with_last_byte(2),
-                trie_input: Arc::new(TrieInputSorted::default()),
-            }),
-            ..empty_bundle()
-        };
-
-        deferred.set_ready(first.clone());
-        deferred.set_ready(second);
-
-        assert_eq!(deferred.wait_cloned().anchor_hash(), first.anchor_hash());
-    }
-
-    /// Verifies that cloned handles share the same underlying state.
-    #[test]
-    fn clones_share_state() {
-        let deferred = empty_pending();
-        let setter = deferred.clone();
-
-        let bundle = ComputedTrieData {
-            anchored_trie_input: Some(AnchoredTrieInput {
-                anchor_hash: B256::with_last_byte(3),
-                trie_input: Arc::new(TrieInputSorted::default()),
-            }),
-            ..empty_bundle()
-        };
-
-        thread::spawn(move || setter.set_ready(bundle));
-
-        // Give the thread time to set
-        thread::sleep(Duration::from_millis(10));
-        assert_eq!(deferred.wait_cloned().anchor_hash(), Some(B256::with_last_byte(3)));
-    }
-
-    /// Verifies that calling `set_ready` before `wait_cloned` returns the set value immediately.
-    #[test]
-    fn set_before_wait_returns_set_value() {
-        let deferred = empty_pending();
-
-        let bundle = ComputedTrieData {
-            anchored_trie_input: Some(AnchoredTrieInput {
-                anchor_hash: B256::with_last_byte(4),
-                trie_input: Arc::new(TrieInputSorted::default()),
-            }),
-            ..empty_bundle()
-        };
-
-        deferred.set_ready(bundle.clone());
-
-        let start = Instant::now();
-        let result = deferred.wait_cloned();
-        let elapsed = start.elapsed();
-
-        assert_eq!(result.anchor_hash(), bundle.anchor_hash());
-        assert!(elapsed < Duration::from_millis(20));
-    }
-
-    /// Verifies race condition handling: either async `set_ready` or fallback result is returned.
-    #[test]
-    fn async_set_ready_race_with_fallback() {
-        // Test that when async task sets ready, either the set value or fallback is returned
-        let deferred = empty_pending_with_anchor(B256::with_last_byte(100)); // Fallback anchor
-        let deferred_clone = deferred.clone();
-
-        // Spawn async task that sets ready after a delay
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(5));
-            let bundle = ComputedTrieData {
-                anchored_trie_input: Some(AnchoredTrieInput {
-                    anchor_hash: B256::with_last_byte(200), // Async anchor
-                    trie_input: Arc::new(TrieInputSorted::default()),
-                }),
-                ..empty_bundle()
-            };
-            deferred_clone.set_ready(bundle);
-        });
-
-        // Wait a bit for potential race
-        thread::sleep(Duration::from_millis(10));
-
-        let result = deferred.wait_cloned();
-        // Result should be either from set_ready (200) or fallback (100)
-        let anchor = result.anchor_hash();
-        assert!(
-            anchor == Some(B256::with_last_byte(200)) || anchor == Some(B256::with_last_byte(100)),
-            "Expected anchor 100 or 200, got {:?}",
-            anchor
-        );
+        // All results should share the same Arc (same cached computation)
+        for i in 1..results.len() {
+            assert!(Arc::ptr_eq(&results[0].hashed_state, &results[i].hashed_state));
+        }
     }
 
     /// Tests that ancestor trie data is merged during fallback computation and that the
@@ -534,5 +437,163 @@ mod tests {
         assert_eq!(overlay_state.len(), 1);
         let (_, account) = &overlay_state[0];
         assert_eq!(account.unwrap().nonce, 2);
+    }
+
+    // ==================== Deadlock Safety Tests ====================
+    //
+    // These tests verify that the implementation handles various ancestor chain
+    // patterns without deadlock. The key invariant is that ancestors must form
+    // a DAG (directed acyclic graph) - no cycles or self-references.
+    //
+    // IMPORTANT: Self-reference or cycles in ancestors WILL deadlock because
+    // `compute_from_inputs` holds the mutex while calling `wait_cloned` on
+    // ancestors. If an ancestor is the same object (or part of a cycle),
+    // the thread will block waiting for a lock it already holds.
+
+    /// Helper to create a chain of pending blocks: block[0] has no ancestors,
+    /// block[i] has block[i-1] as ancestor.
+    fn create_pending_chain(len: usize) -> Vec<DeferredTrieData> {
+        let mut chain: Vec<DeferredTrieData> = Vec::with_capacity(len);
+        for i in 0..len {
+            let ancestors = if i == 0 { vec![] } else { vec![chain[i - 1].clone()] };
+            chain.push(DeferredTrieData::pending(
+                Arc::new(HashedPostState::default()),
+                Arc::new(TrieUpdates::default()),
+                B256::with_last_byte(i as u8),
+                ancestors,
+            ));
+        }
+        chain
+    }
+
+    /// Verifies linear ancestor chain completes without deadlock.
+    /// Chain: block[n] -> block[n-1] -> ... -> block[0] (no ancestors)
+    #[test]
+    fn linear_chain_no_deadlock() {
+        let chain = create_pending_chain(5);
+
+        // Access the tip - should recursively compute all ancestors without deadlock
+        let result = chain[4].wait_cloned();
+        assert_eq!(result.anchor_hash(), Some(B256::with_last_byte(4)));
+    }
+
+    /// Verifies deep ancestor chain (20+ levels) completes without stack overflow.
+    #[test]
+    fn deep_chain_no_stack_overflow() {
+        let chain = create_pending_chain(25);
+
+        let result = chain[24].wait_cloned();
+        assert_eq!(result.anchor_hash(), Some(B256::with_last_byte(24)));
+    }
+
+    /// Verifies concurrent access to different blocks in same chain works correctly.
+    #[test]
+    fn concurrent_chain_access() {
+        let chain = create_pending_chain(10);
+
+        // Multiple threads access different points in the chain simultaneously
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let block = chain[i].clone();
+                thread::spawn(move || block.wait_cloned())
+            })
+            .collect();
+
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        // Each result should have its block's anchor hash
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(result.anchor_hash(), Some(B256::with_last_byte(i as u8)));
+        }
+    }
+
+    /// Verifies diamond dependency pattern works: D depends on B and C, both depend on A.
+    ///
+    /// ```text
+    ///       A (no ancestors)
+    ///      / \
+    ///     B   C
+    ///      \ /
+    ///       D
+    /// ```
+    #[test]
+    fn diamond_dependency_no_deadlock() {
+        // A has no ancestors
+        let a = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            B256::with_last_byte(0xA),
+            vec![],
+        );
+
+        // B and C both depend on A
+        let b = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            B256::with_last_byte(0xB),
+            vec![a.clone()],
+        );
+        let c = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            B256::with_last_byte(0xC),
+            vec![a.clone()],
+        );
+
+        // D depends on both B and C (diamond merge)
+        let d = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            B256::with_last_byte(0xD),
+            vec![b, c],
+        );
+
+        // Should complete without deadlock
+        let result = d.wait_cloned();
+        assert_eq!(result.anchor_hash(), Some(B256::with_last_byte(0xD)));
+    }
+
+    /// Verifies two independent chains can be computed in parallel.
+    #[test]
+    fn parallel_independent_chains() {
+        let chain1 = create_pending_chain(5);
+        let chain2 = create_pending_chain(5);
+
+        let tip1 = chain1[4].clone();
+        let tip2 = chain2[4].clone();
+
+        let h1 = thread::spawn(move || tip1.wait_cloned());
+        let h2 = thread::spawn(move || tip2.wait_cloned());
+
+        let r1 = h1.join().unwrap();
+        let r2 = h2.join().unwrap();
+
+        // Both should complete with their respective anchors
+        assert_eq!(r1.anchor_hash(), Some(B256::with_last_byte(4)));
+        assert_eq!(r2.anchor_hash(), Some(B256::with_last_byte(4)));
+    }
+
+    /// Verifies duplicate ancestor in list doesn't deadlock.
+    /// The same ancestor appearing twice should work: first computes, second returns cached.
+    #[test]
+    fn duplicate_ancestor_no_deadlock() {
+        let ancestor = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            B256::with_last_byte(1),
+            vec![],
+        );
+
+        // Block with same ancestor listed twice
+        let block = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            B256::with_last_byte(2),
+            vec![ancestor.clone(), ancestor], // Same ancestor twice!
+        );
+
+        // Should complete without deadlock
+        let result = block.wait_cloned();
+        assert_eq!(result.anchor_hash(), Some(B256::with_last_byte(2)));
     }
 }
