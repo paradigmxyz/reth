@@ -11,6 +11,13 @@ use reth_evm_ethereum::{EthEvmConfig};
 use crate::ArbEvmFactory;
 use crate::header;
 use std::collections::HashMap;
+use std::sync::LazyLock;
+use dashmap::DashMap;
+
+/// Global tracker to prevent duplicate nonce restorations across multiple block executions.
+/// Reth executes blocks multiple times (validation + commit phases), but we should only
+/// restore nonces ONCE per block. Key: (block_number, sender_address), Value: restored_nonce
+static RESTORED_NONCES: LazyLock<DashMap<(u64, Address), u64>> = LazyLock::new(DashMap::new);
 use revm_state::{AccountInfo as RevmAccountInfo, EvmStorageSlot};
 use revm_database::{BundleAccount, AccountStatus};
 use revm::{
@@ -610,19 +617,48 @@ where
     }
 
     fn finish(mut self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
+        // Get block number for global tracker
+        let block_number: u64 = alloy_evm::Evm::block(self.inner.evm()).number.try_into().unwrap_or(0);
+
         tracing::info!(
             target: "arb-reth::executor",
+            block_number = block_number,
             pending_restorations = self.pending_nonce_restorations.len(),
+            tracker_size = RESTORED_NONCES.len(),
             "ArbBlockExecutor::finish() called - applying deferred nonce restorations"
         );
 
         // Apply all deferred nonce restorations BEFORE calling inner.finish()
         // This ensures all state modifications happen before final commit
+        //
+        // CRITICAL: Reth executes blocks MULTIPLE TIMES (validation + commit phases).
+        // We must use global tracker to ensure nonce restoration happens only ONCE across
+        // all executions, otherwise final execution will restore from wrong starting nonce.
+        //
+        // FIX: Insert into tracker BEFORE cache check, not inside it, so ALL restorations
+        // are tracked even when account not in cache.
         if !self.pending_nonce_restorations.is_empty() {
             let (db_ref, _, _) = self.inner.evm_mut().components_mut();
             let state: &mut revm::database::State<_> = *db_ref;
 
             for (sender, target_nonce) in &self.pending_nonce_restorations {
+                let tracker_key = (block_number, *sender);
+
+                // Check if this (block, sender) pair already had nonce restored
+                if RESTORED_NONCES.contains_key(&tracker_key) {
+                    tracing::debug!(
+                        target: "arb-reth::nonce-fix",
+                        sender = ?sender,
+                        block_number = block_number,
+                        "[req-1] SKIPPED: Nonce already restored for this sender in this block (duplicate execution)"
+                    );
+                    continue;
+                }
+
+                // CRITICAL FIX: Record in tracker BEFORE cache check, not after
+                // This ensures ALL restorations are tracked, even if account not in cache
+                RESTORED_NONCES.insert(tracker_key, *target_nonce);
+
                 // Try cache first
                 if let Some(cached_acc) = state.cache.accounts.get_mut(sender) {
                     if let Some(account) = cached_acc.account.as_mut() {
@@ -632,11 +668,26 @@ where
                         tracing::info!(
                             target: "arb-reth::nonce-fix",
                             sender = ?sender,
+                            block_number = block_number,
                             from_nonce = current_nonce,
                             to_nonce = target_nonce,
-                            "[req-1] Applied deferred nonce restoration in cache at block end"
+                            "[req-1] APPLIED: Deferred nonce restoration in cache (recorded in tracker)"
+                        );
+                    } else {
+                        tracing::warn!(
+                            target: "arb-reth::nonce-fix",
+                            sender = ?sender,
+                            block_number = block_number,
+                            "[req-1] Account in cache but account.as_mut() returned None"
                         );
                     }
+                } else {
+                    tracing::warn!(
+                        target: "arb-reth::nonce-fix",
+                        sender = ?sender,
+                        block_number = block_number,
+                        "[req-1] NOT IN CACHE: Account not found in cache.accounts (already recorded in tracker)"
+                    );
                 }
             }
         }
@@ -666,7 +717,23 @@ where
                 "No receipts in result - cannot correct gasUsed"
             );
         }
-        
+
+        // Clean up old blocks from the global nonce restoration tracker to prevent memory leaks
+        // Keep last 1000 blocks in the tracker (blocks can execute multiple times, so we need a buffer)
+        const TRACKER_RETENTION_BLOCKS: u64 = 1000;
+        if block_number > TRACKER_RETENTION_BLOCKS {
+            let cleanup_threshold = block_number - TRACKER_RETENTION_BLOCKS;
+            RESTORED_NONCES.retain(|(block, _), _| *block >= cleanup_threshold);
+
+            tracing::debug!(
+                target: "arb-reth::nonce-fix",
+                current_block = block_number,
+                cleanup_threshold = cleanup_threshold,
+                tracker_size_after = RESTORED_NONCES.len(),
+                "[req-1] Cleaned up old blocks from nonce restoration tracker"
+            );
+        }
+
         Ok((evm, result))
     }
 
