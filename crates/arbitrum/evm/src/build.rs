@@ -77,6 +77,9 @@ pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::Re
     tx_state: ArbTxProcessorState,
     cumulative_gas_used: u64,
     exec_ctx: ArbBlockExecutionCtx,
+    /// Deferred nonce restorations to apply at block end (address, target_nonce)
+    /// For Internal/Retry txs that should NOT increment sender nonce
+    pending_nonce_restorations: Vec<(Address, u64)>,
     _phantom: PhantomData<CS>,
 }
 
@@ -549,109 +552,20 @@ where
 
         // For Internal and Retry transactions, EVM increments nonce even with disable_nonce_check=true
         // (that flag only skips validation, not increment). We need to manually restore it.
-        // From Testing Agent: Internal AND Retry transactions should NOT increment sender nonce
         //
-        // SOLUTION: Directly modify bundle_state instead of using insert_account()
-        // This avoids invalid state transitions that caused panic at bundle_account.rs:185
-        // Pattern based on Testing Agent suggestion and storage.rs:110
+        // DEFERRED APPROACH: Don't modify state immediately - just record that restoration is needed.
+        // Apply all restorations ONCE at block end to avoid mid-block state inconsistencies.
+        // Testing Agent confirmed: merge_transitions is BLOCK-LEVEL, not TRANSACTION-LEVEL.
         if let Some(pre_nonce) = used_pre_nonce {
-            tracing::info!(
-                target: "arb-reth::nonce-debug",
-                sender = ?sender,
-                pre_nonce = pre_nonce,
-                result_is_ok = result.is_ok(),
-                "[req-1] DEBUG: Entered nonce restoration block"
-            );
-
             if result.is_ok() {
-                tracing::info!(
-                    target: "arb-reth::nonce-debug",
-                    sender = ?sender,
-                    "[req-1] DEBUG: Result is OK, accessing state cache"
-                );
-
-                let (db_ref, _, _) = self.inner.evm_mut().components_mut();
-                let state: &mut revm::database::State<D> = *db_ref;
+                // Defer restoration to block end
+                self.pending_nonce_restorations.push((sender, pre_nonce));
 
                 tracing::info!(
-                    target: "arb-reth::nonce-debug",
+                    target: "arb-reth::nonce-fix",
                     sender = ?sender,
-                    in_bundle_state = state.bundle_state.state.contains_key(&sender),
-                    in_cache = state.cache.accounts.contains_key(&sender),
-                    "[req-1] DEBUG: Checking sender location (bundle_state vs cache)"
-                );
-
-                // After execute_transaction_with_commit_condition, the state might be in bundle_state
-                // Try bundle_state first, then fall back to cache
-                let mut restored = false;
-
-                if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
-                    tracing::info!(
-                        target: "arb-reth::nonce-debug",
-                        sender = ?sender,
-                        has_info = acc.info.is_some(),
-                        "[req-1] DEBUG: Found account in bundle_state"
-                    );
-
-                    if let Some(info) = acc.info.as_mut() {
-                        let post_nonce = info.nonce;
-                        info.nonce = pre_nonce;
-                        restored = true;
-
-                        tracing::info!(
-                            target: "arb-reth::nonce-fix",
-                            sender = ?sender,
-                            pre_nonce = pre_nonce,
-                            post_nonce = post_nonce,
-                            restored_nonce = pre_nonce,
-                            "[req-1] Restored nonce for Internal/Retry transaction via bundle_state"
-                        );
-                    }
-                }
-
-                // If not in bundle_state, try cache
-                if !restored {
-                    if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
-                        tracing::info!(
-                            target: "arb-reth::nonce-debug",
-                            sender = ?sender,
-                            account_status = ?cached_acc.status,
-                            "[req-1] DEBUG: Found account in cache (not in bundle_state yet)"
-                        );
-
-                        if let Some(info) = cached_acc.account.as_mut() {
-                            let post_nonce = info.info.nonce;
-                            info.info.nonce = pre_nonce;
-
-                            tracing::info!(
-                                target: "arb-reth::nonce-fix",
-                                sender = ?sender,
-                                pre_nonce = pre_nonce,
-                                post_nonce = post_nonce,
-                                restored_nonce = pre_nonce,
-                                "[req-1] Restored nonce for Internal/Retry transaction via cache.accounts"
-                            );
-                        } else {
-                            tracing::warn!(
-                                target: "arb-reth::nonce-debug",
-                                sender = ?sender,
-                                "[req-1] DEBUG: Cached account has no info!"
-                            );
-                        }
-                    } else {
-                        tracing::warn!(
-                            target: "arb-reth::nonce-debug",
-                            sender = ?sender,
-                            "[req-1] DEBUG: Sender NOT found in bundle_state or cache!"
-                        );
-                    }
-                }
-            } else {
-                tracing::warn!(
-                    target: "arb-reth::nonce-debug",
-                    sender = ?sender,
-                    result = ?result,
-                    "[req-1] DEBUG: Result is NOT OK!"
+                    pre_nonce = pre_nonce,
+                    "[req-1] Deferred nonce restoration for Internal/Retry tx (will apply at block end)"
                 );
             }
         }
@@ -695,12 +609,38 @@ where
         result
     }
 
-    fn finish(self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
+    fn finish(mut self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
         tracing::info!(
             target: "arb-reth::executor",
-            "ArbBlockExecutor::finish() called"
+            pending_restorations = self.pending_nonce_restorations.len(),
+            "ArbBlockExecutor::finish() called - applying deferred nonce restorations"
         );
-        
+
+        // Apply all deferred nonce restorations BEFORE calling inner.finish()
+        // This ensures all state modifications happen before final commit
+        if !self.pending_nonce_restorations.is_empty() {
+            let (db_ref, _, _) = self.inner.evm_mut().components_mut();
+            let state: &mut revm::database::State<_> = *db_ref;
+
+            for (sender, target_nonce) in &self.pending_nonce_restorations {
+                // Try cache first
+                if let Some(cached_acc) = state.cache.accounts.get_mut(sender) {
+                    if let Some(account) = cached_acc.account.as_mut() {
+                        let current_nonce = account.info.nonce;
+                        account.info.nonce = *target_nonce;
+
+                        tracing::info!(
+                            target: "arb-reth::nonce-fix",
+                            sender = ?sender,
+                            from_nonce = current_nonce,
+                            to_nonce = target_nonce,
+                            "[req-1] Applied deferred nonce restoration in cache at block end"
+                        );
+                    }
+                }
+            }
+        }
+
         let (evm, mut result) = self.inner.finish()?;
         
         tracing::info!(
@@ -785,6 +725,7 @@ where
             tx_state: Default::default(),
             cumulative_gas_used: 0,
             exec_ctx: ctx,
+            pending_nonce_restorations: Vec::new(),
             _phantom: core::marker::PhantomData::<CS>,
         }
     }
