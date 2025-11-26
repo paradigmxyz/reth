@@ -439,37 +439,35 @@ where
             reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
         } else if is_deposit {
             reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
-        }
-        if is_internal || is_deposit {
-            // For Internal transactions, EVM will always increment nonce during execution
-            // even with disable_nonce_check=true (that only skips validation, not increment)
-            // PRE-DECREMENT APPROACH: Set account nonce to current-1 BEFORE execution
-            // so after EVM increments: (current-1)+1=current (nonce unchanged)
+            // For Deposit transactions, set nonce
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
         }
+        // ITERATION 46: Removed tx_env nonce setting for Internal transactions
+        // This was interfering with nonce restoration. Internal transactions should
+        // use the nonce from the transaction itself, not override it.
 
 
-        // ITERATION 41: Track pre-execution nonce for Internal and Retry transactions
-        // EVM always increments nonce during execution, even with disable_nonce_check=true
-        // (that flag only disables validation, not increment).
-        // We will restore the nonce IMMEDIATELY after transaction execution completes.
+        // ITERATION 46: Separate restoration logic for Internal vs Retry
+        // - Internal (0x6a): ALWAYS restore to 0 (ArbOS should never have nonce > 0)
+        // - Retry (0x68): Restore to current_nonce (prevents increment for THIS tx)
         //
-        // CRITICAL DIFFERENCE:
-        // - Internal (0x6a): Sender is ArbOS, nonce should ALWAYS be 0 (never increment)
-        // - Retry (0x68): Sender's nonce should not increment for THIS tx, but can increment between Retry txs
-        // ITERATION 45: Use same restoration pattern for both Internal and Retry
-        // Both transaction types should restore to current_nonce to prevent increment
-        // For Internal (0x6a), current_nonce should always be 0 (ArbOS address)
-        // For Retry (0x68), current_nonce is the sender's nonce before this transaction
-        let pre_exec_nonce = if is_internal || is_retry {
+        // ITER45 made Internal worse (0x2) by using current_nonce for both.
+        // ITER44 gave 0x1 for Internal with hardcoded 0.
+        // ITER46: Try hardcoded 0 WITHOUT the tx_env nonce setting (line 448).
+        let pre_exec_nonce = if is_internal {
             tracing::info!(
                 target: "reth::evm::execute",
                 sender = ?sender,
                 current_nonce = current_nonce,
-                is_internal = is_internal,
-                is_retry = is_retry,
-                "[req-1] ITER45: Will restore nonce to current_nonce={} after execution",
-                current_nonce
+                "[req-1] ITER46: Internal tx - will restore nonce to 0"
+            );
+            Some(0)
+        } else if is_retry {
+            tracing::info!(
+                target: "reth::evm::execute",
+                sender = ?sender,
+                current_nonce = current_nonce,
+                "[req-1] ITER46: Retry tx - will restore nonce to current_nonce"
             );
             Some(current_nonce)
         } else {
