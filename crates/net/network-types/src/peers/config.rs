@@ -14,7 +14,7 @@ use tracing::info;
 
 use crate::{BackoffKind, ReputationChangeWeights};
 
-/// A bootnode for Discv5 discovery that can be either an enode (TrustedPeer) or an ENR string.
+/// A bootnode for Discv5 discovery that can be either an enode (`TrustedPeer`) or an ENR string.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(untagged))]
@@ -31,7 +31,7 @@ impl FromStr for Discv5BootNode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // Check if it's an ENR (starts with "enr:")
         if s.starts_with("enr:") {
-            Ok(Discv5BootNode::Enr(s.to_string()))
+            Ok(Self::Enr(s.to_string()))
         } else {
             // Try to parse as enode
             TrustedPeer::from_str(s).map(Discv5BootNode::Enode)
@@ -41,7 +41,7 @@ impl FromStr for Discv5BootNode {
 
 impl From<TrustedPeer> for Discv5BootNode {
     fn from(peer: TrustedPeer) -> Self {
-        Discv5BootNode::Enode(peer)
+        Self::Enode(peer)
     }
 }
 
@@ -206,13 +206,13 @@ pub struct PeersConfig {
     pub ip_filter: IpFilter,
     /// Bootnodes for Discv4 discovery (enode:// format).
     ///
-    /// Similar to geth's BootstrapNodes. These nodes are used to bootstrap the Discv4
+    /// Similar to geth's `BootstrapNodes`. These nodes are used to bootstrap the Discv4
     /// discovery protocol.
     #[cfg_attr(feature = "serde", serde(default))]
     pub bootnodes_v4: Vec<TrustedPeer>,
     /// Bootnodes for Discv5 discovery (enode:// or enr: format).
     ///
-    /// Similar to geth's BootstrapNodesV5. These nodes are used to bootstrap the Discv5
+    /// Similar to geth's `BootstrapNodesV5`. These nodes are used to bootstrap the Discv5
     /// discovery protocol. Can be either enode URLs (enode://...) or ENR strings (enr:...).
     #[cfg_attr(feature = "serde", serde(default))]
     pub bootnodes_v5: Vec<Discv5BootNode>,

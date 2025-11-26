@@ -271,7 +271,7 @@ impl NetworkArgs {
     /// Configured Bootnodes are prioritized, if unset, the chain spec bootnodes are used
     /// Priority order for bootnodes configuration:
     /// 1. --bootnodes flag (applies to both discv4 and discv5)
-    /// 2. Config file bootnodes_v4/bootnodes_v5
+    /// 2. Config file `bootnodes_v4`/`bootnodes_v5`
     /// 3. Network preset flags (e.g. --holesky)
     /// 4. Chain spec bootnodes
     /// 5. default to mainnet nodes
@@ -299,7 +299,7 @@ impl NetworkArgs {
                 .filter_map(|peer| peer.resolve_blocking().ok())
                 .collect()
         } else {
-            chain_bootnodes_default.clone()
+            chain_bootnodes_default
         };
         
         // For discv5: CLI > Config file > Chain spec > Default
@@ -328,14 +328,14 @@ impl NetworkArgs {
             } else if !enode_nodes.is_empty() {
                 (enode_nodes, None)
             } else {
-                (chain_bootnodes_default.clone(), None)
+                (discv4_bootnodes.clone(), None)
             }
         } else {
-            (chain_bootnodes_default.clone(), None)
+            (discv4_bootnodes.clone(), None)
         };
         
         // Use discv4 bootnodes for the general boot_nodes (for backward compatibility)
-        let chain_bootnodes = discv4_bootnodes.clone();
+        let chain_bootnodes = discv4_bootnodes;
         
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
