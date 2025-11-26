@@ -189,6 +189,50 @@ impl<T: TransactionOrdering> BestTransactions<T> {
             }
         }
     }
+
+    /// Returns the next best transaction and its priority value.
+    #[allow(clippy::type_complexity)]
+    pub fn next_tx_and_priority(
+        &mut self,
+    ) -> Option<(Arc<ValidPoolTransaction<T::Transaction>>, Priority<T::PriorityValue>)> {
+        loop {
+            self.add_new_transactions();
+            // Remove the next independent tx with the highest priority
+            let best = self.pop_best()?;
+            let sender_id = best.transaction.sender_id();
+
+            // skip transactions for which sender was marked as invalid
+            if self.invalid.contains(&sender_id) {
+                debug!(
+                    target: "txpool",
+                    "[{:?}] skipping invalid transaction",
+                    best.transaction.hash()
+                );
+                continue
+            }
+
+            // Insert transactions that just got unlocked.
+            if let Some(unlocked) = self.all.get(&best.unlocks()) {
+                self.independent.insert(unlocked.clone());
+            }
+
+            if self.skip_blobs && best.transaction.transaction.is_eip4844() {
+                // blobs should be skipped, marking them as invalid will ensure that no dependent
+                // transactions are returned
+                self.mark_invalid(
+                    &best.transaction,
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::NoEip4844Blobs,
+                    ),
+                )
+            } else {
+                if self.new_transaction_receiver.is_some() {
+                    self.last_priority = Some(best.priority.clone())
+                }
+                return Some((best.transaction, best.priority))
+            }
+        }
+    }
 }
 
 /// Result of attempting to receive a new transaction from the channel during iteration.
@@ -241,43 +285,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     type Item = Arc<ValidPoolTransaction<T::Transaction>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            self.add_new_transactions();
-            // Remove the next independent tx with the highest priority
-            let best = self.pop_best()?;
-            let sender_id = best.transaction.sender_id();
-
-            // skip transactions for which sender was marked as invalid
-            if self.invalid.contains(&sender_id) {
-                debug!(
-                    target: "txpool",
-                    "[{:?}] skipping invalid transaction",
-                    best.transaction.hash()
-                );
-                continue
-            }
-
-            // Insert transactions that just got unlocked.
-            if let Some(unlocked) = self.all.get(&best.unlocks()) {
-                self.independent.insert(unlocked.clone());
-            }
-
-            if self.skip_blobs && best.transaction.transaction.is_eip4844() {
-                // blobs should be skipped, marking them as invalid will ensure that no dependent
-                // transactions are returned
-                self.mark_invalid(
-                    &best.transaction,
-                    InvalidPoolTransactionError::Eip4844(
-                        Eip4844PoolTransactionError::NoEip4844Blobs,
-                    ),
-                )
-            } else {
-                if self.new_transaction_receiver.is_some() {
-                    self.last_priority = Some(best.priority.clone())
-                }
-                return Some(best.transaction)
-            }
-        }
+        self.next_tx_and_priority().map(|(tx, _)| tx)
     }
 }
 

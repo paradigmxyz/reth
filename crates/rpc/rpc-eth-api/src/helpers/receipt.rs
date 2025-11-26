@@ -15,16 +15,7 @@ use reth_storage_api::{ProviderReceipt, ProviderTx};
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` receipts RPC methods.
 pub trait LoadReceipt:
-    EthApiTypes<
-        RpcConvert: RpcConvert<
-            Primitives = Self::Primitives,
-            Error = Self::Error,
-            Network = Self::NetworkTypes,
-        >,
-        Error: FromEthApiError,
-    > + RpcNodeCoreExt
-    + Send
-    + Sync
+    EthApiTypes<RpcConvert: RpcConvert<Primitives = Self::Primitives>> + RpcNodeCoreExt + Send + Sync
 {
     /// Helper method for `eth_getBlockReceipts` and `eth_getTransactionReceipt`.
     fn build_transaction_receipt(
