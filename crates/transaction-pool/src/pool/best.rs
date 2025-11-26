@@ -32,7 +32,7 @@ pub(crate) struct BestTransactionsWithFees<T: TransactionOrdering> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithFees<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
         BestTransactions::mark_invalid(&mut self.best, tx, kind)
     }
 
@@ -68,7 +68,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
             crate::traits::BestTransactions::mark_invalid(
                 self,
                 &best,
-                InvalidPoolTransactionError::Underpriced,
+                &InvalidPoolTransactionError::Underpriced,
             );
         }
     }
@@ -112,7 +112,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     pub(crate) fn mark_invalid(
         &mut self,
         tx: &Arc<ValidPoolTransaction<T::Transaction>>,
-        _kind: InvalidPoolTransactionError,
+        _kind: &InvalidPoolTransactionError,
     ) {
         self.invalid.insert(tx.sender_id());
     }
@@ -219,7 +219,7 @@ enum IncomingTransaction<T: TransactionOrdering> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
         Self::mark_invalid(self, tx, kind)
     }
 
@@ -313,7 +313,9 @@ where
             }
             self.best.mark_invalid(
                 &best,
-                InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+                &InvalidPoolTransactionError::Consensus(
+                    InvalidTransactionError::TxTypeNotSupported,
+                ),
             );
         }
     }
@@ -324,7 +326,7 @@ where
     I: crate::traits::BestTransactions,
     P: FnMut(&<I as Iterator>::Item) -> bool + Send,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
         crate::traits::BestTransactions::mark_invalid(&mut self.best, tx, kind)
     }
 
@@ -413,7 +415,7 @@ where
     I: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
     T: PoolTransaction,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
         self.inner.mark_invalid(tx, kind)
     }
 
@@ -484,7 +486,7 @@ mod tests {
         let invalid = best.independent.iter().next().unwrap();
         best.mark_invalid(
             &invalid.transaction.clone(),
-            InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+            &InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
         );
 
         // iterator is empty
@@ -513,7 +515,7 @@ mod tests {
         crate::traits::BestTransactions::mark_invalid(
             &mut *best,
             &tx,
-            InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+            &InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
         );
         assert!(Iterator::next(&mut best).is_none());
     }
