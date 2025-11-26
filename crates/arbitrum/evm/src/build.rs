@@ -190,8 +190,9 @@ where
         let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
         let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
         let is_retry = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry);
-        // Internal and Retry transactions need precredit logic for nonce handling
-        let needs_precredit = is_sequenced || is_internal || is_retry;
+        let is_submit_retryable = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable);
+        // Internal, Retry, and SubmitRetryable transactions need precredit logic for nonce handling
+        let needs_precredit = is_sequenced || is_internal || is_retry || is_submit_retryable;
 
         let paid_gas_price = {
             use reth_arbitrum_primitives::ArbTxType::*;
@@ -450,6 +451,7 @@ where
         // ITERATION 46: Separate restoration logic for Internal vs Retry
         // - Internal (0x6a): ALWAYS restore to 0 (ArbOS should never have nonce > 0)
         // - Retry (0x68): Restore to current_nonce (prevents increment for THIS tx)
+        // - SubmitRetryable (0x69): Restore to current_nonce (synthetic tx shouldn't increment nonce)
         //
         // ITER45 made Internal worse (0x2) by using current_nonce for both.
         // ITER44 gave 0x1 for Internal with hardcoded 0.
@@ -468,6 +470,14 @@ where
                 sender = ?sender,
                 current_nonce = current_nonce,
                 "[req-1] ITER46: Retry tx - will restore nonce to current_nonce"
+            );
+            Some(current_nonce)
+        } else if is_submit_retryable {
+            tracing::info!(
+                target: "reth::evm::execute",
+                sender = ?sender,
+                current_nonce = current_nonce,
+                "[req-1] ITER48: SubmitRetryable tx - will restore nonce to current_nonce"
             );
             Some(current_nonce)
         } else {
@@ -514,11 +524,13 @@ where
         let evm = self.inner.evm_mut();
         let prev_disable_balance = evm.cfg_mut().disable_balance_check;
         let prev_disable_nonce = evm.cfg_mut().disable_nonce_check;
-        evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
-        // Internal and Retry transactions should NOT increment nonce
+        // SubmitRetryable also needs balance check disabled because start_tx hook handles balance manipulation
+        evm.cfg_mut().disable_balance_check = is_internal || is_deposit || is_submit_retryable;
+        // Internal, Retry, and SubmitRetryable transactions should NOT have nonce validation
+        // SubmitRetryable: ends early in start_tx hook, sender may already have nonce from Deposit
         // Note: disable_nonce_check only disables VALIDATION, not increment!
         // We restore nonce IMMEDIATELY after execution (tracked in pre_exec_nonce)
-        evm.cfg_mut().disable_nonce_check = is_internal || is_retry;
+        evm.cfg_mut().disable_nonce_check = is_internal || is_retry || is_submit_retryable;
 
         let wrapped = WithTxEnv { tx_env, tx };
 
