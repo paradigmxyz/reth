@@ -1,18 +1,15 @@
 extern crate alloc;
 
 use alloy_evm::{
-    eth::EthEvmContext,
-    precompiles::PrecompilesMap,
-    tx::{FromRecoveredTx, FromTxWithEncoded},
-    Database, EvmEnv, EvmFactory, IntoTxEnv,
+    eth::EthEvmContext, precompiles::PrecompilesMap, Database, EvmEnv, EvmFactory, IntoTxEnv,
 };
+use alloy_evm::tx::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_primitives::{Address, Bytes};
 use core::fmt::Debug;
 use reth_arbitrum_primitives::ArbTransactionSigned;
-use revm::{
-    context::{result::EVMError, TxEnv},
-    inspector::NoOpInspector,
-};
+use revm::context::TxEnv;
+use revm::inspector::NoOpInspector;
+use revm::context::result::EVMError;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ArbTransaction<T>(pub T);
@@ -27,9 +24,8 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
         };
         tx.caller = sender;
         tx.gas_limit = signed.gas_limit();
-        if (matches!(signed.tx_type(), reth_arbitrum_primitives::ArbTxType::Internal) ||
-            matches!(signed.tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit)) &&
-            tx.gas_limit == 0
+        if (matches!(signed.tx_type(), reth_arbitrum_primitives::ArbTxType::Internal)
+            || matches!(signed.tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit)) && tx.gas_limit == 0
         {
             tx.gas_limit = 1_000_000;
         }
@@ -39,8 +35,8 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
                 tx.value = signed.value();
                 tx.gas_price = signed.max_fee_per_gas();
             }
-            reth_arbitrum_primitives::ArbTxType::Deposit |
-            reth_arbitrum_primitives::ArbTxType::Internal => {
+            reth_arbitrum_primitives::ArbTxType::Deposit
+            | reth_arbitrum_primitives::ArbTxType::Internal => {
                 tx.value = alloy_primitives::U256::ZERO;
                 tx.gas_price = 0;
             }
@@ -56,22 +52,22 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
         }
         tx.kind = kind;
         tx.data = signed.input().clone();
-
+        
         let should_skip_checks = matches!(
             signed.tx_type(),
-            reth_arbitrum_primitives::ArbTxType::Internal |
-                reth_arbitrum_primitives::ArbTxType::Deposit |
-                reth_arbitrum_primitives::ArbTxType::Contract |
-                reth_arbitrum_primitives::ArbTxType::Retry |
-                reth_arbitrum_primitives::ArbTxType::SubmitRetryable
+            reth_arbitrum_primitives::ArbTxType::Internal
+                | reth_arbitrum_primitives::ArbTxType::Deposit
+                | reth_arbitrum_primitives::ArbTxType::Contract
+                | reth_arbitrum_primitives::ArbTxType::Retry
+                | reth_arbitrum_primitives::ArbTxType::SubmitRetryable
         );
-
+        
         if should_skip_checks {
             tx.chain_id = Some(421614);
         } else {
             tx.chain_id = Some(signed.chain_id().unwrap_or(421614));
         }
-
+        
         tx.nonce = signed.nonce();
         tx.access_list = signed.access_list().cloned().unwrap_or_default();
         tx.blob_hashes = signed.blob_versioned_hashes().unwrap_or(&[]).to_vec();
@@ -89,9 +85,7 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
 
 impl FromTxWithEncoded<ArbTransactionSigned> for ArbTransaction<TxEnv> {
     fn from_encoded_tx(signed: &ArbTransactionSigned, sender: Address, _encoded: Bytes) -> Self {
-        <ArbTransaction<TxEnv> as FromRecoveredTx<ArbTransactionSigned>>::from_recovered_tx(
-            signed, sender,
-        )
+        <ArbTransaction<TxEnv> as FromRecoveredTx<ArbTransactionSigned>>::from_recovered_tx(signed, sender)
     }
 }
 
@@ -124,14 +118,8 @@ impl IntoTxEnv<ArbTransaction<TxEnv>> for ArbTransaction<TxEnv> {
 }
 
 impl revm::context_interface::Transaction for ArbTransaction<TxEnv> {
-    type AccessListItem<'a>
-        = <TxEnv as revm::context_interface::Transaction>::AccessListItem<'a>
-    where
-        Self: 'a;
-    type Authorization<'a>
-        = <TxEnv as revm::context_interface::Transaction>::Authorization<'a>
-    where
-        Self: 'a;
+    type AccessListItem<'a> = <TxEnv as revm::context_interface::Transaction>::AccessListItem<'a> where Self: 'a;
+    type Authorization<'a> = <TxEnv as revm::context_interface::Transaction>::Authorization<'a> where Self: 'a;
 
     fn tx_type(&self) -> u8 {
         revm::context_interface::Transaction::tx_type(&self.0)
@@ -220,8 +208,7 @@ where
     fn transact_raw(
         &mut self,
         tx: Self::Tx,
-    ) -> Result<revm::context_interface::result::ResultAndState<Self::HaltReason>, Self::Error>
-    {
+    ) -> Result<revm::context_interface::result::ResultAndState<Self::HaltReason>, Self::Error> {
         self.inner.transact_raw(tx.0)
     }
 
@@ -230,8 +217,7 @@ where
         caller: alloy_primitives::Address,
         contract: alloy_primitives::Address,
         data: alloy_primitives::Bytes,
-    ) -> Result<revm::context_interface::result::ResultAndState<Self::HaltReason>, Self::Error>
-    {
+    ) -> Result<revm::context_interface::result::ResultAndState<Self::HaltReason>, Self::Error> {
         self.inner.transact_system_call(caller, contract, data)
     }
 
@@ -247,7 +233,9 @@ where
         self.inner.components()
     }
 
-    fn components_mut(&mut self) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
+    fn components_mut(
+        &mut self,
+    ) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
         self.inner.components_mut()
     }
 }
@@ -264,7 +252,8 @@ impl ArbEvmFactory {
 }
 
 impl EvmFactory for ArbEvmFactory {
-    type Evm<DB: Database, I: revm::inspector::Inspector<EthEvmContext<DB>>> = ArbEvm<DB, I>;
+    type Evm<DB: Database, I: revm::inspector::Inspector<EthEvmContext<DB>>> =
+        ArbEvm<DB, I>;
     type Context<DB: Database> = EthEvmContext<DB>;
     type Tx = ArbTransaction<TxEnv>;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;

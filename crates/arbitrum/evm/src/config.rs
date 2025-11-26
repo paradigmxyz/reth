@@ -1,17 +1,13 @@
 #![cfg_attr(test, allow(dead_code))]
 #![allow(unused)]
-use crate::{
-    header::{
-        compute_nitro_mixhash, derive_arb_header_info_from_state, read_arbos_version, ArbHeaderInfo,
-    },
-    ArbitrumChainSpec,
-};
 use alloc::sync::Arc;
 use alloy_consensus::{proofs, Block, BlockBody, Header, TxReceipt};
-use alloy_primitives::{logs_bloom, Address, Bytes, B256, B64, U256};
+use alloy_primitives::{logs_bloom, Address, B256, B64, Bytes, U256};
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{Receipt, SignedTransaction};
+use crate::ArbitrumChainSpec;
+use crate::header::{ArbHeaderInfo, derive_arb_header_info_from_state, compute_nitro_mixhash, read_arbos_version};
 
 pub struct ArbBlockAssembler<ChainSpec> {
     chain_spec: Arc<ChainSpec>,
@@ -40,8 +36,8 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         input: reth_evm::execute::BlockAssemblerInput<'_, '_, F>,
     ) -> Result<alloy_consensus::Block<F::Transaction>, reth_execution_errors::BlockExecutionError>
     where
-        F::Receipt: alloy_eips::Encodable2718 + TxReceipt,
-    {
+        F::Receipt: alloy_eips::Encodable2718 + TxReceipt
+{
         let reth_execution_types::BlockExecutionResult { receipts, gas_used, .. } = input.output;
 
         reth_tracing::tracing::info!(
@@ -67,8 +63,7 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             *gas_used
         };
 
-        let transactions_root =
-            alloy_consensus::proofs::calculate_transaction_root(&input.transactions);
+        let transactions_root = alloy_consensus::proofs::calculate_transaction_root(&input.transactions);
         // Wrap receipts in ReceiptWithBloom before calculating root, as per EIP-2718 encoding
         let receipts_with_bloom = receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>();
         let receipts_root = alloy_consensus::proofs::calculate_receipt_root(&receipts_with_bloom);
@@ -203,6 +198,7 @@ where
     }
 }
 
+
 #[derive(Clone, Debug, Default)]
 pub struct ArbNextBlockEnvAttributes {
     pub timestamp: u64,
@@ -218,8 +214,8 @@ pub struct ArbNextBlockEnvAttributes {
     pub l1_block_number: u64,
 }
 #[cfg(feature = "rpc")]
-impl<H: alloy_consensus::BlockHeader> reth_rpc_eth_api::helpers::pending_block::BuildPendingEnv<H>
-    for ArbNextBlockEnvAttributes
+impl<H: alloy_consensus::BlockHeader>
+    reth_rpc_eth_api::helpers::pending_block::BuildPendingEnv<H> for ArbNextBlockEnvAttributes
 {
     fn build_pending_env(parent: &reth_primitives_traits::SealedHeader<H>) -> Self {
         Self {
@@ -227,9 +223,7 @@ impl<H: alloy_consensus::BlockHeader> reth_rpc_eth_api::helpers::pending_block::
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: alloy_primitives::B256::random(),
             gas_limit: parent.gas_limit(),
-            parent_beacon_block_root: parent
-                .parent_beacon_block_root()
-                .map(|_| alloy_primitives::B256::ZERO),
+            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| alloy_primitives::B256::ZERO),
             withdrawals: parent.withdrawals_root().map(|_| ()),
             extra_data: alloy_primitives::Bytes::new(),
             max_fee_per_gas: None,
@@ -262,9 +256,7 @@ where
             prev_randao: attrs.prev_randao,
             gas_limit: parent.gas_limit(),
             withdrawals: None,
-            parent_beacon_block_root: attrs
-                .parent_beacon_block_root
-                .or_else(|| parent.parent_beacon_block_root()),
+            parent_beacon_block_root: attrs.parent_beacon_block_root.or_else(|| parent.parent_beacon_block_root()),
             extra_data: alloy_primitives::Bytes::new(),
             max_fee_per_gas: None,
             blob_gas_price: None,

@@ -7,14 +7,13 @@ use reth_basic_payload_builder::{
 };
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_chainspec::ChainSpecProvider;
-use reth_evm::{execute::BlockBuilder, ConfigureEvm};
+use reth_evm::{ConfigureEvm, execute::BlockBuilder};
 use reth_execution_types::ExecutionOutcome;
-use reth_payload_builder::{PayloadBuilderError, PayloadJobGenerator};
+use reth_payload_builder::PayloadJobGenerator;
+use reth_payload_builder::PayloadBuilderError;
 use reth_payload_primitives::{BuildNextEnv, PayloadBuilderAttributes};
 use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor};
-use reth_revm::{
-    cached::CachedReads, cancelled::CancelOnDrop, database::StateProviderDatabase, db::State,
-};
+use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop, database::StateProviderDatabase, db::State};
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use std::{marker::PhantomData, sync::Arc};
 
@@ -61,6 +60,7 @@ where
             .map_err(PayloadBuilderError::other)
     }
 }
+
 
 #[derive(Debug)]
 pub struct ArbPayloadBuilder<Pool, Client, Evm, N, Attrs> {
@@ -126,9 +126,7 @@ where
 
         let mut builder = ctx.block_builder(&mut db)?;
 
-        builder
-            .apply_pre_execution_changes()
-            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        builder.apply_pre_execution_changes().map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
         let outcome = builder.finish(&state_provider)?;
         let sealed_block = Arc::new(outcome.block.sealed_block().clone());
@@ -149,8 +147,7 @@ where
             trie: ExecutedTrieUpdates::Present(Arc::new(outcome.trie_updates)),
         };
 
-        let payload =
-            ArbBuiltPayload::new(ctx.payload_id(), sealed_block, U256::ZERO, Some(executed));
+        let payload = ArbBuiltPayload::new(ctx.payload_id(), sealed_block, U256::ZERO, Some(executed));
 
         Ok(BuildOutcomeKind::Better { payload }.with_cached_reads(cached_reads))
     }

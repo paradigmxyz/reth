@@ -137,15 +137,14 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
         Self {
             components: self.components.clone(),
 
+
             task_executor: self.task_executor.clone(),
             provider: self.provider.clone(),
             provider_factory: self.provider_factory.clone(),
         }
     }
 }
-impl<T: FullNodeTypes, C: NodeComponents<T>> reth_node_api::ProviderFactoryExt
-    for NodeAdapter<T, C>
-{
+impl<T: FullNodeTypes, C: NodeComponents<T>> reth_node_api::ProviderFactoryExt for NodeAdapter<T, C> {
     fn provider_factory(
         &self,
     ) -> &reth_provider::providers::ProviderFactory<
@@ -154,6 +153,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> reth_node_api::ProviderFactoryExt
         &self.provider_factory
     }
 }
+
 
 /// A fully type configured node builder.
 ///
@@ -177,6 +177,7 @@ impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
+
 {
     /// Advances the state of the node builder to the next state where all customizable
     /// [`NodeAddOns`] types are configured.

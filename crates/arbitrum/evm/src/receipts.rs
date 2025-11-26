@@ -89,9 +89,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
 
                 // Check for early termination gas FIRST (before checking transaction type)
                 // because Internal transactions can also go through early termination
-                let (actual_gas_used, cumulative_gas) = if let Some((early_gas, early_cumulative)) =
-                    crate::get_early_tx_gas(&tx_hash)
-                {
+                let (actual_gas_used, cumulative_gas) = if let Some((early_gas, early_cumulative)) = crate::get_early_tx_gas(&tx_hash) {
                     tracing::warn!(
                         target: "arb-reth::receipt-builder",
                         tx_hash = ?tx_hash,
@@ -127,7 +125,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     );
                     (gas_used, cumulative)
                 };
-
+                
                 let mut logs = ctx.result.into_logs();
                 let evm_log_count = logs.len();
                 let mut extra = crate::log_sink::take();
@@ -143,13 +141,13 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     total_logs = logs.len(),
                     "!!!! Merged logs for receipt"
                 );
-
+                
                 let receipt = AlloyReceipt {
                     status: Eip658Value::Eip658(status_flag),
                     cumulative_gas_used: cumulative_gas,
                     logs,
                 };
-
+                
                 tracing::info!(
                     target: "arb-reth::receipt-builder",
                     tx_hash = ?tx_hash,
@@ -165,8 +163,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     ArbTxType::Legacy => ArbReceipt::Legacy(receipt),
                     ArbTxType::Eip2930 => ArbReceipt::Eip2930(receipt),
                     ArbTxType::Eip1559 => ArbReceipt::Eip1559(receipt),
-                    ArbTxType::Eip4844 => ArbReceipt::Legacy(receipt), /* No Eip4844 variant,
-                                                                         * use Legacy */
+                    ArbTxType::Eip4844 => ArbReceipt::Legacy(receipt),  // No Eip4844 variant, use Legacy
                     ArbTxType::Eip7702 => ArbReceipt::Eip7702(receipt),
                     ArbTxType::Deposit => unreachable!(),
                 };
@@ -192,6 +189,7 @@ impl alloy_evm::eth::receipt_builder::ReceiptBuilder for ArbRethReceiptBuilder {
             Err(_ctx) => self.build_deposit_receipt(ArbDepositReceipt::default()),
         }
     }
+
 }
 
 #[cfg(test)]
@@ -203,58 +201,22 @@ mod tests {
     impl reth_evm::Evm for StubEvm {
         type DB = ();
         type Tx = crate::arb_evm::ArbTransaction<revm::context::TxEnv>;
-        type Error = revm::context::result::EVMError<
-            reth_storage_errors::db::DatabaseError,
-            revm::context::result::InvalidTransaction,
-        >;
+        type Error = revm::context::result::EVMError<reth_storage_errors::db::DatabaseError, revm::context::result::InvalidTransaction>;
         type HaltReason = revm::context::result::HaltReason;
         type Spec = crate::SpecId;
         type Precompiles = alloy_evm::precompiles::PrecompilesMap;
         type Inspector = ();
 
-        fn block(&self) -> &revm::context::BlockEnv {
-            unimplemented!()
-        }
-        fn chain_id(&self) -> u64 {
-            unimplemented!()
-        }
-        fn transact_raw(
-            &mut self,
-            _: Self::Tx,
-        ) -> core::result::Result<
-            revm::context::result::ExecResultAndState<
-                revm::context::result::ExecutionResult<Self::HaltReason>,
-            >,
-            Self::Error,
-        > {
-            unimplemented!()
-        }
-        fn transact_system_call(
-            &mut self,
-            _: alloy_primitives::Address,
-            _: alloy_primitives::Address,
-            _: alloy_primitives::Bytes,
-        ) -> core::result::Result<
-            revm::context::result::ExecResultAndState<
-                revm::context::result::ExecutionResult<Self::HaltReason>,
-            >,
-            Self::Error,
-        > {
-            unimplemented!()
-        }
-        fn finish(self) -> (Self::DB, reth_evm::EvmEnv<Self::Spec>) {
-            unimplemented!()
-        }
+        fn block(&self) -> &revm::context::BlockEnv { unimplemented!() }
+        fn chain_id(&self) -> u64 { unimplemented!() }
+        fn transact_raw(&mut self, _: Self::Tx) -> core::result::Result<revm::context::result::ExecResultAndState<revm::context::result::ExecutionResult<Self::HaltReason>>, Self::Error> { unimplemented!() }
+        fn transact_system_call(&mut self, _: alloy_primitives::Address, _: alloy_primitives::Address, _: alloy_primitives::Bytes) -> core::result::Result<revm::context::result::ExecResultAndState<revm::context::result::ExecutionResult<Self::HaltReason>>, Self::Error> { unimplemented!() }
+        fn finish(self) -> (Self::DB, reth_evm::EvmEnv<Self::Spec>) { unimplemented!() }
         fn set_inspector_enabled(&mut self, _: bool) {}
-        fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) {
-            unimplemented!()
-        }
-        fn components_mut(
-            &mut self,
-        ) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
-            unimplemented!()
-        }
+        fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) { unimplemented!() }
+        fn components_mut(&mut self) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) { unimplemented!() }
     }
+
 
     #[test]
     fn builds_core_receipt_with_status_and_cumulative_gas() {
@@ -278,15 +240,14 @@ mod tests {
 
     #[test]
     fn deposit_receipt_build_path_errors() {
+
         let builder = ArbRethReceiptBuilder::default();
-        use alloy_primitives::{address, b256, Signature, U256};
         use arb_alloy_consensus::tx::ArbDepositTx;
+        use alloy_primitives::{address, b256, U256, Signature};
         use reth_arbitrum_primitives::ArbTypedTransaction;
         let dep = ArbDepositTx {
             chain_id: U256::from(42161u64),
-            l1_request_id: b256!(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-            ),
+            l1_request_id: b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             from: address!("00000000000000000000000000000000000000aa"),
             to: address!("00000000000000000000000000000000000000bb"),
             value: U256::ZERO,
@@ -306,8 +267,7 @@ mod tests {
                 output: revm::context::result::Output::Call(alloy_primitives::Bytes::default()),
             },
             cumulative_gas_used: 0,
-            state: &revm::state::EvmState::default(),
-            evm: &mut evm,
+            state: &revm::state::EvmState::default(), evm: &mut evm,
         };
         let res = builder.build_receipt::<StubEvm>(ctx);
         assert!(res.is_err());
@@ -315,6 +275,7 @@ mod tests {
 
     #[test]
     fn non_deposit_tx_types_build_legacy_receipts_without_l1_fields() {
+
         let builder = ArbRethReceiptBuilder::default();
 
         fn run_tx(
@@ -333,16 +294,13 @@ mod tests {
                 tx,
                 result: base_result.clone(),
                 cumulative_gas_used: 21000,
-                state: &revm::state::EvmState::default(),
-                evm: &mut evm,
+                state: &revm::state::EvmState::default(), evm: &mut evm,
             };
             builder.build_receipt::<StubEvm>(ctx).expect("non-deposit should build")
         }
 
-        use alloy_primitives::{address, b256, Signature, U256};
-        use arb_alloy_consensus::tx::{
-            ArbContractTx, ArbInternalTx, ArbRetryTx, ArbSubmitRetryableTx, ArbUnsignedTx,
-        };
+        use arb_alloy_consensus::tx::{ArbUnsignedTx, ArbContractTx, ArbRetryTx, ArbSubmitRetryableTx, ArbInternalTx};
+        use alloy_primitives::{address, b256, U256, Signature};
         use reth_arbitrum_primitives::ArbTypedTransaction;
 
         let unsigned = ArbUnsignedTx {
@@ -356,17 +314,11 @@ mod tests {
             data: Vec::new().into(),
         };
         let tx_unsigned = reth_arbitrum_primitives::ArbTransactionSigned::new_unhashed(
-            ArbTypedTransaction::Unsigned(unsigned),
-            alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false),
-        );
+            ArbTypedTransaction::Unsigned(unsigned), alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false));
         let r = run_tx(&builder, &tx_unsigned);
-        match r {
-            ArbReceipt::Legacy(rec) => match rec.status {
-                Eip658Value::Eip658(true) => {}
-                _ => panic!("expected EIP-658 status"),
-            },
-            _ => panic!("expected Legacy receipt"),
-        }
+        match r { ArbReceipt::Legacy(rec) => {
+            match rec.status { Eip658Value::Eip658(true) => {}, _ => panic!("expected EIP-658 status") }
+        }, _ => panic!("expected Legacy receipt") }
 
         let contract = ArbContractTx {
             chain_id: U256::from(42161u64),
@@ -379,9 +331,7 @@ mod tests {
             data: Vec::new().into(),
         };
         let tx_contract = reth_arbitrum_primitives::ArbTransactionSigned::new_unhashed(
-            ArbTypedTransaction::Contract(contract),
-            alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false),
-        );
+            ArbTypedTransaction::Contract(contract), alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false));
         let _ = run_tx(&builder, &tx_contract);
 
         let retry = ArbRetryTx {
@@ -399,9 +349,7 @@ mod tests {
             submission_fee_refund: U256::ZERO,
         };
         let tx_retry = reth_arbitrum_primitives::ArbTransactionSigned::new_unhashed(
-            ArbTypedTransaction::Retry(retry),
-            alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false),
-        );
+            ArbTypedTransaction::Retry(retry), alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false));
         let _ = run_tx(&builder, &tx_retry);
 
         let srt = ArbSubmitRetryableTx {
@@ -420,16 +368,15 @@ mod tests {
             retry_data: Vec::new().into(),
         };
         let tx_srt = reth_arbitrum_primitives::ArbTransactionSigned::new_unhashed(
-            ArbTypedTransaction::SubmitRetryable(srt),
-            alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false),
-        );
+            ArbTypedTransaction::SubmitRetryable(srt), alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false));
         let _ = run_tx(&builder, &tx_srt);
 
-        let itx = ArbInternalTx { chain_id: U256::from(42161u64), data: Vec::new().into() };
+        let itx = ArbInternalTx {
+            chain_id: U256::from(42161u64),
+            data: Vec::new().into(),
+        };
         let tx_itx = reth_arbitrum_primitives::ArbTransactionSigned::new_unhashed(
-            ArbTypedTransaction::Internal(itx),
-            alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false),
-        );
+            ArbTypedTransaction::Internal(itx), alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false));
         let _ = run_tx(&builder, &tx_itx);
 
         let leg = alloy_consensus::TxLegacy {
@@ -442,9 +389,7 @@ mod tests {
             input: Vec::new().into(),
         };
         let tx_legacy = reth_arbitrum_primitives::ArbTransactionSigned::new_unhashed(
-            ArbTypedTransaction::Legacy(leg),
-            alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false),
-        );
+            ArbTypedTransaction::Legacy(leg), alloy_primitives::Signature::new(U256::ZERO, U256::ZERO, false));
         let _ = run_tx(&builder, &tx_legacy);
     }
 

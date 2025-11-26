@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, Bytes, U256, B256};
 pub trait LogEmitter {
     fn emit_log(&mut self, address: alloy_primitives::Address, topics: &[[u8; 32]], data: &[u8]) {
         crate::log_sink::push(address, topics, data);
@@ -8,7 +8,7 @@ pub trait LogEmitter {
 }
 pub struct NoopEmitter;
 impl LogEmitter for NoopEmitter {}
-use crate::retryables::{DefaultRetryables, Retryables};
+use crate::retryables::{Retryables, DefaultRetryables};
 
 pub struct PredeployCallContext {
     pub block_number: u64,
@@ -21,34 +21,14 @@ pub struct PredeployCallContext {
     pub depth: u64,
     pub basefee: U256,
 }
-fn abi_word_u256(x: U256) -> [u8; 32] {
-    x.to_be_bytes::<32>()
-}
-fn abi_word_u64(x: u64) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    out[24..].copy_from_slice(&x.to_be_bytes());
-    out
-}
-fn abi_word_b256(x: B256) -> [u8; 32] {
-    x.0
-}
-fn abi_word_address(a: Address) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    out[12..].copy_from_slice(a.as_slice());
-    out
-}
+fn abi_word_u256(x: U256) -> [u8; 32] { x.to_be_bytes::<32>() }
+fn abi_word_u64(x: u64) -> [u8; 32] { let mut out=[0u8;32]; out[24..].copy_from_slice(&x.to_be_bytes()); out }
+fn abi_word_b256(x: B256) -> [u8; 32] { x.0 }
+fn abi_word_address(a: Address) -> [u8; 32] { let mut out=[0u8;32]; out[12..].copy_from_slice(a.as_slice()); out }
 
 pub trait PredeployHandler {
     fn address(&self) -> Address;
-    fn call(
-        &self,
-        ctx: &PredeployCallContext,
-        input: &Bytes,
-        gas_limit: u64,
-        value: U256,
-        retryables: &mut dyn Retryables,
-        emitter: &mut dyn LogEmitter,
-    ) -> (Bytes, u64, bool);
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, value: U256, retryables: &mut dyn Retryables, emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool);
 }
 
 pub struct PredeployRegistry {
@@ -57,9 +37,11 @@ pub struct PredeployRegistry {
 
 impl PredeployRegistry {
     pub fn new() -> Self {
-        Self { handlers: alloc::vec::Vec::new() }
+        Self { 
+            handlers: alloc::vec::Vec::new(), 
+        }
     }
-
+    
     pub fn default() -> Self {
         Self::new()
     }
@@ -68,16 +50,7 @@ impl PredeployRegistry {
         self.handlers.push(handler);
     }
 
-    pub fn dispatch_with_emitter(
-        &mut self,
-        ctx: &PredeployCallContext,
-        to: Address,
-        input: &Bytes,
-        gas_limit: u64,
-        value: U256,
-        retryables: &mut dyn Retryables,
-        emitter: &mut dyn LogEmitter,
-    ) -> Option<(Bytes, u64, bool)> {
+    pub fn dispatch_with_emitter(&mut self, ctx: &PredeployCallContext, to: Address, input: &Bytes, gas_limit: u64, value: U256, retryables: &mut dyn Retryables, emitter: &mut dyn LogEmitter) -> Option<(Bytes, u64, bool)> {
         for h in &self.handlers {
             if h.address() == to {
                 return Some(h.call(ctx, input, gas_limit, value, retryables, emitter));
@@ -86,15 +59,7 @@ impl PredeployRegistry {
         None
     }
 
-    pub fn dispatch(
-        &mut self,
-        ctx: &PredeployCallContext,
-        to: Address,
-        input: &Bytes,
-        gas_limit: u64,
-        value: U256,
-        retryables: &mut dyn Retryables,
-    ) -> Option<(Bytes, u64, bool)> {
+    pub fn dispatch(&mut self, ctx: &PredeployCallContext, to: Address, input: &Bytes, gas_limit: u64, value: U256, retryables: &mut dyn Retryables) -> Option<(Bytes, u64, bool)> {
         let mut noop = NoopEmitter;
         self.dispatch_with_emitter(ctx, to, input, gas_limit, value, retryables, &mut noop)
     }
@@ -118,15 +83,7 @@ impl PredeployHandler for ArbSys {
         self.addr
     }
 
-    fn call(
-        &self,
-        ctx: &PredeployCallContext,
-        input: &Bytes,
-        gas_limit: u64,
-        _value: U256,
-        retryables: &mut dyn Retryables,
-        _emitter: &mut dyn LogEmitter,
-    ) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables, _emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let send_tx_to_l1 = pre::selector(pre::SIG_SEND_TX_TO_L1);
@@ -204,7 +161,9 @@ impl PredeployHandler for ArbSys {
                 out[12..].copy_from_slice(ctx.origin.as_slice());
                 (Bytes::from(out.to_vec()), gas_limit, true)
             }
-            s if s == get_tx_call_value => (encode_u256(_value), gas_limit, true),
+            s if s == get_tx_call_value => {
+                (encode_u256(_value), gas_limit, true)
+            }
             s if s == arb_chain_id => {
                 let out = encode_u256(ctx.chain_id);
                 (out, gas_limit, true)
@@ -249,7 +208,7 @@ impl PredeployHandler for ArbSys {
             s if s == get_storage_at => {
                 let mut out = [0u8; 32];
                 (Bytes::from(out.to_vec()), gas_limit, true)
-            }
+            },
             _ => (Bytes::default(), gas_limit, true),
         }
     }
@@ -271,15 +230,7 @@ impl PredeployHandler for ArbRetryableTx {
         self.addr
     }
 
-    fn call(
-        &self,
-        ctx: &PredeployCallContext,
-        input: &Bytes,
-        gas_limit: u64,
-        _value: U256,
-        retryables: &mut dyn Retryables,
-        emitter: &mut dyn LogEmitter,
-    ) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables, emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let redeem = pre::selector(pre::SIG_RETRY_REDEEM);
@@ -319,12 +270,12 @@ impl PredeployHandler for ArbRetryableTx {
                 let secs = arb_alloy_util::retryables::RETRYABLE_LIFETIME_SECONDS;
                 let out = U256::from(secs).to_be_bytes::<32>();
                 (Bytes::from(out.to_vec()), gas_limit, true)
-            }
+            },
             s if s == get_timeout => {
                 let timeout = arb_alloy_util::retryables::retryable_timeout_from(ctx.time);
                 let out = U256::from(timeout).to_be_bytes::<32>();
                 (Bytes::from(out.to_vec()), gas_limit, true)
-            }
+            },
             s if s == keepalive => {
                 let tid = read_ticket_id(input);
                 let _ = retryables.keepalive_retryable(&crate::retryables::RetryableTicketId(tid));
@@ -338,12 +289,12 @@ impl PredeployHandler for ArbRetryableTx {
                 let mut out = [0u8; 32];
                 out[12..].copy_from_slice(addr.as_slice());
                 (Bytes::from(out.to_vec()), gas_limit, true)
-            }
+            },
             s if s == get_current_redeemer => {
                 let mut out = [0u8; 32];
                 out[12..].copy_from_slice(ctx.caller.as_slice());
                 (Bytes::from(out.to_vec()), gas_limit, true)
-            }
+            },
             s if s == submit_retryable => {
                 let params = crate::retryables::RetryableCreateParams {
                     sender: ctx.caller,
@@ -357,28 +308,16 @@ impl PredeployHandler for ArbRetryableTx {
                     gas_price_bid: U256::ZERO,
                 };
                 match retryables.create_retryable(params) {
-                    crate::retryables::RetryableAction::Created {
-                        ticket_id,
-                        user_gas: _,
-                        nonce,
-                        refund_to,
-                        max_refund,
-                        submission_fee_refund,
-                        retry_tx_hash,
-                        sequence_num,
-                        ..
-                    } => {
+                    crate::retryables::RetryableAction::Created { ticket_id, user_gas: _, nonce, refund_to, max_refund, submission_fee_refund, retry_tx_hash, sequence_num, .. } => {
                         let mut out = [0u8; 32];
                         out.copy_from_slice(&ticket_id.0);
 
-                        let topic_created =
-                            arb_alloy_predeploys::topic(arb_alloy_predeploys::EVT_TICKET_CREATED);
+                        let topic_created = arb_alloy_predeploys::topic(arb_alloy_predeploys::EVT_TICKET_CREATED);
                         let topics_created = [topic_created, ticket_id.0];
                         let data_created: [u8; 0] = [];
                         emitter.emit_log(self.addr, &topics_created, &data_created);
 
-                        let topic_redeem =
-                            arb_alloy_predeploys::topic(arb_alloy_predeploys::EVT_REDEEM_SCHEDULED);
+                        let topic_redeem = arb_alloy_predeploys::topic(arb_alloy_predeploys::EVT_REDEEM_SCHEDULED);
                         let seq_topic = abi_word_u64(sequence_num);
                         let topics_redeem = [topic_redeem, ticket_id.0, retry_tx_hash.0, seq_topic];
                         let mut data = alloc::vec::Vec::with_capacity(32 * 3);
@@ -394,7 +333,7 @@ impl PredeployHandler for ArbRetryableTx {
             }
             _ => (Bytes::default(), gas_limit, true),
         }
-    }
+}
 }
 
 #[derive(Clone)]
@@ -413,15 +352,7 @@ impl PredeployHandler for NodeInterface {
         self.addr
     }
 
-    fn call(
-        &self,
-        ctx: &PredeployCallContext,
-        input: &Bytes,
-        gas_limit: u64,
-        _value: U256,
-        retryables: &mut dyn Retryables,
-        _emitter: &mut dyn LogEmitter,
-    ) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables, _emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -444,6 +375,7 @@ impl PredeployHandler for NodeInterface {
             let out = x.to_be_bytes::<32>();
             Bytes::from(out.to_vec())
         }
+
 
         match sel {
             s if s == ni_nitro_genesis => (abi_zero_word(), gas_limit, true),
@@ -484,9 +416,7 @@ impl ArbOwner {
     pub fn new(addr: Address) -> Self {
         Self {
             addr,
-            owners: alloc::sync::Arc::new(std::sync::Mutex::new(
-                alloc::collections::BTreeSet::new(),
-            )),
+            owners: alloc::sync::Arc::new(std::sync::Mutex::new(alloc::collections::BTreeSet::new())),
             network_fee: alloc::sync::Arc::new(std::sync::Mutex::new(Address::ZERO)),
             infra_fee: alloc::sync::Arc::new(std::sync::Mutex::new(Address::ZERO)),
         }
@@ -498,15 +428,7 @@ impl PredeployHandler for ArbOwner {
         self.addr
     }
 
-    fn call(
-        &self,
-        _ctx: &PredeployCallContext,
-        input: &Bytes,
-        gas_limit: u64,
-        _value: U256,
-        _retryables: &mut dyn Retryables,
-        _emitter: &mut dyn LogEmitter,
-    ) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables, _emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -557,7 +479,9 @@ impl PredeployHandler for ArbOwner {
                 let exists = owners.contains(&addr) as u64;
                 (encode_u256(U256::from(exists)), gas_limit, true)
             }
-            s if s == all_owners => (Bytes::default(), gas_limit, true),
+            s if s == all_owners => {
+                (Bytes::default(), gas_limit, true)
+            }
             s if s == get_net_fee => {
                 let addr = *self.network_fee.lock().unwrap();
                 (encode_address(addr), gas_limit, true)
@@ -597,15 +521,7 @@ impl PredeployHandler for ArbGasInfo {
         self.addr
     }
 
-    fn call(
-        &self,
-        _ctx: &PredeployCallContext,
-        input: &Bytes,
-        gas_limit: u64,
-        _value: U256,
-        retryables: &mut dyn Retryables,
-        _emitter: &mut dyn LogEmitter,
-    ) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables, _emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -690,9 +606,7 @@ impl ArbAddressTable {
         Self {
             addr,
             addrs: alloc::sync::Arc::new(std::sync::Mutex::new(alloc::vec::Vec::new())),
-            index: alloc::sync::Arc::new(
-                std::sync::Mutex::new(alloc::collections::BTreeMap::new()),
-            ),
+            index: alloc::sync::Arc::new(std::sync::Mutex::new(alloc::collections::BTreeMap::new())),
         }
     }
 }
@@ -702,15 +616,7 @@ impl PredeployHandler for ArbAddressTable {
         self.addr
     }
 
-    fn call(
-        &self,
-        _ctx: &PredeployCallContext,
-        input: &Bytes,
-        gas_limit: u64,
-        _value: U256,
-        _retryables: &mut dyn Retryables,
-        _emitter: &mut dyn LogEmitter,
-    ) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables, _emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let at_exists = pre::selector(pre::SIG_AT_ADDRESS_EXISTS);
@@ -755,20 +661,19 @@ impl PredeployHandler for ArbAddressTable {
                 let addr = decode_address(input);
                 let exists = self.index.lock().unwrap().contains_key(&addr);
                 (encode_u256(U256::from(exists as u64)), gas_limit, true)
-            }
+            },
             s if s == at_compress => (Bytes::default(), gas_limit, true),
             s if s == at_decompress => (Bytes::default(), gas_limit, true),
             s if s == at_lookup => {
                 let addr = decode_address(input);
                 let idx = self.index.lock().unwrap().get(&addr).copied().unwrap_or(0);
                 (encode_u256(U256::from(idx)), gas_limit, true)
-            }
+            },
             s if s == at_lookup_index => {
                 let idx = decode_index(input);
-                let addr =
-                    self.addrs.lock().unwrap().get(idx as usize).copied().unwrap_or(Address::ZERO);
+                let addr = self.addrs.lock().unwrap().get(idx as usize).copied().unwrap_or(Address::ZERO);
                 (encode_address(addr), gas_limit, true)
-            }
+            },
             s if s == at_register => {
                 let addr = decode_address(input);
                 if let Some(&idx) = self.index.lock().unwrap().get(&addr) {
@@ -780,22 +685,17 @@ impl PredeployHandler for ArbAddressTable {
                 addrs.push(addr);
                 index.insert(addr, idx);
                 (encode_u256(U256::from(idx)), gas_limit, true)
-            }
+            },
             s if s == at_size => {
                 (encode_u256(U256::from(self.addrs.lock().unwrap().len() as u64)), gas_limit, true)
-            }
+            },
             _ => (Bytes::default(), gas_limit, true),
         }
     }
 }
 
 impl PredeployRegistry {
-    pub fn with_addresses(
-        arb_sys: Address,
-        arb_retryable_tx: Address,
-        arb_owner: Address,
-        arb_address_table: Address,
-    ) -> Self {
+    pub fn with_addresses(arb_sys: Address, arb_retryable_tx: Address, arb_owner: Address, arb_address_table: Address) -> Self {
         let mut reg = Self::default();
         reg.register(alloc::boxed::Box::new(ArbSys::new(arb_sys)));
         reg.register(alloc::boxed::Box::new(ArbRetryableTx::new(arb_retryable_tx)));
@@ -808,18 +708,12 @@ impl PredeployRegistry {
         use arb_alloy_predeploys as pre;
         let mut reg = Self::default();
         reg.register(alloc::boxed::Box::new(ArbSys::new(Address::from(pre::ARB_SYS))));
-        reg.register(alloc::boxed::Box::new(ArbRetryableTx::new(Address::from(
-            pre::ARB_RETRYABLE_TX,
-        ))));
+        reg.register(alloc::boxed::Box::new(ArbRetryableTx::new(Address::from(pre::ARB_RETRYABLE_TX))));
         reg.register(alloc::boxed::Box::new(ArbGasInfo::new(Address::from(pre::ARB_GAS_INFO))));
 
         reg.register(alloc::boxed::Box::new(ArbOwner::new(Address::from(pre::ARB_OWNER))));
-        reg.register(alloc::boxed::Box::new(ArbAddressTable::new(Address::from(
-            pre::ARB_ADDRESS_TABLE,
-        ))));
-        reg.register(alloc::boxed::Box::new(NodeInterface::new(Address::from(
-            pre::NODE_INTERFACE,
-        ))));
+        reg.register(alloc::boxed::Box::new(ArbAddressTable::new(Address::from(pre::ARB_ADDRESS_TABLE))));
+        reg.register(alloc::boxed::Box::new(NodeInterface::new(Address::from(pre::NODE_INTERFACE))));
         reg
     }
 }
@@ -892,12 +786,10 @@ mod tests {
         ctx.chain_id = U256::from(42161u64);
         ctx.os_version = 1;
 
-        let mut call_and_decode_u256 = |selector: [u8; 4]| -> U256 {
+        let mut call_and_decode_u256 = |selector: [u8;4]| -> U256 {
             let mut input = alloc::vec::Vec::with_capacity(4);
             input.extend_from_slice(&selector);
-            let (out, _gas_left, success) = reg
-                .dispatch(&ctx, sys_addr, &Bytes::from(input), 100_000, U256::ZERO)
-                .expect("dispatch");
+            let (out, _gas_left, success) = reg.dispatch(&ctx, sys_addr, &Bytes::from(input), 100_000, U256::ZERO).expect("dispatch");
             assert!(success);
             assert_eq!(out.len(), 32);
             let mut buf = [0u8; 32];
@@ -913,7 +805,7 @@ mod tests {
 
         let got_os_ver = call_and_decode_u256(pre::selector(pre::SIG_ARB_OS_VERSION));
         assert_eq!(got_os_ver, U256::from(56u64 + 1u64));
-    }
+}
 
     #[test]
     fn arbsys_blockhash_queries_return_expected_values() {
@@ -932,14 +824,12 @@ mod tests {
         let mut reg = PredeployRegistry::with_default_addresses();
         let sys_addr = address!("0000000000000000000000000000000000000064");
 
-        let mut call_hash = |selector: [u8; 4], block_num: u64| -> B256 {
+        let mut call_hash = |selector: [u8;4], block_num: u64| -> B256 {
             let mut input = alloc::vec::Vec::with_capacity(4 + 32);
             input.extend_from_slice(&selector);
             let bn = U256::from(block_num).to_be_bytes::<32>();
             input.extend_from_slice(&bn);
-            let (out, _gas_left, success) = reg
-                .dispatch(&ctx, sys_addr, &Bytes::from(input), 100_000, U256::ZERO)
-                .expect("dispatch");
+            let (out, _gas_left, success) = reg.dispatch(&ctx, sys_addr, &Bytes::from(input), 100_000, U256::ZERO).expect("dispatch");
             assert!(success);
             assert_eq!(out.len(), 32);
             let mut buf = [0u8; 32];
@@ -971,9 +861,7 @@ mod tests {
 
         let mut input = alloc::vec::Vec::with_capacity(4);
         input.extend_from_slice(&pre::selector("txOrigin()"));
-        let (out, _gas_left, success) = reg
-            .dispatch(&ctx, sys_addr, &Bytes::from(input), 100_000, U256::ZERO)
-            .expect("dispatch");
+        let (out, _gas_left, success) = reg.dispatch(&ctx, sys_addr, &Bytes::from(input), 100_000, U256::ZERO).expect("dispatch");
         assert!(success);
         assert_eq!(out.len(), 32);
         assert_eq!(&out[12..], ctx.origin.as_slice());
@@ -981,9 +869,7 @@ mod tests {
         let mut input2 = alloc::vec::Vec::with_capacity(4);
         input2.extend_from_slice(&pre::selector("getTxCallValue()"));
         let callvalue = U256::from(123456u64);
-        let (out2, _gas_left2, success2) = reg
-            .dispatch(&ctx, sys_addr, &Bytes::from(input2), 100_000, callvalue)
-            .expect("dispatch");
+        let (out2, _gas_left2, success2) = reg.dispatch(&ctx, sys_addr, &Bytes::from(input2), 100_000, callvalue).expect("dispatch");
         assert!(success2);
         assert_eq!(out2.len(), 32);
         let mut buf = [0u8; 32];
@@ -999,14 +885,12 @@ mod tests {
         ctx.basefee = U256::from(1_234_567u64);
         let mut reg = PredeployRegistry::with_default_addresses();
         let gi = address!("000000000000000000000000000000000000006c");
-        let (out, _gas, ok) =
-            reg.dispatch(&ctx, gi, &mk_bytes(), 21_000, U256::ZERO).expect("dispatch");
+        let (out, _gas, ok) = reg.dispatch(&ctx, gi, &mk_bytes(), 21_000, U256::ZERO).expect("dispatch");
         assert!(ok);
         use arb_alloy_predeploys as pre;
         let mut input = alloc::vec::Vec::with_capacity(4);
         input.extend_from_slice(&pre::selector(pre::SIG_GI_GET_L1_BASEFEE_ESTIMATE));
-        let (out2, _gas2, ok2) =
-            reg.dispatch(&ctx, gi, &Bytes::from(input), 21_000, U256::ZERO).expect("dispatch");
+        let (out2, _gas2, ok2) = reg.dispatch(&ctx, gi, &Bytes::from(input), 21_000, U256::ZERO).expect("dispatch");
         assert!(ok2);
         assert_eq!(out2.len(), 32);
         let mut buf = [0u8; 32];
@@ -1024,8 +908,7 @@ mod tests {
         use arb_alloy_predeploys as pre;
         let mut input = alloc::vec::Vec::with_capacity(4);
         input.extend_from_slice(&pre::selector(pre::SIG_GI_GET_L1_GAS_PRICE_ESTIMATE));
-        let (out, _gas, ok) =
-            reg.dispatch(&ctx, gi, &Bytes::from(input), 21_000, U256::ZERO).expect("dispatch");
+        let (out, _gas, ok) = reg.dispatch(&ctx, gi, &Bytes::from(input), 21_000, U256::ZERO).expect("dispatch");
         assert!(ok);
         assert_eq!(out.len(), 32);
         let mut buf = [0u8; 32];
@@ -1051,7 +934,7 @@ mod tests {
         let mut reg = PredeployRegistry::with_default_addresses();
         let addr_retry = address!("000000000000000000000000000000000000006e");
 
-        let mut call = |sel: [u8; 4]| {
+        let mut call = |sel: [u8;4]| {
             let mut input = alloc::vec::Vec::with_capacity(4);
             input.extend_from_slice(&sel);
             reg.dispatch(&mk_ctx(), addr_retry, &Bytes::from(input), 50_000, U256::ZERO)
@@ -1091,7 +974,7 @@ mod tests {
 
     #[test]
     fn arb_retryable_tx_get_beneficiary_after_submit_retryable() {
-        use alloy_primitives::{address, Bytes, U256};
+        use alloy_primitives::{address, U256, Bytes};
         use arb_alloy_predeploys as pre;
 
         let mut reg = PredeployRegistry::with_default_addresses();
@@ -1119,7 +1002,7 @@ mod tests {
 
     #[test]
     fn arb_retryable_tx_get_current_redeemer_is_ctx_caller() {
-        use alloy_primitives::{address, Bytes, U256};
+        use alloy_primitives::{address, U256, Bytes};
         use arb_alloy_predeploys as pre;
 
         let mut reg = PredeployRegistry::with_default_addresses();
@@ -1188,8 +1071,8 @@ mod tests {
         let mut buf = [0u8; 32];
         buf.copy_from_slice(&out[..32]);
         let got = U256::from_be_bytes(buf);
-        let expected = U256::from(ctx.time) +
-            U256::from(arb_alloy_util::retryables::RETRYABLE_LIFETIME_SECONDS);
+        let expected =
+            U256::from(ctx.time) + U256::from(arb_alloy_util::retryables::RETRYABLE_LIFETIME_SECONDS);
         assert_eq!(got, expected);
     }
 
@@ -1205,21 +1088,13 @@ mod tests {
         ctx.chain_id = U256::from(42161u64);
         ctx.os_version = 5;
 
-        let mk = |sel: [u8; 4]| {
+        let mk = |sel: [u8;4]| {
             let mut v = alloc::vec::Vec::with_capacity(4);
             v.extend_from_slice(&sel);
             Bytes::from(v)
         };
 
-        let (out_os, _gas_os, ok_os) = reg
-            .dispatch(
-                &ctx,
-                sys_addr,
-                &mk(pre::selector(pre::SIG_ARB_OS_VERSION)),
-                50_000,
-                U256::ZERO,
-            )
-            .expect("dispatch");
+        let (out_os, _gas_os, ok_os) = reg.dispatch(&ctx, sys_addr, &mk(pre::selector(pre::SIG_ARB_OS_VERSION)), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok_os);
         assert_eq!(out_os.len(), 32);
         let mut buf = [0u8; 32];
@@ -1227,9 +1102,7 @@ mod tests {
         let got_os = U256::from_be_bytes(buf);
         assert_eq!(got_os, U256::from(56u64 + ctx.os_version));
 
-        let (out_chain, _gas_chain, ok_chain) = reg
-            .dispatch(&ctx, sys_addr, &mk(pre::selector(pre::SIG_ARB_CHAIN_ID)), 50_000, U256::ZERO)
-            .expect("dispatch");
+        let (out_chain, _gas_chain, ok_chain) = reg.dispatch(&ctx, sys_addr, &mk(pre::selector(pre::SIG_ARB_CHAIN_ID)), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok_chain);
         let mut buf2 = [0u8; 32];
         buf2.copy_from_slice(&out_chain[..32]);
@@ -1251,27 +1124,15 @@ mod tests {
             Bytes::from(v)
         };
 
-        let (out_send, _gas_send, ok_send) = reg
-            .dispatch(
-                &mk_ctx(),
-                sys_addr,
-                &mk_input(pre::selector(pre::SIG_SEND_TX_TO_L1)),
-                200_000,
-                U256::ZERO,
-            )
-            .expect("dispatch");
+        let (out_send, _gas_send, ok_send) =
+            reg.dispatch(&mk_ctx(), sys_addr, &mk_input(pre::selector(pre::SIG_SEND_TX_TO_L1)), 200_000, U256::ZERO)
+                .expect("dispatch");
         assert!(ok_send);
         assert_eq!(out_send.len(), 32);
 
-        let (out_withdraw, _gas_withdraw, ok_withdraw) = reg
-            .dispatch(
-                &mk_ctx(),
-                sys_addr,
-                &mk_input(pre::selector(pre::SIG_WITHDRAW_ETH)),
-                200_000,
-                U256::ZERO,
-            )
-            .expect("dispatch");
+        let (out_withdraw, _gas_withdraw, ok_withdraw) =
+            reg.dispatch(&mk_ctx(), sys_addr, &mk_input(pre::selector(pre::SIG_WITHDRAW_ETH)), 200_000, U256::ZERO)
+                .expect("dispatch");
         assert!(ok_withdraw);
         assert!(out_withdraw.len() == 0 || out_withdraw.len() == 32);
     }
@@ -1292,13 +1153,7 @@ mod tests {
         };
 
         let (out, _gas, ok) = reg
-            .dispatch(
-                &mk_ctx(),
-                ni_addr,
-                &mk(pre::SIG_NI_GAS_ESTIMATE_L1_COMPONENT),
-                200_000,
-                U256::ZERO,
-            )
+            .dispatch(&mk_ctx(), ni_addr, &mk(pre::SIG_NI_GAS_ESTIMATE_L1_COMPONENT), 200_000, U256::ZERO)
             .expect("dispatch");
         assert!(ok);
         assert!(out.len() == 0 || out.len() == 32);
@@ -1306,13 +1161,7 @@ mod tests {
         let mut ctx = mk_ctx();
         ctx.basefee = U256::from(123_456u64);
         let (out2, _gas2, ok2) = reg
-            .dispatch(
-                &ctx,
-                ni_addr,
-                &mk(pre::SIG_NI_GAS_ESTIMATE_L1_COMPONENT),
-                200_000,
-                U256::ZERO,
-            )
+            .dispatch(&ctx, ni_addr, &mk(pre::SIG_NI_GAS_ESTIMATE_L1_COMPONENT), 200_000, U256::ZERO)
             .expect("dispatch");
         assert!(ok2);
         assert_eq!(out2.len(), 32);
@@ -1321,7 +1170,7 @@ mod tests {
         let got = U256::from_be_bytes(buf);
         assert_eq!(got, ctx.basefee);
     }
-
+    
     #[test]
     fn node_interface_gas_estimate_components_returns_basefees() {
         use alloy_primitives::address;
@@ -1362,8 +1211,9 @@ mod tests {
         let got3 = U256::from_be_bytes(buf3);
         assert_eq!(got2, ctx.basefee);
         assert_eq!(got3, ctx.basefee);
-    }
 
+    }
+    
     #[test]
     fn node_interface_trivial_selectors_return_expected_abi() {
         use alloy_primitives::address;
@@ -1378,27 +1228,15 @@ mod tests {
             Bytes::from(v)
         };
 
-        let (out_gen, _g1, ok_gen) = reg
-            .dispatch(&mk_ctx(), ni_addr, &mk(pre::SIG_NI_NITRO_GENESIS_BLOCK), 50_000, U256::ZERO)
-            .expect("dispatch");
+        let (out_gen, _g1, ok_gen) = reg.dispatch(&mk_ctx(), ni_addr, &mk(pre::SIG_NI_NITRO_GENESIS_BLOCK), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok_gen);
         assert_eq!(out_gen.len(), 32);
 
-        let (out_b1, _g2, ok_b1) = reg
-            .dispatch(&mk_ctx(), ni_addr, &mk(pre::SIG_NI_BLOCK_L1_NUM), 50_000, U256::ZERO)
-            .expect("dispatch");
+        let (out_b1, _g2, ok_b1) = reg.dispatch(&mk_ctx(), ni_addr, &mk(pre::SIG_NI_BLOCK_L1_NUM), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok_b1);
         assert!(out_b1.is_empty() || out_b1.len() == 32);
 
-        let (out_range, _g3, ok_range) = reg
-            .dispatch(
-                &mk_ctx(),
-                ni_addr,
-                &mk(pre::SIG_NI_L2_BLOCK_RANGE_FOR_L1),
-                50_000,
-                U256::ZERO,
-            )
-            .expect("dispatch");
+        let (out_range, _g3, ok_range) = reg.dispatch(&mk_ctx(), ni_addr, &mk(pre::SIG_NI_L2_BLOCK_RANGE_FOR_L1), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok_range);
         assert_eq!(out_range.len(), 64);
     }
@@ -1416,31 +1254,16 @@ mod tests {
             v.extend_from_slice(&sel);
             Bytes::from(v)
         };
-        let (o1, _g1, ok1) = reg
-            .dispatch(
-                &mk_ctx(),
-                addr_owner,
-                &call(pre::SIG_OWNER_GET_NETWORK_FEE_ACCOUNT),
-                50_000,
-                U256::ZERO,
-            )
-            .expect("dispatch");
+        let (o1, _g1, ok1) = reg.dispatch(&mk_ctx(), addr_owner, &call(pre::SIG_OWNER_GET_NETWORK_FEE_ACCOUNT), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok1);
         assert!(o1.is_empty() || o1.len() == 32);
 
-        let (o2, _g2, ok2) = reg
-            .dispatch(
-                &mk_ctx(),
-                addr_owner,
-                &call(pre::SIG_OWNER_GET_INFRA_FEE_ACCOUNT),
-                50_000,
-                U256::ZERO,
-            )
-            .expect("dispatch");
+        let (o2, _g2, ok2) = reg.dispatch(&mk_ctx(), addr_owner, &call(pre::SIG_OWNER_GET_INFRA_FEE_ACCOUNT), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok2);
         assert!(o2.is_empty() || o2.len() == 32);
     }
 
+ 
     #[test]
     fn arb_owner_basic_selectors_dispatch() {
         use alloy_primitives::address;
@@ -1448,31 +1271,15 @@ mod tests {
         let mut reg = PredeployRegistry::with_default_addresses();
         let addr_owner = address!("0000000000000000000000000000000000000070");
 
-        let mut call = |sel: [u8; 4]| {
+        let mut call = |sel: [u8;4]| {
             let mut v = alloc::vec::Vec::with_capacity(4);
             v.extend_from_slice(&sel);
             Bytes::from(v)
         };
 
-        let (_o1, _g1, ok1) = reg
-            .dispatch(
-                &mk_ctx(),
-                addr_owner,
-                &call(pre::selector(pre::SIG_OWNER_IS_CHAIN_OWNER)),
-                50_000,
-                U256::ZERO,
-            )
-            .expect("dispatch");
+        let (_o1, _g1, ok1) = reg.dispatch(&mk_ctx(), addr_owner, &call(pre::selector(pre::SIG_OWNER_IS_CHAIN_OWNER)), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok1);
-        let (_o2, _g2, ok2) = reg
-            .dispatch(
-                &mk_ctx(),
-                addr_owner,
-                &call(pre::selector(pre::SIG_OWNER_GET_NETWORK_FEE_ACCOUNT)),
-                50_000,
-                U256::ZERO,
-            )
-            .expect("dispatch");
+        let (_o2, _g2, ok2) = reg.dispatch(&mk_ctx(), addr_owner, &call(pre::selector(pre::SIG_OWNER_GET_NETWORK_FEE_ACCOUNT)), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok2);
     }
 
@@ -1490,37 +1297,32 @@ mod tests {
         let a = Address::from([9u8; 20]);
         word[12..].copy_from_slice(a.as_slice());
         in_exists.extend_from_slice(&word);
-        let (out0, _, _) =
-            reg.dispatch(&ctx, addr_table, &Bytes::from(in_exists), 50_000, U256::ZERO).unwrap();
+        let (out0, _, _) = reg.dispatch(&ctx, addr_table, &Bytes::from(in_exists), 50_000, U256::ZERO).unwrap();
         assert_eq!(U256::from_be_slice(&out0[..32]), U256::ZERO);
 
         let mut in_reg = alloc::vec::Vec::with_capacity(4 + 32);
         in_reg.extend_from_slice(&pre::selector(pre::SIG_AT_REGISTER));
         in_reg.extend_from_slice(&word);
-        let (out1, _, _) =
-            reg.dispatch(&ctx, addr_table, &Bytes::from(in_reg), 50_000, U256::ZERO).unwrap();
+        let (out1, _, _) = reg.dispatch(&ctx, addr_table, &Bytes::from(in_reg), 50_000, U256::ZERO).unwrap();
         assert_eq!(U256::from_be_slice(&out1[..32]), U256::from(0));
 
         let mut in_size = alloc::vec::Vec::with_capacity(4);
         in_size.extend_from_slice(&pre::selector(pre::SIG_AT_SIZE));
-        let (out2, _, _) =
-            reg.dispatch(&ctx, addr_table, &Bytes::from(in_size), 50_000, U256::ZERO).unwrap();
+        let (out2, _, _) = reg.dispatch(&ctx, addr_table, &Bytes::from(in_size), 50_000, U256::ZERO).unwrap();
         let sz = U256::from_be_slice(&out2[..32]);
         assert!(sz >= U256::from(0));
 
         let mut in_lookup = alloc::vec::Vec::with_capacity(4 + 32);
         in_lookup.extend_from_slice(&pre::selector(pre::SIG_AT_LOOKUP));
         in_lookup.extend_from_slice(&word);
-        let (out3, _, _) =
-            reg.dispatch(&ctx, addr_table, &Bytes::from(in_lookup), 50_000, U256::ZERO).unwrap();
+        let (out3, _, _) = reg.dispatch(&ctx, addr_table, &Bytes::from(in_lookup), 50_000, U256::ZERO).unwrap();
         let _idx = U256::from_be_slice(&out3[..32]);
 
         let mut in_lookup_i = alloc::vec::Vec::with_capacity(4 + 32);
         in_lookup_i.extend_from_slice(&pre::selector(pre::SIG_AT_LOOKUP_INDEX));
         let idx_word = U256::from(0).to_be_bytes::<32>();
         in_lookup_i.extend_from_slice(&idx_word);
-        let (out4, _, _) =
-            reg.dispatch(&ctx, addr_table, &Bytes::from(in_lookup_i), 50_000, U256::ZERO).unwrap();
+        let (out4, _, _) = reg.dispatch(&ctx, addr_table, &Bytes::from(in_lookup_i), 50_000, U256::ZERO).unwrap();
         assert_eq!(out4.len(), 32);
     }
 
@@ -1541,9 +1343,7 @@ mod tests {
             depth: 1,
             basefee: U256::ZERO,
         };
-        let (_out, _gas, success) = reg
-            .dispatch(&ctx, addr_owner, &Bytes::default(), 50_000, U256::ZERO)
-            .expect("dispatch");
+        let (_out, _gas, success) = reg.dispatch(&ctx, addr_owner, &Bytes::default(), 50_000, U256::ZERO).expect("dispatch");
         assert!(success);
     }
 
@@ -1553,9 +1353,7 @@ mod tests {
         use arb_alloy_predeploys as pre;
         let mut reg = PredeployRegistry::with_default_addresses();
         let addr_at = address!("0000000000000000000000000000000000000066");
-        let (_out, _gas, success) = reg
-            .dispatch(&mk_ctx(), addr_at, &Bytes::default(), 50_000, U256::ZERO)
-            .expect("dispatch");
+        let (_out, _gas, success) = reg.dispatch(&mk_ctx(), addr_at, &Bytes::default(), 50_000, U256::ZERO).expect("dispatch");
         assert!(success);
     }
 
@@ -1580,8 +1378,7 @@ mod tests {
             pre::SIG_AT_REGISTER,
             pre::SIG_AT_SIZE,
         ] {
-            let (_o, _g, ok) =
-                reg.dispatch(&mk_ctx(), at_addr, &mk(sig), 50_000, U256::ZERO).expect("dispatch");
+            let (_o, _g, ok) = reg.dispatch(&mk_ctx(), at_addr, &mk(sig), 50_000, U256::ZERO).expect("dispatch");
             assert!(ok, "selector should dispatch: {}", sig);
         }
     }
@@ -1590,7 +1387,7 @@ mod tests {
     fn arb_address_table_selector_abi_shapes() {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
-
+    
         let mut reg = PredeployRegistry::with_default_addresses();
         let addr_at = address!("0000000000000000000000000000000000000066");
 
@@ -1601,33 +1398,23 @@ mod tests {
             Bytes::from(v)
         };
 
-        let (o_exists, _g1, ok1) = reg
-            .dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_ADDRESS_EXISTS), 50_000, U256::ZERO)
-            .expect("dispatch");
+        let (o_exists, _g1, ok1) = reg.dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_ADDRESS_EXISTS), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok1);
         assert!(o_exists.is_empty() || o_exists.len() == 32);
 
-        let (o_lookup, _g2, ok2) = reg
-            .dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_LOOKUP), 50_000, U256::ZERO)
-            .expect("dispatch");
+        let (o_lookup, _g2, ok2) = reg.dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_LOOKUP), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok2);
         assert!(o_lookup.is_empty() || o_lookup.len() == 32);
 
-        let (o_lookup_index, _g3, ok3) = reg
-            .dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_LOOKUP_INDEX), 50_000, U256::ZERO)
-            .expect("dispatch");
+        let (o_lookup_index, _g3, ok3) = reg.dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_LOOKUP_INDEX), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok3);
         assert!(o_lookup_index.is_empty() || o_lookup_index.len() == 32);
 
-        let (o_register, _g4, ok4) = reg
-            .dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_REGISTER), 50_000, U256::ZERO)
-            .expect("dispatch");
+        let (o_register, _g4, ok4) = reg.dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_REGISTER), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok4);
         assert!(o_register.is_empty() || o_register.len() == 32);
 
-        let (o_size, _g5, ok5) = reg
-            .dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_SIZE), 50_000, U256::ZERO)
-            .expect("dispatch");
+        let (o_size, _g5, ok5) = reg.dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_SIZE), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok5);
         assert!(o_size.is_empty() || o_size.len() == 32);
     }

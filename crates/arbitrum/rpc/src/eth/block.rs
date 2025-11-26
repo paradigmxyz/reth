@@ -1,4 +1,5 @@
-use crate::{error::ArbEthApiError, eth::ArbEthApi};
+use crate::eth::ArbEthApi;
+use crate::error::ArbEthApiError;
 use alloy_eips::BlockId;
 use reth_primitives_traits::RecoveredBlock;
 use reth_rpc_eth_api::{

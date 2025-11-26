@@ -1,26 +1,27 @@
 #![cfg_attr(test, allow(dead_code))]
 pub mod header;
 
+
 #[cfg_attr(not(feature = "std"), no_std)]
+
 extern crate alloc;
 
 use alloc::sync::Arc;
 
-use alloy_consensus::{BlockHeader as _, Header, Transaction as _};
-use alloy_eips::Decodable2718;
-use alloy_evm::tx::{FromRecoveredTx, FromTxWithEncoded};
-use alloy_primitives::U256;
 use core::convert::Infallible;
-use reth_arbitrum_chainspec::ArbitrumChainSpec;
-use reth_arbitrum_payload::ArbExecutionData;
-use reth_evm::{
-    ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
-};
-use reth_primitives_traits::{
-    BlockHeader, BlockTy, NodePrimitives, SealedBlock, SealedHeader, SignedTransaction, TxTy,
-    WithEncoded,
-};
+use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader as _, Transaction as _};
+use alloy_primitives::U256;
+use reth_evm::{ConfigureEvm, EvmEnv};
+use alloy_eips::Decodable2718;
+use reth_primitives_traits::SignedTransaction;
+use reth_evm::{ConfigureEngineEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor};
+use reth_primitives_traits::{TxTy, WithEncoded, SealedBlock, SealedHeader, NodePrimitives, BlockTy, BlockHeader};
+use alloy_evm::tx::{FromRecoveredTx, FromTxWithEncoded};
+use alloy_consensus::{BlockHeader as _, Transaction as _};
 use reth_storage_errors::any::AnyError;
+use reth_arbitrum_payload::ArbExecutionData;
+use reth_arbitrum_chainspec::ArbitrumChainSpec;
 use revm::{
     context::{BlockEnv, CfgEnv},
     context_interface::block::BlobExcessGasAndPrice,
@@ -41,30 +42,27 @@ pub use predeploys::*;
 mod retryables;
 pub use retryables::*;
 mod arb_evm;
-pub use arb_evm::{ArbEvm, ArbEvmFactory, ArbTransaction};
+pub use arb_evm::{ArbTransaction, ArbEvm, ArbEvmFactory};
 
-mod early_tx_state;
 mod log_sink;
-pub use early_tx_state::{
-    add_gas_adjustment, clear_early_tx_gas, get_and_clear_gas_adjustment, get_early_tx_gas,
-    set_early_tx_gas,
-};
-pub mod addressset;
-pub mod addresstable;
-pub mod arbosstate;
-pub mod blockhash;
-pub mod features;
-pub mod internal_tx;
+mod early_tx_state;
+pub use early_tx_state::{set_early_tx_gas, get_early_tx_gas, clear_early_tx_gas, add_gas_adjustment, get_and_clear_gas_adjustment};
+pub mod storage;
 pub mod l1_pricing;
 pub mod l2_pricing;
+pub mod addressset;
+pub mod addresstable;
 pub mod merkleaccumulator;
+pub mod blockhash;
+pub mod features;
 pub mod programs;
-pub mod storage;
+pub mod arbosstate;
+pub mod internal_tx;
+
 
 pub struct ArbEvmConfig<ChainSpec = (), N = (), R = ArbRethReceiptBuilder>
 where
-    R: Clone,
-{
+    R: Clone, {
     pub executor_factory: ArbBlockExecutorFactory<R, ChainSpec>,
     pub block_assembler: ArbBlockAssembler<ChainSpec>,
     _pd: core::marker::PhantomData<N>,
@@ -83,10 +81,11 @@ impl<ChainSpec, N: Clone, R: Clone> Clone for ArbEvmConfig<ChainSpec, N, R> {
 impl<ChainSpec, N, R: Clone> core::fmt::Debug for ArbEvmConfig<ChainSpec, N, R> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ArbEvmConfig").finish()
-    }
+}
 }
 
-impl<ChainSpec, N, R> Default for ArbEvmConfig<ChainSpec, N, R>
+
+    impl<ChainSpec, N, R> Default for ArbEvmConfig<ChainSpec, N, R>
 where
     ChainSpec: Default,
     R: Default + Clone,
@@ -112,30 +111,18 @@ where
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         self.executor_factory.spec()
     }
+
 }
 
 impl<ChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec, N, R>
 where
     ChainSpec: ArbitrumChainSpec + Send + Sync + Unpin + core::fmt::Debug + 'static,
     N: reth_primitives_traits::NodePrimitives<
-            SignedTx = reth_arbitrum_primitives::ArbTransactionSigned,
-            Receipt = reth_arbitrum_primitives::ArbReceipt,
-            Block = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>,
-        > + Clone
-        + Send
-        + Sync
-        + Unpin
-        + core::fmt::Debug,
-    R: Clone
-        + Send
-        + Sync
-        + Unpin
-        + core::fmt::Debug
-        + 'static
-        + alloy_evm::eth::receipt_builder::ReceiptBuilder<
-            Transaction = reth_arbitrum_primitives::ArbTransactionSigned,
-            Receipt = reth_arbitrum_primitives::ArbReceipt,
-        >,
+        SignedTx = reth_arbitrum_primitives::ArbTransactionSigned,
+        Receipt = reth_arbitrum_primitives::ArbReceipt,
+        Block = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>
+    > + Clone + Send + Sync + Unpin + core::fmt::Debug,
+    R: Clone + Send + Sync + Unpin + core::fmt::Debug + 'static + alloy_evm::eth::receipt_builder::ReceiptBuilder<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt>,
 {
     type Primitives = N;
     type Error = core::convert::Infallible;
@@ -151,10 +138,7 @@ where
         &self.block_assembler
     }
 
-    fn evm_env(
-        &self,
-        header: &<N as NodePrimitives>::BlockHeader,
-    ) -> Result<EvmEnv<SpecId>, Infallible> {
+    fn evm_env(&self, header: &<N as NodePrimitives>::BlockHeader) -> Result<EvmEnv<SpecId>, Infallible> {
         let chain_id = self.chain_spec().chain_id() as u64;
         let spec = self.chain_spec().spec_id_by_timestamp(header.timestamp());
         let mut cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
@@ -166,10 +150,7 @@ where
             prevrandao: header.mix_hash(),
             gas_limit: header.gas_limit(),
             basefee: header.base_fee_per_gas().unwrap_or_default(),
-            blob_excess_gas_and_price: Some(BlobExcessGasAndPrice {
-                excess_blob_gas: 0,
-                blob_gasprice: 0,
-            }),
+            blob_excess_gas_and_price: Some(BlobExcessGasAndPrice { excess_blob_gas: 0, blob_gasprice: 0 }),
         };
         Ok(EvmEnv { cfg_env, block_env })
     }
@@ -191,29 +172,17 @@ where
             prevrandao: Some(attributes.prev_randao),
             gas_limit: attributes.gas_limit,
             basefee: attributes.max_fee_per_gas.unwrap_or_default().try_into().unwrap_or_default(),
-            blob_excess_gas_and_price: Some(BlobExcessGasAndPrice {
-                excess_blob_gas: 0,
-                blob_gasprice: 0,
-            }),
+            blob_excess_gas_and_price: Some(BlobExcessGasAndPrice { excess_blob_gas: 0, blob_gasprice: 0 }),
         };
         Ok(EvmEnv { cfg_env, block_env })
     }
-    fn context_for_block(
-        &self,
-        block: &'_ SealedBlock<BlockTy<Self::Primitives>>,
-    ) -> Result<ArbBlockExecutionCtx, Infallible> {
+    fn context_for_block(&self, block: &'_ SealedBlock<BlockTy<Self::Primitives>>) -> Result<ArbBlockExecutionCtx, Infallible> {
         // Extract L1 block number and delayed messages from the block header
         // mixHash encoding: [send_count(8), l1_block_num(8), arbos_version(8), reserved(8)]
         let mix_hash_bytes = block.header().mix_hash.0;
         let l1_block_number = u64::from_be_bytes([
-            mix_hash_bytes[8],
-            mix_hash_bytes[9],
-            mix_hash_bytes[10],
-            mix_hash_bytes[11],
-            mix_hash_bytes[12],
-            mix_hash_bytes[13],
-            mix_hash_bytes[14],
-            mix_hash_bytes[15],
+            mix_hash_bytes[8], mix_hash_bytes[9], mix_hash_bytes[10], mix_hash_bytes[11],
+            mix_hash_bytes[12], mix_hash_bytes[13], mix_hash_bytes[14], mix_hash_bytes[15],
         ]);
 
         // Nonce contains delayed_messages_read
@@ -230,9 +199,7 @@ where
 
     fn context_for_next_block(
         &self,
-        parent: &SealedHeader<
-            <Self::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
-        >,
+        parent: &SealedHeader<<Self::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader>,
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<ArbBlockExecutionCtx, Infallible> {
         Ok(ArbBlockExecutionCtx {
@@ -243,30 +210,18 @@ where
             l1_block_number: attributes.l1_block_number,
         })
     }
+
 }
 
 impl<ChainSpec, N, R> ConfigureEngineEvm<ArbExecutionData> for ArbEvmConfig<ChainSpec, N, R>
 where
     ChainSpec: ArbitrumChainSpec + Send + Sync + Unpin + core::fmt::Debug + 'static,
     N: reth_primitives_traits::NodePrimitives<
-            SignedTx = reth_arbitrum_primitives::ArbTransactionSigned,
-            Receipt = reth_arbitrum_primitives::ArbReceipt,
-            Block = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>,
-        > + Send
-        + Sync
-        + Unpin
-        + core::fmt::Debug
-        + Clone,
-    R: Send
-        + Sync
-        + Unpin
-        + core::fmt::Debug
-        + Clone
-        + 'static
-        + alloy_evm::eth::receipt_builder::ReceiptBuilder<
-            Transaction = reth_arbitrum_primitives::ArbTransactionSigned,
-            Receipt = reth_arbitrum_primitives::ArbReceipt,
-        >,
+        SignedTx = reth_arbitrum_primitives::ArbTransactionSigned,
+        Receipt = reth_arbitrum_primitives::ArbReceipt,
+        Block = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>
+    > + Send + Sync + Unpin + core::fmt::Debug + Clone,
+    R: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static + alloy_evm::eth::receipt_builder::ReceiptBuilder<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt>,
 {
     fn evm_env_for_payload(
         &self,
@@ -283,10 +238,7 @@ where
             prevrandao: Some(payload.payload.as_v1().prev_randao),
             gas_limit: payload.payload.as_v1().gas_limit,
             basefee: payload.payload.as_v1().base_fee_per_gas.try_into().unwrap_or_default(),
-            blob_excess_gas_and_price: Some(BlobExcessGasAndPrice {
-                excess_blob_gas: 0,
-                blob_gasprice: 0,
-            }),
+            blob_excess_gas_and_price: Some(BlobExcessGasAndPrice { excess_blob_gas: 0, blob_gasprice: 0 }),
         };
         Ok(EvmEnv { cfg_env, block_env })
     }
@@ -308,13 +260,17 @@ where
         &self,
         payload: &ArbExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Infallible> {
-        Ok(payload.payload.transactions().clone().into_iter().map(|encoded| {
-            let tx =
-                reth_arbitrum_primitives::ArbTransactionSigned::decode_2718_exact(encoded.as_ref())
+        Ok(payload
+            .payload
+            .transactions()
+            .clone()
+            .into_iter()
+            .map(|encoded| {
+                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718_exact(encoded.as_ref())
                     .map_err(AnyError::new)?;
-            let signer = tx.try_recover().map_err(AnyError::new)?;
-            Ok::<_, AnyError>(WithEncoded::new(encoded.into(), tx.with_signer(signer)))
-        }))
+                let signer = tx.try_recover().map_err(AnyError::new)?;
+                Ok::<_, AnyError>(WithEncoded::new(encoded.into(), tx.with_signer(signer)))
+            }))
     }
 }
 impl<ChainSpec: ArbitrumChainSpec, N, R: Clone> ArbEvmConfig<ChainSpec, N, R> {
@@ -322,8 +278,8 @@ impl<ChainSpec: ArbitrumChainSpec, N, R: Clone> ArbEvmConfig<ChainSpec, N, R> {
         &self,
         bytes: &[u8],
     ) -> Result<arb_alloy_consensus::ArbTxEnvelope, AnyError> {
-        let (env, _) =
-            arb_alloy_consensus::ArbTxEnvelope::decode_typed(bytes).map_err(AnyError::new)?;
+        let (env, _) = arb_alloy_consensus::ArbTxEnvelope::decode_typed(bytes)
+            .map_err(AnyError::new)?;
         Ok(env)
     }
 }
@@ -331,16 +287,20 @@ impl<ChainSpec: ArbitrumChainSpec, N, R: Clone> ArbEvmConfig<ChainSpec, N, R> {
     pub fn tx_envelopes_for_payload(
         &self,
         payload: &ArbExecutionData,
-    ) -> impl Iterator<
-        Item = Result<(alloy_primitives::Bytes, arb_alloy_consensus::ArbTxEnvelope), AnyError>,
-    > + '_ {
-        payload.payload.transactions().clone().into_iter().map(|encoded| {
-            let (env, _) = arb_alloy_consensus::ArbTxEnvelope::decode_typed(encoded.as_ref())
-                .map_err(AnyError::new)?;
-            Ok((encoded, env))
-        })
+    ) -> impl Iterator<Item = Result<(alloy_primitives::Bytes, arb_alloy_consensus::ArbTxEnvelope), AnyError>> + '_ {
+        payload
+            .payload
+            .transactions()
+            .clone()
+            .into_iter()
+            .map(|encoded| {
+                let (env, _) = arb_alloy_consensus::ArbTxEnvelope::decode_typed(encoded.as_ref())
+                    .map_err(AnyError::new)?;
+                Ok((encoded, env))
+            })
     }
 }
+
 
 impl<ChainSpec: ArbitrumChainSpec, N, R: Clone> ArbEvmConfig<ChainSpec, N, R> {
     pub fn default_predeploy_registry(&self) -> PredeployRegistry {
@@ -350,85 +310,64 @@ impl<ChainSpec: ArbitrumChainSpec, N, R: Clone> ArbEvmConfig<ChainSpec, N, R> {
     pub fn arb_tx_iterator_for_payload(
         &self,
         payload: &ArbExecutionData,
-    ) -> impl Iterator<
-        Item = Result<
-            (alloy_primitives::Bytes, reth_arbitrum_primitives::ArbTransactionSigned),
-            AnyError,
-        >,
-    > + '_ {
-        payload.payload.transactions().clone().into_iter().map(|encoded| {
-            let tx =
-                reth_arbitrum_primitives::ArbTransactionSigned::decode_2718_exact(encoded.as_ref())
+    ) -> impl Iterator<Item = Result<(alloy_primitives::Bytes, reth_arbitrum_primitives::ArbTransactionSigned), AnyError>> + '_ {
+        payload
+            .payload
+            .transactions()
+            .clone()
+            .into_iter()
+            .map(|encoded| {
+                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718_exact(encoded.as_ref())
                     .map_err(AnyError::new)?;
-            Ok::<_, AnyError>((encoded, tx))
-        })
+                Ok::<_, AnyError>((encoded, tx))
+            })
     }
 
-    pub fn map_env_to_tx_type(
-        env: &arb_alloy_consensus::ArbTxEnvelope,
-    ) -> reth_arbitrum_primitives::ArbTxType {
+    pub fn map_env_to_tx_type(env: &arb_alloy_consensus::ArbTxEnvelope) -> reth_arbitrum_primitives::ArbTxType {
         match env {
-            arb_alloy_consensus::ArbTxEnvelope::Deposit(_) => {
-                reth_arbitrum_primitives::ArbTxType::Deposit
-            }
-            arb_alloy_consensus::ArbTxEnvelope::Unsigned(_) => {
-                reth_arbitrum_primitives::ArbTxType::Unsigned
-            }
-            arb_alloy_consensus::ArbTxEnvelope::Contract(_) => {
-                reth_arbitrum_primitives::ArbTxType::Contract
-            }
-            arb_alloy_consensus::ArbTxEnvelope::Retry(_) => {
-                reth_arbitrum_primitives::ArbTxType::Retry
-            }
-            arb_alloy_consensus::ArbTxEnvelope::SubmitRetryable(_) => {
-                reth_arbitrum_primitives::ArbTxType::SubmitRetryable
-            }
-            arb_alloy_consensus::ArbTxEnvelope::Internal(_) => {
-                reth_arbitrum_primitives::ArbTxType::Internal
-            }
-            arb_alloy_consensus::ArbTxEnvelope::Legacy(_) => {
-                reth_arbitrum_primitives::ArbTxType::Legacy
-            }
+            arb_alloy_consensus::ArbTxEnvelope::Deposit(_) => reth_arbitrum_primitives::ArbTxType::Deposit,
+            arb_alloy_consensus::ArbTxEnvelope::Unsigned(_) => reth_arbitrum_primitives::ArbTxType::Unsigned,
+            arb_alloy_consensus::ArbTxEnvelope::Contract(_) => reth_arbitrum_primitives::ArbTxType::Contract,
+            arb_alloy_consensus::ArbTxEnvelope::Retry(_) => reth_arbitrum_primitives::ArbTxType::Retry,
+            arb_alloy_consensus::ArbTxEnvelope::SubmitRetryable(_) => reth_arbitrum_primitives::ArbTxType::SubmitRetryable,
+            arb_alloy_consensus::ArbTxEnvelope::Internal(_) => reth_arbitrum_primitives::ArbTxType::Internal,
+            arb_alloy_consensus::ArbTxEnvelope::Legacy(_) => reth_arbitrum_primitives::ArbTxType::Legacy,
         }
     }
 }
 
+
+
+
+
 pub(crate) mod tests {
     use alloy_evm::tx::RecoveredTx;
-    pub(crate) mod test_helpers {
-        use super::*;
-        #[derive(Clone, Debug, Default)]
-        pub struct TestChainSpec;
-        impl ArbitrumChainSpec for TestChainSpec {
-            fn chain_id(&self) -> u64 {
-                42161
-            }
-            fn spec_id_by_timestamp(&self, _ts: u64) -> SpecId {
-                SpecId::CANCUN
-            }
-        }
-        #[derive(Clone, Debug, Default, PartialEq, Eq)]
-        pub struct TestPrims;
-        impl reth_primitives_traits::NodePrimitives for TestPrims {
-            type BlockHeader = alloy_consensus::Header;
-            type Block = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>;
-            type BlockBody =
-                alloy_consensus::BlockBody<reth_arbitrum_primitives::ArbTransactionSigned>;
-            type Receipt = reth_arbitrum_primitives::ArbReceipt;
-            type SignedTx = reth_arbitrum_primitives::ArbTransactionSigned;
-        }
+pub(crate) mod test_helpers {
+    use super::*;
+    #[derive(Clone, Debug, Default)]
+    pub struct TestChainSpec;
+    impl ArbitrumChainSpec for TestChainSpec {
+
+        fn chain_id(&self) -> u64 { 42161 }
+        fn spec_id_by_timestamp(&self, _ts: u64) -> SpecId { SpecId::CANCUN }
     }
+    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    pub struct TestPrims;
+    impl reth_primitives_traits::NodePrimitives for TestPrims {
+        type BlockHeader = alloy_consensus::Header;
+        type Block = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>;
+        type BlockBody = alloy_consensus::BlockBody<reth_arbitrum_primitives::ArbTransactionSigned>;
+        type Receipt = reth_arbitrum_primitives::ArbReceipt;
+        type SignedTx = reth_arbitrum_primitives::ArbTransactionSigned;
+    }
+}
 
     use super::*;
     use alloy_primitives::Address;
 
     #[test]
     fn arb_evm_config_default_constructs() {
-        let _cfg = ArbEvmConfig::<
-            crate::tests::test_helpers::TestChainSpec,
-            crate::tests::test_helpers::TestPrims,
-            ArbRethReceiptBuilder,
-        >::default();
+        let _cfg = ArbEvmConfig::<crate::tests::test_helpers::TestChainSpec, crate::tests::test_helpers::TestPrims, ArbRethReceiptBuilder>::default();
     }
 
     #[test]
@@ -440,8 +379,8 @@ pub(crate) mod tests {
 
     #[test]
     fn decode_arb_envelope_deposit_roundtrip() {
-        use alloy_primitives::{address, B256, U256};
         use arb_alloy_consensus::tx::ArbDepositTx;
+        use alloy_primitives::{address, B256, U256};
         let dep = ArbDepositTx {
             chain_id: U256::from(42161u64),
             l1_request_id: B256::from([0x11u8; 32]),
@@ -451,11 +390,7 @@ pub(crate) mod tests {
         };
         let env = arb_alloy_consensus::ArbTxEnvelope::Deposit(dep.clone());
         let encoded = env.encode_typed();
-        let cfg = ArbEvmConfig::<
-            crate::tests::test_helpers::TestChainSpec,
-            crate::tests::test_helpers::TestPrims,
-            ArbRethReceiptBuilder,
-        >::default();
+        let cfg = ArbEvmConfig::<crate::tests::test_helpers::TestChainSpec, crate::tests::test_helpers::TestPrims, ArbRethReceiptBuilder>::default();
         let decoded = cfg.decode_arb_envelope(&encoded).expect("decode ok");
         match decoded {
             arb_alloy_consensus::ArbTxEnvelope::Deposit(inner) => {
@@ -471,11 +406,7 @@ pub(crate) mod tests {
     #[test]
     fn default_predeploy_registry_dispatches_known_address() {
         use alloy_primitives::address;
-        let cfg = ArbEvmConfig::<
-            crate::tests::test_helpers::TestChainSpec,
-            crate::tests::test_helpers::TestPrims,
-            ArbRethReceiptBuilder,
-        >::default();
+        let cfg = ArbEvmConfig::<crate::tests::test_helpers::TestChainSpec, crate::tests::test_helpers::TestPrims, ArbRethReceiptBuilder>::default();
         let mut reg = cfg.default_predeploy_registry();
         let sys = address!("0000000000000000000000000000000000000064");
         let ctx = crate::predeploys::PredeployCallContext {
@@ -494,13 +425,11 @@ pub(crate) mod tests {
     }
     #[test]
     fn arb_tx_iterator_maps_envelope_types() {
-        use alloy_primitives::{address, b256, Bytes, U256};
         use arb_alloy_consensus::tx::{ArbDepositTx, ArbUnsignedTx};
+        use alloy_primitives::{address, b256, Bytes, U256};
         let dep = arb_alloy_consensus::ArbTxEnvelope::Deposit(ArbDepositTx {
             chain_id: U256::from(42161u64),
-            l1_request_id: b256!(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-            ),
+            l1_request_id: b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             from: address!("00000000000000000000000000000000000000aa"),
             to: address!("00000000000000000000000000000000000000bb"),
             value: U256::from(1u64),
@@ -524,37 +453,26 @@ pub(crate) mod tests {
             }),
             ..Default::default()
         };
-        let cfg = ArbEvmConfig::<
-            crate::tests::test_helpers::TestChainSpec,
-            crate::tests::test_helpers::TestPrims,
-            ArbRethReceiptBuilder,
-        >::default();
-        let got: Vec<_> = cfg
-            .arb_tx_iterator_for_payload(&payload)
+        let cfg = ArbEvmConfig::<crate::tests::test_helpers::TestChainSpec, crate::tests::test_helpers::TestPrims, ArbRethReceiptBuilder>::default();
+        let got: Vec<_> = cfg.arb_tx_iterator_for_payload(&payload)
             .map(|r| r.expect("ok"))
             .map(|(_enc, s)| s.tx_type())
             .collect();
-        assert_eq!(
-            got,
-            vec![
-                reth_arbitrum_primitives::ArbTxType::Deposit,
-                reth_arbitrum_primitives::ArbTxType::Unsigned,
-            ]
-        );
+        assert_eq!(got, vec![
+            reth_arbitrum_primitives::ArbTxType::Deposit,
+            reth_arbitrum_primitives::ArbTxType::Unsigned,
+        ]);
     }
     #[test]
     fn maps_all_envelope_variants_to_tx_types() {
-        use alloy_primitives::{address, b256, U256};
         use arb_alloy_consensus::tx::{
-            ArbContractTx, ArbDepositTx, ArbInternalTx, ArbRetryTx, ArbSubmitRetryableTx,
-            ArbUnsignedTx,
+            ArbDepositTx, ArbUnsignedTx, ArbContractTx, ArbRetryTx, ArbSubmitRetryableTx, ArbInternalTx,
         };
+        use alloy_primitives::{address, b256, U256};
 
         let dep = arb_alloy_consensus::ArbTxEnvelope::Deposit(ArbDepositTx {
             chain_id: U256::from(42161u64),
-            l1_request_id: b256!(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-            ),
+            l1_request_id: b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             from: address!("00000000000000000000000000000000000000aa"),
             to: address!("00000000000000000000000000000000000000bb"),
             value: U256::from(1u64),
@@ -614,11 +532,7 @@ pub(crate) mod tests {
         });
         let leg = arb_alloy_consensus::ArbTxEnvelope::Legacy(Vec::new());
         fn map(env: &arb_alloy_consensus::ArbTxEnvelope) -> reth_arbitrum_primitives::ArbTxType {
-            ArbEvmConfig::<
-                crate::tests::test_helpers::TestChainSpec,
-                crate::tests::test_helpers::TestPrims,
-                ArbRethReceiptBuilder,
-            >::map_env_to_tx_type(env)
+            ArbEvmConfig::<crate::tests::test_helpers::TestChainSpec, crate::tests::test_helpers::TestPrims, ArbRethReceiptBuilder>::map_env_to_tx_type(env)
         }
 
         assert_eq!(map(&dep), reth_arbitrum_primitives::ArbTxType::Deposit);
@@ -631,8 +545,8 @@ pub(crate) mod tests {
     }
     #[test]
     fn arb_tx_iterator_recovers_signer_for_non_legacy() {
-        use alloy_primitives::{address, Bytes, U256};
         use arb_alloy_consensus::tx::ArbUnsignedTx;
+        use alloy_primitives::{address, Bytes, U256};
         let env = arb_alloy_consensus::ArbTxEnvelope::Unsigned(ArbUnsignedTx {
             chain_id: U256::from(42161u64),
             from: address!("00000000000000000000000000000000000000aa"),
@@ -651,11 +565,7 @@ pub(crate) mod tests {
             }),
             ..Default::default()
         };
-        let cfg = ArbEvmConfig::<
-            crate::tests::test_helpers::TestChainSpec,
-            crate::tests::test_helpers::TestPrims,
-            ArbRethReceiptBuilder,
-        >::default();
+        let cfg = ArbEvmConfig::<crate::tests::test_helpers::TestChainSpec, crate::tests::test_helpers::TestPrims, ArbRethReceiptBuilder>::default();
         let mut it = cfg.tx_iterator_for_payload(&payload);
         let item = it.next().expect("one").expect("ok");
         let signed = item;
@@ -664,8 +574,8 @@ pub(crate) mod tests {
     }
     #[test]
     fn arb_tx_iterator_recovers_signer_for_contract() {
-        use alloy_primitives::{address, Bytes, B256, U256};
         use arb_alloy_consensus::tx::ArbContractTx;
+        use alloy_primitives::{address, Bytes, U256, B256};
 
         let env = arb_alloy_consensus::ArbTxEnvelope::Contract(ArbContractTx {
             chain_id: U256::from(42161u64),
@@ -685,11 +595,7 @@ pub(crate) mod tests {
             }),
             ..Default::default()
         };
-        let cfg = ArbEvmConfig::<
-            crate::tests::test_helpers::TestChainSpec,
-            crate::tests::test_helpers::TestPrims,
-            ArbRethReceiptBuilder,
-        >::default();
+        let cfg = ArbEvmConfig::<crate::tests::test_helpers::TestChainSpec, crate::tests::test_helpers::TestPrims, ArbRethReceiptBuilder>::default();
         let mut it = cfg.tx_iterator_for_payload(&payload);
         let item = it.next().expect("one").expect("ok");
         let signed = item;
@@ -699,8 +605,8 @@ pub(crate) mod tests {
 
     #[test]
     fn arb_tx_iterator_recovers_signer_for_retry() {
-        use alloy_primitives::{address, Bytes, B256, U256};
         use arb_alloy_consensus::tx::ArbRetryTx;
+        use alloy_primitives::{address, Bytes, U256, B256};
 
         let env = arb_alloy_consensus::ArbTxEnvelope::Retry(ArbRetryTx {
             chain_id: U256::from(42161u64),
@@ -724,11 +630,7 @@ pub(crate) mod tests {
             }),
             ..Default::default()
         };
-        let cfg = ArbEvmConfig::<
-            crate::tests::test_helpers::TestChainSpec,
-            crate::tests::test_helpers::TestPrims,
-            ArbRethReceiptBuilder,
-        >::default();
+        let cfg = ArbEvmConfig::<crate::tests::test_helpers::TestChainSpec, crate::tests::test_helpers::TestPrims, ArbRethReceiptBuilder>::default();
         let mut it = cfg.tx_iterator_for_payload(&payload);
         let item = it.next().expect("one").expect("ok");
         let signed = item;
@@ -738,8 +640,8 @@ pub(crate) mod tests {
 
     #[test]
     fn arb_tx_iterator_recovers_signer_for_submit_retryable() {
-        use alloy_primitives::{address, Bytes, B256, U256};
         use arb_alloy_consensus::tx::ArbSubmitRetryableTx;
+        use alloy_primitives::{address, Bytes, U256, B256};
 
         let env = arb_alloy_consensus::ArbTxEnvelope::SubmitRetryable(ArbSubmitRetryableTx {
             chain_id: U256::from(42161u64),
@@ -764,32 +666,27 @@ pub(crate) mod tests {
             }),
             ..Default::default()
         };
-        let cfg = ArbEvmConfig::<
-            crate::tests::test_helpers::TestChainSpec,
-            crate::tests::test_helpers::TestPrims,
-            ArbRethReceiptBuilder,
-        >::default();
+        let cfg = ArbEvmConfig::<crate::tests::test_helpers::TestChainSpec, crate::tests::test_helpers::TestPrims, ArbRethReceiptBuilder>::default();
         let mut it = cfg.tx_iterator_for_payload(&payload);
         let item = it.next().expect("one").expect("ok");
         let signed = item;
         let signer = *signed.signer();
         assert_eq!(signer, address!("00000000000000000000000000000000000000ad"));
     }
+
+
 }
 
 #[cfg(test)]
 mod env_tests {
     use super::*;
-    use alloy_consensus::{BlockHeader as _, Header, Transaction as _};
+    use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader as _, Transaction as _};
     use alloy_primitives::{address, b256, Bytes, B256, U256};
 
     #[test]
     fn evm_env_for_payload_maps_all_fields() {
-        let cfg = ArbEvmConfig::<
-            crate::tests::test_helpers::TestChainSpec,
-            crate::tests::test_helpers::TestPrims,
-            ArbRethReceiptBuilder,
-        >::default();
+        let cfg = ArbEvmConfig::<crate::tests::test_helpers::TestChainSpec, crate::tests::test_helpers::TestPrims, ArbRethReceiptBuilder>::default();
 
         let fee_recipient = address!("00000000000000000000000000000000000000fe");
         let prev_randao = b256!("1111111111111111111111111111111111111111111111111111111111111111");
@@ -814,11 +711,8 @@ mod env_tests {
                 receipts_root: B256::ZERO,
                 logs_bloom: alloy_primitives::Bloom::default(),
             }),
-            sidecar: reth_arbitrum_payload::ArbSidecar {
-                parent_beacon_block_root: Some(B256::ZERO),
-            },
-            parent_hash: B256::ZERO,
-            block_hash: B256::ZERO,
+            sidecar: reth_arbitrum_payload::ArbSidecar { parent_beacon_block_root: Some(B256::ZERO) },
+            parent_hash: B256::ZERO, block_hash: B256::ZERO,
         };
 
         let env = cfg.evm_env_for_payload(&payload);
@@ -832,11 +726,7 @@ mod env_tests {
 
     #[test]
     fn evm_env_from_header_maps_all_fields() {
-        let cfg = ArbEvmConfig::<
-            crate::tests::test_helpers::TestChainSpec,
-            crate::tests::test_helpers::TestPrims,
-            ArbRethReceiptBuilder,
-        >::default();
+        let cfg = ArbEvmConfig::<crate::tests::test_helpers::TestChainSpec, crate::tests::test_helpers::TestPrims, ArbRethReceiptBuilder>::default();
 
         let mut h = Header::default();
         h.number = 99;

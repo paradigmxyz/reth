@@ -1,25 +1,18 @@
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::Header as RpcHeader;
 use alloy_serde::WithOtherFields;
-use reth_arbitrum_evm::header::extract_send_root_from_header_extra;
-use reth_primitives_traits::SealedHeader;
+use reth_primitives_traits::{SealedHeader};
 use reth_rpc_convert::transaction::HeaderConverter;
+use reth_arbitrum_evm::header::extract_send_root_from_header_extra;
 
 #[derive(Clone, Debug)]
 pub struct ArbHeaderConverter;
 
-impl HeaderConverter<alloy_consensus::Header, WithOtherFields<RpcHeader<alloy_consensus::Header>>>
-    for ArbHeaderConverter
-{
+impl HeaderConverter<alloy_consensus::Header, WithOtherFields<RpcHeader<alloy_consensus::Header>>> for ArbHeaderConverter {
     type Err = std::convert::Infallible;
 
-    fn convert_header(
-        &self,
-        header: SealedHeader<alloy_consensus::Header>,
-        block_size: usize,
-    ) -> Result<WithOtherFields<RpcHeader<alloy_consensus::Header>>, Self::Err> {
-        let base =
-            RpcHeader::from_consensus(header.clone().into(), None, Some(U256::from(block_size)));
+    fn convert_header(&self, header: SealedHeader<alloy_consensus::Header>, block_size: usize) -> Result<WithOtherFields<RpcHeader<alloy_consensus::Header>>, Self::Err> {
+        let base = RpcHeader::from_consensus(header.clone().into(), None, Some(U256::from(block_size)));
         let mut out = WithOtherFields::new(base);
 
         let h = header.header();

@@ -1,23 +1,29 @@
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
-use reth_provider::{
-    providers::ProviderFactory, DBProvider, DatabaseProviderFactory, OriginalValuesKnown,
-    StaticFileProviderFactory, StaticFileWriter,
-};
+use reth_provider::DatabaseProviderFactory;
+use reth_provider::DBProvider;
 use reth_storage_api::{
-    BlockExecutionWriter, BlockWriter, HistoryWriter, StageCheckpointWriter, StateWriter,
-    TrieWriter,
+    BlockWriter, StateWriter, TrieWriter, HistoryWriter, StageCheckpointWriter, BlockExecutionWriter,
 };
+use reth_provider::OriginalValuesKnown;
+use reth_provider::providers::ProviderFactory;
+use reth_provider::StaticFileProviderFactory;
+use reth_provider::StaticFileWriter;
 
-use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction};
+
+use alloy_consensus::BlockHeader;
+use alloy_consensus::Transaction;
+use alloy_consensus::transaction::TxHashRef;
 
 use alloy_primitives::Sealable;
-use reth_arbitrum_rpc::{ArbNitroApiServer, ArbNitroRpc};
+use reth_arbitrum_rpc::ArbNitroApiServer;
+use reth_arbitrum_rpc::ArbNitroRpc;
 
+use reth_primitives_traits::Block as _;
+use reth_storage_api::BlockReader;
+use reth_primitives_traits::SignedTransaction;
 use super::args::RollupArgs;
 use crate::follower::DynFollowerExecutor;
 use reth_node_builder::rpc::EngineValidatorAddOn;
-use reth_primitives_traits::{Block as _, SignedTransaction};
-use reth_storage_api::BlockReader;
 
 #[derive(Debug, Clone, Default)]
 pub struct ArbNode {
@@ -45,18 +51,22 @@ use reth_node_builder::{
         Identity, RethRpcAddOns, RethRpcMiddleware, RethRpcServerHandles, RpcAddOns, RpcContext,
         RpcHandle, RpcHooks,
     },
-    BuilderContext, DebugNode as _, DebugNode, Node, NodeAdapter,
+    BuilderContext, DebugNode as _, NodeAdapter,
 };
+use reth_node_builder::{DebugNode, Node};
 use reth_provider::providers::ProviderFactoryBuilder;
 use reth_rpc_api::servers::DebugApiServer;
 use reth_rpc_server_types::RethRpcModule;
 
-use crate::{engine::ArbEngineTypes, follower::FollowerExecutor, rpc::ArbEngineApiBuilder};
+use crate::engine::ArbEngineTypes;
+use crate::follower::FollowerExecutor;
+use crate::rpc::ArbEngineApiBuilder;
 use reth_arbitrum_evm::{ArbEvmConfig, ArbRethReceiptBuilder};
 use reth_arbitrum_payload::ArbExecutionData;
 use reth_evm::ConfigureEvm;
 use reth_payload_primitives::BuildNextEnv;
-use reth_provider::{ChainSpecProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::ChainSpecProvider;
+use reth_provider::{HeaderProvider, StateProviderFactory};
 
 use alloy_eips::eip2718::Decodable2718;
 impl NodeTypes for ArbNode {
@@ -167,7 +177,7 @@ pub struct ArbFollowerExec<N: FullNodeComponents> {
     pub db_factory: reth_provider::providers::ProviderFactory<
         reth_node_api::NodeTypesWithDBAdapter<
             <N as reth_node_api::FullNodeTypes>::Types,
-            <N as reth_node_api::FullNodeTypes>::DB,
+            <N as reth_node_api::FullNodeTypes>::DB
         >,
     >,
     pub beacon: reth_node_api::ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
@@ -177,30 +187,31 @@ pub struct ArbFollowerExec<N: FullNodeComponents> {
 impl<N> ArbFollowerExec<N>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<
-                ChainSpec = ChainSpec,
-                Primitives = reth_arbitrum_primitives::ArbPrimitives,
-            >,
-        > + Send
+        Types: NodeTypes<
+            ChainSpec = ChainSpec,
+            Primitives = reth_arbitrum_primitives::ArbPrimitives,
+        >,
+    > + Send
         + Sync
         + 'static,
     reth_node_api::NodeTypesWithDBAdapter<
         <N as reth_node_api::FullNodeTypes>::Types,
-        <N as reth_node_api::FullNodeTypes>::DB,
+        <N as reth_node_api::FullNodeTypes>::DB
     >: reth_provider::providers::ProviderNodeTypes
-        + reth_node_api::NodeTypes<Primitives = reth_arbitrum_primitives::ArbPrimitives>,
-    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload:
-        reth_payload_primitives::PayloadTypes<
-            ExecutionData = reth_arbitrum_payload::ArbExecutionData,
+        + reth_node_api::NodeTypes<
+            Primitives = reth_arbitrum_primitives::ArbPrimitives
         >,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
 {
     fn execute_message_to_block_sync(
         provider: &N::Provider,
         db_factory: &reth_provider::providers::ProviderFactory<
             reth_node_api::NodeTypesWithDBAdapter<
                 <N as reth_node_api::FullNodeTypes>::Types,
-                <N as reth_node_api::FullNodeTypes>::DB,
-            >,
+                <N as reth_node_api::FullNodeTypes>::DB
+            >
         >,
         evm_config: &reth_arbitrum_evm::ArbEvmConfig<
             ChainSpec,
@@ -220,7 +231,7 @@ where
         alloy_primitives::B256,
         alloy_primitives::B256,
         reth_primitives_traits::SealedBlock<
-            alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>,
+            alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>
         >,
     )> {
         use reth_evm::execute::BlockBuilder;
@@ -266,7 +277,10 @@ where
             ChainSpec,
             reth_arbitrum_primitives::ArbPrimitives,
         > as reth_evm::ConfigureEvm>::NextBlockEnvCtx::build_next_env(
-            &reth_payload_builder::EthPayloadBuilderAttributes::new(parent_hash, attrs2.into()),
+            &reth_payload_builder::EthPayloadBuilderAttributes::new(
+                parent_hash,
+                attrs2.into(),
+            ),
             &sealed_parent,
             evm_config.chain_spec().as_ref(),
         )
@@ -279,6 +293,7 @@ where
         next_env.suggested_fee_recipient = poster;
         next_env.delayed_messages_read = delayed_messages_read;
         next_env.l1_block_number = l1_block_number;
+
 
         let chain_id = evm_config.chain_spec().chain().id();
         if chain_id == 421_614 {
@@ -295,15 +310,17 @@ where
                 let target = parent_gas_limit / 8;
                 let mut next_bf = parent_bf;
                 if parent_gas_used > target {
-                    let delta = ((parent_bf as u128) * ((parent_gas_used - target) as u128) /
-                        (target as u128) /
-                        8) as u64;
+                    let delta = ((parent_bf as u128)
+                        * ((parent_gas_used - target) as u128)
+                        / (target as u128)
+                        / 8) as u64;
                     let change = if delta == 0 { 1 } else { delta };
                     next_bf = parent_bf.saturating_add(change);
                 } else if parent_gas_used < target {
-                    let delta = ((parent_bf as u128) * ((target - parent_gas_used) as u128) /
-                        (target as u128) /
-                        8) as u64;
+                    let delta = ((parent_bf as u128)
+                        * ((target - parent_gas_used) as u128)
+                        / (target as u128)
+                        / 8) as u64;
                     let change = if delta == 0 { 1 } else { delta };
                     next_bf = parent_bf.saturating_sub(change);
                 }
@@ -319,9 +336,7 @@ where
         const INITIAL_PER_BLOCK_GAS_LIMIT_NITRO: u64 = 0x4000000000000;
         if chain_id == 421_614 {
             next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
-        } else if let Some(gl) =
-            reth_arbitrum_evm::header::read_l2_per_block_gas_limit(&state_provider)
-        {
+        } else if let Some(gl) = reth_arbitrum_evm::header::read_l2_per_block_gas_limit(&state_provider) {
             reth_tracing::tracing::info!(target: "arb-reth::follower", derived_gas_limit = gl, "using ArbOS per-block gas limit for next block");
             next_env.gas_limit = gl;
         } else {
@@ -356,7 +371,9 @@ where
             *cur = &cur[32..];
             Ok(alloy_primitives::U256::from_be_bytes(buf))
         }
-        fn read_address_from_256(cur: &mut &[u8]) -> eyre::Result<alloy_primitives::Address> {
+        fn read_address_from_256(
+            cur: &mut &[u8],
+        ) -> eyre::Result<alloy_primitives::Address> {
             if cur.len() < 32 {
                 return Err(eyre::eyre!("insufficient bytes for Address256"));
             }
@@ -383,7 +400,10 @@ where
             *cur = &cur[8..];
             Ok(u64::from_be_bytes(buf))
         }
-        fn u256_to_u64_checked(v: &alloy_primitives::U256, what: &str) -> eyre::Result<u64> {
+        fn u256_to_u64_checked(
+            v: &alloy_primitives::U256,
+            what: &str,
+        ) -> eyre::Result<u64> {
             <u64 as core::convert::TryFrom<alloy_primitives::U256>>::try_from(*v)
                 .map_err(|_| eyre::eyre!("{what} >= 2^64"))
         }
@@ -392,7 +412,8 @@ where
             chain_id: alloy_primitives::U256,
             poster: alloy_primitives::Address,
             request_id: Option<alloy_primitives::B256>,
-        ) -> eyre::Result<Vec<reth_arbitrum_primitives::ArbTransactionSigned>> {
+        ) -> eyre::Result<Vec<reth_arbitrum_primitives::ArbTransactionSigned>>
+        {
             use alloy_rlp::Decodable;
             let mut out = Vec::new();
             if bytes.is_empty() {
@@ -459,8 +480,11 @@ where
                     };
                     let mut enc = env.encode_typed();
                     let mut s = enc.as_slice();
-                    let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                        .map_err(|_| eyre::eyre!("decode_2718 failed for unsigned/contract"))?;
+                    let tx =
+                        reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                            .map_err(|_| {
+                                eyre::eyre!("decode_2718 failed for unsigned/contract")
+                            })?;
                     out.push(tx);
                 }
                 0x03 => {
@@ -492,8 +516,9 @@ where
                             None
                         };
 
-                        let mut seg_txs =
-                            parse_l2_message_to_txs(seg, chain_id, poster, sub_request_id)?;
+                        let mut seg_txs = parse_l2_message_to_txs(
+                            seg, chain_id, poster, sub_request_id,
+                        )?;
                         out.append(&mut seg_txs);
                         index = index.saturating_add(1);
                     }
@@ -506,8 +531,8 @@ where
                     );
 
                     // SignedTx message contains a SINGLE transaction (not multiple like Batch)
-                    // The Go implementation reads all remaining bytes and unmarshals as one
-                    // transaction See: nitro/arbos/parse_l2.go:159-174
+                    // The Go implementation reads all remaining bytes and unmarshals as one transaction
+                    // See: nitro/arbos/parse_l2.go:159-174
 
                     // SignedTx messages can contain either:
                     // 1. Legacy RLP transactions (first byte >= 0xc0) - no type byte
@@ -527,16 +552,13 @@ where
                     let tx = if is_legacy_rlp {
                         // Legacy RLP transaction - decode directly without type byte
                         use alloy_rlp::Decodable;
-                        reth_arbitrum_primitives::ArbTransactionSigned::decode(&mut s).map_err(
-                            |e| eyre::eyre!("Failed to decode Legacy RLP transaction: {}", e),
-                        )?
+                        reth_arbitrum_primitives::ArbTransactionSigned::decode(&mut s)
+                            .map_err(|e| eyre::eyre!("Failed to decode Legacy RLP transaction: {}", e))?
                     } else {
                         // Typed transaction (EIP-2718) - use decode_2718
                         use alloy_eips::eip2718::Decodable2718;
                         reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                            .map_err(|e| {
-                                eyre::eyre!("Failed to decode typed transaction: {:?}", e)
-                            })?
+                            .map_err(|e| eyre::eyre!("Failed to decode typed transaction: {:?}", e))?
                     };
 
                     reth_tracing::tracing::warn!(
@@ -576,21 +598,21 @@ where
             time_passed: u64,
         ) -> alloy_primitives::Bytes {
             const SELECTOR: [u8; 4] = [0x6b, 0xf6, 0xa4, 0x2d]; // startBlock(uint256,uint64,uint64,uint64)
-
+            
             reth_tracing::tracing::info!(
                 target: "arb-reth::follower",
                 "encode_start_block_data: Using correct startBlock selector={:02x?}",
                 SELECTOR
             );
-
+            
             let mut out = Vec::with_capacity(4 + 32 * 4);
             out.extend_from_slice(&SELECTOR);
-
+            
             let encoded_l1_base_fee = abi_encode_u256(&l1_base_fee);
             let encoded_l1_block_number = abi_encode_u64(l1_block_number);
             let encoded_l2_block_number = abi_encode_u64(l2_block_number);
             let encoded_time_passed = abi_encode_u64(time_passed);
-
+            
             reth_tracing::tracing::info!(
                 target: "arb-reth::follower",
                 "Encoding params: l1_base_fee={:02x?}, l1_block_number={:02x?}, l2_block_number={:02x?}, time_passed={:02x?}",
@@ -599,18 +621,18 @@ where
                 &encoded_l2_block_number[..8],
                 &encoded_time_passed[..8]
             );
-
+            
             out.extend_from_slice(&encoded_l1_base_fee);
             out.extend_from_slice(&encoded_l1_block_number);
             out.extend_from_slice(&encoded_l2_block_number);
             out.extend_from_slice(&encoded_time_passed);
-
+            
             reth_tracing::tracing::info!(
                 target: "arb-reth::follower",
                 "Final encoded data first 8 bytes: {:02x?}",
                 &out[..std::cmp::min(8, out.len())]
             );
-
+            
             alloy_primitives::Bytes::from(out)
         }
 
@@ -651,7 +673,8 @@ where
             kind_name, kind, l2_owned.len()
         );
 
-        let chain_id_u256 = alloy_primitives::U256::from(evm_config.chain_spec().chain().id());
+        let chain_id_u256 =
+            alloy_primitives::U256::from(evm_config.chain_spec().chain().id());
 
         reth_tracing::tracing::info!(
             target: "arb-reth::follower",
@@ -665,9 +688,8 @@ where
                 let first = l2_owned.first().copied().unwrap_or(0xff);
                 let len = l2_owned.len();
                 reth_tracing::tracing::info!(target: "arb-reth::follower", l2_payload_len = len, l2_first_byte = first, "follower: L2_MESSAGE payload summary");
-                let parsed_txs =
-                    parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id)
-                        .map_err(|e| eyre::eyre!("parse_l2_message_to_txs error: {e}"))?;
+                let parsed_txs = parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id)
+                    .map_err(|e| eyre::eyre!("parse_l2_message_to_txs error: {e}"))?;
                 reth_tracing::tracing::info!(
                     target: "arb-reth::follower",
                     tx_count = parsed_txs.len(),
@@ -675,7 +697,7 @@ where
                     parsed_txs.len()
                 );
                 parsed_txs
-            }
+            },
             6 => Vec::new(),
             7 => {
                 let req = request_id.ok_or_else(|| {
@@ -741,8 +763,11 @@ where
             9 => {
                 let mut cur = &l2_owned[..];
                 let retry_to = read_address_from_256(&mut cur)?;
-                let retry_to_opt =
-                    if retry_to == alloy_primitives::Address::ZERO { None } else { Some(retry_to) };
+                let retry_to_opt = if retry_to == alloy_primitives::Address::ZERO {
+                    None
+                } else {
+                    Some(retry_to)
+                };
                 let callvalue = read_u256_be32(&mut cur)?;
                 let deposit_value = read_u256_be32(&mut cur)?;
                 let max_submission_fee = read_u256_be32(&mut cur)?;
@@ -804,16 +829,16 @@ where
                         submission_fee_refund: max_submission_fee,
                     },
                 );
-
+                
                 reth_tracing::tracing::info!(
                     target: "arb-reth::follower",
                     "Creating Retry transaction: retry_data_len={}, retry_data_prefix={:02x?}",
                     retry_data.len(),
                     &retry_data[..std::cmp::min(4, retry_data.len())]
                 );
-
+                
                 let mut retry_enc = retry_env.encode_typed();
-
+                
                 reth_tracing::tracing::info!(
                     target: "arb-reth::follower",
                     "Retry envelope encoded: type_byte={:02x}, total_len={}, first_4_bytes={:02x?}",
@@ -821,11 +846,11 @@ where
                     retry_enc.len(),
                     &retry_enc[..std::cmp::min(5, retry_enc.len())]
                 );
-
+                
                 let mut rs = retry_enc.as_slice();
                 let retry_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut rs)
                     .map_err(|_| eyre::eyre!("decode retry failed"))?;
-
+                
                 use reth_primitives_traits::SignedTransaction;
                 reth_tracing::tracing::info!(
                     target: "arb-reth::follower",
@@ -833,11 +858,13 @@ where
                     retry_tx.tx_type(),
                     retry_tx.tx_hash()
                 );
-
+                
                 vec![submit_tx, retry_tx]
             }
             10 => return Err(eyre::eyre!("BatchForGasEstimation unimplemented")),
-            11 => Vec::new(),
+            11 => {
+                Vec::new()
+            }
             12 => {
                 reth_tracing::tracing::warn!(
                     target: "arb-reth::ETHDEPOSIT-DEBUG",
@@ -860,8 +887,9 @@ where
                     remaining = cur.len(),
                     "🔍 ETHDEPOSIT: Read balance"
                 );
-                let req = request_id
-                    .ok_or_else(|| eyre::eyre!("cannot issue deposit tx without L1 request id"))?;
+                let req = request_id.ok_or_else(|| {
+                    eyre::eyre!("cannot issue deposit tx without L1 request id")
+                })?;
                 let env = arb_alloy_consensus::tx::ArbTxEnvelope::Deposit(
                     arb_alloy_consensus::tx::ArbDepositTx {
                         chain_id: chain_id_u256,
@@ -911,7 +939,7 @@ where
             }
             _ => return Err(eyre::eyre!("unknown L2 message kind")),
         };
-
+        
         reth_tracing::tracing::info!(
             target: "arb-reth::follower",
             "After match: txs.len()={}, tx_types={:?}",
@@ -921,10 +949,10 @@ where
                 format!("{:?}", tx.tx_type())
             }).collect::<Vec<_>>()
         );
-
+        
         for (i, tx) in txs.iter().enumerate() {
-            use alloy_consensus::Transaction;
             use reth_primitives_traits::SignedTransaction;
+            use alloy_consensus::Transaction;
             let input = tx.input();
             reth_tracing::tracing::info!(
                 target: "arb-reth::follower",
@@ -938,20 +966,15 @@ where
         }
 
         {
-            let is_first_startblock = txs
-                .first()
-                .map(|tx| {
-                    use reth_primitives_traits::SignedTransaction;
-                    let is_internal =
-                        matches!(tx.tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
-                    let input = tx.input();
-                    const SIG: &str = "startBlock(uint256,uint64,uint64,uint64)";
-                    let selector = alloy_primitives::keccak256(SIG.as_bytes());
-                    let has_selector =
-                        input.as_ref().len() >= 4 && &input.as_ref()[0..4] == &selector.0[..4];
-                    is_internal && has_selector
-                })
-                .unwrap_or(false);
+            let is_first_startblock = txs.first().map(|tx| {
+                use reth_primitives_traits::SignedTransaction;
+                let is_internal = matches!(tx.tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
+                let input = tx.input();
+                const SIG: &str = "startBlock(uint256,uint64,uint64,uint64)";
+                let selector = alloy_primitives::keccak256(SIG.as_bytes());
+                let has_selector = input.as_ref().len() >= 4 && &input.as_ref()[0..4] == &selector.0[..4];
+                is_internal && has_selector
+            }).unwrap_or(false);
 
             reth_tracing::tracing::info!(
                 target: "arb-reth::follower",
@@ -972,7 +995,7 @@ where
                     l2_block_number,
                     time_passed,
                 );
-
+                
                 reth_tracing::tracing::info!(
                     target: "arb-reth::follower",
                     "Creating StartBlock: l1_base_fee={}, l1_block_number={}, l2_block_number={}, time_passed={}, start_data_len={}, start_data_prefix={:02x?}",
@@ -983,20 +1006,20 @@ where
                     start_data.len(),
                     &start_data[..std::cmp::min(4, start_data.len())]
                 );
-
+                
                 let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
                     arb_alloy_consensus::tx::ArbInternalTx {
                         chain_id: chain_id_u256,
                         data: start_data,
-                    },
+                    }
                 );
                 let mut enc = env.encode_typed();
                 let mut s = enc.as_slice();
                 let start_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                     .map_err(|_| eyre::eyre!("decode Internal failed for StartBlock"))?;
-
-                use alloy_consensus::Transaction;
+                
                 use reth_primitives_traits::SignedTransaction;
+                use alloy_consensus::Transaction;
                 reth_tracing::tracing::info!(
                     target: "arb-reth::follower",
                     "Created StartBlock tx: type={:?}, hash={:?}, input_len={}, input_prefix={:02x?}",
@@ -1005,9 +1028,9 @@ where
                     start_tx.input().len(),
                     &start_tx.input()[..std::cmp::min(4, start_tx.input().len())]
                 );
-
+                
                 txs.insert(0, start_tx);
-
+                
                 reth_tracing::tracing::info!(
                     target: "arb-reth::follower",
                     "After StartBlock insertion: txs.len()={}, tx_types={:?}",
@@ -1035,11 +1058,12 @@ where
         reth_tracing::tracing::info!(target: "arb-reth::follower", txs_len = txs.len(), "follower: executing txs (including StartBlock)");
 
         reth_tracing::tracing::info!(target: "arb-reth::follower", tx_count = txs.len(), "follower: built tx list");
-        use reth_primitives_traits::{Recovered, SignedTransaction, SignerRecoverable};
+        use reth_primitives_traits::{Recovered, SignerRecoverable, SignedTransaction};
         for tx in &txs {
             let sender =
                 tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover signer"))?;
-            let bal = state_provider.account_balance(&sender).ok().flatten().unwrap_or_default();
+            let bal =
+                state_provider.account_balance(&sender).ok().flatten().unwrap_or_default();
             let gp = tx.max_fee_per_gas();
             let txh = *tx.tx_hash();
             reth_tracing::tracing::info!(
@@ -1056,8 +1080,9 @@ where
                 .execute_transaction(recovered)
                 .map_err(|e| eyre::eyre!("execute_transaction error: {e}"))?;
         }
-        let outcome =
-            builder.finish(&state_provider).map_err(|e| eyre::eyre!("finish error: {e}"))?;
+        let outcome = builder
+            .finish(&state_provider)
+            .map_err(|e| eyre::eyre!("finish error: {e}"))?;
         {
             use reth_primitives_traits::SignedTransaction as _;
             let mut fin_types: Vec<String> = Vec::new();
@@ -1078,10 +1103,7 @@ where
         let (mut header_unsealed, body_unsealed) = sealed_block0.clone().split_header_body();
 
         header_unsealed.nonce = alloy_primitives::B64::new(delayed_messages_read.to_be_bytes());
-        type ArbBlock = alloy_consensus::Block<
-            reth_arbitrum_primitives::ArbTransactionSigned,
-            alloy_consensus::Header,
-        >;
+        type ArbBlock = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned, alloy_consensus::Header>;
         let sealed_block: reth_primitives_traits::block::SealedBlock<ArbBlock> =
             reth_primitives_traits::block::SealedBlock::seal_parts(header_unsealed, body_unsealed);
 
@@ -1089,15 +1111,11 @@ where
         let new_block_hash = sealed_block.hash();
 
         let senders = outcome.block.senders().to_vec();
-        let modified_block = reth_primitives_traits::block::RecoveredBlock::new_sealed(
-            sealed_block.clone(),
-            senders,
-        );
-
+        let modified_block = reth_primitives_traits::block::RecoveredBlock::new_sealed(sealed_block.clone(), senders);
+        
         let header_hash_hex = format!("{:#x}", new_block_hash);
         let header_mix_hex = format!("{:#x}", header.mix_hash);
-        let header_extra_hex =
-            format!("{:#x}", alloy_primitives::B256::from_slice(&header.extra_data));
+        let header_extra_hex = format!("{:#x}", alloy_primitives::B256::from_slice(&header.extra_data));
 
         let prev_randao_hex = format!("{:#x}", attrs.prev_randao);
         reth_tracing::tracing::info!(
@@ -1129,6 +1147,7 @@ where
     }
 }
 
+
 impl<N> FollowerExecutor for ArbFollowerExec<N>
 where
     N: FullNodeComponents<
@@ -1141,13 +1160,14 @@ where
         + 'static,
     reth_node_api::NodeTypesWithDBAdapter<
         <N as reth_node_api::FullNodeTypes>::Types,
-        <N as reth_node_api::FullNodeTypes>::DB,
+        <N as reth_node_api::FullNodeTypes>::DB
     >: reth_provider::providers::ProviderNodeTypes
-        + reth_node_api::NodeTypes<Primitives = reth_arbitrum_primitives::ArbPrimitives>,
-    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload:
-        reth_payload_primitives::PayloadTypes<
-            ExecutionData = reth_arbitrum_payload::ArbExecutionData,
+        + reth_node_api::NodeTypes<
+            Primitives = reth_arbitrum_primitives::ArbPrimitives
         >,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
 {
     fn execute_message_to_block(
         &self,
@@ -1165,8 +1185,7 @@ where
         Box<
             dyn core::future::Future<
                     Output = eyre::Result<(alloy_primitives::B256, alloy_primitives::B256)>,
-                > + Send
-                + '_,
+                > + Send + '_,
         >,
     > {
         let provider = self.provider.clone();
@@ -1217,11 +1236,7 @@ where
                     return Err(eyre::eyre!(e));
                 }
             };
-            if !matches!(
-                np.status,
-                alloy_rpc_types_engine::PayloadStatusEnum::Valid |
-                    alloy_rpc_types_engine::PayloadStatusEnum::Syncing
-            ) {
+            if !matches!(np.status, alloy_rpc_types_engine::PayloadStatusEnum::Valid | alloy_rpc_types_engine::PayloadStatusEnum::Syncing) {
                 reth_tracing::tracing::warn!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: newPayload not valid/syncing");
                 eyre::bail!("newPayload status not valid/syncing: {:?}", np.status);
             }
@@ -1245,24 +1260,16 @@ where
                     None,
                     reth_payload_primitives::EngineApiMessageVersion::default(),
                 )
-                .await
-            {
+                .await {
                 Ok(res) => res,
                 Err(e) => {
                     reth_tracing::tracing::error!(target: "arb-reth::follower", error=%e, %new_block_hash, "follower: FCU RPC failed");
                     return Err(eyre::eyre!(e));
                 }
             };
-            if !matches!(
-                fcu_resp.payload_status.status,
-                alloy_rpc_types_engine::PayloadStatusEnum::Valid |
-                    alloy_rpc_types_engine::PayloadStatusEnum::Syncing
-            ) {
+            if !matches!(fcu_resp.payload_status.status, alloy_rpc_types_engine::PayloadStatusEnum::Valid | alloy_rpc_types_engine::PayloadStatusEnum::Syncing) {
                 reth_tracing::tracing::warn!(target: "arb-reth::follower", status=?fcu_resp.payload_status.status, latest_valid_hash=?fcu_resp.payload_status.latest_valid_hash, %new_block_hash, "follower: FCU not valid/syncing");
-                eyre::bail!(
-                    "forkchoiceUpdated status not valid/syncing: {:?}",
-                    fcu_resp.payload_status.status
-                );
+                eyre::bail!("forkchoiceUpdated status not valid/syncing: {:?}", fcu_resp.payload_status.status);
             }
             reth_tracing::tracing::info!(target: "arb-reth::follower", status = ?fcu_resp.payload_status.status, latest_valid_hash=?fcu_resp.payload_status.latest_valid_hash, %new_block_hash, "follower: updated forkchoice to new head");
             Ok((new_block_hash, new_send_root))
@@ -1321,17 +1328,16 @@ impl<N, EthB, PVB, EB, EVB, RpcM> reth_node_api::NodeAddOns<N>
     for ArbAddOns<N, EthB, PVB, EB, EVB, RpcM>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<
-                ChainSpec = ChainSpec,
-                Primitives = reth_arbitrum_primitives::ArbPrimitives,
-            >,
-        > + reth_node_api::ProviderFactoryExt,
+        Types: NodeTypes<
+            ChainSpec = ChainSpec,
+            Primitives = reth_arbitrum_primitives::ArbPrimitives,
+        >,
+    > + reth_node_api::ProviderFactoryExt,
     <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
         reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
-    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload:
-        reth_payload_primitives::PayloadTypes<
-            ExecutionData = reth_arbitrum_payload::ArbExecutionData,
-        >,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -1371,17 +1377,16 @@ where
 impl<N, EthB, PVB, EB, EVB, RpcM> RethRpcAddOns<N> for ArbAddOns<N, EthB, PVB, EB, EVB, RpcM>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<
-                ChainSpec = ChainSpec,
-                Primitives = reth_arbitrum_primitives::ArbPrimitives,
-            >,
-        > + reth_node_api::ProviderFactoryExt,
+        Types: NodeTypes<
+            ChainSpec = ChainSpec,
+            Primitives = reth_arbitrum_primitives::ArbPrimitives,
+        >,
+    > + reth_node_api::ProviderFactoryExt,
     <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
         reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
-    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload:
-        reth_payload_primitives::PayloadTypes<
-            ExecutionData = reth_arbitrum_payload::ArbExecutionData,
-        >,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -1452,7 +1457,8 @@ where
     fn add_ons(&self) -> <Self as Node<N>>::AddOns {
         let engine_api =
             ArbEngineApiBuilder::new(crate::validator::ArbPayloadValidatorBuilder::default());
-        let add_ons: <Self as Node<N>>::AddOns = ArbAddOns::default().with_engine_api(engine_api);
+        let add_ons: <Self as Node<N>>::AddOns =
+            ArbAddOns::default().with_engine_api(engine_api);
         add_ons
     }
 }

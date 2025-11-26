@@ -1,6 +1,6 @@
-use alloy_primitives::B256;
 use jsonrpsee::proc_macros::rpc;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
+use alloy_primitives::B256;
 
 #[cfg(feature = "std")]
 use once_cell::sync::OnceCell;
@@ -213,9 +213,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     ) -> RpcResult<ArbMessageResult> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.new_message(msg_idx, msg, msg_for_prefetch).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .new_message(msg_idx, msg, msg_for_prefetch)
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(ArbMessageResult { block_hash: B256::ZERO, send_root: B256::ZERO })
     }
@@ -228,9 +229,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     ) -> RpcResult<Vec<ArbMessageResult>> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.reorg(first_msg_to_add, new_messages, old_messages).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .reorg(first_msg_to_add, new_messages, old_messages)
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(vec![])
     }
@@ -238,9 +240,7 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn head_message_index(&self) -> RpcResult<u64> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.head_message_index().await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b.head_message_index().await.map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(0)
     }
@@ -248,9 +248,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn result_at_message_index(&self, msg_idx: u64) -> RpcResult<ArbMessageResult> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.result_at_message_index(msg_idx).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .result_at_message_index(msg_idx)
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(ArbMessageResult { block_hash: B256::ZERO, send_root: B256::ZERO })
     }
@@ -258,9 +259,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn message_index_to_block_number(&self, msg_idx: u64) -> RpcResult<u64> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.message_index_to_block_number(msg_idx).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .message_index_to_block_number(msg_idx)
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(msg_idx)
     }
@@ -268,9 +270,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn block_number_to_message_index(&self, block_number: u64) -> RpcResult<u64> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.block_number_to_message_index(block_number).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .block_number_to_message_index(block_number)
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(block_number)
     }
@@ -283,9 +286,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     ) -> RpcResult<()> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.set_finality_data(safe, finalized, validated).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .set_finality_data(safe, finalized, validated)
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(())
     }
@@ -293,9 +297,7 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn mark_feed_start(&self, to: u64) -> RpcResult<()> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.mark_feed_start(to).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b.mark_feed_start(to).await.map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(())
     }
@@ -303,9 +305,7 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn trigger_maintenance(&self) -> RpcResult<()> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.trigger_maintenance().await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b.trigger_maintenance().await.map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(())
     }
@@ -313,9 +313,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn should_trigger_maintenance(&self) -> RpcResult<bool> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.should_trigger_maintenance().await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .should_trigger_maintenance()
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(false)
     }
@@ -323,9 +324,7 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn maintenance_status(&self) -> RpcResult<ArbMaintenanceStatus> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.maintenance_status().await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b.maintenance_status().await.map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(ArbMaintenanceStatus { status: "ok".to_string() })
     }
@@ -337,9 +336,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     ) -> RpcResult<ArbRecordResult> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.record_block_creation(pos, msg).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .record_block_creation(pos, msg)
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(ArbRecordResult { result_hash: B256::ZERO })
     }
@@ -347,9 +347,7 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn mark_valid(&self, pos: u64, result_hash: B256) -> RpcResult<()> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.mark_valid(pos, result_hash).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b.mark_valid(pos, result_hash).await.map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(())
     }
@@ -357,9 +355,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn prepare_for_record(&self, start: u64, end: u64) -> RpcResult<()> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.prepare_for_record(start, end).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .prepare_for_record(start, end)
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(())
     }
@@ -367,9 +366,7 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn pause_sequencer(&self) -> RpcResult<()> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.pause_sequencer().await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b.pause_sequencer().await.map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(())
     }
@@ -377,9 +374,7 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn activate_sequencer(&self) -> RpcResult<()> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.activate_sequencer().await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b.activate_sequencer().await.map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(())
     }
@@ -387,9 +382,7 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn forward_to(&self, url: String) -> RpcResult<()> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.forward_to(url).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b.forward_to(url).await.map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(())
     }
@@ -401,9 +394,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     ) -> RpcResult<()> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.sequence_delayed_message(message, delayed_seq_num).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .sequence_delayed_message(message, delayed_seq_num)
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(())
     }
@@ -411,9 +405,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn next_delayed_message_number(&self) -> RpcResult<u64> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.next_delayed_message_number().await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .next_delayed_message_number()
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(0)
     }
@@ -421,9 +416,7 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn synced(&self) -> RpcResult<bool> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.synced().await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b.synced().await.map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(true)
     }
@@ -431,9 +424,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn full_sync_progress(&self) -> RpcResult<serde_json::Value> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.full_sync_progress().await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .full_sync_progress()
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(serde_json::json!({"status": "idle"}))
     }
@@ -441,9 +435,10 @@ impl ArbNitroApiServer for ArbNitroRpc {
     async fn arbos_version_for_message_index(&self, msg_idx: u64) -> RpcResult<u64> {
         #[cfg(feature = "std")]
         if let Some(b) = ARB_BACKEND.get() {
-            return b.arbos_version_for_message_index(msg_idx).await.map_err(|e| {
-                jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into()
-            });
+            return b
+                .arbos_version_for_message_index(msg_idx)
+                .await
+                .map_err(|e| jsonrpsee_types::ErrorObjectOwned::owned(-32000, e, None::<()>).into());
         }
         Ok(1)
     }

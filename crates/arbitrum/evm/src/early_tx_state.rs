@@ -1,5 +1,6 @@
 use alloy_primitives::B256;
-use std::{cell::RefCell, collections::HashMap};
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 thread_local! {
     static EARLY_TX_GAS: RefCell<HashMap<B256, (u64, u64)>> = RefCell::new(HashMap::new());
@@ -20,7 +21,9 @@ pub fn set_early_tx_gas(tx_hash: B256, gas_used: u64, cumulative_gas: u64) {
 }
 
 pub fn get_early_tx_gas(tx_hash: &B256) -> Option<(u64, u64)> {
-    let result = EARLY_TX_GAS.with(|map| map.borrow().get(tx_hash).copied());
+    let result = EARLY_TX_GAS.with(|map| {
+        map.borrow().get(tx_hash).copied()
+    });
     tracing::info!(
         target: "arb-reth::gas-tracking",
         tx_hash = ?tx_hash,

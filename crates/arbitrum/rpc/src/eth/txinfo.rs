@@ -1,5 +1,5 @@
-use reth_rpc_convert::TxInfoMapper;
 use reth_storage_api::HeaderProvider;
+use reth_rpc_convert::TxInfoMapper;
 
 #[derive(Clone, Debug)]
 pub struct ArbTxInfoMapper<P> {
@@ -19,11 +19,7 @@ where
     type Out = alloy_rpc_types_eth::TransactionInfo;
     type Err = core::convert::Infallible;
 
-    fn try_map(
-        &self,
-        _tx: &T,
-        tx_info: alloy_rpc_types_eth::TransactionInfo,
-    ) -> Result<Self::Out, Self::Err> {
+    fn try_map(&self, _tx: &T, tx_info: alloy_rpc_types_eth::TransactionInfo) -> Result<Self::Out, Self::Err> {
         Ok(tx_info)
     }
 }

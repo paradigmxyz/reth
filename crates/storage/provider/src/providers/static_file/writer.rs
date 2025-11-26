@@ -343,7 +343,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {
         let segment = self.writer.user_header().segment();
-
+        
         tracing::info!(
             target: "reth::static_file",
             "increment_block called: segment={:?}, expected_block={}, current_next={}",
@@ -377,14 +377,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         self.writer.user_header_mut().increment_block();
-
+        
         tracing::info!(
             target: "reth::static_file",
             "increment_block completed: segment={:?}, block_range={:?}",
             segment,
             self.writer.user_header().block_range()
         );
-
+        
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 segment,
@@ -610,14 +610,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
-
+        
         tracing::info!(
             target: "reth::static_file",
             tx_num = %tx_num,
             tx_range = ?self.writer.user_header().tx_range(),
             "append_transaction called"
         );
-
+        
         self.append_with_tx_number(tx_num, tx)?;
 
         if let Some(metrics) = &self.metrics {
@@ -645,14 +645,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
-
+        
         tracing::info!(
             target: "reth::static_file",
             tx_num = %tx_num,
             tx_range = ?self.writer.user_header().tx_range(),
             "append_receipt called"
         );
-
+        
         self.append_with_tx_number(tx_num, receipt)?;
 
         if let Some(metrics) = &self.metrics {

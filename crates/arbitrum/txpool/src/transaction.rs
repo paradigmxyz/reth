@@ -1,14 +1,13 @@
-use alloy_consensus::{
-    transaction::{Recovered, TxHashRef},
-    BlobTransactionValidationError, Typed2718,
-};
-use alloy_eips::{
-    eip2718::WithEncoded, eip2930::AccessList, eip7594::BlobTransactionSidecarVariant,
-    Encodable2718,
-};
-use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_consensus::transaction::{Recovered, TxHashRef};
+use alloy_eips::Encodable2718;
+use alloy_consensus::{BlobTransactionValidationError, Typed2718};
+use alloy_eips::eip2718::WithEncoded;
+use alloy_eips::eip2930::AccessList;
+use alloy_eips::eip7594::BlobTransactionSidecarVariant;
+use alloy_primitives::{Address, Bytes, TxHash, TxKind, U256, B256};
 use c_kzg::KzgSettings;
-use core::{convert::Infallible, fmt::Debug};
+use core::convert::Infallible;
+use core::fmt::Debug;
 use reth_arbitrum_primitives::ArbTransactionSigned;
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_transaction_pool::{

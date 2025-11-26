@@ -1,19 +1,17 @@
 #![allow(unused)]
 
-use crate::{
-    addressset::AddressSet,
-    addresstable::AddressTable,
-    blockhash::Blockhashes,
-    features::Features,
-    l1_pricing::L1PricingState,
-    l2_pricing::L2PricingState,
-    merkleaccumulator::MerkleAccumulator,
-    programs::Programs,
-    retryables::RetryableState,
-    storage::{Storage, StorageBackedAddress, StorageBackedBigUint, StorageBackedUint64},
-};
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, U256, B256};
 use revm::Database;
+use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint, StorageBackedAddress};
+use crate::l1_pricing::L1PricingState;
+use crate::l2_pricing::L2PricingState;
+use crate::retryables::RetryableState;
+use crate::addressset::AddressSet;
+use crate::addresstable::AddressTable;
+use crate::merkleaccumulator::MerkleAccumulator;
+use crate::blockhash::Blockhashes;
+use crate::programs::Programs;
+use crate::features::Features;
 
 const VERSION_OFFSET: u64 = 0;
 const UPGRADE_VERSION_OFFSET: u64 = 1;
@@ -76,74 +74,35 @@ pub struct ArbosState<D> {
 impl<D: Database> ArbosState<D> {
     pub fn open(state: *mut revm::database::State<D>) -> Result<Self, &'static str> {
         let backing_storage = Storage::new(state, B256::ZERO);
-
-        let arbos_version = backing_storage
-            .get_by_uint64(VERSION_OFFSET)
+        
+        let arbos_version = backing_storage.get_by_uint64(VERSION_OFFSET)
             .map(|v| U256::from_be_bytes(v.0).to::<u64>())
             .unwrap_or(0);
-
+        
         if arbos_version == 0 {
             return Err("ArbOS uninitialized");
         }
-
+        
         Ok(Self {
             arbos_version,
             upgrade_version: StorageBackedUint64::new(state, B256::ZERO, UPGRADE_VERSION_OFFSET),
-            upgrade_timestamp: StorageBackedUint64::new(
-                state,
-                B256::ZERO,
-                UPGRADE_TIMESTAMP_OFFSET,
-            ),
-            network_fee_account: StorageBackedAddress::new(
-                state,
-                B256::ZERO,
-                NETWORK_FEE_ACCOUNT_OFFSET,
-            ),
-            l1_pricing_state: L1PricingState::open(
-                backing_storage.open_sub_storage(L1_PRICING_SUBSPACE),
-                arbos_version,
-            ),
-            l2_pricing_state: L2PricingState::open(
-                backing_storage.open_sub_storage(L2_PRICING_SUBSPACE),
-            ),
+            upgrade_timestamp: StorageBackedUint64::new(state, B256::ZERO, UPGRADE_TIMESTAMP_OFFSET),
+            network_fee_account: StorageBackedAddress::new(state, B256::ZERO, NETWORK_FEE_ACCOUNT_OFFSET),
+            l1_pricing_state: L1PricingState::open(backing_storage.open_sub_storage(L1_PRICING_SUBSPACE), arbos_version),
+            l2_pricing_state: L2PricingState::open(backing_storage.open_sub_storage(L2_PRICING_SUBSPACE)),
             retryable_state: RetryableState::new(state, B256::from_slice(RETRYABLES_SUBSPACE)),
-            address_table: AddressTable::open(
-                backing_storage.open_sub_storage(ADDRESS_TABLE_SUBSPACE),
-            ),
+            address_table: AddressTable::open(backing_storage.open_sub_storage(ADDRESS_TABLE_SUBSPACE)),
             chain_owners: AddressSet::open(backing_storage.open_sub_storage(CHAIN_OWNER_SUBSPACE)),
-            native_token_owners: AddressSet::open(
-                backing_storage.open_sub_storage(NATIVE_TOKEN_OWNER_SUBSPACE),
-            ),
-            send_merkle: MerkleAccumulator::open(
-                backing_storage.open_sub_storage(SEND_MERKLE_SUBSPACE),
-            ),
-            programs: Programs::open(
-                arbos_version,
-                backing_storage.open_sub_storage(PROGRAMS_SUBSPACE),
-            ),
+            native_token_owners: AddressSet::open(backing_storage.open_sub_storage(NATIVE_TOKEN_OWNER_SUBSPACE)),
+            send_merkle: MerkleAccumulator::open(backing_storage.open_sub_storage(SEND_MERKLE_SUBSPACE)),
+            programs: Programs::open(arbos_version, backing_storage.open_sub_storage(PROGRAMS_SUBSPACE)),
             features: Features::open(backing_storage.open_sub_storage(FEATURES_SUBSPACE)),
             blockhashes: Blockhashes::open(backing_storage.open_sub_storage(BLOCKHASHES_SUBSPACE)),
             chain_id: StorageBackedBigUint::new(state, B256::ZERO, CHAIN_ID_OFFSET),
-            genesis_block_num: StorageBackedUint64::new(
-                state,
-                B256::ZERO,
-                GENESIS_BLOCK_NUM_OFFSET,
-            ),
-            infra_fee_account: StorageBackedAddress::new(
-                state,
-                B256::ZERO,
-                INFRA_FEE_ACCOUNT_OFFSET,
-            ),
-            brotli_compression_level: StorageBackedUint64::new(
-                state,
-                B256::ZERO,
-                BROTLI_COMPRESSION_LEVEL_OFFSET,
-            ),
-            native_token_enabled_time: StorageBackedUint64::new(
-                state,
-                B256::ZERO,
-                NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET,
-            ),
+            genesis_block_num: StorageBackedUint64::new(state, B256::ZERO, GENESIS_BLOCK_NUM_OFFSET),
+            infra_fee_account: StorageBackedAddress::new(state, B256::ZERO, INFRA_FEE_ACCOUNT_OFFSET),
+            brotli_compression_level: StorageBackedUint64::new(state, B256::ZERO, BROTLI_COMPRESSION_LEVEL_OFFSET),
+            native_token_enabled_time: StorageBackedUint64::new(state, B256::ZERO, NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET),
             backing_storage,
         })
     }
@@ -154,42 +113,40 @@ impl<D: Database> ArbosState<D> {
         arbos_version: u64,
     ) -> Result<Self, &'static str> {
         let backing_storage = Storage::new(state, B256::ZERO);
-
-        let current_version = backing_storage
-            .get_by_uint64(VERSION_OFFSET)
+        
+        let current_version = backing_storage.get_by_uint64(VERSION_OFFSET)
             .map(|v| U256::from_be_bytes(v.0).to::<u64>())
             .unwrap_or(0);
-
+        
         if current_version != 0 {
             return Err("ArbOS already initialized");
         }
-
-        backing_storage
-            .set_by_uint64(VERSION_OFFSET, B256::from(U256::from(arbos_version)))
+        
+        backing_storage.set_by_uint64(VERSION_OFFSET, B256::from(U256::from(arbos_version)))
             .map_err(|_| "Failed to set version")?;
-
+        
         let l1_pricing_sto = backing_storage.open_sub_storage(L1_PRICING_SUBSPACE);
         let initial_l1_base_fee = U256::from(100_000_000_000u64); // 100 Gwei
         let rewards_recipient = Address::ZERO; // Will be set later
         L1PricingState::<D>::initialize(&l1_pricing_sto, rewards_recipient, initial_l1_base_fee);
-
+        
         let l2_pricing_sto = backing_storage.open_sub_storage(L2_PRICING_SUBSPACE);
         let initial_l2_base_fee = U256::from(100_000_000u64); // 0.1 Gwei
         L2PricingState::<D>::initialize(&l2_pricing_sto, initial_l2_base_fee);
-
+        
         AddressSet::<D>::initialize(&backing_storage.open_sub_storage(CHAIN_OWNER_SUBSPACE))
             .map_err(|_| "Failed to initialize chain owners")?;
-
+        
         AddressSet::<D>::initialize(&backing_storage.open_sub_storage(NATIVE_TOKEN_OWNER_SUBSPACE))
             .map_err(|_| "Failed to initialize native token owners")?;
-
+        
         AddressTable::<D>::initialize(&backing_storage.open_sub_storage(ADDRESS_TABLE_SUBSPACE));
         MerkleAccumulator::<D>::initialize(&backing_storage.open_sub_storage(SEND_MERKLE_SUBSPACE));
         Blockhashes::<D>::initialize(&backing_storage.open_sub_storage(BLOCKHASHES_SUBSPACE));
-
+        
         let chain_id_storage = StorageBackedBigUint::new(state, B256::ZERO, CHAIN_ID_OFFSET);
         chain_id_storage.set(chain_id).map_err(|_| "Failed to set chain ID")?;
-
+        
         Self::open(state)
     }
 
@@ -220,7 +177,7 @@ impl<D: Database> ArbosState<D> {
     pub fn set_infra_fee_account(&self, account: Address) -> Result<(), ()> {
         self.infra_fee_account.set(account)
     }
-
+    
     pub fn upgrade_arbos_version_if_necessary<D2: Database>(
         &mut self,
         current_timestamp: u64,
@@ -228,27 +185,26 @@ impl<D: Database> ArbosState<D> {
     ) -> Result<(), ()> {
         let scheduled_upgrade_version = self.upgrade_version.get()?;
         let scheduled_upgrade_timestamp = self.upgrade_timestamp.get()?;
-
+        
         if scheduled_upgrade_version == 0 || current_timestamp < scheduled_upgrade_timestamp {
             return Ok(());
         }
-
+        
         if scheduled_upgrade_version > self.arbos_version {
             self.arbos_version = scheduled_upgrade_version;
-
-            self.backing_storage
-                .set_by_uint64(VERSION_OFFSET, B256::from(U256::from(self.arbos_version)))?;
-
+            
+            self.backing_storage.set_by_uint64(VERSION_OFFSET, B256::from(U256::from(self.arbos_version)))?;
+            
             self.upgrade_version.set(0)?;
             self.upgrade_timestamp.set(0)?;
-
+            
             tracing::info!(
                 "ArbOS upgraded from version {} to version {}",
                 self.arbos_version,
                 scheduled_upgrade_version
             );
         }
-
+        
         Ok(())
     }
 }

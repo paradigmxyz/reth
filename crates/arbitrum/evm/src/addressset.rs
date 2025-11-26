@@ -1,8 +1,8 @@
 #![allow(unused)]
 
-use crate::storage::{Storage, StorageBackedAddress, StorageBackedUint64};
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, U256, B256};
 use revm::Database;
+use crate::storage::{Storage, StorageBackedUint64, StorageBackedAddress};
 
 pub struct AddressSet<D> {
     backing_storage: Storage<D>,
@@ -18,8 +18,12 @@ impl<D: Database> AddressSet<D> {
     pub fn open(sto: Storage<D>) -> Self {
         let size = StorageBackedUint64::new(sto.state, sto.base_key, 0);
         let by_address = sto.open_sub_storage(&[0u8]);
-
-        Self { backing_storage: sto.clone(), size, by_address }
+        
+        Self {
+            backing_storage: sto.clone(),
+            size,
+            by_address,
+        }
     }
 
     pub fn size(&self) -> Result<u64, ()> {
@@ -37,8 +41,7 @@ impl<D: Database> AddressSet<D> {
         if size == 0 {
             return Ok(None);
         }
-        let sba =
-            StorageBackedAddress::new(self.backing_storage.state, self.backing_storage.base_key, 1);
+        let sba = StorageBackedAddress::new(self.backing_storage.state, self.backing_storage.base_key, 1);
         sba.get().map(Some)
     }
 
@@ -47,13 +50,13 @@ impl<D: Database> AddressSet<D> {
         if size == 0 {
             return Ok(());
         }
-
+        
         for i in 1..=size {
             let contents = self.backing_storage.get_by_uint64(i)?;
             self.backing_storage.set_by_uint64(i, B256::ZERO)?;
             self.by_address.set(contents, B256::ZERO)?;
         }
-
+        
         self.size.set(0)
     }
 
@@ -62,17 +65,13 @@ impl<D: Database> AddressSet<D> {
         if size > max_num {
             size = max_num;
         }
-
+        
         let mut ret = Vec::with_capacity(size as usize);
         for i in 0..size {
-            let sba = StorageBackedAddress::new(
-                self.backing_storage.state,
-                self.backing_storage.base_key,
-                i + 1,
-            );
+            let sba = StorageBackedAddress::new(self.backing_storage.state, self.backing_storage.base_key, i + 1);
             ret.push(sba.get()?);
         }
-
+        
         Ok(ret)
     }
 
@@ -81,11 +80,11 @@ impl<D: Database> AddressSet<D> {
         if size == 0 {
             return Ok(());
         }
-
+        
         for i in 1..=size {
             self.backing_storage.set_by_uint64(i, B256::ZERO)?;
         }
-
+        
         self.size.set(0)
     }
 
@@ -94,20 +93,16 @@ impl<D: Database> AddressSet<D> {
         if present {
             return Ok(());
         }
-
+        
         let size = self.size.get()?;
         let slot = uint_to_hash(1 + size);
         let addr_hash = address_to_hash(addr);
-
+        
         self.by_address.set(addr_hash, slot)?;
-
-        let sba = StorageBackedAddress::new(
-            self.backing_storage.state,
-            self.backing_storage.base_key,
-            1 + size,
-        );
+        
+        let sba = StorageBackedAddress::new(self.backing_storage.state, self.backing_storage.base_key, 1 + size);
         sba.set(addr)?;
-
+        
         self.size.set(size + 1)
     }
 
@@ -115,23 +110,23 @@ impl<D: Database> AddressSet<D> {
         let addr_hash = address_to_hash(addr);
         let slot_hash = self.by_address.get(addr_hash)?;
         let slot = hash_to_uint64(slot_hash);
-
+        
         if slot == 0 {
             return Ok(());
         }
-
+        
         self.by_address.set(addr_hash, B256::ZERO)?;
-
+        
         let size = self.size.get()?;
         if slot < size {
             let at_size = self.backing_storage.get_by_uint64(size)?;
             self.backing_storage.set_by_uint64(slot, at_size)?;
-
+            
             if arbos_version >= 11 {
                 self.by_address.set(at_size, uint_to_hash(slot))?;
             }
         }
-
+        
         self.backing_storage.set_by_uint64(size, B256::ZERO)?;
         self.size.set(size - 1)
     }

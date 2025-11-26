@@ -2,8 +2,10 @@ use alloy_rpc_types_eth::BlockError;
 use jsonrpsee_types::error::ErrorObject;
 use reth_evm::execute::ProviderError;
 use reth_rpc_eth_api::{AsEthApiError, EthTxEnvError, TransactionConversionError};
-use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
+use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::error::api::FromEvmHalt;
 use revm::context_interface::result::EVMError;
+
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArbEthApiError {
@@ -26,6 +28,7 @@ impl From<ArbEthApiError> for ErrorObject<'static> {
         }
     }
 }
+
 
 impl From<TransactionConversionError> for ArbEthApiError {
     fn from(value: TransactionConversionError) -> Self {

@@ -1,5 +1,5 @@
-use alloy_primitives::{Address, Log, B256};
 use core::cell::RefCell;
+use alloy_primitives::{Address, B256, Log};
 
 thread_local! {
     static PREDEPLOY_LOGS: RefCell<Vec<Log>> = RefCell::new(Vec::new());
@@ -11,8 +11,7 @@ pub fn clear() {
 
 pub fn push(address: Address, topics: &[[u8; 32]], data: &[u8]) {
     let t: Vec<B256> = topics.iter().map(|w| B256::from(*w)).collect();
-    let log =
-        Log::new_unchecked(address, t.clone(), alloy_primitives::Bytes::copy_from_slice(data));
+    let log = Log::new_unchecked(address, t.clone(), alloy_primitives::Bytes::copy_from_slice(data));
     PREDEPLOY_LOGS.with(|b| {
         b.borrow_mut().push(log);
         tracing::info!(

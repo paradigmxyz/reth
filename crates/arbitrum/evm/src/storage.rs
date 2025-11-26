@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, keccak256};
 use revm::Database;
 use std::collections::HashMap;
 
@@ -23,14 +23,13 @@ fn storage_key_map(storage_key: &[u8], offset: u64) -> U256 {
 }
 
 fn ensure_arbos_account_loaded<D: Database>(state: &mut revm::database::State<D>) {
-    use revm_database::{AccountStatus, BundleAccount};
+    use revm_database::{BundleAccount, AccountStatus};
     use revm_state::AccountInfo;
 
-    let arbos_addr = Address::from([
-        0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-    ]);
-
+    let arbos_addr = Address::from([0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                   0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                   0xFF, 0xFF, 0xFF, 0xFF]);
+    
     if !state.bundle_state.state.contains_key(&arbos_addr) {
         let info = match state.basic(arbos_addr) {
             Ok(Some(account_info)) => Some(account_info),
@@ -41,7 +40,7 @@ fn ensure_arbos_account_loaded<D: Database>(state: &mut revm::database::State<D>
                 code: None,
             }),
         };
-
+        
         let acc = BundleAccount {
             info,
             storage: HashMap::default(),
@@ -51,6 +50,7 @@ fn ensure_arbos_account_loaded<D: Database>(state: &mut revm::database::State<D>
         state.bundle_state.state.insert(arbos_addr, acc);
     }
 }
+
 
 pub struct Storage<D> {
     pub state: *mut revm::database::State<D>,
@@ -75,10 +75,9 @@ impl<D: Database> Storage<D> {
         unsafe {
             let state = &mut *self.state;
             ensure_arbos_account_loaded(state);
-            let arbos_addr = Address::from([
-                0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            ]);
+            let arbos_addr = Address::from([0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF]);
             match state.storage(arbos_addr, slot) {
                 Ok(value) => Ok(B256::from(value)),
                 Err(_) => Err(()),
@@ -91,14 +90,13 @@ impl<D: Database> Storage<D> {
         unsafe {
             let state = &mut *self.state;
             ensure_arbos_account_loaded(state);
-            let arbos_addr = Address::from([
-                0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            ]);
+            let arbos_addr = Address::from([0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF]);
             let value_u256 = U256::from_be_bytes(value.0);
-
+            
             use revm_state::EvmStorageSlot;
-
+            
             let original_value = if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&slot) {
                     slot_entry.previous_or_original_value
@@ -108,7 +106,7 @@ impl<D: Database> Storage<D> {
             } else {
                 state.storage(arbos_addr, slot).unwrap_or(U256::ZERO)
             };
-
+            
             if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
                 acc.storage.insert(
                     slot,
@@ -129,10 +127,9 @@ impl<D: Database> Storage<D> {
         unsafe {
             let state = &mut *self.state;
             ensure_arbos_account_loaded(state);
-            let arbos_addr = Address::from([
-                0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            ]);
+            let arbos_addr = Address::from([0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF]);
             let slot = U256::from_be_bytes(key.0);
             match state.storage(arbos_addr, slot) {
                 Ok(value) => Ok(B256::from(value)),
@@ -145,15 +142,14 @@ impl<D: Database> Storage<D> {
         unsafe {
             let state = &mut *self.state;
             ensure_arbos_account_loaded(state);
-            let arbos_addr = Address::from([
-                0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            ]);
+            let arbos_addr = Address::from([0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF]);
             let slot = U256::from_be_bytes(key.0);
             let value_u256 = U256::from_be_bytes(value.0);
-
+            
             use revm_state::EvmStorageSlot;
-
+            
             let original_value = if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&slot) {
                     slot_entry.previous_or_original_value
@@ -163,7 +159,7 @@ impl<D: Database> Storage<D> {
             } else {
                 state.storage(arbos_addr, slot).unwrap_or(U256::ZERO)
             };
-
+            
             if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
                 acc.storage.insert(
                     slot,
@@ -175,13 +171,19 @@ impl<D: Database> Storage<D> {
     }
 
     pub fn clone(&self) -> Self {
-        Self { state: self.state, base_key: self.base_key }
+        Self {
+            state: self.state,
+            base_key: self.base_key,
+        }
     }
 }
 
 impl<D> Clone for Storage<D> {
     fn clone(&self) -> Self {
-        Self { state: self.state, base_key: self.base_key }
+        Self {
+            state: self.state,
+            base_key: self.base_key,
+        }
     }
 }
 
@@ -203,11 +205,10 @@ impl<D: Database> StorageBackedUint64<D> {
         unsafe {
             let state = &mut *self.storage;
             ensure_arbos_account_loaded(state);
-            let arbos_addr = Address::from([
-                0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            ]);
-
+            let arbos_addr = Address::from([0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF]);
+            
             if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&self.slot) {
                     let value_u64: u64 = slot_entry.present_value.try_into().unwrap_or(0);
@@ -219,7 +220,7 @@ impl<D: Database> StorageBackedUint64<D> {
             } else {
                 tracing::warn!(target: "arb-storage", "GET: arbos account not in bundle_state");
             }
-
+            
             match state.storage(arbos_addr, self.slot) {
                 Ok(value) => {
                     let value_u64: u64 = value.try_into().unwrap_or(0);
@@ -238,14 +239,13 @@ impl<D: Database> StorageBackedUint64<D> {
         unsafe {
             let state = &mut *self.storage;
             ensure_arbos_account_loaded(state);
-            let arbos_addr = Address::from([
-                0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            ]);
+            let arbos_addr = Address::from([0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF]);
             let value_u256 = U256::from(value);
-
+            
             use revm_state::EvmStorageSlot;
-
+            
             let original_value = if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&self.slot) {
                     slot_entry.previous_or_original_value
@@ -255,7 +255,7 @@ impl<D: Database> StorageBackedUint64<D> {
             } else {
                 state.storage(arbos_addr, self.slot).unwrap_or(U256::ZERO)
             };
-
+            
             if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
                 tracing::info!(target: "arb-storage", "SET to bundle_state slot={:?} value={} (original={})", self.slot, value, original_value);
                 acc.storage.insert(
@@ -294,17 +294,16 @@ impl<D: Database> StorageBackedBigUint<D> {
         unsafe {
             let state = &mut *self.storage;
             ensure_arbos_account_loaded(state);
-            let arbos_addr = Address::from([
-                0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            ]);
-
+            let arbos_addr = Address::from([0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF]);
+            
             if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&self.slot) {
                     return Ok(slot_entry.present_value);
                 }
             }
-
+            
             match state.storage(arbos_addr, self.slot) {
                 Ok(value) => Ok(value),
                 Err(_) => Err(()),
@@ -316,13 +315,12 @@ impl<D: Database> StorageBackedBigUint<D> {
         unsafe {
             let state = &mut *self.storage;
             ensure_arbos_account_loaded(state);
-            let arbos_addr = Address::from([
-                0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            ]);
-
+            let arbos_addr = Address::from([0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF]);
+            
             use revm_state::EvmStorageSlot;
-
+            
             let original_value = if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&self.slot) {
                     slot_entry.previous_or_original_value
@@ -332,7 +330,7 @@ impl<D: Database> StorageBackedBigUint<D> {
             } else {
                 state.storage(arbos_addr, self.slot).unwrap_or(U256::ZERO)
             };
-
+            
             if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
                 acc.storage.insert(
                     self.slot,
@@ -362,11 +360,10 @@ impl<D: Database> StorageBackedAddress<D> {
         unsafe {
             let state = &mut *self.storage;
             ensure_arbos_account_loaded(state);
-            let arbos_addr = Address::from([
-                0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            ]);
-
+            let arbos_addr = Address::from([0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF]);
+            
             if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&self.slot) {
                     let bytes = slot_entry.present_value.to_be_bytes::<32>();
@@ -374,7 +371,7 @@ impl<D: Database> StorageBackedAddress<D> {
                     return Ok(Address::from(addr_bytes));
                 }
             }
-
+            
             match state.storage(arbos_addr, self.slot) {
                 Ok(value) => {
                     let bytes = value.to_be_bytes::<32>();
@@ -390,16 +387,15 @@ impl<D: Database> StorageBackedAddress<D> {
         unsafe {
             let state = &mut *self.storage;
             ensure_arbos_account_loaded(state);
-            let arbos_addr = Address::from([
-                0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            ]);
+            let arbos_addr = Address::from([0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                           0xFF, 0xFF, 0xFF, 0xFF]);
             let mut value_bytes = [0u8; 32];
             value_bytes[12..32].copy_from_slice(value.as_slice());
             let value_u256 = U256::from_be_bytes(value_bytes);
-
+            
             use revm_state::EvmStorageSlot;
-
+            
             let original_value = if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&self.slot) {
                     slot_entry.previous_or_original_value
@@ -409,7 +405,7 @@ impl<D: Database> StorageBackedAddress<D> {
             } else {
                 state.storage(arbos_addr, self.slot).unwrap_or(U256::ZERO)
             };
-
+            
             if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
                 acc.storage.insert(
                     self.slot,

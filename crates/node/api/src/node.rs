@@ -162,10 +162,13 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
 /// - Node configuration
 /// - Engine API handles for consensus layer communication
 /// - JWT secrets for authenticated endpoints
+///
 pub trait ProviderFactoryExt: FullNodeTypes {
     fn provider_factory(
         &self,
-    ) -> &reth_provider::providers::ProviderFactory<NodeTypesWithDBAdapter<Self::Types, Self::DB>>;
+    ) -> &reth_provider::providers::ProviderFactory<
+        NodeTypesWithDBAdapter<Self::Types, Self::DB>
+    >;
 }
 /// This ensures add-ons can integrate deeply with the node while maintaining clean separation
 /// of concerns.

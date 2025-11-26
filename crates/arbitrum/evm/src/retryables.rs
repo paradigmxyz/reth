@@ -1,8 +1,8 @@
 #![allow(unused)]
 
-use crate::storage::{Storage, StorageBackedAddress, StorageBackedBigUint, StorageBackedUint64};
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, U256, B256};
 use revm::Database;
+use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint, StorageBackedAddress};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RetryableTicketId(pub [u8; 32]);
@@ -32,20 +32,10 @@ pub enum RetryableAction {
         retry_tx_hash: alloy_primitives::B256,
         sequence_num: u64,
     },
-    Redeemed {
-        ticket_id: RetryableTicketId,
-        success: bool,
-    },
-    Canceled {
-        ticket_id: RetryableTicketId,
-    },
-    KeptAlive {
-        ticket_id: RetryableTicketId,
-    },
-    TimedOut {
-        ticket_id: RetryableTicketId,
-        refund_to: Address,
-    },
+    Redeemed { ticket_id: RetryableTicketId, success: bool },
+    Canceled { ticket_id: RetryableTicketId },
+    KeptAlive { ticket_id: RetryableTicketId },
+    TimedOut { ticket_id: RetryableTicketId, refund_to: Address },
 }
 
 pub trait Retryables {
@@ -64,7 +54,7 @@ pub struct RetryableState<D> {
 pub struct RetryableTicket<D> {
     storage: Storage<D>,
     ticket_id: RetryableTicketId,
-
+    
     escrowed: StorageBackedBigUint<D>,
     beneficiary: StorageBackedAddress<D>,
     from: StorageBackedAddress<D>,
@@ -93,19 +83,15 @@ impl<D: Database> RetryableState<D> {
         let storage = Storage::new(state, base_key);
         Self { storage }
     }
-
-    pub fn try_to_reap_one_retryable(
-        &self,
-        current_time: u64,
-        state: *mut revm::database::State<D>,
-    ) -> Result<bool, ()> {
+    
+    pub fn try_to_reap_one_retryable(&self, current_time: u64, state: *mut revm::database::State<D>) -> Result<bool, ()> {
         let timeout_storage = StorageBackedUint64::new(state, self.storage.base_key, 0);
         let oldest_timeout = timeout_storage.get().unwrap_or(u64::MAX);
-
+        
         if oldest_timeout >= current_time {
             return Ok(false);
         }
-
+        
         Ok(true)
     }
 
@@ -125,7 +111,7 @@ impl<D: Database> RetryableState<D> {
 
         let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
         let ticket_base_key = B256::from(keccak256(&ticket_id.0));
-
+        
         tracing::info!(target: "arb-retryable", "CREATE: ticket_id={:?} base_key={:?}", ticket_id, ticket_base_key);
 
         let ticket = RetryableTicket {
@@ -168,30 +154,22 @@ impl<D: Database> RetryableState<D> {
     ) -> Option<RetryableTicket<D>> {
         let ticket_base_key = B256::from(keccak256(&ticket_id.0));
         let timeout_storage = StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET);
-
+        
         tracing::info!(target: "arb-retryable", "OPEN: ticket_id={:?} base_key={:?}", ticket_id, ticket_base_key);
         tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: ticket_id={:?} current_time={}", ticket_id, current_time);
         if let Ok(timeout) = timeout_storage.get() {
             tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: found timeout={} current_time={} valid={}", timeout, current_time, timeout > current_time);
             if timeout > current_time {
                 let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
-
+                
                 return Some(RetryableTicket {
                     storage: ticket_storage,
                     ticket_id: RetryableTicketId(ticket_id.0),
                     escrowed: StorageBackedBigUint::new(state, ticket_base_key, ESCROWED_OFFSET),
-                    beneficiary: StorageBackedAddress::new(
-                        state,
-                        ticket_base_key,
-                        BENEFICIARY_OFFSET,
-                    ),
+                    beneficiary: StorageBackedAddress::new(state, ticket_base_key, BENEFICIARY_OFFSET),
                     from: StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET),
                     to: StorageBackedAddress::new(state, ticket_base_key, TO_OFFSET),
-                    call_value: StorageBackedBigUint::new(
-                        state,
-                        ticket_base_key,
-                        CALL_VALUE_OFFSET,
-                    ),
+                    call_value: StorageBackedBigUint::new(state, ticket_base_key, CALL_VALUE_OFFSET),
                     call_data: StorageBackedBigUint::new(state, ticket_base_key, CALL_DATA_OFFSET),
                     timeout: timeout_storage,
                     num_tries: StorageBackedUint64::new(state, ticket_base_key, NUM_TRIES_OFFSET),
@@ -244,7 +222,10 @@ pub struct DefaultRetryables<D> {
 
 impl<D: Database> DefaultRetryables<D> {
     pub fn new(state: *mut revm::database::State<D>, base_key: B256) -> Self {
-        Self { retryable_state: RetryableState::new(state, base_key), state }
+        Self {
+            retryable_state: RetryableState::new(state, base_key),
+            state,
+        }
     }
 }
 
@@ -264,9 +245,8 @@ impl<D: Database> Retryables for DefaultRetryables<D> {
         preimage.extend_from_slice(&params.call_data);
         let id = keccak256(preimage);
         let ticket_id = RetryableTicketId(id.0);
-
-        let ticket =
-            self.retryable_state.create_retryable(self.state, ticket_id, params.clone(), 0);
+        
+        let ticket = self.retryable_state.create_retryable(self.state, ticket_id, params.clone(), 0);
         let escrowed = ticket.get_escrowed().unwrap_or_default();
 
         RetryableAction::Created {
@@ -287,13 +267,16 @@ impl<D: Database> Retryables for DefaultRetryables<D> {
             if ticket.is_active() {
                 let _ = ticket.deactivate();
                 let _ = ticket.increment_tries();
-                return RetryableAction::Redeemed {
-                    ticket_id: RetryableTicketId(ticket_id.0),
-                    success: true,
+                return RetryableAction::Redeemed { 
+                    ticket_id: RetryableTicketId(ticket_id.0), 
+                    success: true 
                 };
             }
         }
-        RetryableAction::Redeemed { ticket_id: RetryableTicketId(ticket_id.0), success: false }
+        RetryableAction::Redeemed { 
+            ticket_id: RetryableTicketId(ticket_id.0), 
+            success: false 
+        }
     }
 
     fn cancel_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
@@ -326,8 +309,9 @@ mod tests {
         let calldata = vec![0u8; 100];
         let calldata_len = calldata.len();
         let l1_base = 1_000u128;
-        let expected =
-            U256::from(arb_alloy_util::retryables::retryable_submission_fee(calldata_len, l1_base));
+        let expected = U256::from(
+            arb_alloy_util::retryables::retryable_submission_fee(calldata_len, l1_base),
+        );
         assert!(expected > U256::ZERO);
     }
 
@@ -336,10 +320,11 @@ mod tests {
         let beneficiary = Address::from([2u8; 20]);
         assert_eq!(beneficiary, Address::from([2u8; 20]));
     }
-
+    
     #[test]
     fn get_beneficiary_returns_set_address() {
         let beneficiary = Address::from([5u8; 20]);
         assert_eq!(beneficiary, Address::from([5u8; 20]));
     }
+
 }

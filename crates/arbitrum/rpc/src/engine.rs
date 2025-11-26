@@ -1,3 +1,4 @@
+
 use alloy_primitives::{BlockHash, B256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
@@ -43,6 +44,7 @@ pub trait ArbEngineApi<Engine: EngineTypes> {
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus>;
 
+
     #[method(name = "forkchoiceUpdatedV1")]
     async fn fork_choice_updated_v1(
         &self,
@@ -65,16 +67,13 @@ pub trait ArbEngineApi<Engine: EngineTypes> {
     ) -> RpcResult<ForkchoiceUpdated>;
 
     #[method(name = "getPayloadV2")]
-    async fn get_payload_v2(
-        &self,
-        payload_id: PayloadId,
-    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV2>;
+    async fn get_payload_v2(&self, payload_id: PayloadId)
+        -> RpcResult<Engine::ExecutionPayloadEnvelopeV2>;
 
     #[method(name = "getPayloadV3")]
-    async fn get_payload_v3(
-        &self,
-        payload_id: PayloadId,
-    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV3>;
+    async fn get_payload_v3(&self, payload_id: PayloadId)
+        -> RpcResult<Engine::ExecutionPayloadEnvelopeV3>;
+
 
     #[method(name = "getPayloadBodiesByHashV1")]
     async fn get_payload_bodies_by_hash_v1(
@@ -156,6 +155,7 @@ where
         Ok(self.inner.new_payload_v3_metered(payload).await?)
     }
 
+
     async fn fork_choice_updated_v1(
         &self,
         fork_choice_state: ForkchoiceState,
@@ -194,6 +194,7 @@ where
         Ok(self.inner.get_payload_v3_metered(payload_id).await?)
     }
 
+
     async fn get_payload_bodies_by_hash_v1(
         &self,
         block_hashes: Vec<BlockHash>,
@@ -216,7 +217,10 @@ where
         Ok(self.inner.get_client_version_v1(client)?)
     }
 
-    async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
+    async fn exchange_capabilities(
+        &self,
+        _capabilities: Vec<String>,
+    ) -> RpcResult<Vec<String>> {
         Ok(self.inner.capabilities().list())
     }
 }

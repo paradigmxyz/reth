@@ -334,9 +334,9 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             h
         } else {
             let gh = self.chain.genesis_hash();
-            let h = provider.header_by_hash_or_number(gh.into())?.ok_or_else(|| {
-                reth_storage_errors::provider::ProviderError::HeaderNotFound(head.into())
-            })?;
+            let h = provider
+                .header_by_hash_or_number(gh.into())?
+                .ok_or_else(|| reth_storage_errors::provider::ProviderError::HeaderNotFound(head.into()))?;
             h
         };
 

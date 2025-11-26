@@ -1,4 +1,5 @@
-use std::{collections::BTreeMap, io::Read};
+use std::collections::BTreeMap;
+use std::io::Read;
 
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{hex, Address, Bytes, B256, U256};
@@ -53,10 +54,8 @@ pub fn load_sepolia_secure_alloc_accounts() -> Result<BTreeMap<Address, GenesisA
             }
             let addr = Address::from_slice(&addr_bytes);
 
-            let nonce =
-                v.get("nonce").and_then(|x| x.as_str()).map(|s| parse_u256_hex(s).to::<u64>());
-            let balance =
-                v.get("balance").and_then(|x| x.as_str()).map(parse_u256_hex).unwrap_or(U256::ZERO);
+            let nonce = v.get("nonce").and_then(|x| x.as_str()).map(|s| parse_u256_hex(s).to::<u64>());
+            let balance = v.get("balance").and_then(|x| x.as_str()).map(parse_u256_hex).unwrap_or(U256::ZERO);
             let code_opt = v.get("code").and_then(|x| x.as_str()).map(|s| {
                 let hexbytes = hex::decode(s.trim_start_matches("0x")).unwrap_or_default();
                 Bytes::from(hexbytes)
@@ -104,25 +103,22 @@ pub fn load_sepolia_secure_alloc_hashed(
     let mut accounts_h = BTreeMap::<B256, Account>::new();
     let mut storages_h = BTreeMap::<B256, HashedStorage>::new();
 
-    let obj = parsed
-        .get("secureAlloc")
-        .and_then(|v| v.as_object())
-        .ok_or_else(|| anyhow::anyhow!("secureAlloc not found in embedded artifact"))?;
+    let obj = parsed.get("secureAlloc").and_then(|v| v.as_object()).ok_or_else(|| {
+        anyhow::anyhow!("secureAlloc not found in embedded artifact")
+    })?;
 
     for (hashed_addr_hex, v) in obj {
         let hashed_addr = parse_b256_hex(hashed_addr_hex);
 
-        let balance =
-            v.get("balance").and_then(|x| x.as_str()).map(parse_u256_hex).unwrap_or(U256::ZERO);
-        let nonce_u256 =
-            v.get("nonce").and_then(|x| x.as_str()).map(parse_u256_hex).unwrap_or(U256::ZERO);
+        let balance = v
+            .get("balance")
+            .and_then(|x| x.as_str())
+            .map(parse_u256_hex)
+            .unwrap_or(U256::ZERO);
+        let nonce_u256 = v.get("nonce").and_then(|x| x.as_str()).map(parse_u256_hex).unwrap_or(U256::ZERO);
         let nonce = nonce_u256.to::<u64>();
 
-        let code_bytes = v
-            .get("code")
-            .and_then(|x| x.as_str())
-            .map(|s| hex::decode(s.trim_start_matches("0x")).unwrap_or_default())
-            .unwrap_or_default();
+        let code_bytes = v.get("code").and_then(|x| x.as_str()).map(|s| hex::decode(s.trim_start_matches("0x")).unwrap_or_default()).unwrap_or_default();
         let code_hash = if !code_bytes.is_empty() {
             keccak256(&code_bytes)
         } else if let Some(ch) = v.get("codeHash").and_then(|x| x.as_str()) {
