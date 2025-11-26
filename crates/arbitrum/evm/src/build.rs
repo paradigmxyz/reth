@@ -572,10 +572,21 @@ where
                         pre_nonce = pre_nonce,
                         post_exec_nonce = post_exec_nonce,
                         success = result.is_ok(),
-                        "[req-1] IMMEDIATELY restored nonce after transaction (prevents retry corruption)"
+                        "[req-1] IMMEDIATELY restored nonce in cache after transaction"
                     );
                 }
             }
+
+            // CRITICAL: Persist cache changes to bundle_state
+            // Without this, the nonce restoration in cache won't be included in the final block state.
+            // merge_transitions() copies changes from cache into bundle_state.
+            state.merge_transitions(revm::database::states::bundle_state::BundleRetention::Reverts);
+
+            tracing::warn!(
+                target: "reth::evm::execute",
+                sender = ?sender,
+                "[req-1] Persisted nonce restoration to bundle_state via merge_transitions"
+            );
         }
 
         let evm = self.inner.evm_mut();
