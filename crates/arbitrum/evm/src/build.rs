@@ -552,40 +552,18 @@ where
             );
         }
 
-        // POST-EXECUTION IMMEDIATE nonce restoration for Internal and Retry transactions
+        // Track nonce restoration needed for Internal and Retry transactions
         // EVM increments nonce during execution even with disable_nonce_check=true.
-        // We must restore it IMMEDIATELY after execution (even if execution failed) to prevent
-        // state corruption across retry attempts.
+        // We cannot restore immediately after execution because the bundle_state is created
+        // inside execute_transaction_with_commit_condition (when f(exec_result) is called).
+        // Instead, we track which addresses need restoration and fix them in finish().
         if let Some(pre_nonce) = pre_exec_nonce {
-            let (db_ref, _, _) = self.inner.evm_mut().components_mut();
-            let state: &mut revm::database::State<D> = *db_ref;
-
-            // Directly access and modify the account in cache
-            if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
-                if let Some(account) = cached_acc.account.as_mut() {
-                    let post_exec_nonce = account.info.nonce;
-                    account.info.nonce = pre_nonce;
-
-                    tracing::warn!(
-                        target: "reth::evm::execute",
-                        sender = ?sender,
-                        pre_nonce = pre_nonce,
-                        post_exec_nonce = post_exec_nonce,
-                        success = result.is_ok(),
-                        "[req-1] IMMEDIATELY restored nonce in cache after transaction"
-                    );
-                }
-            }
-
-            // CRITICAL: Persist cache changes to bundle_state
-            // Without this, the nonce restoration in cache won't be included in the final block state.
-            // merge_transitions() copies changes from cache into bundle_state.
-            state.merge_transitions(revm::database::states::bundle_state::BundleRetention::Reverts);
-
+            self.pending_nonce_restorations.push((sender, pre_nonce));
             tracing::warn!(
                 target: "reth::evm::execute",
                 sender = ?sender,
-                "[req-1] Persisted nonce restoration to bundle_state via merge_transitions"
+                target_nonce = pre_nonce,
+                "[req-1] Tracked nonce restoration for finish() - will fix bundle_state before DB commit"
             );
         }
 
@@ -631,22 +609,65 @@ where
     fn finish(mut self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
         tracing::info!(
             target: "arb-reth::executor",
-            "ArbBlockExecutor::finish() called - nonce restorations now happen immediately after each tx"
+            pending_restorations = self.pending_nonce_restorations.len(),
+            "ArbBlockExecutor::finish() called - will apply nonce restorations BEFORE calling inner.finish()"
         );
 
-        // ITERATION 32: Deferred restoration removed - nonces are now restored IMMEDIATELY
-        // after each transaction execution. This ensures restoration happens even if
-        // finish() is never called (which occurs when execution fails).
+        // CRITICAL: Apply nonce restorations BEFORE finish() is called
+        // Once finish() is called, the bundle_state is created and we lose access to modify it
+        if !self.pending_nonce_restorations.is_empty() {
+            tracing::warn!(
+                target: "reth::evm::execute",
+                restorations_count = self.pending_nonce_restorations.len(),
+                "[req-1] Applying nonce restorations to EVM state BEFORE finish()"
+            );
+
+            // Access the EVM's database/state BEFORE calling finish()
+            let (db_ref, _, _) = self.inner.evm_mut().components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
+
+            for (address, target_nonce) in &self.pending_nonce_restorations {
+                if let Some(cached_acc) = state.cache.accounts.get_mut(address) {
+                    if let Some(account) = cached_acc.account.as_mut() {
+                        let current_nonce = account.info.nonce;
+                        account.info.nonce = *target_nonce;
+
+                        tracing::warn!(
+                            target: "reth::evm::execute",
+                            address = ?address,
+                            wrong_nonce = current_nonce,
+                            corrected_nonce = target_nonce,
+                            "[req-1] RESTORED nonce in cache before finish()"
+                        );
+                    }
+                } else {
+                    tracing::error!(
+                        target: "reth::evm::execute",
+                        address = ?address,
+                        "[req-1] Account not found in cache for nonce restoration!"
+                    );
+                }
+            }
+
+            // Force cache to merge into bundle_state BEFORE finish() is called
+            state.merge_transitions(revm::database::states::bundle_state::BundleRetention::Reverts);
+
+            tracing::warn!(
+                target: "reth::evm::execute",
+                "[req-1] Merged cache transitions BEFORE finish() - nonces should be correct in bundle"
+            );
+        }
 
         let (evm, mut result) = self.inner.finish()?;
-        
+
         tracing::info!(
             target: "arb-reth::executor",
             receipts_count = result.receipts.len(),
             inner_gas_used = result.gas_used,
             "Got result from inner executor"
         );
-        
+
+
         if let Some(last_receipt) = result.receipts.last() {
             use alloy_consensus::TxReceipt;
             let correct_gas_used = last_receipt.cumulative_gas_used();
@@ -663,7 +684,7 @@ where
                 "No receipts in result - cannot correct gasUsed"
             );
         }
-        
+
         Ok((evm, result))
     }
 
