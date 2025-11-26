@@ -65,6 +65,3 @@ alloy-eips.workspace = true
 alloy-rlp.workspace = true
 revm-context-interface.workspace = true
 tracing.workspace = true
-
-# For global nonce restoration tracker
-dashmap.workspace = true
