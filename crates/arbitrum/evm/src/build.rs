@@ -358,7 +358,6 @@ where
             }
         }
 
-        let mut used_pre_nonce = None;
         let mut maybe_predeploy_result: Option<(revm::context::result::ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>, u64)> = None;
         // Skip predeploy dispatch for transactions that are fully handled in start_tx
         // (internal, deposits, submit retryables) to preserve logs emitted in start_tx
@@ -428,22 +427,9 @@ where
         }
 
         if needs_precredit {
-            // Only Internal transactions should have nonce decremented
-            // Retry transactions don't increment nonce (they skip nonce validation)
-            // Sequenced transactions (including SubmitRetryable) should increment nonce normally
-            if is_internal {
-                // Set used_pre_nonce for internal transactions
-                // Internal (0x6a) transactions should NOT increment sender nonce
-                // This ensures nonce gets decremented after EVM execution to compensate
-                used_pre_nonce = Some(current_nonce);
-                tracing::info!(
-                    target: "arb-reth::nonce-debug",
-                    tx_type = ?tx.tx().tx_type(),
-                    is_internal = is_internal,
-                    current_nonce = current_nonce,
-                    "Setting used_pre_nonce for nonce decrement (Internal tx only)"
-                );
-            }
+            // Internal and Retry transactions have nonce validation disabled
+            // so they won't increment sender nonce during EVM execution
+            // No need for post-execution nonce decrement
 
             let mut effective_gas_limit = gas_limit;
             if (is_internal || is_deposit) && gas_limit == 0 {
@@ -477,17 +463,13 @@ where
 
 
 
-        if let Some(pre_nonce) = used_pre_nonce {
-            reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
-        }
-
         let evm = self.inner.evm_mut();
         let prev_disable_balance = evm.cfg_mut().disable_balance_check;
         let prev_disable_nonce = evm.cfg_mut().disable_nonce_check;
         evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
-        // Retry transactions use nonce=0 even when account nonce is higher
-        // They need nonce validation disabled
-        evm.cfg_mut().disable_nonce_check = is_retry;
+        // Internal and Retry transactions should NOT increment nonce
+        // Disabling nonce check prevents EVM from incrementing nonce
+        evm.cfg_mut().disable_nonce_check = is_internal || is_retry;
 
         let wrapped = WithTxEnv { tx_env, tx };
 
@@ -542,69 +524,9 @@ where
             );
         }
 
-        // Decrement nonce for Internal and Retry transactions
-        // These transaction types should NOT increment sender nonce
-        if used_pre_nonce.is_some() && result.is_ok() {
-            let evm = self.inner.evm_mut();
-
-            // Get the current nonce from the account
-            // This will be incremented by 1 from where it started
-            if let Ok(Some(current_account)) = evm.db_mut().basic(sender) {
-                let current_nonce_after_tx = current_account.nonce;
-                tracing::info!(
-                    target: "arb-reth::nonce-debug",
-                    sender = ?sender,
-                    current_nonce_after_tx = current_nonce_after_tx,
-                    "Account nonce after transaction execution"
-                );
-
-                // Access state to modify the nonce directly
-                // We'll modify the cache which we know works, and also try to mark it in bundle_state
-                let (db_ref, _insp, _precompiles) = evm.components_mut();
-                let state: &mut revm::database::State<D> = *db_ref;
-
-                // Modify the nonce in cache
-                if let Some(cached_account) = state.cache.accounts.get_mut(&sender) {
-                    if let Some(ref mut info) = cached_account.account {
-                        let old_nonce = info.info.nonce;
-                        if info.info.nonce > 0 {
-                            info.info.nonce -= 1;
-
-                            // Also mark the account as changed in bundle_state if it exists there
-                            // This ensures the cache modification persists to the database
-                            if let Some(bundle_account) = state.bundle_state.state.get_mut(&sender) {
-                                if let Some(ref mut bundle_info) = bundle_account.info {
-                                    bundle_info.nonce = info.info.nonce;
-                                    tracing::info!(
-                                        target: "arb-reth::nonce-debug",
-                                        sender = ?sender,
-                                        old_nonce = old_nonce,
-                                        new_nonce = info.info.nonce,
-                                        "Decremented nonce in cache AND bundle_state for Internal transaction"
-                                    );
-                                } else {
-                                    tracing::info!(
-                                        target: "arb-reth::nonce-debug",
-                                        sender = ?sender,
-                                        old_nonce = old_nonce,
-                                        new_nonce = info.info.nonce,
-                                        "Decremented nonce in cache only (bundle_state.info is None)"
-                                    );
-                                }
-                            } else {
-                                tracing::info!(
-                                    target: "arb-reth::nonce-debug",
-                                    sender = ?sender,
-                                    old_nonce = old_nonce,
-                                    new_nonce = info.info.nonce,
-                                    "Decremented nonce in cache only (account not in bundle_state)"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // Internal and Retry transactions had nonce validation disabled
+        // so they didn't increment nonce during EVM execution
+        // No post-execution nonce adjustment needed
 
         let evm = self.inner.evm_mut();
         evm.cfg_mut().disable_balance_check = prev_disable_balance;
