@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_primitives::{TxHash, U256};
 use alloy_rpc_types_eth::{
     pubsub::{Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata},
@@ -13,7 +14,8 @@ use jsonrpsee::{
 };
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{NodePrimitives, TransactionMeta};
+use reth_rpc_convert::{build_convert_receipt_inputs, transaction::ConvertReceiptInput};
 use reth_rpc_eth_api::{
     pubsub::EthPubSubApiServer, EthApiTypes, RpcConvert, RpcNodeCore, RpcTransaction,
 };
@@ -55,17 +57,16 @@ impl<Eth> EthPubSub<Eth> {
     }
 }
 
-impl<N: NodePrimitives, Eth> EthPubSub<Eth>
+impl<N: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>, Eth> EthPubSub<Eth>
 where
     Eth: RpcNodeCore<
             Provider: BlockNumReader + CanonStateSubscriptions<Primitives = N>,
             Pool: TransactionPool,
             Network: NetworkInfo,
         > + EthApiTypes<
-            RpcConvert: RpcConvert<
-                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
-            >,
+            RpcConvert: RpcConvert<Primitives = N, Network = Eth::NetworkTypes, Error = Eth::Error>,
         >,
+    PoolConsensusTx<Eth::Pool>: TxHashRef,
 {
     /// Returns the current sync status for the `syncing` subscription
     pub fn sync_status(&self, is_syncing: bool) -> PubSubSyncStatus {
@@ -92,6 +93,14 @@ where
     /// Returns a stream that yields all logs that match the given filter.
     pub fn log_stream(&self, filter: Filter) -> impl Stream<Item = Log> {
         self.inner.log_stream(filter)
+    }
+
+    /// Returns a stream that yields all transaction receipts from new blocks.
+    pub fn transaction_receipts_stream(
+        &self,
+        hashes: Option<Vec<TxHash>>,
+    ) -> impl Stream<Item = reth_rpc_convert::RpcReceipt<Eth::NetworkTypes>> {
+        self.inner.transaction_receipts_stream(hashes)
     }
 
     /// The actual handler for an accepted [`EthPubSub::subscribe`] call.
@@ -209,17 +218,17 @@ where
 }
 
 #[async_trait::async_trait]
-impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
+impl<N: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>, Eth>
+    EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
 where
     Eth: RpcNodeCore<
-            Provider: BlockNumReader + CanonStateSubscriptions,
+            Provider: BlockNumReader + CanonStateSubscriptions<Primitives = N>,
             Pool: TransactionPool,
             Network: NetworkInfo,
         > + EthApiTypes<
-            RpcConvert: RpcConvert<
-                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
-            >,
+            RpcConvert: RpcConvert<Primitives = N, Network = Eth::NetworkTypes, Error = Eth::Error>,
         > + 'static,
+    PoolConsensusTx<Eth::Pool>: TxHashRef,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -390,5 +399,105 @@ where
                 );
                 futures::stream::iter(all_logs)
             })
+    }
+}
+
+impl<N: NodePrimitives<SignedTx: TxHashRef>, Eth> EthPubSubInner<Eth>
+where
+    Eth: RpcNodeCore<Provider: CanonStateSubscriptions<Primitives = N>>
+        + EthApiTypes<
+            RpcConvert: RpcConvert<Primitives = N, Network = Eth::NetworkTypes, Error = Eth::Error>,
+        >,
+{
+    /// Returns a stream that yields all transaction receipts from new blocks.
+    fn transaction_receipts_stream(
+        &self,
+        hashes: Option<Vec<TxHash>>,
+    ) -> impl Stream<Item = reth_rpc_convert::RpcReceipt<Eth::NetworkTypes>> {
+        let eth_api = self.eth_api.clone();
+        self.eth_api.provider().canonical_state_stream().flat_map(move |new_chain| {
+            let mut all_receipts = Vec::new();
+
+            // Process all blocks in the committed chain - exactly like new_headers_stream pattern
+            for (block, receipts) in new_chain.committed().blocks_and_receipts() {
+                match &hashes {
+                    // If no specific hashes requested, process all receipts
+                    None => {
+                        let inputs = build_convert_receipt_inputs(block, receipts);
+                        if let Ok(rpc_receipts) = eth_api
+                            .tx_resp_builder()
+                            .convert_receipts_with_block(inputs, block.sealed_block())
+                        {
+                            all_receipts.extend(rpc_receipts);
+                        }
+                    }
+                    // If specific hashes requested, filter during iteration to maintain proper
+                    // gas/log indexing
+                    Some(target_hashes) => {
+                        use std::collections::HashSet;
+                        let hash_set: HashSet<_> = target_hashes.iter().collect();
+
+                        // Build inputs manually for filtered transactions, maintaining proper order
+                        let block_number = block.header().number();
+                        let base_fee = block.header().base_fee_per_gas();
+                        let block_hash = block.hash();
+                        let excess_blob_gas = block.header().excess_blob_gas();
+                        let timestamp = block.header().timestamp();
+                        let mut gas_used = 0;
+                        let mut next_log_index = 0;
+
+                        let filtered_inputs: Vec<_> = block
+                            .transactions_recovered()
+                            .zip(receipts.iter())
+                            .enumerate()
+                            .filter_map(|(idx, (tx, receipt))| {
+                                let cumulative_gas_used = receipt.cumulative_gas_used();
+                                let logs_len = receipt.logs().len();
+
+                                let current_gas_used = cumulative_gas_used - gas_used;
+                                let current_log_index = next_log_index;
+
+                                // Update for next iteration
+                                gas_used = cumulative_gas_used;
+                                next_log_index += logs_len;
+
+                                // Only include if hash matches
+                                hash_set.contains(tx.tx_hash()).then(|| {
+                                    let meta = TransactionMeta {
+                                        tx_hash: *tx.tx_hash(),
+                                        index: idx as u64,
+                                        block_hash,
+                                        block_number,
+                                        base_fee,
+                                        excess_blob_gas,
+                                        timestamp,
+                                    };
+
+                                    ConvertReceiptInput {
+                                        tx,
+                                        gas_used: current_gas_used,
+                                        next_log_index: current_log_index,
+                                        meta,
+                                        receipt: receipt.clone(),
+                                    }
+                                })
+                            })
+                            .collect();
+
+                        if !filtered_inputs.is_empty() &&
+                            let Ok(rpc_receipts) =
+                                eth_api.tx_resp_builder().convert_receipts_with_block(
+                                    filtered_inputs,
+                                    block.sealed_block(),
+                                )
+                        {
+                            all_receipts.extend(rpc_receipts);
+                        }
+                    }
+                }
+            }
+
+            futures::stream::iter(all_receipts)
+        })
     }
 }
