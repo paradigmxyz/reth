@@ -613,52 +613,62 @@ where
             "ArbBlockExecutor::finish() called - will apply nonce restorations BEFORE calling inner.finish()"
         );
 
-        // CRITICAL: Apply nonce restorations BEFORE finish() is called
-        // Once finish() is called, the bundle_state is created and we lose access to modify it
+        let (mut evm, mut result) = self.inner.finish()?;
+
+        // CRITICAL ITERATION 36: Apply nonce restorations AFTER finish() to the EVM's bundle_state
+        // finish() creates bundle from transitions (which have wrong nonces from commits).
+        // We need to access the bundle_state directly from the EVM database and fix it.
         if !self.pending_nonce_restorations.is_empty() {
             tracing::warn!(
                 target: "reth::evm::execute",
                 restorations_count = self.pending_nonce_restorations.len(),
-                "[req-1] Applying nonce restorations to EVM state BEFORE finish()"
+                "[req-1] ITERATION 36: Accessing bundle_state from EVM AFTER finish() to fix nonces"
             );
 
-            // Access the EVM's database/state BEFORE calling finish()
-            let (db_ref, _, _) = self.inner.evm_mut().components_mut();
+            // After finish(), the EVM contains the State with bundle_state
+            // Access the bundle_state directly and modify the account nonces
+            let (db_ref, _, _) = evm.components_mut();
             let state: &mut revm::database::State<D> = *db_ref;
 
+            // Access the bundle_state field directly (it's public in revm State)
+            let bundle = &mut state.bundle_state;
+
+            tracing::warn!(
+                target: "reth::evm::execute",
+                "[req-1] ITERATION 36: Successfully accessed bundle_state from EVM!"
+            );
+
+            // Modify nonces directly in the bundle_state
             for (address, target_nonce) in &self.pending_nonce_restorations {
-                if let Some(cached_acc) = state.cache.accounts.get_mut(address) {
-                    if let Some(account) = cached_acc.account.as_mut() {
-                        let current_nonce = account.info.nonce;
-                        account.info.nonce = *target_nonce;
+                // bundle.state is a HashMap<Address, BundleAccount>
+                if let Some(bundle_acc) = bundle.state.get_mut(address) {
+                    if let Some(ref mut account_info) = bundle_acc.info {
+                        let wrong_nonce = account_info.nonce;
+                        account_info.nonce = *target_nonce;
 
                         tracing::warn!(
                             target: "reth::evm::execute",
                             address = ?address,
-                            wrong_nonce = current_nonce,
+                            wrong_nonce = wrong_nonce,
                             corrected_nonce = target_nonce,
-                            "[req-1] RESTORED nonce in cache before finish()"
+                            "[req-1] FIXED nonce directly in bundle_state!"
+                        );
+                    } else {
+                        tracing::error!(
+                            target: "reth::evm::execute",
+                            address = ?address,
+                            "[req-1] BundleAccount exists but info is None!"
                         );
                     }
                 } else {
                     tracing::error!(
                         target: "reth::evm::execute",
                         address = ?address,
-                        "[req-1] Account not found in cache for nonce restoration!"
+                        "[req-1] Address not found in bundle_state!"
                     );
                 }
             }
-
-            // Force cache to merge into bundle_state BEFORE finish() is called
-            state.merge_transitions(revm::database::states::bundle_state::BundleRetention::Reverts);
-
-            tracing::warn!(
-                target: "reth::evm::execute",
-                "[req-1] Merged cache transitions BEFORE finish() - nonces should be correct in bundle"
-            );
         }
-
-        let (evm, mut result) = self.inner.finish()?;
 
         tracing::info!(
             target: "arb-reth::executor",
