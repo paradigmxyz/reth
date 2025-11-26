@@ -90,6 +90,7 @@ impl DeferredTrieData {
     /// - If not computed: first caller computes, others wait for that result
     ///
     /// This guarantees exactly one computation per handle (automatic deduplication).
+    #[tracing::instrument(level = "debug", target = "engine::tree", name = "wait_cloned", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
         self.inner
             .computed
@@ -107,6 +108,12 @@ impl DeferredTrieData {
     /// 2. Merge trie data from ancestor blocks
     /// 3. Extend the overlay with the current block's sorted data
     /// 4. Return the completed `ComputedTrieData`
+    #[tracing::instrument(
+        level = "debug",
+        target = "engine::tree",
+        name = "compute_trie_data",
+        skip_all
+    )]
     fn compute_trie_data(&self) -> ComputedTrieData {
         let inputs = self.inner.inputs.as_ref().expect("compute_trie_data called on ready handle");
 

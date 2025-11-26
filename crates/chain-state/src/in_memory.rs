@@ -806,6 +806,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// - If already computed: returns cached result immediately
     /// - If not computed: first caller computes, others wait for that result
     #[inline]
+    #[tracing::instrument(level = "debug", target = "engine::tree", name = "trie_data", skip_all)]
     pub fn trie_data(&self) -> ComputedTrieData {
         self.trie_data.wait_cloned()
     }
