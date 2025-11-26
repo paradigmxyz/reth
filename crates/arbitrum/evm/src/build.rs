@@ -553,21 +553,21 @@ where
         // For Internal and Retry transactions, EVM increments nonce even with disable_nonce_check=true
         // (that flag only skips validation, not increment). We need to manually restore it.
         //
-        // DEFERRED APPROACH: Don't modify state immediately - just record that restoration is needed.
-        // Apply all restorations ONCE at block end to avoid mid-block state inconsistencies.
-        // Testing Agent confirmed: merge_transitions is BLOCK-LEVEL, not TRANSACTION-LEVEL.
+        // CRITICAL FIX (Iteration 31): Restore nonce REGARDLESS of success or failure!
+        // When a transaction FAILS, the state changes (including nonce increment) still persist.
+        // This causes retry attempts to see the wrong nonce, creating an infinite failure loop.
+        // We MUST restore the nonce even for failed transactions to ensure retries start with correct state.
         if let Some(pre_nonce) = used_pre_nonce {
-            if result.is_ok() {
-                // Defer restoration to block end
-                self.pending_nonce_restorations.push((sender, pre_nonce));
+            // ALWAYS defer restoration, regardless of success/failure
+            self.pending_nonce_restorations.push((sender, pre_nonce));
 
-                tracing::info!(
-                    target: "arb-reth::nonce-fix",
-                    sender = ?sender,
-                    pre_nonce = pre_nonce,
-                    "[req-1] Deferred nonce restoration for Internal/Retry tx (will apply at block end)"
-                );
-            }
+            tracing::info!(
+                target: "arb-reth::nonce-fix",
+                sender = ?sender,
+                pre_nonce = pre_nonce,
+                success = result.is_ok(),
+                "[req-1] Deferred nonce restoration for Internal/Retry tx (will apply at block end, regardless of tx result)"
+            );
         }
 
         let evm = self.inner.evm_mut();
