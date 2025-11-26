@@ -4,6 +4,7 @@ use std::{
     collections::HashSet,
     io::{self, ErrorKind},
     path::Path,
+    str::FromStr,
     time::Duration,
 };
 
@@ -12,6 +13,37 @@ use reth_network_peers::{NodeRecord, TrustedPeer};
 use tracing::info;
 
 use crate::{BackoffKind, ReputationChangeWeights};
+
+/// A bootnode for Discv5 discovery that can be either an enode (TrustedPeer) or an ENR string.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
+pub enum Discv5BootNode {
+    /// An enode URL (enode://...)
+    Enode(TrustedPeer),
+    /// An ENR string (enr:...)
+    Enr(String),
+}
+
+impl FromStr for Discv5BootNode {
+    type Err = <TrustedPeer as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Check if it's an ENR (starts with "enr:")
+        if s.starts_with("enr:") {
+            Ok(Discv5BootNode::Enr(s.to_string()))
+        } else {
+            // Try to parse as enode
+            TrustedPeer::from_str(s).map(Discv5BootNode::Enode)
+        }
+    }
+}
+
+impl From<TrustedPeer> for Discv5BootNode {
+    fn from(peer: TrustedPeer) -> Self {
+        Discv5BootNode::Enode(peer)
+    }
+}
 
 /// Maximum number of available slots for outbound sessions.
 pub const DEFAULT_MAX_COUNT_PEERS_OUTBOUND: u32 = 100;
@@ -172,6 +204,18 @@ pub struct PeersConfig {
     /// IPs within the specified CIDR ranges will be allowed.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ip_filter: IpFilter,
+    /// Bootnodes for Discv4 discovery (enode:// format).
+    ///
+    /// Similar to geth's BootstrapNodes. These nodes are used to bootstrap the Discv4
+    /// discovery protocol.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub bootnodes_v4: Vec<TrustedPeer>,
+    /// Bootnodes for Discv5 discovery (enode:// or enr: format).
+    ///
+    /// Similar to geth's BootstrapNodesV5. These nodes are used to bootstrap the Discv5
+    /// discovery protocol. Can be either enode URLs (enode://...) or ENR strings (enr:...).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub bootnodes_v5: Vec<Discv5BootNode>,
 }
 
 impl Default for PeersConfig {
@@ -191,6 +235,8 @@ impl Default for PeersConfig {
             max_backoff_count: 5,
             incoming_ip_throttle_duration: INBOUND_IP_THROTTLE_DURATION,
             ip_filter: IpFilter::default(),
+            bootnodes_v4: Default::default(),
+            bootnodes_v5: Default::default(),
         }
     }
 }
@@ -311,6 +357,18 @@ impl PeersConfig {
     /// Configure the IP filter for restricting network connections to specific IP ranges.
     pub fn with_ip_filter(mut self, ip_filter: IpFilter) -> Self {
         self.ip_filter = ip_filter;
+        self
+    }
+
+    /// Sets the bootnodes for Discv4 discovery.
+    pub fn with_bootnodes_v4(mut self, bootnodes: Vec<TrustedPeer>) -> Self {
+        self.bootnodes_v4 = bootnodes;
+        self
+    }
+
+    /// Sets the bootnodes for Discv5 discovery.
+    pub fn with_bootnodes_v5(mut self, bootnodes: Vec<Discv5BootNode>) -> Self {
+        self.bootnodes_v5 = bootnodes;
         self
     }
 

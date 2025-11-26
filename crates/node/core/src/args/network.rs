@@ -39,6 +39,7 @@ use reth_network::{
     HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives, SessionsConfig,
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
+use reth_network_types::peers::Discv5BootNode;
 use secp256k1::SecretKey;
 use std::str::FromStr;
 use tracing::error;
@@ -269,9 +270,11 @@ impl NetworkArgs {
     ///
     /// Configured Bootnodes are prioritized, if unset, the chain spec bootnodes are used
     /// Priority order for bootnodes configuration:
-    /// 1. --bootnodes flag
-    /// 2. Network preset flags (e.g. --holesky)
-    /// 3. default to mainnet nodes
+    /// 1. --bootnodes flag (applies to both discv4 and discv5)
+    /// 2. Config file bootnodes_v4/bootnodes_v5
+    /// 3. Network preset flags (e.g. --holesky)
+    /// 4. Chain spec bootnodes
+    /// 5. default to mainnet nodes
     pub fn network_config<N: NetworkPrimitives>(
         &self,
         config: &Config,
@@ -280,9 +283,60 @@ impl NetworkArgs {
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder<N> {
         let addr = self.resolved_addr();
-        let chain_bootnodes = self
-            .resolved_bootnodes()
-            .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
+        
+        // Resolve bootnodes with priority: CLI > Config file > Chain spec > Default
+        let cli_bootnodes = self.resolved_bootnodes();
+        let chain_bootnodes_default = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
+        
+        // For discv4: CLI > Config file > Chain spec > Default
+        let discv4_bootnodes = if let Some(cli_nodes) = &cli_bootnodes {
+            cli_nodes.clone()
+        } else if !config.peers.bootnodes_v4.is_empty() {
+            config
+                .peers
+                .bootnodes_v4
+                .iter()
+                .filter_map(|peer| peer.resolve_blocking().ok())
+                .collect()
+        } else {
+            chain_bootnodes_default.clone()
+        };
+        
+        // For discv5: CLI > Config file > Chain spec > Default
+        // Separate enode and enr bootnodes for discv5
+        let (discv5_bootnodes_enode, discv5_bootnodes_enr) = if let Some(cli_nodes) = &cli_bootnodes {
+            (cli_nodes.clone(), None)
+        } else if !config.peers.bootnodes_v5.is_empty() {
+            let mut enode_nodes = Vec::new();
+            let mut enr_strings = Vec::new();
+            
+            for bootnode in &config.peers.bootnodes_v5 {
+                match bootnode {
+                    Discv5BootNode::Enode(peer) => {
+                        if let Ok(node) = peer.resolve_blocking() {
+                            enode_nodes.push(node);
+                        }
+                    }
+                    Discv5BootNode::Enr(enr_str) => {
+                        enr_strings.push(enr_str.clone());
+                    }
+                }
+            }
+            
+            if !enr_strings.is_empty() {
+                (enode_nodes, Some(enr_strings.join(",")))
+            } else if !enode_nodes.is_empty() {
+                (enode_nodes, None)
+            } else {
+                (chain_bootnodes_default.clone(), None)
+            }
+        } else {
+            (chain_bootnodes_default.clone(), None)
+        };
+        
+        // Use discv4 bootnodes for the general boot_nodes (for backward compatibility)
+        let chain_bootnodes = discv4_bootnodes.clone();
+        
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
@@ -318,7 +372,13 @@ impl NetworkArgs {
             // apply discovery settings
             .apply(|builder| {
                 let rlpx_socket = (addr, self.port).into();
-                self.discovery.apply_to_builder(builder, rlpx_socket, chain_bootnodes)
+                self.discovery.apply_to_builder_with_discv5_bootnodes(
+                    builder,
+                    rlpx_socket,
+                    chain_bootnodes,
+                    discv5_bootnodes_enode,
+                    discv5_bootnodes_enr,
+                )
             })
             .listener_addr(SocketAddr::new(
                 addr, // set discovery port based on instance number
@@ -530,9 +590,32 @@ impl DiscoveryArgs {
     /// Apply the discovery settings to the given [`NetworkConfigBuilder`]
     pub fn apply_to_builder<N>(
         &self,
-        mut network_config_builder: NetworkConfigBuilder<N>,
+        network_config_builder: NetworkConfigBuilder<N>,
         rlpx_tcp_socket: SocketAddr,
         boot_nodes: impl IntoIterator<Item = NodeRecord>,
+    ) -> NetworkConfigBuilder<N>
+    where
+        N: NetworkPrimitives,
+    {
+        let boot_nodes: Vec<_> = boot_nodes.into_iter().collect();
+        self.apply_to_builder_with_discv5_bootnodes(
+            network_config_builder,
+            rlpx_tcp_socket,
+            boot_nodes.clone(),
+            boot_nodes,
+            None,
+        )
+    }
+
+    /// Apply the discovery settings to the given [`NetworkConfigBuilder`] with separate bootnodes
+    /// for discv4 and discv5.
+    pub fn apply_to_builder_with_discv5_bootnodes<N>(
+        &self,
+        mut network_config_builder: NetworkConfigBuilder<N>,
+        rlpx_tcp_socket: SocketAddr,
+        _discv4_boot_nodes: impl IntoIterator<Item = NodeRecord>,
+        discv5_boot_nodes_enode: impl IntoIterator<Item = NodeRecord>,
+        discv5_boot_nodes_enr: Option<String>,
     ) -> NetworkConfigBuilder<N>
     where
         N: NetworkPrimitives,
@@ -551,8 +634,13 @@ impl DiscoveryArgs {
         }
 
         if self.should_enable_discv5() {
-            network_config_builder = network_config_builder
-                .discovery_v5(self.discovery_v5_builder(rlpx_tcp_socket, boot_nodes));
+            network_config_builder = network_config_builder.discovery_v5(
+                self.discovery_v5_builder_with_enr(
+                    rlpx_tcp_socket,
+                    discv5_boot_nodes_enode,
+                    discv5_boot_nodes_enr,
+                ),
+            );
         }
 
         network_config_builder
@@ -563,6 +651,17 @@ impl DiscoveryArgs {
         &self,
         rlpx_tcp_socket: SocketAddr,
         boot_nodes: impl IntoIterator<Item = NodeRecord>,
+    ) -> reth_discv5::ConfigBuilder {
+        self.discovery_v5_builder_with_enr(rlpx_tcp_socket, boot_nodes, None)
+    }
+
+    /// Creates a [`reth_discv5::ConfigBuilder`] filling it with the values from this struct,
+    /// supporting both enode and ENR bootnodes.
+    pub fn discovery_v5_builder_with_enr(
+        &self,
+        rlpx_tcp_socket: SocketAddr,
+        boot_nodes_enode: impl IntoIterator<Item = NodeRecord>,
+        boot_nodes_enr: Option<String>,
     ) -> reth_discv5::ConfigBuilder {
         let Self {
             discv5_addr,
@@ -585,7 +684,7 @@ impl DiscoveryArgs {
             SocketAddr::V6(addr) => Some(*addr.ip()),
         });
 
-        reth_discv5::Config::builder(rlpx_tcp_socket)
+        let mut builder = reth_discv5::Config::builder(rlpx_tcp_socket)
             .discv5_config(
                 reth_discv5::discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
                     discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, *discv5_port)),
@@ -593,10 +692,17 @@ impl DiscoveryArgs {
                 ))
                 .build(),
             )
-            .add_unsigned_boot_nodes(boot_nodes)
+            .add_unsigned_boot_nodes(boot_nodes_enode)
             .lookup_interval(*discv5_lookup_interval)
             .bootstrap_lookup_interval(*discv5_bootstrap_lookup_interval)
-            .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown)
+            .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown);
+
+        // Add ENR bootnodes if provided
+        if let Some(enr_strings) = boot_nodes_enr {
+            builder = builder.add_cl_serialized_signed_boot_nodes(&enr_strings);
+        }
+
+        builder
     }
 
     /// Returns true if discv5 discovery should be configured
