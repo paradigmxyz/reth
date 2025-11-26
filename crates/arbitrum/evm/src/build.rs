@@ -560,7 +560,7 @@ where
                 let state: &mut revm::database::State<D> = *db_ref;
 
                 // Check if account is in cache (it should be after execution)
-                if let Some(cached_account) = state.cache.get_mut(&sender) {
+                if let Some(cached_account) = state.cache.accounts.get_mut(&sender) {
                     if let Some(ref mut info) = cached_account.account {
                         if let Some(ref mut account_info) = info.info {
                             let old_nonce = account_info.nonce;
