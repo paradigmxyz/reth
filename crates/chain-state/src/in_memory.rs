@@ -800,12 +800,11 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         &self.execution_output
     }
 
-    /// Returns the trie data, computing it synchronously if the deferred task hasn't completed.
+    /// Returns the trie data, computing it synchronously if not already cached.
     ///
-    /// This method uses a try-lock approach:
-    /// - If the deferred task has completed, returns the cached result immediately.
-    /// - If the task is still pending or the lock is contended, computes the trie data
-    ///   synchronously from the stored unsorted inputs.
+    /// Uses `OnceLock::get_or_init` internally:
+    /// - If already computed: returns cached result immediately
+    /// - If not computed: first caller computes, others wait for that result
     #[inline]
     pub fn trie_data(&self) -> ComputedTrieData {
         self.trie_data.wait_cloned()
