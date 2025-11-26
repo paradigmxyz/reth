@@ -76,10 +76,7 @@ impl BlockingTaskPool {
         Self::builder().build().map(Self::new)
     }
 
-    fn prepare_task<F, R>(
-        &self,
-        func: F,
-    ) -> (BlockingTaskHandle<R>, impl FnOnce() + Send + 'static)
+    fn prepare_task<F, R>(&self, func: F) -> (BlockingTaskHandle<R>, impl FnOnce() + Send + 'static)
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
