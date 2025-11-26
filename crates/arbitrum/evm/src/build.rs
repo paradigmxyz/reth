@@ -631,6 +631,17 @@ where
                                 restored_nonce = pre_nonce,
                                 "[req-1] Restored nonce for Internal/Retry transaction via cache.accounts"
                             );
+
+                            // CRITICAL FIX: Immediately merge cache to bundle_state to persist changes
+                            // Without this, cache modifications may not persist for Internal transactions
+                            // which are first in the block and might be overwritten by subsequent txs
+                            state.merge_transitions(revm_database::states::bundle_state::BundleRetention::Reverts);
+
+                            tracing::info!(
+                                target: "arb-reth::nonce-fix",
+                                sender = ?sender,
+                                "[req-1] Forced merge_transitions after nonce restoration"
+                            );
                         } else {
                             tracing::warn!(
                                 target: "arb-reth::nonce-debug",
