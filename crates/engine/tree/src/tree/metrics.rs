@@ -306,8 +306,6 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_histogram: Histogram,
     /// Histogram of deferred trie computation duration.
     pub(crate) deferred_trie_compute_duration: Histogram,
-    /// Histogram of time spent waiting for deferred trie data to become available.
-    pub(crate) deferred_trie_wait_duration: Histogram,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Histogram,
     /// Payload conversion and validation latency

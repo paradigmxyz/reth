@@ -910,7 +910,6 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<(TrieInputSorted, B256)> {
-        let wait_start = Instant::now();
         let (block_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
@@ -924,10 +923,6 @@ where
                 anchor_hash == block_hash
             {
                 trace!(target: "engine::tree::payload_validator", %block_hash,"Reusing trie input with matching anchor hash");
-                self.metrics
-                    .block_validation
-                    .deferred_trie_wait_duration
-                    .record(wait_start.elapsed().as_secs_f64());
                 return Ok(((*trie_input).clone(), block_hash));
             }
         }
@@ -941,10 +936,6 @@ where
         // Extend with contents of parent in-memory blocks directly in sorted form.
         let input = Self::merge_overlay_trie_input(&blocks);
 
-        self.metrics
-            .block_validation
-            .deferred_trie_wait_duration
-            .record(wait_start.elapsed().as_secs_f64());
         Ok((input, block_hash))
     }
 
