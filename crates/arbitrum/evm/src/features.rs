@@ -1,8 +1,8 @@
 #![allow(unused)]
 
+use crate::storage::{Storage, StorageBackedBigUint};
 use alloy_primitives::U256;
 use revm::Database;
-use crate::storage::{Storage, StorageBackedBigUint};
 
 const INCREASED_CALLDATA: u32 = 0;
 
@@ -13,10 +13,8 @@ pub struct Features<D> {
 impl<D: Database> Features<D> {
     pub fn open(sto: Storage<D>) -> Self {
         let features = StorageBackedBigUint::new(sto.state, sto.base_key, 0);
-        
-        Self {
-            features,
-        }
+
+        Self { features }
     }
 
     pub fn set_calldata_price_increase(&self, enabled: bool) -> Result<(), ()> {
@@ -29,13 +27,13 @@ impl<D: Database> Features<D> {
 
     fn set_bit(&self, index: u32, enabled: bool) -> Result<(), ()> {
         let mut bi = self.features.get().unwrap_or(U256::ZERO);
-        
+
         if enabled {
             bi |= U256::from(1) << index;
         } else {
             bi &= !(U256::from(1) << index);
         }
-        
+
         self.features.set(bi)
     }
 

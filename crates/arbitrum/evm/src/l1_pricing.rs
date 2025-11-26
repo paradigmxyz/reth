@@ -1,18 +1,18 @@
+use crate::storage::{Storage, StorageBackedAddress, StorageBackedBigUint, StorageBackedUint64};
 use alloy_primitives::{Address, B256, U256};
 use revm::Database;
-use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint, StorageBackedAddress};
 
 fn compress_brotli(data: &[u8], level: u64) -> Result<u64, ()> {
     use brotli::enc::BrotliEncoderParams;
-    
+
     let quality = level.min(11) as u32;
-    
+
     let mut params = BrotliEncoderParams::default();
     params.quality = quality as i32;
-    
+
     let mut compressed = Vec::new();
     let mut cursor = std::io::Cursor::new(data);
-    
+
     match brotli::BrotliCompress(&mut cursor, &mut compressed, &params) {
         Ok(_) => Ok(compressed.len() as u64),
         Err(_) => Err(()),
@@ -21,12 +21,12 @@ fn compress_brotli(data: &[u8], level: u64) -> Result<u64, ()> {
 
 pub struct L1PricingState<D> {
     storage: Storage<D>,
-    
+
     pay_rewards_to: StorageBackedAddress<D>,
     equilibration_units: StorageBackedBigUint<D>,
     inertia: StorageBackedUint64<D>,
     per_unit_reward: StorageBackedUint64<D>,
-    
+
     last_update_time: StorageBackedUint64<D>,
     funds_due_for_rewards: StorageBackedBigUint<D>,
     units_since_update: StorageBackedUint64<D>,
@@ -36,7 +36,7 @@ pub struct L1PricingState<D> {
     amortized_cost_cap_bips: StorageBackedUint64<D>,
     l1_fees_available: StorageBackedBigUint<D>,
     gas_floor_per_token: StorageBackedUint64<D>,
-    
+
     arbos_version: u64,
 }
 
@@ -60,36 +60,54 @@ const INITIAL_PER_BATCH_GAS_COST_V6: u64 = 100_000;
 const INITIAL_PER_BATCH_GAS_COST_V12: u64 = 210_000;
 
 pub const BATCH_POSTER_ADDRESS: Address = Address::new([
-    0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x73, 0x65, 0x71, 0x75, 0x65, 0x6e,
-    0x63, 0x65, 0x72, 0x00
+    0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x73, 0x65, 0x71, 0x75, 0x65, 0x6e,
+    0x63, 0x65, 0x72, 0x00,
 ]);
 
 pub const L1_PRICER_FUNDS_POOL_ADDRESS: Address = Address::new([
-    0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0xf6
+    0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0xf6,
 ]);
 
 impl<D: Database> L1PricingState<D> {
     pub fn open(storage: Storage<D>, arbos_version: u64) -> Self {
         let state = storage.state;
         let base_key = storage.base_key;
-        
+
         Self {
             pay_rewards_to: StorageBackedAddress::new(state, base_key, PAY_REWARDS_TO_OFFSET),
-            equilibration_units: StorageBackedBigUint::new(state, base_key, EQUILIBRATION_UNITS_OFFSET),
+            equilibration_units: StorageBackedBigUint::new(
+                state,
+                base_key,
+                EQUILIBRATION_UNITS_OFFSET,
+            ),
             inertia: StorageBackedUint64::new(state, base_key, INERTIA_OFFSET),
             per_unit_reward: StorageBackedUint64::new(state, base_key, PER_UNIT_REWARD_OFFSET),
             last_update_time: StorageBackedUint64::new(state, base_key, LAST_UPDATE_TIME_OFFSET),
-            funds_due_for_rewards: StorageBackedBigUint::new(state, base_key, FUNDS_DUE_FOR_REWARDS_OFFSET),
+            funds_due_for_rewards: StorageBackedBigUint::new(
+                state,
+                base_key,
+                FUNDS_DUE_FOR_REWARDS_OFFSET,
+            ),
             units_since_update: StorageBackedUint64::new(state, base_key, UNITS_SINCE_OFFSET),
             price_per_unit: StorageBackedBigUint::new(state, base_key, PRICE_PER_UNIT_OFFSET),
             last_surplus: StorageBackedBigUint::new(state, base_key, LAST_SURPLUS_OFFSET),
-            per_batch_gas_cost: StorageBackedUint64::new(state, base_key, PER_BATCH_GAS_COST_OFFSET),
-            amortized_cost_cap_bips: StorageBackedUint64::new(state, base_key, AMORTIZED_COST_CAP_BIPS_OFFSET),
+            per_batch_gas_cost: StorageBackedUint64::new(
+                state,
+                base_key,
+                PER_BATCH_GAS_COST_OFFSET,
+            ),
+            amortized_cost_cap_bips: StorageBackedUint64::new(
+                state,
+                base_key,
+                AMORTIZED_COST_CAP_BIPS_OFFSET,
+            ),
             l1_fees_available: StorageBackedBigUint::new(state, base_key, L1_FEES_AVAILABLE_OFFSET),
-            gas_floor_per_token: StorageBackedUint64::new(state, base_key, GAS_FLOOR_PER_TOKEN_OFFSET),
+            gas_floor_per_token: StorageBackedUint64::new(
+                state,
+                base_key,
+                GAS_FLOOR_PER_TOKEN_OFFSET,
+            ),
             storage,
             arbos_version,
         }
@@ -102,45 +120,51 @@ impl<D: Database> L1PricingState<D> {
     ) {
         let state = storage.state;
         let base_key = storage.base_key;
-        
+
         let pay_rewards_to = StorageBackedAddress::new(state, base_key, PAY_REWARDS_TO_OFFSET);
         pay_rewards_to.set(initial_rewards_recipient).ok();
-        
-        let equilibration_units = StorageBackedBigUint::new(state, base_key, EQUILIBRATION_UNITS_OFFSET);
+
+        let equilibration_units =
+            StorageBackedBigUint::new(state, base_key, EQUILIBRATION_UNITS_OFFSET);
         let initial_equilibration_units = U256::from(60u64 * 16u64 * 100_000u64);
         equilibration_units.set(initial_equilibration_units).ok();
-        
+
         let inertia = StorageBackedUint64::new(state, base_key, INERTIA_OFFSET);
         inertia.set(INITIAL_INERTIA).ok();
-        
+
         let per_unit_reward = StorageBackedUint64::new(state, base_key, PER_UNIT_REWARD_OFFSET);
         per_unit_reward.set(INITIAL_PER_UNIT_REWARD).ok();
-        
-        let funds_due_for_rewards = StorageBackedBigUint::new(state, base_key, FUNDS_DUE_FOR_REWARDS_OFFSET);
+
+        let funds_due_for_rewards =
+            StorageBackedBigUint::new(state, base_key, FUNDS_DUE_FOR_REWARDS_OFFSET);
         funds_due_for_rewards.set(U256::ZERO).ok();
-        
+
         let price_per_unit = StorageBackedBigUint::new(state, base_key, PRICE_PER_UNIT_OFFSET);
         price_per_unit.set(initial_l1_base_fee).ok();
-        
+
         let last_update_time = StorageBackedUint64::new(state, base_key, LAST_UPDATE_TIME_OFFSET);
         last_update_time.set(0).ok();
-        
+
         let units_since_update = StorageBackedUint64::new(state, base_key, UNITS_SINCE_OFFSET);
         units_since_update.set(0).ok();
-        
+
         let last_surplus = StorageBackedBigUint::new(state, base_key, LAST_SURPLUS_OFFSET);
         last_surplus.set(U256::ZERO).ok();
-        
-        let per_batch_gas_cost = StorageBackedUint64::new(state, base_key, PER_BATCH_GAS_COST_OFFSET);
+
+        let per_batch_gas_cost =
+            StorageBackedUint64::new(state, base_key, PER_BATCH_GAS_COST_OFFSET);
         per_batch_gas_cost.set(INITIAL_PER_BATCH_GAS_COST_V6).ok();
-        
-        let amortized_cost_cap_bips = StorageBackedUint64::new(state, base_key, AMORTIZED_COST_CAP_BIPS_OFFSET);
+
+        let amortized_cost_cap_bips =
+            StorageBackedUint64::new(state, base_key, AMORTIZED_COST_CAP_BIPS_OFFSET);
         amortized_cost_cap_bips.set(0).ok();
-        
-        let l1_fees_available = StorageBackedBigUint::new(state, base_key, L1_FEES_AVAILABLE_OFFSET);
+
+        let l1_fees_available =
+            StorageBackedBigUint::new(state, base_key, L1_FEES_AVAILABLE_OFFSET);
         l1_fees_available.set(U256::ZERO).ok();
-        
-        let gas_floor_per_token = StorageBackedUint64::new(state, base_key, GAS_FLOOR_PER_TOKEN_OFFSET);
+
+        let gas_floor_per_token =
+            StorageBackedUint64::new(state, base_key, GAS_FLOOR_PER_TOKEN_OFFSET);
         gas_floor_per_token.set(0).ok();
     }
 
@@ -150,15 +174,15 @@ impl<D: Database> L1PricingState<D> {
         initial_l1_base_fee: U256,
     ) -> Result<(), ()> {
         self.pay_rewards_to.set(initial_rewards_recipient)?;
-        
+
         let initial_equilibration_units = U256::from(60u64 * 16u64 * 100_000u64);
         self.equilibration_units.set(initial_equilibration_units)?;
-        
+
         self.inertia.set(INITIAL_INERTIA)?;
         self.per_unit_reward.set(INITIAL_PER_UNIT_REWARD)?;
         self.funds_due_for_rewards.set(U256::ZERO)?;
         self.price_per_unit.set(initial_l1_base_fee)?;
-        
+
         self.last_update_time.set(0)?;
         self.units_since_update.set(0)?;
         self.last_surplus.set(U256::ZERO)?;
@@ -166,7 +190,7 @@ impl<D: Database> L1PricingState<D> {
         self.amortized_cost_cap_bips.set(0)?;
         self.l1_fees_available.set(U256::ZERO)?;
         self.gas_floor_per_token.set(0)?;
-        
+
         Ok(())
     }
 
@@ -266,11 +290,16 @@ impl<D: Database> L1PricingState<D> {
         self.l1_fees_available.set(current.saturating_add(amount))
     }
 
-    pub fn get_poster_data_cost(&self, tx_data: &[u8], poster: Address, brotli_level: u64) -> Result<(U256, u64), ()> {
+    pub fn get_poster_data_cost(
+        &self,
+        tx_data: &[u8],
+        poster: Address,
+        brotli_level: u64,
+    ) -> Result<(U256, u64), ()> {
         if poster != BATCH_POSTER_ADDRESS {
             return Ok((U256::ZERO, 0));
         }
-        
+
         let compressed_len = match compress_brotli(tx_data, brotli_level) {
             Ok(len) => len,
             Err(_) => {
@@ -278,24 +307,24 @@ impl<D: Database> L1PricingState<D> {
                 return Err(());
             }
         };
-        
+
         const TX_DATA_NONZERO_GAS: u64 = 16;
         let units = compressed_len.saturating_mul(TX_DATA_NONZERO_GAS);
-        
+
         let price_per_unit = self.get_price_per_unit()?;
-        
+
         let cost = price_per_unit.saturating_mul(U256::from(units));
-        
+
         Ok((cost, units))
     }
-    
+
     pub fn poster_data_cost(&self, calldata_units: u64) -> Result<U256, ()> {
         let price_per_unit = self.get_price_per_unit()?;
         let per_batch_gas_cost = self.get_per_batch_gas_cost()?;
-        
+
         let calldata_cost = price_per_unit.saturating_mul(U256::from(calldata_units));
         let batch_cost = U256::from(per_batch_gas_cost);
-        
+
         Ok(calldata_cost.saturating_add(batch_cost))
     }
 
@@ -309,32 +338,34 @@ impl<D: Database> L1PricingState<D> {
         let inertia = self.get_inertia()?;
         let equilibration_units = self.get_equilibration_units()?;
         let current_price = self.get_price_per_unit()?;
-        
+
         self.add_to_units_since_update(units_bought)?;
-        
+
         let last_update_time = self.get_last_update_time()?;
         let time_since_update = current_time.saturating_sub(last_update_time);
-        
-        if time_since_update >= 3600 || self.get_units_since_update()? >= equilibration_units.try_into().unwrap_or(u64::MAX) {
+
+        if time_since_update >= 3600 ||
+            self.get_units_since_update()? >= equilibration_units.try_into().unwrap_or(u64::MAX)
+        {
             let target_price = l1_base_fee;
             let price_diff = if target_price > current_price {
                 target_price - current_price
             } else {
                 current_price - target_price
             };
-            
+
             let adjustment = price_diff / U256::from(inertia);
             let new_price = if target_price > current_price {
                 current_price + adjustment
             } else {
                 current_price.saturating_sub(adjustment)
             };
-            
+
             self.set_price_per_unit(new_price)?;
             self.set_last_update_time(current_time)?;
             self.units_since_update.set(0)?; // Reset units counter
         }
-        
+
         Ok(())
     }
 }

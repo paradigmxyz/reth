@@ -1,12 +1,10 @@
-use std::sync::{Arc, OnceLock};
-use alloy_primitives::{B256, Address, U256};
+use alloy_primitives::{Address, B256, U256};
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use core::{future::Future, pin::Pin};
 use eyre::Result;
-use alloy_rpc_types_engine::ForkchoiceState;
-use alloy_rpc_types_engine::PayloadAttributes;
-use core::future::Future;
-use core::pin::Pin;
 use reth_node_api::ConsensusEngineHandle;
 use reth_provider::StateProviderFactory;
+use std::sync::{Arc, OnceLock};
 
 pub trait FollowerExecutor: Send + Sync {
     fn execute_message_to_block(
@@ -39,7 +37,9 @@ pub fn get_follower_executor() -> Option<DynFollowerExecutor> {
 #[derive(Clone)]
 pub struct FollowerExecutorHandle {
     pub provider: Arc<dyn StateProviderFactory + Send + Sync>,
-    pub beacon: ConsensusEngineHandle<crate::engine::ArbEngineTypes<reth_arbitrum_payload::ArbPayloadTypes>>,
+    pub beacon: ConsensusEngineHandle<
+        crate::engine::ArbEngineTypes<reth_arbitrum_payload::ArbPayloadTypes>,
+    >,
 }
 
 impl FollowerExecutor for FollowerExecutorHandle {

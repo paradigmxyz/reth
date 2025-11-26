@@ -1,15 +1,11 @@
 use reth_arbitrum_payload::ArbExecutionData;
-use reth_engine_primitives::EngineApiValidator;
-use reth_engine_primitives::PayloadValidator;
-use reth_payload_primitives::{
-    EngineApiMessageVersion,
-    EngineObjectValidationError,
-    NewPayloadError,
-    PayloadOrAttributes,
-    ExecutionPayload,
-};
+use reth_engine_primitives::{EngineApiValidator, PayloadValidator};
 use reth_node_api::{EngineTypes, FullNodeComponents, NodeTypes, PayloadTypes};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, Block};
+use reth_payload_primitives::{
+    EngineApiMessageVersion, EngineObjectValidationError, ExecutionPayload, NewPayloadError,
+    PayloadOrAttributes,
+};
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
 use reth_provider::StateProviderFactory;
 use reth_tracing::tracing;
 
@@ -58,11 +54,10 @@ where
         let got_hash = sealed_block.hash();
         if expected_hash != got_hash {
             tracing::warn!(target: "arb-reth::engine", got=%got_hash, expected=%expected_hash, "arb engine: block hash mismatch");
-            return Err(NewPayloadError::Other(format!(
-                "block hash mismatch: execution={} consensus={}",
-                got_hash,
-                expected_hash
-            ).into()));
+            return Err(NewPayloadError::Other(
+                format!("block hash mismatch: execution={} consensus={}", got_hash, expected_hash)
+                    .into(),
+            ));
         }
 
         let hdr = sealed_block.header();

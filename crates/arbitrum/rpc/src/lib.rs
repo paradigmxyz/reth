@@ -1,9 +1,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod engine;
-pub mod nitro;
-pub mod eth;
 pub mod error;
+pub mod eth;
+pub mod nitro;
 
 pub struct ArbRpc;
 

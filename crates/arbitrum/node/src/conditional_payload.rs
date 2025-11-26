@@ -1,8 +1,8 @@
-use reth_payload_builder::PayloadBuilderHandle;
-use reth_node_api::{FullNodeTypes, NodeTypes, PrimitivesTy};
 use reth_evm::ConfigureEvm;
+use reth_node_api::{FullNodeTypes, NodeTypes, PrimitivesTy};
+use reth_node_builder::components::{NoopPayloadServiceBuilder, PayloadServiceBuilder};
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::TransactionPool;
-use reth_node_builder::components::{PayloadServiceBuilder, NoopPayloadServiceBuilder};
 use std::marker::PhantomData;
 
 pub struct ConditionalPayloadServiceBuilder<PB> {
@@ -33,7 +33,9 @@ where
         if self.enabled {
             self.inner.spawn_payload_builder_service(ctx, pool, evm_config).await
         } else {
-            NoopPayloadServiceBuilder::default().spawn_payload_builder_service(ctx, pool, evm_config).await
+            NoopPayloadServiceBuilder::default()
+                .spawn_payload_builder_service(ctx, pool, evm_config)
+                .await
         }
     }
 }

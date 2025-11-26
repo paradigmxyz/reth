@@ -1,10 +1,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use alloy_genesis::{Genesis, GenesisAccount};
-use reth_chainspec::EthChainSpec;
 use alloy_primitives::{hex, keccak256, Address, Bytes, B256, U256};
 use anyhow::Result;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 mod data;
 #[cfg(feature = "std")]
 pub mod embedded_alloc;
@@ -103,12 +102,12 @@ fn find_json_number(buf: &[u8], key: &[u8]) -> Option<u64> {
     while i + key.len() < buf.len() {
         if &buf[i..i + key.len()] == key {
             let mut j = i + key.len();
-            while j < buf.len()
-                && (buf[j] == b' '
-                    || buf[j] == b'\t'
-                    || buf[j] == b'\r'
-                    || buf[j] == b'\n'
-                    || buf[j] == b':')
+            while j < buf.len() &&
+                (buf[j] == b' ' ||
+                    buf[j] == b'\t' ||
+                    buf[j] == b'\r' ||
+                    buf[j] == b'\n' ||
+                    buf[j] == b':')
             {
                 j += 1;
             }
@@ -148,12 +147,12 @@ fn find_json_address(buf: &[u8], key: &[u8]) -> Option<Address> {
     while i + key.len() < buf.len() {
         if &buf[i..i + key.len()] == key {
             let mut j = i + key.len();
-            while j < buf.len()
-                && (buf[j] == b' '
-                    || buf[j] == b'\t'
-                    || buf[j] == b'\r'
-                    || buf[j] == b'\n'
-                    || buf[j] == b':')
+            while j < buf.len() &&
+                (buf[j] == b' ' ||
+                    buf[j] == b'\t' ||
+                    buf[j] == b'\r' ||
+                    buf[j] == b'\n' ||
+                    buf[j] == b':')
             {
                 j += 1;
             }
@@ -354,11 +353,7 @@ fn build_minimal_arbos_storage(chain_id: u64, initial_l1_base_fee: U256) -> BTre
         map_slot(&l2_space, be_u64(L2_PRICING_INERTIA_OFFSET)),
         be_u64(INITIAL_PRICING_INERTIA),
     );
-    insert_non_zero(
-        &mut storage,
-        map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)),
-        be_u64(0),
-    );
+    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)), be_u64(0));
     insert_non_zero(
         &mut storage,
         map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)),
@@ -476,11 +471,7 @@ pub fn build_full_arbos_storage(
         map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)),
         be_u256(initial_l2_base_fee),
     );
-    insert_non_zero(
-        &mut storage,
-        map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)),
-        be_u64(0),
-    );
+    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)), be_u64(0));
     insert_non_zero(
         &mut storage,
         map_slot(&l2_space, be_u64(L2_MIN_BASE_FEE_WEI_OFFSET)),
@@ -537,16 +528,8 @@ pub fn build_full_arbos_storage(
         map_slot(&l1_space, be_u64(L1_FUNDS_DUE_FOR_REWARDS_OFFSET)),
         B256::ZERO,
     );
-    insert_non_zero(
-        &mut storage,
-        map_slot(&l1_space, be_u64(L1_UNITS_SINCE_OFFSET)),
-        be_u64(0),
-    );
-    insert_non_zero(
-        &mut storage,
-        map_slot(&l1_space, be_u64(L1_LAST_SURPLUS_OFFSET)),
-        B256::ZERO,
-    );
+    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_UNITS_SINCE_OFFSET)), be_u64(0));
+    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_LAST_SURPLUS_OFFSET)), B256::ZERO);
     insert_non_zero(
         &mut storage,
         map_slot(&l1_space, be_u64(L1_FEES_AVAILABLE_OFFSET)),
@@ -575,7 +558,6 @@ pub fn build_full_arbos_storage(
     );
 
     let poster_info_space = subspace(&bpt_space, POSTER_INFO_KEY);
-
 
     insert_non_zero(
         &mut storage,
@@ -747,7 +729,8 @@ pub fn sepolia_baked_genesis_from_header(
             alloc.insert(ARBOS_ADDR, acct);
         }
 
-        for &b in &[0x64u8, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0xff] {
+        for &b in &[0x64u8, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0xff]
+        {
             let mut a = [0u8; 20];
             a[19] = b;
             let addr = Address::from_slice(&a);
@@ -880,7 +863,8 @@ mod tests {
             nonce_hex,
             None,
             Some("0x2faf080"), // 50_000_000_000
-        ).expect("ok");
+        )
+        .expect("ok");
 
         let header = spec.genesis_header.header();
         assert_eq!(header.number, 0u64);
@@ -901,7 +885,8 @@ mod tests {
             B256::from(arr)
         };
         assert_eq!(header.mix_hash, mix_bytes);
-        let expected_nonce = alloy_primitives::B64::from(parse_hex_quantity(nonce_hex).to::<u64>().to_be_bytes());
+        let expected_nonce =
+            alloy_primitives::B64::from(parse_hex_quantity(nonce_hex).to::<u64>().to_be_bytes());
         assert_eq!(header.nonce, expected_nonce);
     }
 }

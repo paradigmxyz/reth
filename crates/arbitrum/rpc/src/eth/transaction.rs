@@ -1,11 +1,10 @@
-use serde::{Deserialize, Serialize};
 use alloy_consensus::error::ValueError;
 use alloy_rpc_types_eth::request::TransactionRequest as EthTransactionRequest;
-use revm_context::{cfg::CfgEnv, block::BlockEnv};
-use revm_context::tx::TxEnv;
-use reth_rpc_convert::transaction::{TryIntoSimTx, TryIntoTxEnv, EthTxEnvError};
-use reth_arbitrum_primitives::ArbTransactionSigned;
 use reth_arbitrum_evm::ArbTransaction;
+use reth_arbitrum_primitives::ArbTransactionSigned;
+use reth_rpc_convert::transaction::{EthTxEnvError, TryIntoSimTx, TryIntoTxEnv};
+use revm_context::{block::BlockEnv, cfg::CfgEnv, tx::TxEnv};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -42,15 +41,16 @@ impl TryIntoTxEnv<ArbTransaction<TxEnv>> for ArbTransactionRequest {
     }
 }
 
-use crate::eth::ArbEthApi;
+use crate::{error::ArbEthApiError, eth::ArbEthApi};
 use alloy_primitives::{Bytes, B256};
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
-    FromEvmError, FromEthApiError, RpcConvert, RpcNodeCore,
+    FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use crate::error::ArbEthApiError;
-use reth_transaction_pool::{AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool};
 use reth_rpc_eth_types::utils::recover_raw_transaction;
+use reth_transaction_pool::{
+    AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
+};
 
 impl<N, Rpc> EthTransactions for ArbEthApi<N, Rpc>
 where

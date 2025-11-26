@@ -2,10 +2,10 @@ use alloc::{vec, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
+use reth_arbitrum_primitives::ArbTransactionSigned;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_node_api::{FullNodePrimitives, FullSignedTx};
-use reth_arbitrum_primitives::ArbTransactionSigned;
 use reth_primitives_traits::{Block, FullBlockHeader, SignedTransaction};
 use reth_provider::{
     providers::{ChainStorage, NodeTypesForProvider},
@@ -53,7 +53,8 @@ where
     }
 }
 
-impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>> for ArbStorage<T, H>
+impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>>
+    for ArbStorage<T, H>
 where
     Provider: DBProvider<Tx: DbTxMut>,
     T: SignedTransaction,

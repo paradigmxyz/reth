@@ -1,13 +1,12 @@
-use std::vec;
-use reth_storage_api::HeaderProvider;
-use reth_primitives_traits::NodePrimitives;
-use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
-use reth_rpc_eth_types::receipt::build_receipt;
+use alloy_consensus::{transaction::TxHashRef, Transaction};
 use alloy_rpc_types_eth::TransactionReceipt;
 use alloy_serde::WithOtherFields;
+use reth_primitives_traits::NodePrimitives;
+use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
 use reth_rpc_eth_api::FromEthApiError;
-use alloy_consensus::transaction::TxHashRef;
-use alloy_consensus::Transaction;
+use reth_rpc_eth_types::receipt::build_receipt;
+use reth_storage_api::HeaderProvider;
+use std::vec;
 
 #[derive(Clone, Debug)]
 pub struct ArbReceiptConverter<P> {
@@ -45,8 +44,11 @@ where
             // This works around an issue where tx.signer() returns Address::ZERO
             use alloy_consensus::transaction::SignerRecoverable;
             use core::ops::Deref;
-            let correct_signer = input.tx.deref().recover_signer()
-                .map_err(|_| crate::error::ArbEthApiError::from_eth_err(reth_rpc_eth_types::EthApiError::InvalidTransactionSignature))?;
+            let correct_signer = input.tx.deref().recover_signer().map_err(|_| {
+                crate::error::ArbEthApiError::from_eth_err(
+                    reth_rpc_eth_types::EthApiError::InvalidTransactionSignature,
+                )
+            })?;
 
             // Extract the transaction hash, 'to' address, and next_log_index before moving input
             // We need to compute these eagerly to avoid lifetime issues
@@ -63,7 +65,8 @@ where
             let next_log_index_val = input.next_log_index;
 
             // Build the receipt using the standard build_receipt function
-            // The lambda converts the ArbReceipt to a ReceiptEnvelope, preserving cumulative gas and logs
+            // The lambda converts the ArbReceipt to a ReceiptEnvelope, preserving cumulative gas
+            // and logs
             let mut base_receipt = build_receipt(input, None, |receipt, _next_log_index, _meta| {
                 use alloy_consensus::TxReceipt;
 
@@ -107,13 +110,13 @@ where
             // This is necessary because build_receipt's tx.signer() returns Address::ZERO
             base_receipt.from = correct_signer;
 
-            // For internal transactions (0x6a) and deposit transactions (0x64), fix the receipt fields
-            // These transaction types have special handling in Arbitrum
+            // For internal transactions (0x6a) and deposit transactions (0x64), fix the receipt
+            // fields These transaction types have special handling in Arbitrum
             if tx_type_u8 == 0x6a {
                 // Internal transactions: gasUsed should be 0, to should be ArbOS address
                 base_receipt.gas_used = 0;
-                // TODO: Fix type mismatch - tx_to is Option<FixedBytes<20>> but need Option<Address>
-                // base_receipt.to = tx_to;
+                // TODO: Fix type mismatch - tx_to is Option<FixedBytes<20>> but need
+                // Option<Address> base_receipt.to = tx_to;
                 tracing::debug!(
                     target: "arb-reth::rpc-receipt",
                     tx_hash = ?tx_hash,
@@ -123,8 +126,8 @@ where
             } else if tx_type_u8 == 0x64 {
                 // Deposit transactions: gasUsed should be 0
                 base_receipt.gas_used = 0;
-                // TODO: Fix type mismatch - tx_to is Option<FixedBytes<20>> but need Option<Address>
-                // base_receipt.to = tx_to;
+                // TODO: Fix type mismatch - tx_to is Option<FixedBytes<20>> but need
+                // Option<Address> base_receipt.to = tx_to;
                 tracing::debug!(
                     target: "arb-reth::rpc-receipt",
                     tx_hash = ?tx_hash,
@@ -133,8 +136,8 @@ where
             }
 
             // The base_receipt now has all correct data including the from field
-            // Convert from TransactionReceipt<ReceiptEnvelope> to TransactionReceipt (with default Log type)
-            // We need to map the inner ReceiptEnvelope type
+            // Convert from TransactionReceipt<ReceiptEnvelope> to TransactionReceipt (with default
+            // Log type) We need to map the inner ReceiptEnvelope type
             use alloy_consensus::TxReceipt;
             use alloy_rpc_types_eth::Log as RpcLog;
 
@@ -145,12 +148,11 @@ where
             let consensus_logs = base_receipt.inner.logs();
 
             // Convert consensus logs (alloy_primitives::Log) to RPC logs (alloy_rpc_types_eth::Log)
-            let rpc_logs: Vec<RpcLog> = consensus_logs.iter().enumerate().map(|(idx, log)| {
-                RpcLog {
-                    inner: alloy_primitives::Log {
-                        address: log.address,
-                        data: log.data.clone(),
-                    },
+            let rpc_logs: Vec<RpcLog> = consensus_logs
+                .iter()
+                .enumerate()
+                .map(|(idx, log)| RpcLog {
+                    inner: alloy_primitives::Log { address: log.address, data: log.data.clone() },
                     block_hash: base_receipt.block_hash,
                     block_number: base_receipt.block_number,
                     block_timestamp: None,
@@ -158,8 +160,8 @@ where
                     transaction_index: base_receipt.transaction_index,
                     log_index: Some((next_log_index_val + idx) as u64),
                     removed: false,
-                }
-            }).collect();
+                })
+                .collect();
 
             // Create ReceiptEnvelope<RpcLog>
             let receipt_with_bloom = alloy_consensus::ReceiptWithBloom {

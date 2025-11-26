@@ -1,16 +1,18 @@
-use std::sync::Arc;
-use core::fmt::Debug;
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::B64;
+use core::fmt::Debug;
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
-    validate_against_parent_eip1559_base_fee,
-    validate_against_parent_hash_number,
+    validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
     validate_header_base_fee, validate_header_extra_data,
 };
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::{Block, BlockBody, BlockHeader, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{
+    Block, BlockBody, BlockHeader, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader,
+};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArbBeaconConsensus<ChainSpec> {
@@ -26,7 +28,11 @@ impl<ChainSpec> ArbBeaconConsensus<ChainSpec> {
 impl<N, ChainSpec> FullConsensus<N> for ArbBeaconConsensus<ChainSpec>
 where
     N: NodePrimitives,
-    ChainSpec: EthChainSpec<Header = N::BlockHeader> + Debug + Send + Sync + reth_chainspec::EthereumHardforks,
+    ChainSpec: EthChainSpec<Header = N::BlockHeader>
+        + Debug
+        + Send
+        + Sync
+        + reth_chainspec::EthereumHardforks,
 {
     fn validate_block_post_execution(
         &self,
@@ -40,7 +46,8 @@ where
 impl<B, ChainSpec> Consensus<B> for ArbBeaconConsensus<ChainSpec>
 where
     B: Block,
-    ChainSpec: EthChainSpec<Header = B::Header> + Debug + Send + Sync + reth_chainspec::EthereumHardforks,
+    ChainSpec:
+        EthChainSpec<Header = B::Header> + Debug + Send + Sync + reth_chainspec::EthereumHardforks,
 {
     type Error = ConsensusError;
 
@@ -61,7 +68,11 @@ where
         }
         if header.header().transactions_root() != body.calculate_tx_root() {
             return Err(ConsensusError::BodyTransactionRootDiff(
-                GotExpected { got: body.calculate_tx_root(), expected: header.header().transactions_root() }.into(),
+                GotExpected {
+                    got: body.calculate_tx_root(),
+                    expected: header.header().transactions_root(),
+                }
+                .into(),
             ));
         }
         Ok(())
@@ -108,7 +119,10 @@ where
         let parent_ts = parent.timestamp();
         let ts = h.timestamp();
         if ts < parent_ts {
-            return Err(ConsensusError::TimestampIsInPast { parent_timestamp: parent_ts, timestamp: ts });
+            return Err(ConsensusError::TimestampIsInPast {
+                parent_timestamp: parent_ts,
+                timestamp: ts,
+            });
         }
         Ok(())
     }

@@ -1,8 +1,8 @@
 #![allow(unused)]
 
+use crate::storage::{Storage, StorageBackedUint64};
 use alloy_primitives::{keccak256, B256};
 use revm::Database;
-use crate::storage::{Storage, StorageBackedUint64};
 
 pub struct MerkleAccumulator<D> {
     backing_storage: Storage<D>,
@@ -10,16 +10,12 @@ pub struct MerkleAccumulator<D> {
 }
 
 impl<D: Database> MerkleAccumulator<D> {
-    pub fn initialize(_sto: &Storage<D>) {
-    }
+    pub fn initialize(_sto: &Storage<D>) {}
 
     pub fn open(sto: Storage<D>) -> Self {
         let size = StorageBackedUint64::new(sto.state, sto.base_key, 0);
-        
-        Self {
-            backing_storage: sto,
-            size,
-        }
+
+        Self { backing_storage: sto, size }
     }
 
     pub fn calc_num_partials(size: u64) -> u64 {
@@ -63,7 +59,7 @@ impl<D: Database> MerkleAccumulator<D> {
             so_far = keccak256(&combined);
 
             self.set_partial(level, B256::ZERO)?;
-            
+
             level += 1;
         }
     }

@@ -5,9 +5,13 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-
 #[no_mangle]
-pub extern "C" fn record_block_inputs(ptr: *const u8, len: usize, out_ptr: *mut u8, out_len: *mut usize) -> i32 {
+pub extern "C" fn record_block_inputs(
+    ptr: *const u8,
+    len: usize,
+    out_ptr: *mut u8,
+    out_len: *mut usize,
+) -> i32 {
     if ptr.is_null() || out_ptr.is_null() || out_len.is_null() {
         return -1;
     }
@@ -27,14 +31,28 @@ mod tests {
         let input = b"arb-stf-inputs-v0:canonical-order-check";
         let mut out = vec![0u8; input.len()];
         let mut out_len: usize = 0;
-        let rc1 = unsafe { record_block_inputs(input.as_ptr(), input.len(), out.as_mut_ptr(), &mut out_len as *mut usize) };
+        let rc1 = unsafe {
+            record_block_inputs(
+                input.as_ptr(),
+                input.len(),
+                out.as_mut_ptr(),
+                &mut out_len as *mut usize,
+            )
+        };
         assert_eq!(rc1, 0);
         assert_eq!(out_len, input.len());
         assert_eq!(&out[..out_len], input);
 
         let mut out2 = vec![0u8; input.len()];
         let mut out_len2: usize = 0;
-        let rc2 = unsafe { record_block_inputs(input.as_ptr(), input.len(), out2.as_mut_ptr(), &mut out_len2 as *mut usize) };
+        let rc2 = unsafe {
+            record_block_inputs(
+                input.as_ptr(),
+                input.len(),
+                out2.as_mut_ptr(),
+                &mut out_len2 as *mut usize,
+            )
+        };
         assert_eq!(rc2, 0);
         assert_eq!(out_len2, input.len());
         assert_eq!(&out2[..out_len2], input);
@@ -47,12 +65,26 @@ mod tests {
         let input = b"arb-stf-inputs-1234567890";
         let mut out1 = vec![0u8; input.len()];
         let mut out_len1: usize = 0;
-        let rc1 = unsafe { record_block_inputs(input.as_ptr(), input.len(), out1.as_mut_ptr(), &mut out_len1 as *mut usize) };
+        let rc1 = unsafe {
+            record_block_inputs(
+                input.as_ptr(),
+                input.len(),
+                out1.as_mut_ptr(),
+                &mut out_len1 as *mut usize,
+            )
+        };
         assert_eq!(rc1, 0);
 
         let mut out2 = vec![0u8; input.len()];
         let mut out_len2: usize = 0;
-        let rc2 = unsafe { record_block_inputs(input.as_ptr(), input.len(), out2.as_mut_ptr(), &mut out_len2 as *mut usize) };
+        let rc2 = unsafe {
+            record_block_inputs(
+                input.as_ptr(),
+                input.len(),
+                out2.as_mut_ptr(),
+                &mut out_len2 as *mut usize,
+            )
+        };
         assert_eq!(rc2, 0);
 
         assert_eq!(&out1[..out_len1], &out2[..out_len2]);
@@ -80,5 +112,4 @@ mod tests {
         let hb = keccak256(&out_b[..len_b]);
         assert_ne!(ha, hb);
     }
-
 }

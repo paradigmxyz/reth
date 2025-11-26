@@ -1,39 +1,55 @@
 #![allow(unused)]
 extern crate alloc;
 
+use crate::{arb_evm::ArbEvmExt, header, ArbEvmFactory};
 use alloc::{boxed::Box, sync::Arc};
-use core::marker::PhantomData;
-use std::sync::Mutex;
 use alloy_consensus::Transaction;
-use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap};
-use alloy_primitives::{Address, B256};
-use reth_evm_ethereum::{EthEvmConfig};
-use crate::ArbEvmFactory;
-use crate::header;
-use std::collections::HashMap;
-use revm_state::{AccountInfo as RevmAccountInfo, EvmStorageSlot};
-use revm_database::{BundleAccount, AccountStatus};
-use revm::{
-    context::TxEnv,
-    inspector::Inspector,
-    interpreter::interpreter::EthInterpreter,
-    context::result::{ExecutionResult, ResultAndState},
+use alloy_evm::{
+    block::{
+        BlockExecutor as AlloyBlockExecutor, BlockExecutorFactory, BlockExecutorFor, CommitChanges,
+        ExecutableTx,
+    },
+    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext},
+    precompiles::PrecompilesMap,
+    Database, ToTxEnv,
 };
-use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, WithTxEnv, ExecutorTx};
+use alloy_primitives::{Address, Log as AlloyLog, B256};
+use core::marker::PhantomData;
+use reth_evm::{
+    execute::{BlockAssembler, BlockAssemblerInput, ExecutorTx, WithTxEnv},
+    OnStateHook, TransactionEnv,
+};
+use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionResult as RethBlockExecutionResult;
-use reth_evm::{OnStateHook, TransactionEnv};
-use alloy_evm::Database;
-use revm::Database as RevmDatabase;
-use alloy_evm::block::{BlockExecutorFactory, BlockExecutorFor, CommitChanges, ExecutableTx, BlockExecutor as AlloyBlockExecutor};
-use crate::arb_evm::ArbEvmExt;
-use alloy_evm::eth::{EthBlockExecutionCtx, EthBlockExecutor};
-use alloy_evm::ToTxEnv;
-use alloy_primitives::Log as AlloyLog;
+use revm::{
+    context::{
+        result::{ExecutionResult, ResultAndState},
+        TxEnv,
+    },
+    inspector::Inspector,
+    interpreter::interpreter::EthInterpreter,
+    Database as RevmDatabase,
+};
+use revm_database::{AccountStatus, BundleAccount};
+use revm_state::{AccountInfo as RevmAccountInfo, EvmStorageSlot};
+use std::{collections::HashMap, sync::Mutex};
 
-use crate::predeploys::PredeployRegistry;
-use crate::predeploys::{PredeployCallContext, LogEmitter};
-use crate::execute::{DefaultArbOsHooks, ArbTxProcessorState, ArbStartTxContext, ArbGasChargingContext, ArbEndTxContext, ArbOsHooks};
+use crate::{
+    execute::{
+        ArbEndTxContext, ArbGasChargingContext, ArbOsHooks, ArbStartTxContext, ArbTxProcessorState,
+        DefaultArbOsHooks,
+    },
+    predeploys::{LogEmitter, PredeployCallContext, PredeployRegistry},
+};
+
+use dashmap::DashMap;
+use std::sync::LazyLock;
+
+/// Global tracker to prevent duplicate nonce restorations across multiple block executions
+/// Reth executes blocks multiple times (validation + commit phases), but we should only
+/// restore nonces ONCE per block. Key: (block_number, sender_address), Value: restored_nonce
+static RESTORED_NONCES: LazyLock<DashMap<(u64, Address), u64>> = LazyLock::new(DashMap::new);
 
 pub struct ArbBlockExecutorFactory<R, CS>
 where
@@ -101,12 +117,22 @@ impl<R: Clone, CS> ArbBlockExecutorFactory<R, CS> {
 
 impl<'a, E, CS, RB, D> AlloyBlockExecutor for ArbBlockExecutor<'a, E, CS, RB>
 where
-    RB: alloy_evm::eth::receipt_builder::ReceiptBuilder<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt>,
+    RB: alloy_evm::eth::receipt_builder::ReceiptBuilder<
+        Transaction = reth_arbitrum_primitives::ArbTransactionSigned,
+        Receipt = reth_arbitrum_primitives::ArbReceipt,
+    >,
     D: RevmDatabase + core::fmt::Debug + 'a,
     <D as RevmDatabase>::Error: Send + Sync + 'static,
     E: reth_evm::Evm<DB = &'a mut revm::database::State<D>> + crate::arb_evm::ArbEvmExt,
-    E::Tx: Clone + alloy_evm::tx::FromRecoveredTx<reth_arbitrum_primitives::ArbTransactionSigned> + alloy_evm::tx::FromTxWithEncoded<reth_arbitrum_primitives::ArbTransactionSigned>,
-    for<'b> alloy_evm::eth::EthBlockExecutor<'b, E, alloy_evm::eth::spec::EthSpec, &'b RB>: alloy_evm::block::BlockExecutor<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt, Evm = E>,
+    E::Tx: Clone
+        + alloy_evm::tx::FromRecoveredTx<reth_arbitrum_primitives::ArbTransactionSigned>
+        + alloy_evm::tx::FromTxWithEncoded<reth_arbitrum_primitives::ArbTransactionSigned>,
+    for<'b> alloy_evm::eth::EthBlockExecutor<'b, E, alloy_evm::eth::spec::EthSpec, &'b RB>:
+        alloy_evm::block::BlockExecutor<
+            Transaction = reth_arbitrum_primitives::ArbTransactionSigned,
+            Receipt = reth_arbitrum_primitives::ArbReceipt,
+            Evm = E,
+        >,
     <E as alloy_evm::Evm>::Tx: reth_evm::TransactionEnv,
 {
     type Transaction = reth_arbitrum_primitives::ArbTransactionSigned;
@@ -187,7 +213,8 @@ where
                 _ => true,
             }
         };
-        let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
+        let is_internal =
+            matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
         let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
         let is_retry = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry);
         // Internal and Retry transactions need precredit logic for nonce handling
@@ -216,34 +243,72 @@ where
             ArbTxType::Eip4844 => 0x03,
             ArbTxType::Eip7702 => 0x04,
         };
-        
+
         let to_addr_opt = match tx.tx().kind() {
             alloy_primitives::TxKind::Call(a) => Some(a),
             _ => None,
         };
-        
+
         let block_timestamp = alloy_evm::Evm::block(self.evm()).timestamp.try_into().unwrap_or(0);
-        
+
         let tx_hash = {
             use alloy_eips::eip2718::Encodable2718;
             let mut buf = Vec::new();
             tx.tx().encode_2718(&mut buf);
             alloy_primitives::keccak256(&buf)
         };
-        
-        let (ticket_id, refund_to, gas_fee_cap_opt, max_refund, submission_fee_refund, deposit_value, retry_value, retry_to, retry_data, beneficiary, max_submission_fee, fee_refund_addr, l1_base_fee_opt) = match &**tx.tx() {
-            reth_arbitrum_primitives::ArbTypedTransaction::Retry(retry_tx) => {
-                (Some(retry_tx.ticket_id), Some(retry_tx.refund_to), Some(retry_tx.gas_fee_cap), Some(retry_tx.max_refund), Some(retry_tx.submission_fee_refund), None, None, None, None, None, None, None, None)
-            },
-            reth_arbitrum_primitives::ArbTypedTransaction::SubmitRetryable(submit_tx) => {
-                (None, None, Some(submit_tx.gas_fee_cap), None, None, Some(submit_tx.deposit_value), Some(submit_tx.retry_value), submit_tx.retry_to, Some(submit_tx.retry_data.to_vec()), Some(submit_tx.beneficiary), Some(submit_tx.max_submission_fee), Some(submit_tx.fee_refund_addr), Some(submit_tx.l1_base_fee))
-            },
+
+        let (
+            ticket_id,
+            refund_to,
+            gas_fee_cap_opt,
+            max_refund,
+            submission_fee_refund,
+            deposit_value,
+            retry_value,
+            retry_to,
+            retry_data,
+            beneficiary,
+            max_submission_fee,
+            fee_refund_addr,
+            l1_base_fee_opt,
+        ) = match &**tx.tx() {
+            reth_arbitrum_primitives::ArbTypedTransaction::Retry(retry_tx) => (
+                Some(retry_tx.ticket_id),
+                Some(retry_tx.refund_to),
+                Some(retry_tx.gas_fee_cap),
+                Some(retry_tx.max_refund),
+                Some(retry_tx.submission_fee_refund),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            reth_arbitrum_primitives::ArbTypedTransaction::SubmitRetryable(submit_tx) => (
+                None,
+                None,
+                Some(submit_tx.gas_fee_cap),
+                None,
+                None,
+                Some(submit_tx.deposit_value),
+                Some(submit_tx.retry_value),
+                submit_tx.retry_to,
+                Some(submit_tx.retry_data.to_vec()),
+                Some(submit_tx.beneficiary),
+                Some(submit_tx.max_submission_fee),
+                Some(submit_tx.fee_refund_addr),
+                Some(submit_tx.l1_base_fee),
+            ),
             _ => (None, None, None, None, None, None, None, None, None, None, None, None, None),
         };
-        
+
         let block_number = alloy_evm::Evm::block(self.evm()).number.try_into().unwrap_or(0);
         let parent_hash = self.exec_ctx.parent_hash;
-        
+
         let start_ctx = ArbStartTxContext {
             sender,
             nonce,
@@ -275,7 +340,7 @@ where
             block_number,
             parent_hash: Some(parent_hash),
         };
-        
+
         let start_hook_result = {
             let mut state = core::mem::take(&mut self.tx_state);
             let result = {
@@ -295,11 +360,11 @@ where
                 error = ?start_hook_result.error,
                 "Transaction ended early - will override EVM gas with hook gas"
             );
-            
+
             if let Some(err_msg) = start_hook_result.error {
                 return Err(BlockExecutionError::msg(err_msg));
             }
-            
+
             Some(start_hook_result.gas_used)
         } else {
             None
@@ -314,15 +379,15 @@ where
             tx.tx().encode_2718(&mut buf);
             buf
         };
-        
+
         let calldata_vec = tx.tx().input().to_vec();
-        
+
         let poster = if block_coinbase == crate::l1_pricing::BATCH_POSTER_ADDRESS {
             crate::l1_pricing::BATCH_POSTER_ADDRESS
         } else {
             Address::ZERO
         };
-        
+
         let gas_ctx = ArbGasChargingContext {
             intrinsic_gas: 21_000,
             calldata: calldata_vec,
@@ -361,7 +426,10 @@ where
             }
         }
 
-        let mut maybe_predeploy_result: Option<(revm::context::result::ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>, u64)> = None;
+        let mut maybe_predeploy_result: Option<(
+            revm::context::result::ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>,
+            u64,
+        )> = None;
         // Skip predeploy dispatch for transactions that are fully handled in start_tx
         // (internal, deposits, submit retryables) to preserve logs emitted in start_tx
         if !start_hook_result.end_tx_now {
@@ -384,7 +452,12 @@ where
                 crate::log_sink::clear();
                 struct SinkEmitter;
                 impl LogEmitter for SinkEmitter {
-                    fn emit_log(&mut self, address: alloy_primitives::Address, topics: &[[u8; 32]], data: &[u8]) {
+                    fn emit_log(
+                        &mut self,
+                        address: alloy_primitives::Address,
+                        topics: &[[u8; 32]],
+                        data: &[u8],
+                    ) {
                         crate::log_sink::push(address, topics, data);
                     }
                 }
@@ -394,16 +467,26 @@ where
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
                 let db: &mut revm::database::State<D> = *db_ref;
 
-                let arbos_addr = alloy_primitives::Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                                  0x00, 0x00, 0x00, 0x64]);
+                let arbos_addr = alloy_primitives::Address::from([
+                    0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64,
+                ]);
                 let _ = db.basic(arbos_addr);
 
-                let mut retryables = DefaultRetryables::new(db as *mut _, alloy_primitives::B256::ZERO);
+                let mut retryables =
+                    DefaultRetryables::new(db as *mut _, alloy_primitives::B256::ZERO);
 
                 if let Ok(mut reg) = self.predeploys.lock() {
                     let calldata_bytes = tx.tx().input().clone();
-                    let _ = reg.dispatch_with_emitter(&ctx, call_to, &calldata_bytes, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut retryables, &mut emitter);
+                    let _ = reg.dispatch_with_emitter(
+                        &ctx,
+                        call_to,
+                        &calldata_bytes,
+                        gas_limit,
+                        alloy_primitives::U256::from(tx.tx().value()),
+                        &mut retryables,
+                        &mut emitter,
+                    );
                 }
             }
         }
@@ -416,7 +499,6 @@ where
                 Err(_) => 0,
             }
         };
-
 
         let mut tx_env = tx.to_tx_env();
 
@@ -433,10 +515,10 @@ where
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
         }
 
-
-        // Track the pre-execution nonce for Internal and Retry transactions so we can restore it after execution
-        // Both transaction types should NOT increment sender nonce, but EVM increments it anyway
-        // even with disable_nonce_check=true (that flag only disables validation, not increment)
+        // Track the pre-execution nonce for Internal and Retry transactions so we can restore it
+        // after execution Both transaction types should NOT increment sender nonce, but EVM
+        // increments it anyway even with disable_nonce_check=true (that flag only disables
+        // validation, not increment)
         let used_pre_nonce = if is_internal || is_retry {
             tracing::info!(
                 target: "arb-reth::nonce-debug",
@@ -460,12 +542,10 @@ where
             if (is_internal || is_deposit) && gas_limit == 0 {
                 effective_gas_limit = 1_000_000;
             }
-            let effective_gas_price = if is_internal || is_deposit {
-                block_basefee
-            } else {
-                upfront_gas_price
-            };
-            let needed_fee = alloy_primitives::U256::from(effective_gas_limit) * effective_gas_price;
+            let effective_gas_price =
+                if is_internal || is_deposit { block_basefee } else { upfront_gas_price };
+            let needed_fee =
+                alloy_primitives::U256::from(effective_gas_limit) * effective_gas_price;
             tracing::info!(
                 target: "arb-reth::executor",
                 tx_type = ?tx.tx().tx_type(),
@@ -482,11 +562,6 @@ where
             let inc: u128 = needed_fee.to::<u128>();
             let _ = state.increment_balances(core::iter::once((sender, inc)));
         }
-
-
-
-
-
 
         let evm = self.inner.evm_mut();
         let prev_disable_balance = evm.cfg_mut().disable_balance_check;
@@ -550,12 +625,14 @@ where
             );
         }
 
-        // For Internal and Retry transactions, EVM increments nonce even with disable_nonce_check=true
-        // (that flag only skips validation, not increment). We need to manually restore it.
+        // For Internal and Retry transactions, EVM increments nonce even with
+        // disable_nonce_check=true (that flag only skips validation, not increment). We
+        // need to manually restore it.
         //
-        // DEFERRED APPROACH: Don't modify state immediately - just record that restoration is needed.
-        // Apply all restorations ONCE at block end to avoid mid-block state inconsistencies.
-        // Testing Agent confirmed: merge_transitions is BLOCK-LEVEL, not TRANSACTION-LEVEL.
+        // DEFERRED APPROACH: Don't modify state immediately - just record that restoration is
+        // needed. Apply all restorations ONCE at block end to avoid mid-block state
+        // inconsistencies. Testing Agent confirmed: merge_transitions is BLOCK-LEVEL, not
+        // TRANSACTION-LEVEL.
         if let Some(pre_nonce) = used_pre_nonce {
             if result.is_ok() {
                 // Defer restoration to block end
@@ -587,7 +664,7 @@ where
             ArbTxType::Eip4844 => 0x03,
             ArbTxType::Eip7702 => 0x04,
         };
-        
+
         let end_ctx = ArbEndTxContext {
             success: result.is_ok(),
             gas_left: 0,
@@ -609,32 +686,63 @@ where
         result
     }
 
-    fn finish(mut self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
+    fn finish(
+        mut self,
+    ) -> Result<
+        (Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>),
+        BlockExecutionError,
+    > {
+        // Get block number for global tracker
+        let block_number: u64 =
+            alloy_evm::Evm::block(self.inner.evm()).number.try_into().unwrap_or(0);
+
         tracing::info!(
             target: "arb-reth::executor",
+            block_number = block_number,
             pending_restorations = self.pending_nonce_restorations.len(),
             "ArbBlockExecutor::finish() called - applying deferred nonce restorations"
         );
 
         // Apply all deferred nonce restorations BEFORE calling inner.finish()
         // This ensures all state modifications happen before final commit
+        //
+        // CRITICAL: Reth executes blocks MULTIPLE TIMES (validation + commit phases).
+        // We must use global tracker to ensure nonce restoration happens only ONCE across
+        // all executions, otherwise final execution will restore from wrong starting nonce.
         if !self.pending_nonce_restorations.is_empty() {
             let (db_ref, _, _) = self.inner.evm_mut().components_mut();
             let state: &mut revm::database::State<_> = *db_ref;
 
             for (sender, target_nonce) in &self.pending_nonce_restorations {
+                let tracker_key = (block_number, *sender);
+
+                // Check if this (block, sender) pair already had nonce restored
+                if RESTORED_NONCES.contains_key(&tracker_key) {
+                    tracing::debug!(
+                        target: "arb-reth::nonce-fix",
+                        sender = ?sender,
+                        block_number = block_number,
+                        "[req-1] Nonce already restored for this sender in this block (duplicate execution detected)"
+                    );
+                    continue;
+                }
+
                 // Try cache first
                 if let Some(cached_acc) = state.cache.accounts.get_mut(sender) {
                     if let Some(account) = cached_acc.account.as_mut() {
                         let current_nonce = account.info.nonce;
                         account.info.nonce = *target_nonce;
 
+                        // Record in global tracker to prevent duplicate restoration
+                        RESTORED_NONCES.insert(tracker_key, *target_nonce);
+
                         tracing::info!(
                             target: "arb-reth::nonce-fix",
                             sender = ?sender,
+                            block_number = block_number,
                             from_nonce = current_nonce,
                             to_nonce = target_nonce,
-                            "[req-1] Applied deferred nonce restoration in cache at block end"
+                            "[req-1] Applied deferred nonce restoration in cache at block end (recorded in global tracker)"
                         );
                     }
                 }
@@ -642,14 +750,14 @@ where
         }
 
         let (evm, mut result) = self.inner.finish()?;
-        
+
         tracing::info!(
             target: "arb-reth::executor",
             receipts_count = result.receipts.len(),
             inner_gas_used = result.gas_used,
             "Got result from inner executor"
         );
-        
+
         if let Some(last_receipt) = result.receipts.last() {
             use alloy_consensus::TxReceipt;
             let correct_gas_used = last_receipt.cumulative_gas_used();
@@ -666,7 +774,24 @@ where
                 "No receipts in result - cannot correct gasUsed"
             );
         }
-        
+
+        // Clean up old blocks from the global nonce restoration tracker to prevent memory leaks
+        // Keep last 1000 blocks in the tracker (blocks can execute multiple times, so we need a
+        // buffer)
+        const TRACKER_RETENTION_BLOCKS: u64 = 1000;
+        if block_number > TRACKER_RETENTION_BLOCKS {
+            let cleanup_threshold = block_number - TRACKER_RETENTION_BLOCKS;
+            RESTORED_NONCES.retain(|(block, _), _| *block >= cleanup_threshold);
+
+            tracing::debug!(
+                target: "arb-reth::nonce-fix",
+                current_block = block_number,
+                cleanup_threshold = cleanup_threshold,
+                tracker_size = RESTORED_NONCES.len(),
+                "[req-1] Cleaned up old blocks from nonce restoration tracker"
+            );
+        }
+
         Ok((evm, result))
     }
 
@@ -685,7 +810,12 @@ where
 
 impl<R, CS> BlockExecutorFactory for ArbBlockExecutorFactory<R, CS>
 where
-    R: Clone + 'static + alloy_evm::eth::receipt_builder::ReceiptBuilder<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt>,
+    R: Clone
+        + 'static
+        + alloy_evm::eth::receipt_builder::ReceiptBuilder<
+            Transaction = reth_arbitrum_primitives::ArbTransactionSigned,
+            Receipt = reth_arbitrum_primitives::ArbReceipt,
+        >,
     CS: 'static,
 {
     type EvmFactory = ArbEvmFactory;
@@ -704,7 +834,11 @@ where
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
         DB: Database + 'a + core::fmt::Debug,
-        I: revm::inspector::Inspector<<Self::EvmFactory as reth_evm::EvmFactory>::Context<&'a mut revm::database::State<DB>>> + 'a,
+        I: revm::inspector::Inspector<
+                <Self::EvmFactory as reth_evm::EvmFactory>::Context<
+                    &'a mut revm::database::State<DB>,
+                >,
+            > + 'a,
         <DB as revm::Database>::Error: Send + Sync,
     {
         let eth_ctx: EthBlockExecutionCtx<'a> = EthBlockExecutionCtx {

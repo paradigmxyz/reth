@@ -356,7 +356,6 @@ where
     provider.tx_ref().put::<tables::HeaderNumbers>(block_hash, 0)?;
     provider.tx_ref().put::<tables::BlockBodyIndices>(0, Default::default())?;
 
-
     Ok(())
 }
 

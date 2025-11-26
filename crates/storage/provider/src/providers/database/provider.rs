@@ -1741,7 +1741,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
-                
+
                 tracing::info!(
                     target: "providers::db",
                     receipt_idx = %receipt_idx,
@@ -1751,7 +1751,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     has_contract_log_filter = %has_contract_log_filter,
                     "write_state: processing receipt"
                 );
-                
+
                 // Skip writing receipt if log filter is active and it does not have any logs to
                 // retain
                 if prunable_receipts &&

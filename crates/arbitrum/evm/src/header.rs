@@ -16,7 +16,7 @@ pub fn extract_send_root_from_header_extra(extra: &[u8]) -> B256 {
         B256::ZERO
     }
 }
- 
+
 use reth_storage_api::StateProvider;
 
 #[derive(Clone, Debug, Default)]
@@ -140,7 +140,9 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
     let version_slot = storage_key_map(&root_storage_key, uint_to_hash_u64_be(0));
     let arbos_version = {
         if let Some(acc) = input.bundle_state.account(&addr) {
-            if let Some(ver_u256) = acc.storage_slot(alloy_primitives::U256::from_be_bytes(version_slot.0)) {
+            if let Some(ver_u256) =
+                acc.storage_slot(alloy_primitives::U256::from_be_bytes(version_slot.0))
+            {
                 let bytes: [u8; 32] = ver_u256.to_be_bytes::<32>();
                 let mut buf = [0u8; 8];
                 buf.copy_from_slice(&bytes[24..32]);
@@ -158,7 +160,9 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
 
     let send_count_slot = storage_key_map(&send_merkle_sub, uint_to_hash_u64_be(0));
     let send_count = if let Some(acc) = input.bundle_state.account(&addr) {
-        if let Some(sc_u256) = acc.storage_slot(alloy_primitives::U256::from_be_bytes(send_count_slot.0)) {
+        if let Some(sc_u256) =
+            acc.storage_slot(alloy_primitives::U256::from_be_bytes(send_count_slot.0))
+        {
             let bytes: [u8; 32] = sc_u256.to_be_bytes::<32>();
             let mut buf = [0u8; 8];
             buf.copy_from_slice(&bytes[24..32]);
@@ -180,7 +184,9 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
 
     let l1_block_num_slot = storage_key_map(&blockhashes_sub, uint_to_hash_u64_be(0));
     let l1_block_number = if let Some(acc) = input.bundle_state.account(&addr) {
-        if let Some(bn_u256) = acc.storage_slot(alloy_primitives::U256::from_be_bytes(l1_block_num_slot.0)) {
+        if let Some(bn_u256) =
+            acc.storage_slot(alloy_primitives::U256::from_be_bytes(l1_block_num_slot.0))
+        {
             let bytes: [u8; 32] = bn_u256.to_be_bytes::<32>();
             let mut buf = [0u8; 8];
             buf.copy_from_slice(&bytes[24..32]);
@@ -240,12 +246,7 @@ mod tests {
         let l1_block_number: u64 = 0x1112131415161718;
         let arbos_format_version: u64 = 0x2122232425262728;
 
-        let info = ArbHeaderInfo {
-            send_root,
-            send_count,
-            l1_block_number,
-            arbos_format_version,
-        };
+        let info = ArbHeaderInfo { send_root, send_count, l1_block_number, arbos_format_version };
 
         let mut h = Header::default();
         info.apply_to_header(&mut h);

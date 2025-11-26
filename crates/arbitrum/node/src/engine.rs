@@ -1,20 +1,22 @@
 #![allow(unused)]
 
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
-use reth_node_api::payload::PayloadTypes;
-use reth_node_api::{BuiltPayload, EngineTypes, FullNodeComponents, NodeTypes};
+use reth_node_api::{
+    payload::PayloadTypes, BuiltPayload, EngineTypes, FullNodeComponents, NodeTypes,
+};
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
 use reth_provider::StateProviderFactory;
 use std::marker::PhantomData;
 
 use reth_arbitrum_payload::ArbExecutionData;
-use reth_engine_tree::tree::{BasicEngineValidator, TreeConfig};
-use reth_node_builder::rpc::EngineValidatorBuilder;
-use reth_evm::ConfigureEngineEvm;
 use reth_chainspec::EthChainSpec;
-use reth_node_builder::invalid_block_hook::InvalidBlockHookExt;
-use reth_node_builder::rpc::PayloadValidatorBuilder;
+use reth_engine_tree::tree::{BasicEngineValidator, TreeConfig};
+use reth_evm::ConfigureEngineEvm;
 use reth_node_api::AddOnsContext;
+use reth_node_builder::{
+    invalid_block_hook::InvalidBlockHookExt,
+    rpc::{EngineValidatorBuilder, PayloadValidatorBuilder},
+};
 use reth_tracing::tracing;
 
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -25,9 +27,8 @@ pub struct ArbEngineTypes<T: PayloadTypes> {
 
 impl<T: PayloadTypes<ExecutionData = ArbExecutionData>> EngineTypes for ArbEngineTypes<T>
 where
-    T::BuiltPayload: BuiltPayload
-        + TryInto<ExecutionPayloadV1>
-        + TryInto<ExecutionPayloadEnvelopeV2>,
+    T::BuiltPayload:
+        BuiltPayload + TryInto<ExecutionPayloadV1> + TryInto<ExecutionPayloadEnvelopeV2>,
 {
     type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
@@ -73,7 +74,6 @@ where
     }
 }
 
-
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ArbEngineValidatorBuilder;
 
@@ -117,7 +117,8 @@ where
             target: "arb-reth::engine",
             "arb engine: withdrawals presence checks disabled via ArbEngineValidator"
         );
-        let payload_validator = crate::validator::ArbEngineValidator::new(ctx.node.provider().clone());
+        let payload_validator =
+            crate::validator::ArbEngineValidator::new(ctx.node.provider().clone());
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
         Ok(BasicEngineValidator::new(
