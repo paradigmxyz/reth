@@ -552,19 +552,44 @@ where
             );
         }
 
-        // Track nonce restoration needed for Internal and Retry transactions
+        // ITERATION 40: Restore nonce IMMEDIATELY after transaction execution
         // EVM increments nonce during execution even with disable_nonce_check=true.
-        // We cannot restore immediately after execution because the bundle_state is created
-        // inside execute_transaction_with_commit_condition (when f(exec_result) is called).
-        // Instead, we track which addresses need restoration and fix them in finish().
+        // We MUST restore it immediately while still in the EVM state, before bundle is extracted.
+        // Previous iterations (36-39) failed because they modified bundle_state after finish(),
+        // but finish() already packages the state into result - too late!
         if let Some(pre_nonce) = pre_exec_nonce {
-            self.pending_nonce_restorations.push((sender, pre_nonce));
-            tracing::warn!(
-                target: "reth::evm::execute",
-                sender = ?sender,
-                target_nonce = pre_nonce,
-                "[req-1] Tracked nonce restoration for finish() - will fix bundle_state before DB commit"
-            );
+            // Access the EVM state directly and restore the nonce in cache
+            let evm = self.inner.evm_mut();
+            let (db_ref, _, _) = evm.components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
+
+            // Modify the account in cache - this will be committed to bundle_state later
+            if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
+                if let Some(ref mut account) = cached_acc.account {
+                    let wrong_nonce = account.info.nonce;
+                    account.info.nonce = pre_nonce;
+
+                    tracing::warn!(
+                        target: "reth::evm::execute",
+                        sender = ?sender,
+                        wrong_nonce = wrong_nonce,
+                        restored_nonce = pre_nonce,
+                        "[req-1] ITER40: IMMEDIATELY restored nonce in cache after tx execution!"
+                    );
+                } else {
+                    tracing::error!(
+                        target: "reth::evm::execute",
+                        sender = ?sender,
+                        "[req-1] ITER40: Account in cache but account field is None!"
+                    );
+                }
+            } else {
+                tracing::error!(
+                    target: "reth::evm::execute",
+                    sender = ?sender,
+                    "[req-1] ITER40: Sender not in cache after transaction!"
+                );
+            }
         }
 
         let evm = self.inner.evm_mut();
@@ -609,94 +634,13 @@ where
     fn finish(mut self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
         tracing::info!(
             target: "arb-reth::executor",
-            pending_restorations = self.pending_nonce_restorations.len(),
-            "ArbBlockExecutor::finish() called - will apply nonce restorations BEFORE calling inner.finish()"
+            "ArbBlockExecutor::finish() called - nonce restorations already applied immediately after each tx"
         );
 
+        // ITERATION 40: Nonce restorations are now done immediately after each transaction
+        // (in execute_transaction), not here in finish(). This ensures the correct nonces
+        // are in the cache when bundle_state is created.
         let (mut evm, mut result) = self.inner.finish()?;
-
-        // CRITICAL ITERATION 36: Apply nonce restorations AFTER finish() to the EVM's bundle_state
-        // finish() creates bundle from transitions (which have wrong nonces from commits).
-        // We need to access the bundle_state directly from the EVM database and fix it.
-        if !self.pending_nonce_restorations.is_empty() {
-            tracing::warn!(
-                target: "reth::evm::execute",
-                restorations_count = self.pending_nonce_restorations.len(),
-                "[req-1] ITERATION 36: Accessing bundle_state from EVM AFTER finish() to fix nonces"
-            );
-
-            // After finish(), the EVM contains the State with bundle_state
-            // Access the bundle_state directly and modify the account nonces
-            let (db_ref, _, _) = evm.components_mut();
-            let state: &mut revm::database::State<D> = *db_ref;
-
-            // Access the bundle_state field directly (it's public in revm State)
-            let bundle = &mut state.bundle_state;
-
-            tracing::warn!(
-                target: "reth::evm::execute",
-                "[req-1] ITERATION 36: Successfully accessed bundle_state from EVM!"
-            );
-
-            // ITERATION 37: Modify nonces in bundle_state, adding accounts if missing
-            // bundle.state only contains accounts with state changes (balance, storage, code)
-            // Accounts with nonce-only changes are absent, so we must add them manually
-            for (address, target_nonce) in &self.pending_nonce_restorations {
-                if let Some(bundle_acc) = bundle.state.get_mut(address) {
-                    // Account exists in bundle - just fix the nonce
-                    if let Some(ref mut account_info) = bundle_acc.info {
-                        let wrong_nonce = account_info.nonce;
-                        account_info.nonce = *target_nonce;
-
-                        tracing::warn!(
-                            target: "reth::evm::execute",
-                            address = ?address,
-                            wrong_nonce = wrong_nonce,
-                            corrected_nonce = target_nonce,
-                            "[req-1] ITER37: FIXED nonce in existing bundle account"
-                        );
-                    }
-                } else {
-                    // ITERATION 37 FIX: Account NOT in bundle_state (nonce-only change)
-                    // Query from cache and manually insert into bundle
-                    if let Some(cached_acc) = state.cache.accounts.get(address) {
-                        if let Some(account) = &cached_acc.account {
-                            // Create BundleAccount with correct nonce from cache
-                            let mut account_info = account.info.clone();
-                            account_info.nonce = *target_nonce;
-
-                            let bundle_account = BundleAccount {
-                                info: Some(account_info),
-                                original_info: None,
-                                storage: Default::default(),
-                                status: AccountStatus::Loaded,
-                            };
-
-                            bundle.state.insert(*address, bundle_account);
-
-                            tracing::warn!(
-                                target: "reth::evm::execute",
-                                address = ?address,
-                                target_nonce = target_nonce,
-                                "[req-1] ITER37: ADDED missing account to bundle_state with correct nonce!"
-                            );
-                        } else {
-                            tracing::error!(
-                                target: "reth::evm::execute",
-                                address = ?address,
-                                "[req-1] ITER37: Account in cache but account field is None!"
-                            );
-                        }
-                    } else {
-                        tracing::error!(
-                            target: "reth::evm::execute",
-                            address = ?address,
-                            "[req-1] ITER37: Address not in cache either - cannot restore!"
-                        );
-                    }
-                }
-            }
-        }
 
         tracing::info!(
             target: "arb-reth::executor",
