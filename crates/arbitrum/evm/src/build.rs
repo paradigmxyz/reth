@@ -562,18 +562,16 @@ where
                 // Check if account is in cache (it should be after execution)
                 if let Some(cached_account) = state.cache.accounts.get_mut(&sender) {
                     if let Some(ref mut info) = cached_account.account {
-                        if let Some(ref mut account_info) = info.info {
-                            let old_nonce = account_info.nonce;
-                            if account_info.nonce > 0 {
-                                account_info.nonce -= 1;
-                                tracing::info!(
-                                    target: "arb-reth::nonce-debug",
-                                    sender = ?sender,
-                                    old_nonce = old_nonce,
-                                    new_nonce = account_info.nonce,
-                                    "Decremented nonce in cache for Internal/Retry transaction"
-                                );
-                            }
+                        let old_nonce = info.info.nonce;
+                        if info.info.nonce > 0 {
+                            info.info.nonce -= 1;
+                            tracing::info!(
+                                target: "arb-reth::nonce-debug",
+                                sender = ?sender,
+                                old_nonce = old_nonce,
+                                new_nonce = info.info.nonce,
+                                "Decremented nonce in cache for Internal/Retry transaction"
+                            );
                         }
                     }
                 } else {
