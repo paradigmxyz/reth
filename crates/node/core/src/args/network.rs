@@ -672,6 +672,15 @@ fn parse_block_num_hash(s: &str) -> Result<BlockNumHash, String> {
 mod tests {
     use super::*;
     use clap::Parser;
+    use reth_chainspec::MAINNET;
+    use reth_config::Config;
+    use reth_network_peers::NodeRecord;
+    use secp256k1::SecretKey;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -926,18 +935,9 @@ mod tests {
 
     #[test]
     fn network_config_preserves_basic_nodes_from_peers_file() {
-        use reth_chainspec::MAINNET;
-        use reth_config::Config;
-        use reth_network_peers::NodeRecord;
-        use secp256k1::SecretKey;
-        use std::{
-            fs,
-            time::{SystemTime, UNIX_EPOCH},
-        };
-
-        // Prepare a temporary peers file with a known NodeRecord as JSON (expects array of strings)
         let enode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
         let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+
         let peers_file = std::env::temp_dir().join(format!("reth_peers_test_{}.json", unique));
         fs::write(&peers_file, format!("[\"{}\"]", enode)).expect("write peers file");
 
@@ -949,7 +949,7 @@ mod tests {
         };
 
         // Build the network config using a deterministic secret key
-        let secret_key = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
         let builder = args.network_config::<reth_network::EthNetworkPrimitives>(
             &Config::default(),
             MAINNET.clone(),
