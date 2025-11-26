@@ -89,6 +89,7 @@ use crate::{
 };
 
 use alloy_primitives::{Address, TxHash, B256};
+use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
@@ -109,8 +110,6 @@ pub use pending::PendingPool;
 use reth_primitives_traits::Block;
 
 mod best;
-pub use best::BestTransactions;
-
 mod blob;
 mod listener;
 mod parked;
