@@ -191,8 +191,12 @@ where
         let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
         let is_retry = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry);
         let is_submit_retryable = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable);
-        // Internal, Retry, and SubmitRetryable transactions need precredit logic for nonce handling
-        let needs_precredit = is_sequenced || is_internal || is_retry || is_submit_retryable;
+        // CRITICAL FIX: Only Arbitrum-specific tx types need precredit, NOT regular user txs!
+        // Previously `is_sequenced` was included which pre-credited Legacy txs, causing
+        // transactions with insufficient balance to succeed when they should have failed.
+        // This was the root cause of duplicate txs in blocks 4/8 (same SignedTx from delayed
+        // messages 4/8/10/12 was being included when sender had 0 balance).
+        let needs_precredit = is_internal || is_retry || is_submit_retryable;
 
         let paid_gas_price = {
             use reth_arbitrum_primitives::ArbTxType::*;
@@ -448,20 +452,24 @@ where
         // use the nonce from the transaction itself, not override it.
 
 
-        // ITERATION 46: Separate restoration logic for Internal vs Retry
+        // ITERATION 80: Nonce restoration logic
         // - Internal (0x6a): ALWAYS restore to 0 (ArbOS should never have nonce > 0)
         // - Retry (0x68): Restore to current_nonce (prevents increment for THIS tx)
-        // - SubmitRetryable (0x69): Restore to current_nonce (synthetic tx shouldn't increment nonce)
+        // - SubmitRetryable (0x69): NO RESTORATION - it SHOULD increment nonce!
         //
-        // ITER45 made Internal worse (0x2) by using current_nonce for both.
-        // ITER44 gave 0x1 for Internal with hardcoded 0.
-        // ITER46: Try hardcoded 0 WITHOUT the tx_env nonce setting (line 448).
+        // Key insight from official chain: After Block 1 with SubmitRetryable + Retry,
+        // the sender (0xb8787d8f...) has nonce=1, meaning:
+        // - SubmitRetryable DID increment nonce from 0 to 1
+        // - Retry did NOT increment nonce (stayed at 1)
+        //
+        // Previous iterations incorrectly restored SubmitRetryable nonce to 0,
+        // which caused state root mismatches starting from Block 1.
         let pre_exec_nonce = if is_internal {
             tracing::info!(
                 target: "reth::evm::execute",
                 sender = ?sender,
                 current_nonce = current_nonce,
-                "[req-1] ITER46: Internal tx - will restore nonce to 0"
+                "[req-1] ITER80: Internal tx - will restore nonce to 0"
             );
             Some(0)
         } else if is_retry {
@@ -469,18 +477,12 @@ where
                 target: "reth::evm::execute",
                 sender = ?sender,
                 current_nonce = current_nonce,
-                "[req-1] ITER46: Retry tx - will restore nonce to current_nonce"
-            );
-            Some(current_nonce)
-        } else if is_submit_retryable {
-            tracing::info!(
-                target: "reth::evm::execute",
-                sender = ?sender,
-                current_nonce = current_nonce,
-                "[req-1] ITER48: SubmitRetryable tx - will restore nonce to current_nonce"
+                "[req-1] ITER80: Retry tx - will restore nonce to current_nonce"
             );
             Some(current_nonce)
         } else {
+            // SubmitRetryable and all other tx types: NO nonce restoration
+            // They should increment nonce normally
             None
         };
 
@@ -525,12 +527,51 @@ where
         let prev_disable_balance = evm.cfg_mut().disable_balance_check;
         let prev_disable_nonce = evm.cfg_mut().disable_nonce_check;
         // SubmitRetryable also needs balance check disabled because start_tx hook handles balance manipulation
-        evm.cfg_mut().disable_balance_check = is_internal || is_deposit || is_submit_retryable;
+        let new_disable_balance = is_internal || is_deposit || is_submit_retryable;
+        evm.cfg_mut().disable_balance_check = new_disable_balance;
         // Internal, Retry, and SubmitRetryable transactions should NOT have nonce validation
         // SubmitRetryable: ends early in start_tx hook, sender may already have nonce from Deposit
         // Note: disable_nonce_check only disables VALIDATION, not increment!
         // We restore nonce IMMEDIATELY after execution (tracked in pre_exec_nonce)
-        evm.cfg_mut().disable_nonce_check = is_internal || is_retry || is_submit_retryable;
+        let new_disable_nonce = is_internal || is_retry || is_submit_retryable;
+        evm.cfg_mut().disable_nonce_check = new_disable_nonce;
+
+        if is_submit_retryable {
+            tracing::warn!(
+                target: "reth::evm::execute",
+                sender = ?sender,
+                is_submit_retryable = is_submit_retryable,
+                new_disable_nonce = new_disable_nonce,
+                new_disable_balance = new_disable_balance,
+                "[req-1] ITER48: Setting disable_nonce_check and disable_balance_check for SubmitRetryable"
+            );
+        }
+
+        // Debug log for Legacy transactions to verify balance check is enabled
+        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Legacy) {
+            // Get sender's actual balance from state
+            let sender_balance_result = self.inner.evm_mut().db_mut().basic(sender);
+            let sender_balance = sender_balance_result.ok().flatten().map(|a| a.balance).unwrap_or_default();
+            let required_upfront = alloy_primitives::U256::from(gas_limit) * upfront_gas_price;
+            let has_sufficient = sender_balance >= required_upfront;
+            tracing::warn!(
+                target: "arb-reth::balance-check-debug",
+                tx_hash = ?tx_hash,
+                sender = ?sender,
+                sender_balance = %sender_balance,
+                is_internal = is_internal,
+                is_deposit = is_deposit,
+                is_submit_retryable = is_submit_retryable,
+                is_sequenced = is_sequenced,
+                new_disable_balance = new_disable_balance,
+                needs_precredit = needs_precredit,
+                gas_limit = gas_limit,
+                upfront_gas_price = %upfront_gas_price,
+                required_upfront = %required_upfront,
+                has_sufficient = has_sufficient,
+                "🔍 LEGACY TX: Balance check config"
+            );
+        }
 
         let wrapped = WithTxEnv { tx_env, tx };
 

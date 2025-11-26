@@ -688,8 +688,19 @@ where
                 let first = l2_owned.first().copied().unwrap_or(0xff);
                 let len = l2_owned.len();
                 reth_tracing::tracing::info!(target: "arb-reth::follower", l2_payload_len = len, l2_first_byte = first, "follower: L2_MESSAGE payload summary");
-                let parsed_txs = parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id)
-                    .map_err(|e| eyre::eyre!("parse_l2_message_to_txs error: {e}"))?;
+                // Match Go behavior: if parsing fails, log warning and produce empty tx list
+                // See: nitro/arbos/block_processor.go:192-195
+                let parsed_txs = match parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id) {
+                    Ok(txs) => txs,
+                    Err(e) => {
+                        reth_tracing::tracing::warn!(
+                            target: "arb-reth::follower",
+                            error = %e,
+                            "error parsing incoming message - producing empty tx list (matching Go behavior)"
+                        );
+                        Vec::new()
+                    }
+                };
                 reth_tracing::tracing::info!(
                     target: "arb-reth::follower",
                     tx_count = parsed_txs.len(),
@@ -1076,9 +1087,29 @@ where
                 "follower: executing tx"
             );
             let recovered = Recovered::new_unchecked(tx.clone(), sender);
-            builder
-                .execute_transaction(recovered)
-                .map_err(|e| eyre::eyre!("execute_transaction error: {e}"))?;
+            // Match Go behavior: internal transactions (ArbitrumInternalTxType) must succeed,
+            // but user transactions that fail are logged and skipped (not included in block).
+            // See nitro/arbos/block_processor.go lines 412-428
+            let is_internal = tx.tx_type() == reth_arbitrum_primitives::ArbTxType::Internal;
+            match builder.execute_transaction(recovered) {
+                Ok(_) => {}
+                Err(e) => {
+                    if is_internal {
+                        // Internal transactions must succeed - fail the block if they don't
+                        return Err(eyre::eyre!("failed to apply internal transaction: {e}"));
+                    } else {
+                        // User transactions that fail are skipped (matching Go behavior)
+                        reth_tracing::tracing::debug!(
+                            target: "arb-reth::follower",
+                            tx_hash = %txh,
+                            error = %e,
+                            "error applying transaction - skipping (matching Go behavior)"
+                        );
+                        // Continue to next transaction - don't include this one in block
+                        continue;
+                    }
+                }
+            }
         }
         let outcome = builder
             .finish(&state_provider)

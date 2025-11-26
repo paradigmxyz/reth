@@ -1,0 +1,35 @@
+[2m2025-11-26T21:24:30.556567Z[0m [32m INFO[0m Initialized tracing, debug log directory: /home/dev/.cache/reth/logs/arbitrum-sepolia
+[2m2025-11-26T21:24:30.558770Z[0m [32m INFO[0m Starting reth [3mversion[0m[2m=[0m"1.8.2-dev (4c35097)"
+[2m2025-11-26T21:24:30.559003Z[0m [32m INFO[0m Opening database [3mpath[0m[2m=[0m"/home/dev/.local/share/reth/arbitrum-sepolia/db"
+[2m2025-11-26T21:24:30.570652Z[0m [32m INFO[0m Launching arb-reth node
+[2m2025-11-26T21:24:30.572978Z[0m [32m INFO[0m Saving prune config to toml file
+[2m2025-11-26T21:24:30.573225Z[0m [32m INFO[0m Configuration loaded [3mpath[0m[2m=[0m"/home/dev/.local/share/reth/arbitrum-sepolia/reth.toml"
+[2m2025-11-26T21:24:30.573894Z[0m [32m INFO[0m Verifying storage consistency.
+[2m2025-11-26T21:24:30.590118Z[0m [32m INFO[0m Database opened
+[2m2025-11-26T21:24:30.593260Z[0m [32m INFO[0m increment_block called: segment=Headers, expected_block=0, current_next=0
+[2m2025-11-26T21:24:30.593354Z[0m [32m INFO[0m increment_block completed: segment=Headers, block_range=Some(SegmentRangeInclusive { start: 0, end: 0 })
+[2m2025-11-26T21:24:30.594775Z[0m [32m INFO[0m write_state: processing receipts [3mfirst_block[0m[2m=[0m0 [3mblock_count[0m[2m=[0m0 [3mtotal_receipts[0m[2m=[0m0 [3mreceipts_per_block[0m[2m=[0m[]
+[2m2025-11-26T21:24:30.596077Z[0m [32m INFO[0m increment_block called: segment=Receipts, expected_block=0, current_next=0
+[2m2025-11-26T21:24:30.596096Z[0m [32m INFO[0m increment_block completed: segment=Receipts, block_range=Some(SegmentRangeInclusive { start: 0, end: 0 })
+[2m2025-11-26T21:24:30.596112Z[0m [32m INFO[0m increment_block called: segment=Transactions, expected_block=0, current_next=0
+[2m2025-11-26T21:24:30.596117Z[0m [32m INFO[0m increment_block completed: segment=Transactions, block_range=Some(SegmentRangeInclusive { start: 0, end: 0 })
+[2m2025-11-26T21:24:30.596124Z[0m [32m INFO[0m commit called [3msegment[0m[2m=[0mHeaders [3mblock_range[0m[2m=[0mSome(SegmentRangeInclusive { start: 0, end: 0 }) [3mtx_range[0m[2m=[0mNone [3mis_dirty[0m[2m=[0mtrue
+[2m2025-11-26T21:24:30.600425Z[0m [32m INFO[0m commit called [3msegment[0m[2m=[0mTransactions [3mblock_range[0m[2m=[0mSome(SegmentRangeInclusive { start: 0, end: 0 }) [3mtx_range[0m[2m=[0mNone [3mis_dirty[0m[2m=[0mtrue
+[2m2025-11-26T21:24:30.602500Z[0m [32m INFO[0m commit called [3msegment[0m[2m=[0mReceipts [3mblock_range[0m[2m=[0mSome(SegmentRangeInclusive { start: 0, end: 0 }) [3mtx_range[0m[2m=[0mNone [3mis_dirty[0m[2m=[0mtrue
+[2m2025-11-26T21:24:30.607094Z[0m [32m INFO[0m 
+Pre-merge hard forks (block based):
+
+[2m2025-11-26T21:24:30.636702Z[0m [32m INFO[0m StaticFileProducer initialized
+[2m2025-11-26T21:24:30.637880Z[0m [32m INFO[0m commit called [3msegment[0m[2m=[0mHeaders [3mblock_range[0m[2m=[0mSome(SegmentRangeInclusive { start: 0, end: 0 }) [3mtx_range[0m[2m=[0mNone [3mis_dirty[0m[2m=[0mfalse
+[2m2025-11-26T21:24:30.637950Z[0m [32m INFO[0m commit called [3msegment[0m[2m=[0mTransactions [3mblock_range[0m[2m=[0mSome(SegmentRangeInclusive { start: 0, end: 0 }) [3mtx_range[0m[2m=[0mNone [3mis_dirty[0m[2m=[0mfalse
+[2m2025-11-26T21:24:30.637974Z[0m [32m INFO[0m commit called [3msegment[0m[2m=[0mReceipts [3mblock_range[0m[2m=[0mSome(SegmentRangeInclusive { start: 0, end: 0 }) [3mtx_range[0m[2m=[0mNone [3mis_dirty[0m[2m=[0mfalse
+[2m2025-11-26T21:24:30.638071Z[0m [32m INFO[0m Pruner initialized [3mprune_config[0m[2m=[0mPruneConfig { block_interval: 5, segments: PruneModes { sender_recovery: None, transaction_lookup: None, receipts: None, account_history: None, storage_history: None, bodies_history: None, receipts_log_filter: ReceiptsLogPruneConfig({}) } }
+[2m2025-11-26T21:24:30.638204Z[0m [32m INFO[0m Creating JWT auth secret file [3mpath[0m[2m=[0m"/home/dev/.local/share/reth/arbitrum-sepolia/jwt.hex"
+[2m2025-11-26T21:24:30.639830Z[0m [32m INFO[0m Consensus engine initialized
+[2m2025-11-26T21:24:30.640332Z[0m [32m INFO[0m rpc: initial provider head [3mbest_number[0m[2m=[0m0
+[2m2025-11-26T21:24:30.640376Z[0m [32m INFO[0m Engine API handler initialized
+[2m2025-11-26T21:24:30.643335Z[0m [32m INFO[0m RPC auth server started [3murl[0m[2m=[0m127.0.0.1:8551
+[2m2025-11-26T21:24:30.643577Z[0m [32m INFO[0m RPC IPC server started [3mpath[0m[2m=[0m/tmp/reth.ipc
+[2m2025-11-26T21:24:30.643963Z[0m [32m INFO[0m Starting consensus engine
+[2m2025-11-26T21:24:33.641018Z[0m [32m INFO[0m Status [3mconnected_peers[0m[2m=[0m0 [3mlatest_block[0m[2m=[0m0
+[2m2025-11-26T21:25:48.641528Z[0m [32m INFO[0m Status [3mconnected_peers[0m[2m=[0m0 [3mlatest_block[0m[2m=[0m0
