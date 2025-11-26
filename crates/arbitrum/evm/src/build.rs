@@ -559,7 +559,7 @@ where
         // Solution: Restore nonce IMMEDIATELY after transaction execution, ensuring it happens
         // even if execution fails later. This prevents state corruption across retry attempts.
         if let Some(pre_nonce) = used_pre_nonce {
-            // IMMEDIATE restoration: modify state cache right now
+            // IMMEDIATE restoration: modify state cache AND ensure it persists to bundle
             let (db_ref, _, _) = self.inner.evm_mut().components_mut();
             let state: &mut revm::database::State<D> = *db_ref;
 
@@ -568,16 +568,26 @@ where
                     let post_exec_nonce = account.info.nonce;
                     account.info.nonce = pre_nonce;
 
-                    tracing::info!(
-                        target: "arb-reth::nonce-fix",
+                    tracing::warn!(
+                        target: "reth::evm::execute",
                         sender = ?sender,
                         pre_nonce = pre_nonce,
                         post_exec_nonce = post_exec_nonce,
                         success = result.is_ok(),
-                        "[req-1] IMMEDIATELY restored nonce after transaction (success or failure)"
+                        "[req-1] IMMEDIATELY restored nonce in cache after transaction"
                     );
                 }
             }
+
+            // CRITICAL: Merge cache changes to bundle_state to ensure persistence
+            // This flushes the nonce restoration from cache into the bundle that gets committed
+            state.merge_transitions(revm::db::BundleRetention::Reverts);
+
+            tracing::warn!(
+                target: "reth::evm::execute",
+                sender = ?sender,
+                "[req-1] Merged transitions to persist nonce restoration to bundle_state"
+            );
         }
 
         let evm = self.inner.evm_mut();
