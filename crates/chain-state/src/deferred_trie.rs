@@ -83,16 +83,6 @@ impl DeferredTrieData {
         Self { state: Arc::new(Mutex::new(DeferredState::Ready(bundle))) }
     }
 
-    /// Populate the handle with the computed trie data.
-    ///
-    /// Safe to call multiple times; only the first value is stored (first-write-wins).
-    pub fn set_ready(&self, bundle: ComputedTrieData) {
-        let mut state = self.state.lock();
-        if matches!(&*state, DeferredState::Pending(_)) {
-            *state = DeferredState::Ready(bundle);
-        }
-    }
-
     /// Returns trie data, computing synchronously if the async task hasn't completed.
     ///
     /// Uses a try-lock approach:
@@ -125,13 +115,12 @@ impl DeferredTrieData {
         // task calling set_ready(), or another waiter computing). We block until
         // available.
         //
-        // Possible outcomes after acquiring lock:
-        // 1. State is Ready - another computation finished first, return cached result
-        // 2. State is Pending - we acquired the lock and found the state still pending, so we
-        //    compute and cache
-        //
-        // Duplication is acceptable: if multiple threads compute simultaneously before
-        // any caches the result, only the first to acquire the lock will store it
+        // Deadlock is avoided as long as the provided ancestors form a true ancestor chain (a DAG):
+        // - Each block only waits on its ancestors (blocks on the path to the persisted root)
+        // - Sibling blocks (forks) are never in each other's ancestor lists
+        // - A block never waits on its descendants
+        // Given that invariant, circular wait dependencies are impossible. Supplying a cycle in the
+        // ancestor list would violate this assumption and could deadlock.
         let mut state = self.state.lock();
         match &*state {
             // The async task has completed, return the cached result.
