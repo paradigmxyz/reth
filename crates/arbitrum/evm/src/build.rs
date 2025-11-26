@@ -430,6 +430,13 @@ where
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
         }
 
+        // Track the pre-execution nonce for Internal transactions so we can restore it after execution
+        let used_pre_nonce = if is_internal {
+            Some(current_nonce)
+        } else {
+            None
+        };
+
         if needs_precredit {
             // Internal and Retry transactions have nonce validation disabled
             // so they won't increment sender nonce during EVM execution
@@ -529,29 +536,29 @@ where
         }
 
         // For Internal transactions, EVM increments nonce even with disable_nonce_check=true
-        // (that flag only skips validation, not increment). We need to manually decrement it.
+        // (that flag only skips validation, not increment). We need to manually restore it.
         // From Testing Agent: Internal transactions should NOT increment sender nonce
-        if is_internal && result.is_ok() {
-            let evm = self.inner.evm_mut();
-            let db = evm.db_mut();
+        if let Some(pre_nonce) = used_pre_nonce {
+            if result.is_ok() {
+                let evm = self.inner.evm_mut();
+                let db = evm.db_mut();
 
-            // Get current account state after transaction execution
-            if let Ok(Some(mut account)) = db.basic(sender) {
-                if account.nonce > 0 {
-                    let old_nonce = account.nonce;
-                    account.nonce -= 1;
+                // Get current account state after transaction execution
+                if let Ok(Some(mut account)) = db.basic(sender) {
+                    let post_nonce = account.nonce;
+                    // Restore to exact pre-execution nonce instead of just decrementing
+                    account.nonce = pre_nonce;
 
                     // Update the account in the database
-                    // Note: This approach worked in Iteration 65 for modifying nonce
-                    // It may panic for LoadedNotExisting accounts, but that's a bug we need to see
                     db.insert_account(sender, account);
 
                     tracing::info!(
                         target: "arb-reth::nonce-fix",
                         sender = ?sender,
-                        old_nonce = old_nonce,
-                        new_nonce = account.nonce,
-                        "[req-1] Decremented nonce for Internal transaction to compensate for EVM increment"
+                        pre_nonce = pre_nonce,
+                        post_nonce = post_nonce,
+                        restored_nonce = account.nonce,
+                        "[req-1] Restored nonce for Internal transaction to pre-execution value"
                     );
                 }
             }
