@@ -531,31 +531,6 @@ where
             let gas_for_receipt = if is_internal { 0u64 } else { actual_gas };
             crate::set_early_tx_gas(tx_hash, gas_for_receipt, new_cumulative);
 
-            // CRITICAL: Restore nonce BEFORE calling f(exec_result) which triggers the commit!
-            // This ensures the restored nonce is included in the bundle_state when it's created.
-            // Previous attempts failed because restoration happened AFTER commit.
-            if let Some(pre_nonce) = pre_exec_nonce {
-                let (db_ref, _, _) = self.inner.evm_mut().components_mut();
-                let state: &mut revm::database::State<D> = *db_ref;
-
-                // Directly access and modify the account in cache
-                if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
-                    if let Some(account) = cached_acc.account.as_mut() {
-                        let post_exec_nonce = account.info.nonce;
-                        account.info.nonce = pre_nonce;
-
-                        tracing::warn!(
-                            target: "reth::evm::execute",
-                            sender = ?sender,
-                            pre_nonce = pre_nonce,
-                            post_exec_nonce = post_exec_nonce,
-                            success = exec_result.is_ok(),
-                            "[req-1] RESTORED nonce BEFORE commit (inside closure)"
-                        );
-                    }
-                }
-            }
-
             f(exec_result)
         });
 
@@ -577,10 +552,42 @@ where
             );
         }
 
-        // Nonce restoration for Internal and Retry transactions now happens INSIDE the closure
-        // above (lines 534-557), BEFORE the commit is triggered by f(exec_result).
-        // This ensures the restored nonce is included in the bundle_state when it's created.
-        // Previous attempts failed because restoration happened AFTER the commit.
+        // POST-EXECUTION IMMEDIATE nonce restoration for Internal and Retry transactions
+        // EVM increments nonce during execution even with disable_nonce_check=true.
+        // We must restore it IMMEDIATELY after execution (even if execution failed) to prevent
+        // state corruption across retry attempts.
+        if let Some(pre_nonce) = pre_exec_nonce {
+            let (db_ref, _, _) = self.inner.evm_mut().components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
+
+            // Directly access and modify the account in cache
+            if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
+                if let Some(account) = cached_acc.account.as_mut() {
+                    let post_exec_nonce = account.info.nonce;
+                    account.info.nonce = pre_nonce;
+
+                    tracing::warn!(
+                        target: "reth::evm::execute",
+                        sender = ?sender,
+                        pre_nonce = pre_nonce,
+                        post_exec_nonce = post_exec_nonce,
+                        success = result.is_ok(),
+                        "[req-1] IMMEDIATELY restored nonce in cache after transaction"
+                    );
+                }
+            }
+
+            // CRITICAL: Persist cache changes to bundle_state
+            // Without this, the nonce restoration in cache won't be included in the final block state.
+            // merge_transitions() copies changes from cache into bundle_state.
+            state.merge_transitions(revm::database::states::bundle_state::BundleRetention::Reverts);
+
+            tracing::warn!(
+                target: "reth::evm::execute",
+                sender = ?sender,
+                "[req-1] Persisted nonce restoration to bundle_state via merge_transitions"
+            );
+        }
 
         let evm = self.inner.evm_mut();
         evm.cfg_mut().disable_balance_check = prev_disable_balance;
