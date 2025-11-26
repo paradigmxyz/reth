@@ -80,17 +80,10 @@ mod tests {
         }
 
         async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
-            #[allow(deprecated)]
             Ok(NetworkStatus {
                 client_version: "test".to_string(),
                 protocol_version: 5,
-                eth_protocol_info: EthProtocolInfo {
-                    network: 1,
-                    difficulty: None,
-                    genesis: Default::default(),
-                    config: Default::default(),
-                    head: Default::default(),
-                },
+                eth_protocol_info: EthProtocolInfo { network: 1, ..Default::default() },
                 capabilities: vec![],
             })
         }
