@@ -191,6 +191,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     }
 
     /// Returns the next best transaction and its priority value.
+    #[allow(clippy::type_complexity)]
     pub fn next_tx_and_priority(
         &mut self,
     ) -> Option<(Arc<ValidPoolTransaction<T::Transaction>>, Priority<T::PriorityValue>)> {
