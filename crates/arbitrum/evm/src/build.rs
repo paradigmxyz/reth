@@ -425,10 +425,11 @@ where
         if is_internal || is_deposit {
             // For Internal transactions, EVM will always increment nonce during execution
             // even with disable_nonce_check=true (that only skips validation, not increment)
-            // To compensate, we set tx nonce to current-1 so after increment: (current-1)+1=current
-            // Special case: if current_nonce is 0, we can't decrement, so we'll handle this differently
+            // PRE-DECREMENT APPROACH: Set account nonce to current-1 BEFORE execution
+            // so after EVM increments: (current-1)+1=current (nonce unchanged)
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
         }
+
 
         // Track the pre-execution nonce for Internal and Retry transactions so we can restore it after execution
         // Both transaction types should NOT increment sender nonce, but EVM increments it anyway
