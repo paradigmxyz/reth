@@ -85,7 +85,15 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         let (node, masks) = match self {
             Self::Leaf { short_key, value } => {
                 value.encode(buf)?;
-                (TrieNode::Leaf(LeafNode::new(short_key, core::mem::take(buf))), TrieMasks::none())
+                // Counter-intuitively a clone is better here than a `core::mem::take`. If we take
+                // the buffer then future RLP-encodes will need to re-allocate a new one, and
+                // RLP-encodes after those may need a bigger buffer and therefore re-alloc again.
+                //
+                // By cloning here we do a single allocation of exactly the size we need to take
+                // this value, and the passed in buffer can remain with whatever large capacity it
+                // already has.
+                let rlp_val = buf.clone();
+                (TrieNode::Leaf(LeafNode::new(short_key, rlp_val)), TrieMasks::none())
             }
             Self::Extension { short_key, child } => {
                 (TrieNode::Extension(ExtensionNode { key: short_key, child }), TrieMasks::none())
@@ -94,10 +102,6 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
             Self::Branch(branch_node) => (TrieNode::Branch(branch_node), TrieMasks::none()),
             Self::RlpNode(_) => panic!("Cannot call `into_proof_trie_node` on RlpNode"),
         };
-
-        // Encode the `TrieNode` to the buffer, so we can return the `RlpNode` for it at the end.
-        buf.clear();
-        node.encode(buf);
 
         Ok(ProofTrieNode { node, path, masks })
     }
