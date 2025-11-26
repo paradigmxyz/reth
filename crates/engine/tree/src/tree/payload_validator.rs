@@ -14,9 +14,7 @@ use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
-use reth_chain_state::{
-    AnchoredTrieInput, CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock,
-};
+use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -1003,6 +1001,7 @@ where
         // the merge and any fallback sorting happens in the compute_trie_input_task.
         let ancestors: Vec<DeferredTrieData> =
             overlay_blocks.iter().rev().map(|b| b.trie_data_handle()).collect();
+        let ancestor_count = ancestors.len();
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
         let deferred_trie_data = DeferredTrieData::pending(
@@ -1015,14 +1014,35 @@ where
         let deferred_compute_duration =
             self.metrics.block_validation.deferred_trie_compute_duration.clone();
 
+        debug!(
+            target: "engine::tree::payload_validator",
+            ?anchor_hash,
+            ancestor_count,
+            "spawn deferred_trie wait_cloned task"
+        );
+
         // Spawn background task to compute trie data via wait_cloned(); foreground callers use the
         // same method as a synchronous fallback. OnceLock ensures only one computation runs even
         // under contention.
         let compute_trie_input_task = move || {
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    ?anchor_hash,
+                    ancestor_count,
+                    "deferred_trie background wait_cloned start"
+                );
                 let _ = deferred_handle_task.wait_cloned();
+                let duration = compute_start.elapsed();
                 deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    ?anchor_hash,
+                    ancestor_count,
+                    duration = ?duration,
+                    "deferred_trie background wait_cloned done"
+                );
             }));
 
             // `DeferredTrieData::wait_cloned()` ensures the block can still be processed.

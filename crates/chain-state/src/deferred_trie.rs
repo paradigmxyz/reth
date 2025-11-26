@@ -8,7 +8,9 @@ use std::{
     cell::Cell,
     fmt,
     sync::{Arc, LazyLock, OnceLock},
+    time::Instant,
 };
+use tracing::debug;
 
 /// Metrics for deferred trie computation.
 #[derive(Metrics)]
@@ -70,7 +72,7 @@ impl DeferredTrieData {
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
         anchor_hash: B256,
-        ancestors: Vec<DeferredTrieData>,
+        ancestors: Vec<Self>,
     ) -> Self {
         Self {
             inner: Arc::new(DeferredTrieDataInner {
@@ -121,6 +123,12 @@ impl DeferredTrieData {
         if let Some(bundle) = self.inner.computed.get() {
             // Cached path (background task or earlier caller finished first).
             DEFERRED_TRIE_METRICS.deferred_trie_async_ready_total.increment(1);
+            debug!(
+                target: "chain_state::deferred_trie",
+                ?anchor_hash = self.inner.anchor_hash,
+                ancestors = self.inner.ancestors.len(),
+                "deferred_trie cache hit"
+            );
             return bundle.clone();
         }
 
@@ -128,12 +136,24 @@ impl DeferredTrieData {
         let executed_here = Cell::new(false);
         let computed = self.inner.computed.get_or_init(|| {
             executed_here.set(true);
+            debug!(
+                target: "chain_state::deferred_trie",
+                ?anchor_hash = self.inner.anchor_hash,
+                ancestors = self.inner.ancestors.len(),
+                "deferred_trie compute start"
+            );
             self.compute_from_inputs()
         });
 
         if executed_here.get() {
             // This caller performed the computation.
             DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback_total.increment(1);
+            debug!(
+                target: "chain_state::deferred_trie",
+                ?anchor_hash = self.inner.anchor_hash,
+                ancestors = self.inner.ancestors.len(),
+                "deferred_trie compute done (fallback)"
+            );
         } else {
             // Another caller (foreground or background) computed first; we reused the cache.
             DEFERRED_TRIE_METRICS.deferred_trie_async_ready_total.increment(1);
@@ -155,6 +175,7 @@ impl DeferredTrieData {
         let sorted_trie_updates = Arc::new(self.inner.trie_updates.as_ref().clone().into_sorted());
 
         // Merge trie data from ancestors (oldest -> newest so later state takes precedence)
+        let compute_start = Instant::now();
         let mut overlay = TrieInputSorted::default();
         for ancestor in &self.inner.ancestors {
             let ancestor_data = ancestor.wait_cloned();
@@ -178,12 +199,24 @@ impl DeferredTrieData {
             nodes_mut.extend_ref(sorted_trie_updates.as_ref());
         }
 
-        ComputedTrieData::with_trie_input(
+        let bundle = ComputedTrieData::with_trie_input(
             sorted_hashed_state,
             sorted_trie_updates,
             self.inner.anchor_hash,
             Arc::new(overlay),
-        )
+        );
+
+        debug!(
+            target: "chain_state::deferred_trie",
+            ?anchor_hash = self.inner.anchor_hash,
+            ancestors = self.inner.ancestors.len(),
+            hashed_state_len = bundle.hashed_state.total_len(),
+            trie_updates_len = bundle.trie_updates.total_len(),
+            duration = ?compute_start.elapsed(),
+            "deferred_trie compute finished"
+        );
+
+        bundle
     }
 }
 
