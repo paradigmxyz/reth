@@ -78,7 +78,8 @@ pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::Re
     cumulative_gas_used: u64,
     exec_ctx: ArbBlockExecutionCtx,
     /// Deferred nonce restorations to apply at block end (address, target_nonce)
-    /// For Internal/Retry txs that should NOT increment sender nonce
+    /// ONLY for Internal txs that should NOT increment sender nonce
+    /// (Retry txs SHOULD increment normally - they are real user transactions)
     pending_nonce_restorations: Vec<(Address, u64)>,
     _phantom: PhantomData<CS>,
 }
@@ -434,17 +435,17 @@ where
         }
 
 
-        // Track the pre-execution nonce for Internal and Retry transactions so we can restore it after execution
-        // Both transaction types should NOT increment sender nonce, but EVM increments it anyway
-        // even with disable_nonce_check=true (that flag only disables validation, not increment)
-        let used_pre_nonce = if is_internal || is_retry {
+        // Track the pre-execution nonce for Internal transactions so we can restore it after execution
+        // IMPORTANT: Only INTERNAL transactions should NOT increment sender nonce.
+        // RETRY transactions SHOULD increment nonce (they are real user transactions).
+        // EVM increments nonce anyway even with disable_nonce_check=true (that flag only disables validation, not increment)
+        let used_pre_nonce = if is_internal {
             tracing::info!(
                 target: "arb-reth::nonce-debug",
                 sender = ?sender,
                 current_nonce = current_nonce,
                 is_internal = is_internal,
-                is_retry = is_retry,
-                "[req-1] DEBUG: Tracking pre-nonce for nonce restoration"
+                "[req-1] DEBUG: Tracking pre-nonce for Internal tx nonce restoration"
             );
             Some(current_nonce)
         } else {
@@ -492,10 +493,11 @@ where
         let prev_disable_balance = evm.cfg_mut().disable_balance_check;
         let prev_disable_nonce = evm.cfg_mut().disable_nonce_check;
         evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
-        // Internal and Retry transactions should NOT increment nonce
+        // IMPORTANT: Only INTERNAL transactions bypass nonce checking.
+        // RETRY transactions are real user transactions and SHOULD check + increment nonce normally.
         // Note: disable_nonce_check only disables VALIDATION, not increment!
-        // We restore the nonce after execution using used_pre_nonce
-        evm.cfg_mut().disable_nonce_check = is_internal || is_retry;
+        // We restore the nonce after execution using used_pre_nonce (only for Internal txs)
+        evm.cfg_mut().disable_nonce_check = is_internal;
 
         let wrapped = WithTxEnv { tx_env, tx };
 
@@ -550,8 +552,9 @@ where
             );
         }
 
-        // For Internal and Retry transactions, EVM increments nonce even with disable_nonce_check=true
+        // For INTERNAL transactions ONLY, EVM increments nonce even with disable_nonce_check=true
         // (that flag only skips validation, not increment). We need to manually restore it.
+        // IMPORTANT: Retry transactions SHOULD increment nonce normally (they are real user txs).
         //
         // DEFERRED APPROACH: Don't modify state immediately - just record that restoration is needed.
         // Apply all restorations ONCE at block end to avoid mid-block state inconsistencies.
@@ -565,7 +568,7 @@ where
                     target: "arb-reth::nonce-fix",
                     sender = ?sender,
                     pre_nonce = pre_nonce,
-                    "[req-1] Deferred nonce restoration for Internal/Retry tx (will apply at block end)"
+                    "[req-1] Deferred nonce restoration for INTERNAL tx ONLY (will apply at block end)"
                 );
             }
         }
