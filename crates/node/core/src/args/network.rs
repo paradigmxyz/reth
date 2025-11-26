@@ -283,11 +283,11 @@ impl NetworkArgs {
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder<N> {
         let addr = self.resolved_addr();
-        
+
         // Resolve bootnodes with priority: CLI > Config file > Chain spec > Default
         let cli_bootnodes = self.resolved_bootnodes();
         let chain_bootnodes_default = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
-        
+
         // For discv4: CLI > Config file > Chain spec > Default
         let discv4_bootnodes = if let Some(cli_nodes) = &cli_bootnodes {
             cli_nodes.clone()
@@ -301,15 +301,16 @@ impl NetworkArgs {
         } else {
             chain_bootnodes_default
         };
-        
+
         // For discv5: CLI > Config file > Chain spec > Default
         // Separate enode and enr bootnodes for discv5
-        let (discv5_bootnodes_enode, discv5_bootnodes_enr) = if let Some(cli_nodes) = &cli_bootnodes {
+        let (discv5_bootnodes_enode, discv5_bootnodes_enr) = if let Some(cli_nodes) = &cli_bootnodes
+        {
             (cli_nodes.clone(), None)
         } else if !config.peers.bootnodes_v5.is_empty() {
             let mut enode_nodes = Vec::new();
             let mut enr_strings = Vec::new();
-            
+
             for bootnode in &config.peers.bootnodes_v5 {
                 match bootnode {
                     Discv5BootNode::Enode(peer) => {
@@ -322,7 +323,7 @@ impl NetworkArgs {
                     }
                 }
             }
-            
+
             if !enr_strings.is_empty() {
                 (enode_nodes, Some(enr_strings.join(",")))
             } else if !enode_nodes.is_empty() {
@@ -333,10 +334,10 @@ impl NetworkArgs {
         } else {
             (discv4_bootnodes.clone(), None)
         };
-        
+
         // Use discv4 bootnodes for the general boot_nodes (for backward compatibility)
         let chain_bootnodes = discv4_bootnodes;
-        
+
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
@@ -634,13 +635,12 @@ impl DiscoveryArgs {
         }
 
         if self.should_enable_discv5() {
-            network_config_builder = network_config_builder.discovery_v5(
-                self.discovery_v5_builder_with_enr(
+            network_config_builder =
+                network_config_builder.discovery_v5(self.discovery_v5_builder_with_enr(
                     rlpx_tcp_socket,
                     discv5_boot_nodes_enode,
                     discv5_boot_nodes_enr,
-                ),
-            );
+                ));
         }
 
         network_config_builder
