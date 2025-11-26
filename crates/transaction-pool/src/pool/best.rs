@@ -190,11 +190,10 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         }
     }
 
-    /// Returns the next best transaction and its priority value.
-    #[allow(clippy::type_complexity)]
-    pub fn next_tx_and_priority(
+    /// Returns the next best [`PendingTransaction`].
+    pub fn next_pending(
         &mut self,
-    ) -> Option<(Arc<ValidPoolTransaction<T::Transaction>>, Priority<T::PriorityValue>)> {
+    ) -> Option<PendingTransaction<T>> {
         loop {
             self.add_new_transactions();
             // Remove the next independent tx with the highest priority
@@ -229,7 +228,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                 if self.new_transaction_receiver.is_some() {
                     self.last_priority = Some(best.priority.clone())
                 }
-                return Some((best.transaction, best.priority))
+                return Some((best))
             }
         }
     }
@@ -285,7 +284,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     type Item = Arc<ValidPoolTransaction<T::Transaction>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_tx_and_priority().map(|(tx, _)| tx)
+        self.next_pending().map(|pending| pending.transaction)
     }
 }
 
