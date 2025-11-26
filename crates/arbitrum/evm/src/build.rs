@@ -411,10 +411,25 @@ where
         let current_nonce = {
             let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
             let state: &mut revm::database::State<D> = *db_ref;
-            match state.basic(sender) {
+            let nonce = match state.basic(sender) {
                 Ok(info_opt) => info_opt.map(|i| i.nonce).unwrap_or_default(),
                 Err(_) => 0,
+            };
+
+            // ITERATION 42: Enhanced logging for nonce debugging
+            if is_internal || is_retry {
+                tracing::warn!(
+                    target: "reth::evm::execute",
+                    sender = ?sender,
+                    nonce = nonce,
+                    is_internal = is_internal,
+                    is_retry = is_retry,
+                    tx_type = ?tx_type,
+                    "[req-1] ITER42: Queried sender nonce BEFORE execution"
+                );
             }
+
+            nonce
         };
 
 
@@ -586,7 +601,10 @@ where
                         sender = ?sender,
                         wrong_nonce = wrong_nonce,
                         restored_nonce = pre_nonce,
-                        "[req-1] ITER40: IMMEDIATELY restored nonce in cache after tx execution!"
+                        is_internal = is_internal,
+                        is_retry = is_retry,
+                        tx_type = ?tx_type,
+                        "[req-1] ITER42: IMMEDIATELY restored nonce in cache after tx execution!"
                     );
                 } else {
                     tracing::error!(
