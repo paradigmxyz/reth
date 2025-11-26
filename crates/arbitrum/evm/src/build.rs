@@ -669,7 +669,7 @@ where
                                 info: Some(account_info),
                                 original_info: None,
                                 storage: Default::default(),
-                                status: AccountStatus::Changed,
+                                status: AccountStatus::InMemoryChange,
                             };
 
                             bundle.state.insert(*address, bundle_account);
