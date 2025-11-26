@@ -538,61 +538,51 @@ where
             );
         }
 
-        // Decrement nonce BEFORE restoring balance check, while state is still accessible
-        if used_pre_nonce.is_some() {
-            tracing::info!(
-                target: "arb-reth::nonce-debug",
-                result_is_ok = result.is_ok(),
-                result_is_some = matches!(&result, Ok(Some(_))),
-                "Checking if should decrement nonce"
-            );
-            if result.is_ok() {
-                // Access the EVM's database state directly
-                let evm = self.inner.evm_mut();
+        // Decrement nonce for Internal and Retry transactions
+        // These transaction types should NOT increment sender nonce
+        if used_pre_nonce.is_some() && result.is_ok() {
+            let evm = self.inner.evm_mut();
+
+            // Get the current nonce from the account
+            // This will be incremented by 1 from where it started
+            if let Ok(Some(current_account)) = evm.db_mut().basic(sender) {
+                let current_nonce_after_tx = current_account.nonce;
+                tracing::info!(
+                    target: "arb-reth::nonce-debug",
+                    sender = ?sender,
+                    current_nonce_after_tx = current_nonce_after_tx,
+                    "Account nonce after transaction execution"
+                );
+
+                // Now modify the nonce directly in cached state
+                // We access the DB's cache which holds the modified accounts
                 let (db_ref, _insp, _precompiles) = evm.components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
 
-                // Try to find and modify the sender account in the bundle_state
-                if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
-                    // acc is a BundleAccount
-                    if let Some(info) = acc.info.as_mut() {
-                        let old_nonce = info.nonce;
-                        if info.nonce > 0 {
-                            info.nonce -= 1;
-                            tracing::info!(
-                                target: "arb-reth::nonce-debug",
-                                sender = ?sender,
-                                old_nonce = old_nonce,
-                                new_nonce = info.nonce,
-                                "Decremented nonce in bundle_state after EVM execution"
-                            );
-                        } else {
-                            tracing::warn!(
-                                target: "arb-reth::nonce-debug",
-                                sender = ?sender,
-                                old_nonce = old_nonce,
-                                "Nonce was already 0, cannot decrement"
-                            );
+                // Check if account is in cache (it should be after execution)
+                if let Some(cached_account) = state.cache.get_mut(&sender) {
+                    if let Some(ref mut info) = cached_account.account {
+                        if let Some(ref mut account_info) = info.info {
+                            let old_nonce = account_info.nonce;
+                            if account_info.nonce > 0 {
+                                account_info.nonce -= 1;
+                                tracing::info!(
+                                    target: "arb-reth::nonce-debug",
+                                    sender = ?sender,
+                                    old_nonce = old_nonce,
+                                    new_nonce = account_info.nonce,
+                                    "Decremented nonce in cache for Internal/Retry transaction"
+                                );
+                            }
                         }
-                    } else {
-                        tracing::warn!(
-                            target: "arb-reth::nonce-debug",
-                            sender = ?sender,
-                            "Account in bundle_state but info is None"
-                        );
                     }
                 } else {
                     tracing::warn!(
                         target: "arb-reth::nonce-debug",
                         sender = ?sender,
-                        "Could not find sender account in bundle_state"
+                        "Account not found in cache after transaction execution"
                     );
                 }
-            } else {
-                tracing::warn!(
-                    target: "arb-reth::nonce-debug",
-                    "Transaction result was not Ok, skipping nonce decrement"
-                );
             }
         }
 
