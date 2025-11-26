@@ -566,7 +566,7 @@ where
                 tracing::info!(
                     target: "arb-reth::nonce-debug",
                     sender = ?sender,
-                    "[req-1] DEBUG: Result is OK, accessing bundle_state"
+                    "[req-1] DEBUG: Result is OK, accessing state cache"
                 );
 
                 let (db_ref, _, _) = self.inner.evm_mut().components_mut();
@@ -575,22 +575,23 @@ where
                 tracing::info!(
                     target: "arb-reth::nonce-debug",
                     sender = ?sender,
-                    has_account = state.bundle_state.state.contains_key(&sender),
-                    "[req-1] DEBUG: Checking if sender exists in bundle_state"
+                    in_bundle_state = state.bundle_state.state.contains_key(&sender),
+                    in_cache = state.cache.accounts.contains_key(&sender),
+                    "[req-1] DEBUG: Checking sender location (bundle_state vs cache)"
                 );
 
-                // Directly access and modify bundle_state to avoid state transition panic
-                if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
+                // Try cache.accounts first (accounts might be here before bundle commit)
+                if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
                     tracing::info!(
                         target: "arb-reth::nonce-debug",
                         sender = ?sender,
-                        has_info = acc.info.is_some(),
-                        "[req-1] DEBUG: Found account in bundle_state"
+                        account_status = ?cached_acc.status,
+                        "[req-1] DEBUG: Found account in cache"
                     );
 
-                    if let Some(info) = acc.info.as_mut() {
-                        let post_nonce = info.nonce;
-                        info.nonce = pre_nonce;
+                    if let Some(info) = cached_acc.account.as_mut() {
+                        let post_nonce = info.info.nonce;
+                        info.info.nonce = pre_nonce;
 
                         tracing::info!(
                             target: "arb-reth::nonce-fix",
@@ -598,20 +599,20 @@ where
                             pre_nonce = pre_nonce,
                             post_nonce = post_nonce,
                             restored_nonce = pre_nonce,
-                            "[req-1] Restored nonce for Internal/Retry transaction by modifying bundle_state"
+                            "[req-1] Restored nonce for Internal/Retry transaction via cache.accounts"
                         );
                     } else {
                         tracing::warn!(
                             target: "arb-reth::nonce-debug",
                             sender = ?sender,
-                            "[req-1] DEBUG: Account has no info!"
+                            "[req-1] DEBUG: Cached account has no info!"
                         );
                     }
                 } else {
                     tracing::warn!(
                         target: "arb-reth::nonce-debug",
                         sender = ?sender,
-                        "[req-1] DEBUG: Sender NOT found in bundle_state!"
+                        "[req-1] DEBUG: Sender NOT found in cache.accounts either!"
                     );
                 }
             } else {
