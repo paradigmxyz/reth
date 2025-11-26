@@ -430,17 +430,19 @@ where
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
         }
 
-        // Track the pre-execution nonce for Internal transactions so we can restore it after execution
-        let used_pre_nonce = if is_internal {
+        // Track the pre-execution nonce for Internal and Retry transactions so we can restore it after execution
+        // Both transaction types should NOT increment sender nonce, but EVM increments it anyway
+        // even with disable_nonce_check=true (that flag only disables validation, not increment)
+        let used_pre_nonce = if is_internal || is_retry {
             Some(current_nonce)
         } else {
             None
         };
 
         if needs_precredit {
-            // Internal and Retry transactions have nonce validation disabled
-            // so they won't increment sender nonce during EVM execution
-            // No need for post-execution nonce decrement
+            // Pre-credit sender with gas fees for Internal/Retry transactions
+            // Note: disable_nonce_check only skips validation, nonce will still be incremented
+            // We restore the nonce after execution using used_pre_nonce
 
             let mut effective_gas_limit = gas_limit;
             if (is_internal || is_deposit) && gas_limit == 0 {
@@ -479,7 +481,8 @@ where
         let prev_disable_nonce = evm.cfg_mut().disable_nonce_check;
         evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
         // Internal and Retry transactions should NOT increment nonce
-        // Disabling nonce check prevents EVM from incrementing nonce
+        // Note: disable_nonce_check only disables VALIDATION, not increment!
+        // We restore the nonce after execution using used_pre_nonce
         evm.cfg_mut().disable_nonce_check = is_internal || is_retry;
 
         let wrapped = WithTxEnv { tx_env, tx };
@@ -557,7 +560,7 @@ where
                         sender = ?sender,
                         pre_nonce = pre_nonce,
                         post_nonce = post_nonce,
-                        restored_nonce = account.nonce,
+                        restored_nonce = pre_nonce,
                         "[req-1] Restored nonce for Internal transaction to pre-execution value"
                     );
                 }
