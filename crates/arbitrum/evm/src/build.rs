@@ -434,52 +434,29 @@ where
         }
 
 
-        // PRE-DECREMENT APPROACH for Internal and Retry transactions:
+        // Track pre-execution nonce for Internal and Retry transactions
         // EVM always increments nonce during execution, even with disable_nonce_check=true
         // (that flag only disables validation, not increment).
-        // SOLUTION: Decrement account nonce BEFORE execution, so EVM increment brings it back to correct value.
-        // Example: Account has nonce=5, we decrement to 4, EVM increments to 5 during execution → nonce unchanged!
-        if is_internal || is_retry {
-            if current_nonce > 0 {
-                let (db_ref, _, _) = self.inner.evm_mut().components_mut();
-                let state: &mut revm::database::State<D> = *db_ref;
-
-                // Load or create account in cache
-                let account = state.load_cache_account(sender).map_err(|e| {
-                    BlockExecutionError::msg(format!("Failed to load account for pre-decrement: {}", e))
-                })?;
-
-                // Decrement nonce - accessing through Option<PlainAccount>
-                if let Some(plain_account) = account.account.as_mut() {
-                    let old_nonce = plain_account.info.nonce;
-                    plain_account.info.nonce = old_nonce.saturating_sub(1);
-
-                    tracing::warn!(
-                        target: "reth::evm::execute",
-                        sender = ?sender,
-                        old_nonce = old_nonce,
-                        new_nonce = plain_account.info.nonce,
-                        is_internal = is_internal,
-                        is_retry = is_retry,
-                        "[req-1] PRE-DECREMENTED account nonce before execution (EVM will increment back)"
-                    );
-                }
-            } else {
-                tracing::warn!(
-                    target: "reth::evm::execute",
-                    sender = ?sender,
-                    current_nonce = current_nonce,
-                    is_internal = is_internal,
-                    is_retry = is_retry,
-                    "[req-1] Skipping pre-decrement: nonce already 0"
-                );
-            }
-        }
+        // We will restore the nonce IMMEDIATELY after transaction execution completes.
+        let should_restore_nonce = is_internal || is_retry;
+        let pre_exec_nonce = if should_restore_nonce {
+            tracing::info!(
+                target: "reth::evm::execute",
+                sender = ?sender,
+                current_nonce = current_nonce,
+                is_internal = is_internal,
+                is_retry = is_retry,
+                "[req-1] Tracking pre-execution nonce for restoration"
+            );
+            Some(current_nonce)
+        } else {
+            None
+        };
 
         if needs_precredit {
             // Pre-credit sender with gas fees for Internal/Retry transactions
             // Note: disable_nonce_check only skips validation, nonce will still be incremented
-            // We handle nonce via PRE-DECREMENT approach (decrement before, EVM increments back)
+            // We restore nonce IMMEDIATELY after execution (tracked in pre_exec_nonce)
 
             let mut effective_gas_limit = gas_limit;
             if (is_internal || is_deposit) && gas_limit == 0 {
@@ -519,7 +496,7 @@ where
         evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
         // Internal and Retry transactions should NOT increment nonce
         // Note: disable_nonce_check only disables VALIDATION, not increment!
-        // We handle nonce via PRE-DECREMENT approach (decrement before, EVM increments back)
+        // We restore nonce IMMEDIATELY after execution (tracked in pre_exec_nonce)
         evm.cfg_mut().disable_nonce_check = is_internal || is_retry;
 
         let wrapped = WithTxEnv { tx_env, tx };
@@ -575,9 +552,31 @@ where
             );
         }
 
-        // Nonce handling for Internal and Retry transactions is done via PRE-DECREMENT approach:
-        // Account nonce was decremented BEFORE execution, so EVM increment brings it back to correct value.
-        // No post-execution restoration needed!
+        // POST-EXECUTION IMMEDIATE nonce restoration for Internal and Retry transactions
+        // EVM increments nonce during execution even with disable_nonce_check=true.
+        // We must restore it IMMEDIATELY after execution (even if execution failed) to prevent
+        // state corruption across retry attempts.
+        if let Some(pre_nonce) = pre_exec_nonce {
+            let (db_ref, _, _) = self.inner.evm_mut().components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
+
+            // Directly access and modify the account in cache
+            if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
+                if let Some(account) = cached_acc.account.as_mut() {
+                    let post_exec_nonce = account.info.nonce;
+                    account.info.nonce = pre_nonce;
+
+                    tracing::warn!(
+                        target: "reth::evm::execute",
+                        sender = ?sender,
+                        pre_nonce = pre_nonce,
+                        post_exec_nonce = post_exec_nonce,
+                        success = result.is_ok(),
+                        "[req-1] IMMEDIATELY restored nonce after transaction (prevents retry corruption)"
+                    );
+                }
+            }
+        }
 
         let evm = self.inner.evm_mut();
         evm.cfg_mut().disable_balance_check = prev_disable_balance;
