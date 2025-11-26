@@ -538,22 +538,28 @@ where
             );
         }
 
-        // For Internal transactions, EVM increments nonce even with disable_nonce_check=true
+        // For Internal and Retry transactions, EVM increments nonce even with disable_nonce_check=true
         // (that flag only skips validation, not increment). We need to manually restore it.
-        // From Testing Agent: Internal transactions should NOT increment sender nonce
+        // From Testing Agent: Internal AND Retry transactions should NOT increment sender nonce
+        //
+        // TODO: The insert_account approach causes a panic in bundle_account.rs because
+        // the account is in an invalid state for modification after transaction execution.
+        // Need to find a different approach - perhaps modifying the result's bundle_state
+        // or using a different state modification method.
+        //
+        // Temporary: Commenting out to allow node to run and diagnose the actual nonce values
+        /*
         if let Some(pre_nonce) = used_pre_nonce {
             if result.is_ok() {
+                // PANIC: This causes unreachable!() in bundle_account.rs:185
+                // because account status doesn't allow modification after execution
                 let evm = self.inner.evm_mut();
                 let db = evm.db_mut();
 
-                // Get current account state after transaction execution
                 if let Ok(Some(mut account)) = db.basic(sender) {
                     let post_nonce = account.nonce;
-                    // Restore to exact pre-execution nonce instead of just decrementing
                     account.nonce = pre_nonce;
-
-                    // Update the account in the database
-                    db.insert_account(sender, account);
+                    db.insert_account(sender, account); // <- PANICS HERE
 
                     tracing::info!(
                         target: "arb-reth::nonce-fix",
@@ -566,6 +572,7 @@ where
                 }
             }
         }
+        */
 
         let evm = self.inner.evm_mut();
         evm.cfg_mut().disable_balance_check = prev_disable_balance;
