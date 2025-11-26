@@ -191,24 +191,29 @@ where
         let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
         let is_retry = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry);
         let is_submit_retryable = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable);
-        // ITERATION 81: Fix pre-credit logic
+        // ITERATION 82b: Pre-credit logic - NO pre-credit needed for special tx types
         //
-        // In Go (tx_processor.go):
-        // - Internal (0x6a): Returns immediately with endTxNow=true, multigas.ZeroGas()
-        //   NO EVM execution, NO gas deduction. ApplyInternalTxUpdate() is called directly.
-        //   ArbOS address should NOT receive any pre-credit!
+        // ALL balance manipulation for these tx types is handled in start_tx hook:
         //
-        // - SubmitRetryable (0x69): Handled in StartTxHook, returns endTxNow=true
-        //   Balance manipulation happens in hook, not EVM gas deduction
+        // - Internal (0x6a): Returns endTxNow=true immediately. No EVM execution.
+        //   No pre-credit needed.
         //
-        // - Retry (0x68): Goes through EVM but with special gas handling
-        //   Pre-credit is needed for retry execution
+        // - SubmitRetryable (0x69): Returns endTxNow=true. No EVM execution.
+        //   Hook mints deposit_value to sender. No pre-credit needed.
         //
-        // IMPORTANT: Internal tx should NOT have pre-credit because:
-        // 1. Go doesn't execute Internal through EVM at all
-        // 2. Go returns multigas.ZeroGas() - no gas is consumed
-        // 3. Pre-crediting Internal causes ArbOS balance to accumulate incorrectly
-        let needs_precredit = is_retry || is_submit_retryable;
+        // - Retry (0x68): Goes through EVM but start_tx hook ALREADY mints prepaid gas:
+        //   Line 812-813 in execute.rs: `Self::mint_balance(state_db, ctx.sender, prepaid);`
+        //   where prepaid = basefee * gas_limit. No additional pre-credit needed!
+        //
+        // CRITICAL FIX: Both SubmitRetryable AND Retry were being double-credited:
+        // 1. start_tx hook mints balance (deposit_value or prepaid gas)
+        // 2. build.rs pre-credit adds more balance
+        // Result: sender ends up with excess balance that was never consumed.
+        //
+        // With this fix, only Legacy and other standard transaction types that go
+        // through normal EVM execution without start_tx balance minting will need
+        // pre-credit (and that's handled elsewhere in the EVM execution).
+        let needs_precredit = false;
 
         let paid_gas_price = {
             use reth_arbitrum_primitives::ArbTxType::*;
