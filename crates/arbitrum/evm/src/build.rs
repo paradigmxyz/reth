@@ -449,19 +449,21 @@ where
                     BlockExecutionError::msg(format!("Failed to load account for pre-decrement: {}", e))
                 })?;
 
-                // Decrement nonce
-                let old_nonce = account.account_info().nonce;
-                account.info.nonce = old_nonce.saturating_sub(1);
+                // Decrement nonce - accessing through Option<PlainAccount>
+                if let Some(plain_account) = account.account.as_mut() {
+                    let old_nonce = plain_account.info.nonce;
+                    plain_account.info.nonce = old_nonce.saturating_sub(1);
 
-                tracing::warn!(
-                    target: "reth::evm::execute",
-                    sender = ?sender,
-                    old_nonce = old_nonce,
-                    new_nonce = account.info.nonce,
-                    is_internal = is_internal,
-                    is_retry = is_retry,
-                    "[req-1] PRE-DECREMENTED account nonce before execution (EVM will increment back)"
-                );
+                    tracing::warn!(
+                        target: "reth::evm::execute",
+                        sender = ?sender,
+                        old_nonce = old_nonce,
+                        new_nonce = plain_account.info.nonce,
+                        is_internal = is_internal,
+                        is_retry = is_retry,
+                        "[req-1] PRE-DECREMENTED account nonce before execution (EVM will increment back)"
+                    );
+                }
             } else {
                 tracing::warn!(
                     target: "reth::evm::execute",
