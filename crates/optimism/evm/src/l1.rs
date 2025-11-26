@@ -177,20 +177,19 @@ pub fn parse_l1_info_tx_isthmus(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 
     // https://github.com/ethereum-optimism/op-geth/blob/60038121c7571a59875ff9ed7679c48c9f73405d/core/types/rollup_cost.go#L317-L328
     //
-    // data layout assumed for Ecotone:
+    // data layout for Isthmus (offsets are relative to start of data, after selector):
     // offset type varname
-    // 0     <selector>
-    // 4     uint32 _basefeeScalar (start offset in this scope)
-    // 8     uint32 _blobBaseFeeScalar
-    // 12    uint64 _sequenceNumber,
-    // 20    uint64 _timestamp,
-    // 28    uint64 _l1BlockNumber
-    // 36    uint256 _basefee,
-    // 68    uint256 _blobBaseFee,
-    // 100   bytes32 _hash,
-    // 132   bytes32 _batcherHash,
-    // 164   uint32 _operatorFeeScalar
-    // 168   uint64 _operatorFeeConstant
+    // 0      uint32 _basefeeScalar
+    // 4      uint32 _blobBaseFeeScalar
+    // 8      uint64 _sequenceNumber,
+    // 16     uint64 _timestamp,
+    // 24     uint64 _l1BlockNumber
+    // 32     uint256 _basefee,
+    // 64     uint256 _blobBaseFee,
+    // 96     bytes32 _hash,
+    // 128    bytes32 _batcherHash,
+    // 160    uint32 _operatorFeeScalar
+    // 164    uint64 _operatorFeeConstant
 
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
@@ -241,21 +240,20 @@ pub fn parse_l1_info_tx_jovian(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecut
 
     // https://github.com/ethereum-optimism/op-geth/blob/60038121c7571a59875ff9ed7679c48c9f73405d/core/types/rollup_cost.go#L317-L328
     //
-    // data layout assumed for Ecotone:
+    // data layout for Jovian (offsets are relative to start of data, after selector):
     // offset type varname
-    // 0     <selector>
-    // 4     uint32 _basefeeScalar (start offset in this scope)
-    // 8     uint32 _blobBaseFeeScalar
-    // 12    uint64 _sequenceNumber,
-    // 20    uint64 _timestamp,
-    // 28    uint64 _l1BlockNumber
-    // 36    uint256 _basefee,
-    // 68    uint256 _blobBaseFee,
-    // 100   bytes32 _hash,
-    // 132   bytes32 _batcherHash,
-    // 164   uint32 _operatorFeeScalar
-    // 168   uint64 _operatorFeeConstant
-    // 176   uint16 _daFootprintGasScalar
+    // 0      uint32 _basefeeScalar
+    // 4      uint32 _blobBaseFeeScalar
+    // 8      uint64 _sequenceNumber,
+    // 16     uint64 _timestamp,
+    // 24     uint64 _l1BlockNumber
+    // 32     uint256 _basefee,
+    // 64     uint256 _blobBaseFee,
+    // 96     bytes32 _hash,
+    // 128    bytes32 _batcherHash,
+    // 160    uint32 _operatorFeeScalar
+    // 164    uint64 _operatorFeeConstant
+    // 172    uint16 _daFootprintGasScalar
 
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
