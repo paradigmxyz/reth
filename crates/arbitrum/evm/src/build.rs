@@ -191,12 +191,24 @@ where
         let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
         let is_retry = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry);
         let is_submit_retryable = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable);
-        // CRITICAL FIX: Only Arbitrum-specific tx types need precredit, NOT regular user txs!
-        // Previously `is_sequenced` was included which pre-credited Legacy txs, causing
-        // transactions with insufficient balance to succeed when they should have failed.
-        // This was the root cause of duplicate txs in blocks 4/8 (same SignedTx from delayed
-        // messages 4/8/10/12 was being included when sender had 0 balance).
-        let needs_precredit = is_internal || is_retry || is_submit_retryable;
+        // ITERATION 81: Fix pre-credit logic
+        //
+        // In Go (tx_processor.go):
+        // - Internal (0x6a): Returns immediately with endTxNow=true, multigas.ZeroGas()
+        //   NO EVM execution, NO gas deduction. ApplyInternalTxUpdate() is called directly.
+        //   ArbOS address should NOT receive any pre-credit!
+        //
+        // - SubmitRetryable (0x69): Handled in StartTxHook, returns endTxNow=true
+        //   Balance manipulation happens in hook, not EVM gas deduction
+        //
+        // - Retry (0x68): Goes through EVM but with special gas handling
+        //   Pre-credit is needed for retry execution
+        //
+        // IMPORTANT: Internal tx should NOT have pre-credit because:
+        // 1. Go doesn't execute Internal through EVM at all
+        // 2. Go returns multigas.ZeroGas() - no gas is consumed
+        // 3. Pre-crediting Internal causes ArbOS balance to accumulate incorrectly
+        let needs_precredit = is_retry || is_submit_retryable;
 
         let paid_gas_price = {
             use reth_arbitrum_primitives::ArbTxType::*;
