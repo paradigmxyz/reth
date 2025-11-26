@@ -581,7 +581,7 @@ where
 
             // CRITICAL: Merge cache changes to bundle_state to ensure persistence
             // This flushes the nonce restoration from cache into the bundle that gets committed
-            state.merge_transitions(revm::db::BundleRetention::Reverts);
+            state.merge_transitions(revm::database::states::bundle_state::BundleRetention::Reverts);
 
             tracing::warn!(
                 target: "reth::evm::execute",
