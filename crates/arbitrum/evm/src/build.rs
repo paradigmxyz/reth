@@ -428,20 +428,20 @@ where
         }
 
         if needs_precredit {
-            // Only Internal and Retry transactions should have nonce decremented
+            // Only Internal transactions should have nonce decremented
+            // Retry transactions don't increment nonce (they skip nonce validation)
             // Sequenced transactions (including SubmitRetryable) should increment nonce normally
-            if is_internal || is_retry {
-                // Set used_pre_nonce for internal and retry transactions
-                // Internal (0x6a) and Retry (0x68) transactions should NOT increment sender nonce
+            if is_internal {
+                // Set used_pre_nonce for internal transactions
+                // Internal (0x6a) transactions should NOT increment sender nonce
                 // This ensures nonce gets decremented after EVM execution to compensate
                 used_pre_nonce = Some(current_nonce);
                 tracing::info!(
                     target: "arb-reth::nonce-debug",
                     tx_type = ?tx.tx().tx_type(),
                     is_internal = is_internal,
-                    is_retry = is_retry,
                     current_nonce = current_nonce,
-                    "Setting used_pre_nonce for nonce decrement"
+                    "Setting used_pre_nonce for nonce decrement (Internal tx only)"
                 );
             }
 
