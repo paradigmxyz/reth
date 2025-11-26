@@ -253,23 +253,31 @@ impl DefaultArbOsHooks {
         if amount.is_zero() {
             return Ok(());
         }
-        
+
+        // Load accounts into cache
         let _ = state.load_cache_account(from);
         let _ = state.load_cache_account(to);
-        
+
+        // Check from balance
         let from_account = match state.basic(from) {
             Ok(info) => info,
             Err(_) => return Err(()),
         };
         let from_balance = from_account.map(|i| U256::from(i.balance)).unwrap_or_default();
-        
+
         if from_balance < amount {
             return Err(());
         }
 
-        // Convert U256 to u128, return error if it doesn't fit
+        // Decrement `from` balance directly in cache
+        if let Some(cached_from) = state.cache.accounts.get_mut(&from) {
+            if let Some(ref mut account) = cached_from.account {
+                account.info.balance = account.info.balance.saturating_sub(amount);
+            }
+        }
+
+        // Increment `to` balance using increment_balances API
         let amount_u128: u128 = amount.try_into().map_err(|_| ())?;
-        let _ = state.increment_balances(core::iter::once((from, amount_u128.wrapping_neg())));
         let _ = state.increment_balances(core::iter::once((to, amount_u128)));
         Ok(())
     }
@@ -285,22 +293,25 @@ impl DefaultArbOsHooks {
         if amount.is_zero() {
             return Ok(());
         }
-        
+
         let _ = state.load_cache_account(from);
-        
+
         let from_account = match state.basic(from) {
             Ok(info) => info,
             Err(_) => return Err(()),
         };
         let from_balance = from_account.map(|i| U256::from(i.balance)).unwrap_or_default();
-        
+
         if from_balance < amount {
             return Err(());
         }
 
-        // Convert U256 to u128, return error if it doesn't fit
-        let amount_u128: u128 = amount.try_into().map_err(|_| ())?;
-        let _ = state.increment_balances(core::iter::once((from, amount_u128.wrapping_neg())));
+        // Decrement balance directly in cache
+        if let Some(cached_from) = state.cache.accounts.get_mut(&from) {
+            if let Some(ref mut account) = cached_from.account {
+                account.info.balance = account.info.balance.saturating_sub(amount);
+            }
+        }
         Ok(())
     }
     
