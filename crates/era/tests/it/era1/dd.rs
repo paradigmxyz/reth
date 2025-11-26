@@ -14,11 +14,11 @@ use reth_era::{
 use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;
 
-use crate::{Era1TestDownloader, MAINNET};
+use crate::{EraTestDownloader, MAINNET};
 
-// Helper function to test decompression and decoding for a specific file
+// Helper function to test decompression and decoding for a specific era1 file
 async fn test_file_decompression(
-    downloader: &Era1TestDownloader,
+    downloader: &EraTestDownloader,
     filename: &str,
 ) -> eyre::Result<()> {
     println!("\nTesting file: {filename}");
@@ -154,6 +154,6 @@ async fn test_file_decompression(
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]
 async fn test_mainnet_era1_file_decompression_and_decoding(filename: &str) -> eyre::Result<()> {
-    let downloader = Era1TestDownloader::new().await?;
+    let downloader = EraTestDownloader::new().await?;
     test_file_decompression(&downloader, filename).await
 }

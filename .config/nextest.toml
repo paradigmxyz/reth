@@ -19,3 +19,8 @@ slow-timeout = { period = "2m", terminate-after = 3 }
 [[profile.default.overrides]]
 filter = "package(reth-era) and binary(it)"
 slow-timeout = { period = "2m", terminate-after = 10 }
+
+# Allow slower ethereum node e2e tests (p2p + blobs) to run up to 5 minutes.
+[[profile.default.overrides]]
+filter = "package(reth-node-ethereum) and binary(e2e)"
+slow-timeout = { period = "1m", terminate-after = 5 }
