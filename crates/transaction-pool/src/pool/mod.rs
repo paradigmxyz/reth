@@ -293,6 +293,17 @@ where
             .collect()
     }
 
+    /// Returns hashes of first `max` transactions in the pool that can be propagated.
+    pub fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash> {
+        self.get_pool_data()
+            .all()
+            .transactions_iter()
+            .filter(|tx| tx.propagate)
+            .take(max)
+            .map(|tx| *tx.hash())
+            .collect()
+    }
+
     /// Returns transactions in the pool that can be propagated
     pub fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).cloned().collect()
