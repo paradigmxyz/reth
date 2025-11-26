@@ -75,8 +75,6 @@ impl EngineApiMetrics {
         let wrapper = MeteredStateHook { metrics: self.executor.clone(), inner_hook: state_hook };
         let executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
-        let transactions = transactions.collect::<Result<Vec<_>, _>>()?;
-
         let execute_block = || {
             executor.execute_block_with_transaction_closure(
                 transactions,
