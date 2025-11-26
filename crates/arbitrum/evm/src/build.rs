@@ -638,10 +638,12 @@ where
                 "[req-1] ITERATION 36: Successfully accessed bundle_state from EVM!"
             );
 
-            // Modify nonces directly in the bundle_state
+            // ITERATION 37: Modify nonces in bundle_state, adding accounts if missing
+            // bundle.state only contains accounts with state changes (balance, storage, code)
+            // Accounts with nonce-only changes are absent, so we must add them manually
             for (address, target_nonce) in &self.pending_nonce_restorations {
-                // bundle.state is a HashMap<Address, BundleAccount>
                 if let Some(bundle_acc) = bundle.state.get_mut(address) {
+                    // Account exists in bundle - just fix the nonce
                     if let Some(ref mut account_info) = bundle_acc.info {
                         let wrong_nonce = account_info.nonce;
                         account_info.nonce = *target_nonce;
@@ -651,21 +653,47 @@ where
                             address = ?address,
                             wrong_nonce = wrong_nonce,
                             corrected_nonce = target_nonce,
-                            "[req-1] FIXED nonce directly in bundle_state!"
+                            "[req-1] ITER37: FIXED nonce in existing bundle account"
                         );
+                    }
+                } else {
+                    // ITERATION 37 FIX: Account NOT in bundle_state (nonce-only change)
+                    // Query from cache and manually insert into bundle
+                    if let Some(cached_acc) = state.cache.accounts.get(address) {
+                        if let Some(account) = &cached_acc.account {
+                            // Create BundleAccount with correct nonce from cache
+                            let mut account_info = account.info.clone();
+                            account_info.nonce = *target_nonce;
+
+                            let bundle_account = BundleAccount {
+                                info: Some(account_info),
+                                original_info: None,
+                                storage: Default::default(),
+                                status: AccountStatus::Changed,
+                            };
+
+                            bundle.state.insert(*address, bundle_account);
+
+                            tracing::warn!(
+                                target: "reth::evm::execute",
+                                address = ?address,
+                                target_nonce = target_nonce,
+                                "[req-1] ITER37: ADDED missing account to bundle_state with correct nonce!"
+                            );
+                        } else {
+                            tracing::error!(
+                                target: "reth::evm::execute",
+                                address = ?address,
+                                "[req-1] ITER37: Account in cache but account field is None!"
+                            );
+                        }
                     } else {
                         tracing::error!(
                             target: "reth::evm::execute",
                             address = ?address,
-                            "[req-1] BundleAccount exists but info is None!"
+                            "[req-1] ITER37: Address not in cache either - cannot restore!"
                         );
                     }
-                } else {
-                    tracing::error!(
-                        target: "reth::evm::execute",
-                        address = ?address,
-                        "[req-1] Address not found in bundle_state!"
-                    );
                 }
             }
         }
