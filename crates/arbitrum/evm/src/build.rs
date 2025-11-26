@@ -482,8 +482,12 @@ where
         }
 
         let evm = self.inner.evm_mut();
-        let prev_disable = evm.cfg_mut().disable_balance_check;
+        let prev_disable_balance = evm.cfg_mut().disable_balance_check;
+        let prev_disable_nonce = evm.cfg_mut().disable_nonce_check;
         evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
+        // Retry transactions use nonce=0 even when account nonce is higher
+        // They need nonce validation disabled
+        evm.cfg_mut().disable_nonce_check = is_retry;
 
         let wrapped = WithTxEnv { tx_env, tx };
 
@@ -585,7 +589,8 @@ where
         }
 
         let evm = self.inner.evm_mut();
-        evm.cfg_mut().disable_balance_check = prev_disable;
+        evm.cfg_mut().disable_balance_check = prev_disable_balance;
+        evm.cfg_mut().disable_nonce_check = prev_disable_nonce;
 
         let tx_type_u8 = match tx_type {
             ArbTxType::Deposit => 0x64,
