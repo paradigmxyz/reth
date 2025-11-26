@@ -22,9 +22,11 @@ struct DeferredTrieMetrics {
 
 /// Shared handle to asynchronously populated trie data.
 ///
-/// Uses a try-lock + fallback computation approach for deadlock-free access.
-/// If the deferred task hasn't completed, computes trie data synchronously
-/// from stored unsorted inputs rather than blocking.
+/// Uses a try-lock + blocking fallback approach:
+/// - First attempts a non-blocking `try_lock` to check/compute the result
+/// - If contended (another thread is computing), blocks until that thread finishes
+///
+/// Deadlock safety requires that ancestors form a DAG (no cycles or self-references).
 #[derive(Clone)]
 pub struct DeferredTrieData {
     /// Shared deferred state holding either raw inputs (pending) or computed result (ready).
@@ -51,14 +53,15 @@ impl fmt::Debug for DeferredTrieData {
 impl DeferredTrieData {
     /// Create a new pending handle with fallback inputs for synchronous computation.
     ///
-    /// If the async task hasn't completed when `wait_cloned` is called, the trie data
-    /// will be computed synchronously from these inputs. This eliminates deadlock risk.
+    /// # Safety Invariant
+    /// The `ancestors` list must form a DAG (directed acyclic graph). Self-references
+    /// or cycles will cause deadlock when `wait_cloned` is called.
     ///
     /// # Arguments
     /// * `hashed_state` - Unsorted hashed post-state from execution
     /// * `trie_updates` - Unsorted trie updates from state root computation
     /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
-    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
+    /// * `ancestors` - Deferred trie data from ancestor blocks (must form a DAG)
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
@@ -83,14 +86,13 @@ impl DeferredTrieData {
         Self { state: Arc::new(Mutex::new(DeferredState::Ready(bundle))) }
     }
 
-    /// Returns trie data, computing synchronously if the async task hasn't completed.
+    /// Returns trie data, computing synchronously if not already cached.
     ///
-    /// Uses a try-lock approach:
-    /// - If the async task has completed (`Ready`), returns the cached result.
-    /// - If pending, computes synchronously from stored inputs.
+    /// Uses a try-lock + blocking fallback approach:
+    /// - If `try_lock` succeeds: returns cached result or computes and caches
+    /// - If `try_lock` fails (contended): blocks until the computing thread finishes
     ///
-    /// This design eliminates deadlock risk: we never block waiting for another task.
-    /// All code paths are guaranteed to return (either cached or computed result).
+    /// This avoids duplicate computation when multiple threads access the same handle.
     pub fn wait_cloned(&self) -> ComputedTrieData {
         // Try to get the lock
         if let Some(mut state) = self.state.try_lock() {
@@ -111,9 +113,8 @@ impl DeferredTrieData {
             }
         }
 
-        // Lock is contended - another thread/task holds the mutex (either the async
-        // task calling set_ready(), or another waiter computing). We block until
-        // available.
+        // Lock is contended - another thread is computing. Block until released.
+        // After acquiring, either return the cached result or compute and cache.
         //
         // Deadlock is avoided as long as the provided ancestors form a true ancestor chain (a DAG):
         // - Each block only waits on its ancestors (blocks on the path to the persisted root)
