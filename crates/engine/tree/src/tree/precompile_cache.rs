@@ -19,11 +19,11 @@ const MAX_CACHE_SIZE: u32 = 10_000;
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(HashMap<Address, PrecompileCache<S>>)
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone;
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Copy + Clone;
 
 impl<S> PrecompileCacheMap<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Copy + Clone + 'static,
 {
     pub(crate) fn cache_for_address(&mut self, address: Address) -> PrecompileCache<S> {
         self.0.entry(address).or_default().clone()
@@ -37,11 +37,11 @@ where
 #[derive(Debug, Clone)]
 pub struct PrecompileCache<S>(Arc<Mutex<LruMap<CacheKey<S>, CacheEntry>>>)
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone;
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Copy + Clone;
 
 impl<S> Default for PrecompileCache<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Copy + Clone + 'static,
 {
     fn default() -> Self {
         Self(Arc::new(Mutex::new(LruMap::new(schnellru::ByLength::new(MAX_CACHE_SIZE)))))
@@ -50,7 +50,7 @@ where
 
 impl<S> PrecompileCache<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Copy + Clone + 'static,
 {
     fn get(&self, key: &CacheKeyRef<'_, S>) -> Option<CacheEntry> {
         self.0.lock().get(key).cloned()
@@ -116,7 +116,7 @@ impl CacheEntry {
 #[derive(Debug)]
 pub(crate) struct CachedPrecompile<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Copy + Clone + 'static,
 {
     /// Cache for precompile results and gas bounds.
     cache: PrecompileCache<S>,
@@ -130,7 +130,7 @@ where
 
 impl<S> CachedPrecompile<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Copy + Clone + 'static,
 {
     /// `CachedPrecompile` constructor.
     pub(crate) const fn new(
@@ -183,14 +183,14 @@ where
 
 impl<S> Precompile for CachedPrecompile<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Copy + Clone + 'static,
 {
     fn precompile_id(&self) -> &PrecompileId {
         self.precompile.precompile_id()
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
-        let key = CacheKeyRef::new(self.spec_id.clone(), input.data);
+        let key = CacheKeyRef::new(self.spec_id, input.data);
 
         if let Some(entry) = &self.cache.get(&key) {
             self.increment_by_one_precompile_cache_hits();
@@ -204,7 +204,7 @@ where
 
         match &result {
             Ok(output) => {
-                let key = CacheKey::new(self.spec_id.clone(), Bytes::copy_from_slice(calldata));
+                let key = CacheKey::new(self.spec_id, Bytes::copy_from_slice(calldata));
                 let size = self.cache.insert(key, CacheEntry(output.clone()));
                 self.set_precompile_cache_size_metric(size as f64);
                 self.increment_by_one_precompile_cache_misses();
