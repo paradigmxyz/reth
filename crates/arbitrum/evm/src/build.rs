@@ -457,23 +457,19 @@ where
         // CRITICAL DIFFERENCE:
         // - Internal (0x6a): Sender is ArbOS, nonce should ALWAYS be 0 (never increment)
         // - Retry (0x68): Sender's nonce should not increment for THIS tx, but can increment between Retry txs
-        let pre_exec_nonce = if is_internal {
-            // Internal transactions: ALWAYS restore to 0, not current_nonce
-            // ArbOS address should never have nonce incremented
+        // ITERATION 45: Use same restoration pattern for both Internal and Retry
+        // Both transaction types should restore to current_nonce to prevent increment
+        // For Internal (0x6a), current_nonce should always be 0 (ArbOS address)
+        // For Retry (0x68), current_nonce is the sender's nonce before this transaction
+        let pre_exec_nonce = if is_internal || is_retry {
             tracing::info!(
                 target: "reth::evm::execute",
                 sender = ?sender,
                 current_nonce = current_nonce,
-                "[req-1] Internal tx: will restore nonce to 0 (not current_nonce)"
-            );
-            Some(0)
-        } else if is_retry {
-            // Retry transactions: restore to current_nonce (prevents increment for THIS tx)
-            tracing::info!(
-                target: "reth::evm::execute",
-                sender = ?sender,
-                current_nonce = current_nonce,
-                "[req-1] Retry tx: will restore nonce to current_nonce"
+                is_internal = is_internal,
+                is_retry = is_retry,
+                "[req-1] ITER45: Will restore nonce to current_nonce={} after execution",
+                current_nonce
             );
             Some(current_nonce)
         } else {
