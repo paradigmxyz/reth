@@ -580,18 +580,22 @@ where
                     "[req-1] DEBUG: Checking sender location (bundle_state vs cache)"
                 );
 
-                // Try cache.accounts first (accounts might be here before bundle commit)
-                if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
+                // After execute_transaction_with_commit_condition, the state might be in bundle_state
+                // Try bundle_state first, then fall back to cache
+                let mut restored = false;
+
+                if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
                     tracing::info!(
                         target: "arb-reth::nonce-debug",
                         sender = ?sender,
-                        account_status = ?cached_acc.status,
-                        "[req-1] DEBUG: Found account in cache"
+                        has_info = acc.info.is_some(),
+                        "[req-1] DEBUG: Found account in bundle_state"
                     );
 
-                    if let Some(info) = cached_acc.account.as_mut() {
-                        let post_nonce = info.info.nonce;
-                        info.info.nonce = pre_nonce;
+                    if let Some(info) = acc.info.as_mut() {
+                        let post_nonce = info.nonce;
+                        info.nonce = pre_nonce;
+                        restored = true;
 
                         tracing::info!(
                             target: "arb-reth::nonce-fix",
@@ -599,21 +603,47 @@ where
                             pre_nonce = pre_nonce,
                             post_nonce = post_nonce,
                             restored_nonce = pre_nonce,
-                            "[req-1] Restored nonce for Internal/Retry transaction via cache.accounts"
+                            "[req-1] Restored nonce for Internal/Retry transaction via bundle_state"
                         );
+                    }
+                }
+
+                // If not in bundle_state, try cache
+                if !restored {
+                    if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
+                        tracing::info!(
+                            target: "arb-reth::nonce-debug",
+                            sender = ?sender,
+                            account_status = ?cached_acc.status,
+                            "[req-1] DEBUG: Found account in cache (not in bundle_state yet)"
+                        );
+
+                        if let Some(info) = cached_acc.account.as_mut() {
+                            let post_nonce = info.info.nonce;
+                            info.info.nonce = pre_nonce;
+
+                            tracing::info!(
+                                target: "arb-reth::nonce-fix",
+                                sender = ?sender,
+                                pre_nonce = pre_nonce,
+                                post_nonce = post_nonce,
+                                restored_nonce = pre_nonce,
+                                "[req-1] Restored nonce for Internal/Retry transaction via cache.accounts"
+                            );
+                        } else {
+                            tracing::warn!(
+                                target: "arb-reth::nonce-debug",
+                                sender = ?sender,
+                                "[req-1] DEBUG: Cached account has no info!"
+                            );
+                        }
                     } else {
                         tracing::warn!(
                             target: "arb-reth::nonce-debug",
                             sender = ?sender,
-                            "[req-1] DEBUG: Cached account has no info!"
+                            "[req-1] DEBUG: Sender NOT found in bundle_state or cache!"
                         );
                     }
-                } else {
-                    tracing::warn!(
-                        target: "arb-reth::nonce-debug",
-                        sender = ?sender,
-                        "[req-1] DEBUG: Sender NOT found in cache.accounts either!"
-                    );
                 }
             } else {
                 tracing::warn!(
