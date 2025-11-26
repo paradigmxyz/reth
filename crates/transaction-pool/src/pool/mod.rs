@@ -89,7 +89,6 @@ use crate::{
 };
 
 use alloy_primitives::{Address, TxHash, B256};
-use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
@@ -110,6 +109,8 @@ pub use pending::PendingPool;
 use reth_primitives_traits::Block;
 
 mod best;
+pub use best::BestTransactions;
+
 mod blob;
 mod listener;
 mod parked;
@@ -422,47 +423,7 @@ where
         let UpdateOutcome { promoted, discarded } =
             self.pool.write().update_accounts(changed_senders);
 
-        // Notify about promoted pending transactions (similar to notify_on_new_state)
-        if !promoted.is_empty() {
-            self.pending_transaction_listener.lock().retain_mut(|listener| {
-                let promoted_hashes = promoted.iter().filter_map(|tx| {
-                    if listener.kind.is_propagate_only() && !tx.propagate {
-                        None
-                    } else {
-                        Some(*tx.hash())
-                    }
-                });
-                listener.send_all(promoted_hashes)
-            });
-
-            // in this case we should also emit promoted transactions in full
-            self.transaction_listener.lock().retain_mut(|listener| {
-                let promoted_txs = promoted.iter().filter_map(|tx| {
-                    if listener.kind.is_propagate_only() && !tx.propagate {
-                        None
-                    } else {
-                        Some(NewTransactionEvent::pending(tx.clone()))
-                    }
-                });
-                listener.send_all(promoted_txs)
-            });
-        }
-
-        {
-            let mut listener = self.event_listener.write();
-            if !listener.is_empty() {
-                for tx in &promoted {
-                    listener.pending(tx.hash(), None);
-                }
-                for tx in &discarded {
-                    listener.discarded(tx.hash());
-                }
-            }
-        }
-
-        // This deletes outdated blob txs from the blob store, based on the account's nonce. This is
-        // called during txpool maintenance when the pool drifted.
-        self.delete_discarded_blobs(discarded.iter());
+        self.notify_on_transaction_updates(promoted, discarded);
     }
 
     /// Add a single validated transaction into the pool.
@@ -723,6 +684,65 @@ where
             for tx in &discarded {
                 listener.discarded(tx.hash());
             }
+        }
+    }
+
+    /// Notifies all listeners about the transaction movements.
+    ///
+    /// This will emit events according to the provided changes.
+    ///
+    /// CAUTION: This function is only intended to be used manually in order to use this type's
+    /// [`TransactionEvents`] receivers when manually implementing the
+    /// [`TransactionPool`](crate::TransactionPool) trait for a custom pool implementation
+    /// [`TransactionPool::transaction_event_listener`](crate::TransactionPool).
+    #[allow(clippy::type_complexity)]
+    pub fn notify_on_transaction_updates(
+        &self,
+        promoted: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+        discarded: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+    ) {
+        // Notify about promoted pending transactions (similar to notify_on_new_state)
+        if !promoted.is_empty() {
+            self.pending_transaction_listener.lock().retain_mut(|listener| {
+                let promoted_hashes = promoted.iter().filter_map(|tx| {
+                    if listener.kind.is_propagate_only() && !tx.propagate {
+                        None
+                    } else {
+                        Some(*tx.hash())
+                    }
+                });
+                listener.send_all(promoted_hashes)
+            });
+
+            // in this case we should also emit promoted transactions in full
+            self.transaction_listener.lock().retain_mut(|listener| {
+                let promoted_txs = promoted.iter().filter_map(|tx| {
+                    if listener.kind.is_propagate_only() && !tx.propagate {
+                        None
+                    } else {
+                        Some(NewTransactionEvent::pending(tx.clone()))
+                    }
+                });
+                listener.send_all(promoted_txs)
+            });
+        }
+
+        {
+            let mut listener = self.event_listener.write();
+            if !listener.is_empty() {
+                for tx in &promoted {
+                    listener.pending(tx.hash(), None);
+                }
+                for tx in &discarded {
+                    listener.discarded(tx.hash());
+                }
+            }
+        }
+
+        if !discarded.is_empty() {
+            // This deletes outdated blob txs from the blob store, based on the account's nonce.
+            // This is called during txpool maintenance when the pool drifted.
+            self.delete_discarded_blobs(discarded.iter());
         }
     }
 
