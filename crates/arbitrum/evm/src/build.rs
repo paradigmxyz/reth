@@ -434,6 +434,14 @@ where
         // Both transaction types should NOT increment sender nonce, but EVM increments it anyway
         // even with disable_nonce_check=true (that flag only disables validation, not increment)
         let used_pre_nonce = if is_internal || is_retry {
+            tracing::info!(
+                target: "arb-reth::nonce-debug",
+                sender = ?sender,
+                current_nonce = current_nonce,
+                is_internal = is_internal,
+                is_retry = is_retry,
+                "[req-1] DEBUG: Tracking pre-nonce for nonce restoration"
+            );
             Some(current_nonce)
         } else {
             None
@@ -546,12 +554,40 @@ where
         // This avoids invalid state transitions that caused panic at bundle_account.rs:185
         // Pattern based on Testing Agent suggestion and storage.rs:110
         if let Some(pre_nonce) = used_pre_nonce {
+            tracing::info!(
+                target: "arb-reth::nonce-debug",
+                sender = ?sender,
+                pre_nonce = pre_nonce,
+                result_is_ok = result.is_ok(),
+                "[req-1] DEBUG: Entered nonce restoration block"
+            );
+
             if result.is_ok() {
+                tracing::info!(
+                    target: "arb-reth::nonce-debug",
+                    sender = ?sender,
+                    "[req-1] DEBUG: Result is OK, accessing bundle_state"
+                );
+
                 let (db_ref, _, _) = self.inner.evm_mut().components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
 
+                tracing::info!(
+                    target: "arb-reth::nonce-debug",
+                    sender = ?sender,
+                    has_account = state.bundle_state.state.contains_key(&sender),
+                    "[req-1] DEBUG: Checking if sender exists in bundle_state"
+                );
+
                 // Directly access and modify bundle_state to avoid state transition panic
                 if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
+                    tracing::info!(
+                        target: "arb-reth::nonce-debug",
+                        sender = ?sender,
+                        has_info = acc.info.is_some(),
+                        "[req-1] DEBUG: Found account in bundle_state"
+                    );
+
                     if let Some(info) = acc.info.as_mut() {
                         let post_nonce = info.nonce;
                         info.nonce = pre_nonce;
@@ -564,8 +600,27 @@ where
                             restored_nonce = pre_nonce,
                             "[req-1] Restored nonce for Internal/Retry transaction by modifying bundle_state"
                         );
+                    } else {
+                        tracing::warn!(
+                            target: "arb-reth::nonce-debug",
+                            sender = ?sender,
+                            "[req-1] DEBUG: Account has no info!"
+                        );
                     }
+                } else {
+                    tracing::warn!(
+                        target: "arb-reth::nonce-debug",
+                        sender = ?sender,
+                        "[req-1] DEBUG: Sender NOT found in bundle_state!"
+                    );
                 }
+            } else {
+                tracing::warn!(
+                    target: "arb-reth::nonce-debug",
+                    sender = ?sender,
+                    result = ?result,
+                    "[req-1] DEBUG: Result is NOT OK!"
+                );
             }
         }
 
