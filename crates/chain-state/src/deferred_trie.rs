@@ -27,7 +27,15 @@ struct DeferredTrieMetrics {
 /// from stored unsorted inputs rather than blocking.
 #[derive(Clone)]
 pub struct DeferredTrieData {
-    /// Shared deferred state holding either raw inputs (pending) or computed result (ready).
+    /// Block's hashed post-state (unsorted) for synchronous fallback computation.
+    hashed_state: Arc<HashedPostState>,
+    /// Block's trie updates (unsorted) for synchronous fallback computation.
+    trie_updates: Arc<TrieUpdates>,
+    /// Pre-merged trie input from ancestor blocks used as a base overlay.
+    parent_trie_input: Arc<TrieInputSorted>,
+    /// The persisted ancestor hash this trie input is anchored to.
+    anchor_hash: B256,
+    /// Shared deferred state holding the computed result (if ready).
     state: Arc<Mutex<DeferredState>>,
 }
 
@@ -58,20 +66,19 @@ impl DeferredTrieData {
     /// * `hashed_state` - Unsorted hashed post-state from execution
     /// * `trie_updates` - Unsorted trie updates from state root computation
     /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
-    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
+    /// * `parent_trie_input` - Pre-merged trie input from ancestor blocks
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
         anchor_hash: B256,
-        ancestors: Vec<Self>,
+        parent_trie_input: Arc<TrieInputSorted>,
     ) -> Self {
         Self {
-            state: Arc::new(Mutex::new(DeferredState::Pending(PendingInputs {
-                hashed_state,
-                trie_updates,
-                anchor_hash,
-                ancestors,
-            }))),
+            hashed_state,
+            trie_updates,
+            parent_trie_input,
+            anchor_hash,
+            state: Arc::new(Mutex::new(DeferredState::Pending)),
         }
     }
 
@@ -244,23 +251,10 @@ impl ComputedTrieData {
 
 /// Internal state for deferred trie data.
 enum DeferredState {
-    /// Data is not yet available; raw inputs stored for fallback computation.
-    Pending(PendingInputs),
+    /// Data is not yet available.
+    Pending,
     /// Data has been computed and is ready.
     Ready(ComputedTrieData),
-}
-
-/// Inputs kept while a deferred trie computation is pending.
-#[derive(Clone, Debug)]
-struct PendingInputs {
-    /// Unsorted hashed post-state from execution.
-    hashed_state: Arc<HashedPostState>,
-    /// Unsorted trie updates from state root computation.
-    trie_updates: Arc<TrieUpdates>,
-    /// The persisted ancestor hash this trie input is anchored to.
-    anchor_hash: B256,
-    /// Deferred trie data from ancestor blocks for merging.
-    ancestors: Vec<DeferredTrieData>,
 }
 
 /// Trie input bundled with its anchor hash.
