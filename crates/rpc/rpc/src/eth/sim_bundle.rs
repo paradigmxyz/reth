@@ -340,6 +340,8 @@ where
                 }
 
                 // After processing all transactions, process refunds
+                // Store the original refundable value to calculate all payouts correctly
+                let original_refundable_value = refundable_value;
                 for item in &flattened_bundle {
                     if let Some(refund_percent) = item.refund_percent {
                         // Get refund configurations
@@ -355,9 +357,11 @@ where
                         // Add gas used for payout transactions
                         total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
 
-                        // Calculate allocated refundable value (payout value)
-                        let payout_value =
-                            refundable_value * U256::from(refund_percent) / U256::from(100);
+                        // Calculate allocated refundable value (payout value) based on ORIGINAL
+                        // refundable value This ensures all refund_percent
+                        // values are calculated from the same base
+                        let payout_value = original_refundable_value * U256::from(refund_percent) /
+                            U256::from(100);
 
                         if payout_tx_fee > payout_value {
                             return Err(EthApiError::InvalidParams(
