@@ -31,5 +31,5 @@ pub mod sigsegv_handler;
 #[cfg(not(all(unix, any(target_env = "gnu", target_os = "macos"))))]
 pub mod sigsegv_handler {
     /// No-op function.
-    pub fn install() {}
+    pub const fn install() {}
 }
