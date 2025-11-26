@@ -88,14 +88,15 @@ impl DeferredTrieData {
     /// Useful when trie data is available immediately.
     /// [`Self::wait_cloned`] will return without any computation.
     pub fn ready(bundle: ComputedTrieData) -> Self {
-        let mut computed = OnceLock::new();
+        let anchor_hash = bundle.anchor_hash().unwrap_or_default();
+        let computed = OnceLock::new();
         let _ = computed.set(bundle);
         Self {
             inner: Arc::new(DeferredTrieDataInner {
                 hashed_state: Arc::new(HashedPostState::default()),
                 trie_updates: Arc::new(TrieUpdates::default()),
                 ancestors: Vec::new(),
-                anchor_hash: bundle.anchor_hash().unwrap_or_default(),
+                anchor_hash,
                 computed,
             }),
         }
