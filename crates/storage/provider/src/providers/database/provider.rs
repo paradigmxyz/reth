@@ -306,6 +306,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         debug!(target: "providers::db", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
+        let mut aggregated_hashed_post_state_sorted = HashedPostStateSorted::default();
+
         // TODO: Do performant / batched writes for each type of object
         // instead of a loop over all blocks,
         // meaning:
@@ -325,12 +327,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Must be written after blocks because of the receipt lookup.
             self.write_state(&execution_output, OriginalValuesKnown::No)?;
 
-            // insert hashes and intermediate merkle nodes
-            self.write_hashed_state(&hashed_state)?;
+            // aggregate hashed post states for batch insert
+            aggregated_hashed_post_state_sorted.extend_ref(&hashed_state);
 
             self.write_trie_changesets(block_number, &trie_updates, None)?;
             self.write_trie_updates_sorted(&trie_updates)?;
         }
+
+        // batch insert hash post states
+        self.write_hashed_state(&aggregated_hashed_post_state_sorted)?;
 
         // update history indices
         self.update_history_indices(first_number..=last_block_number)?;
@@ -1711,7 +1716,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     ) -> ProviderResult<()> {
         // Write storage changes
         tracing::trace!("Writing storage changes");
-        let mut storages_cursor = self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
+        let mut storages_cursor = self.tx_ref().cursor_dup_read::<tables::PlainStorageState>()?;
         let mut storage_changeset_cursor =
             self.tx_ref().cursor_dup_write::<tables::StorageChangeSets>()?;
         for (block_index, mut storage_changes) in reverts.storage.into_iter().enumerate() {
