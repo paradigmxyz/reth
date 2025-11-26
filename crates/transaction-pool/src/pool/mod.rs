@@ -330,8 +330,7 @@ where
         } else {
             transaction
                 .transaction
-                .clone()
-                .try_into_pooled()
+                .clone_into_pooled()
                 .inspect_err(|err| {
                     debug!(
                         target: "txpool", %err,
