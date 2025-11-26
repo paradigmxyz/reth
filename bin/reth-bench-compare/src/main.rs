@@ -14,6 +14,9 @@
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
+// Suppress unused crate dependency warning
+use alloy_consensus as _;
+
 mod benchmark;
 mod cli;
 mod comparison;

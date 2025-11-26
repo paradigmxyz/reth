@@ -56,7 +56,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 .config
                 .datadir
                 .clone()
-                .resolve_datadir(config_container.config.chain.chain())
+                .resolve_datadir(config_container.config.chain.name().as_str())
                 .exex_wal(),
         )?;
 
