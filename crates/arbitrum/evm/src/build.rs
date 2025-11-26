@@ -542,37 +542,32 @@ where
         // (that flag only skips validation, not increment). We need to manually restore it.
         // From Testing Agent: Internal AND Retry transactions should NOT increment sender nonce
         //
-        // TODO: The insert_account approach causes a panic in bundle_account.rs because
-        // the account is in an invalid state for modification after transaction execution.
-        // Need to find a different approach - perhaps modifying the result's bundle_state
-        // or using a different state modification method.
-        //
-        // Temporary: Commenting out to allow node to run and diagnose the actual nonce values
-        /*
+        // SOLUTION: Directly modify bundle_state instead of using insert_account()
+        // This avoids invalid state transitions that caused panic at bundle_account.rs:185
+        // Pattern based on Testing Agent suggestion and storage.rs:110
         if let Some(pre_nonce) = used_pre_nonce {
             if result.is_ok() {
-                // PANIC: This causes unreachable!() in bundle_account.rs:185
-                // because account status doesn't allow modification after execution
-                let evm = self.inner.evm_mut();
-                let db = evm.db_mut();
+                let (db_ref, _, _) = self.inner.evm_mut().components_mut();
+                let state: &mut revm::database::State<D> = *db_ref;
 
-                if let Ok(Some(mut account)) = db.basic(sender) {
-                    let post_nonce = account.nonce;
-                    account.nonce = pre_nonce;
-                    db.insert_account(sender, account); // <- PANICS HERE
+                // Directly access and modify bundle_state to avoid state transition panic
+                if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
+                    if let Some(info) = acc.info.as_mut() {
+                        let post_nonce = info.nonce;
+                        info.nonce = pre_nonce;
 
-                    tracing::info!(
-                        target: "arb-reth::nonce-fix",
-                        sender = ?sender,
-                        pre_nonce = pre_nonce,
-                        post_nonce = post_nonce,
-                        restored_nonce = pre_nonce,
-                        "[req-1] Restored nonce for Internal transaction to pre-execution value"
-                    );
+                        tracing::info!(
+                            target: "arb-reth::nonce-fix",
+                            sender = ?sender,
+                            pre_nonce = pre_nonce,
+                            post_nonce = post_nonce,
+                            restored_nonce = pre_nonce,
+                            "[req-1] Restored nonce for Internal/Retry transaction by modifying bundle_state"
+                        );
+                    }
                 }
             }
         }
-        */
 
         let evm = self.inner.evm_mut();
         evm.cfg_mut().disable_balance_check = prev_disable_balance;
