@@ -1171,6 +1171,14 @@ pub trait PoolTransaction:
         Ok(Recovered::new_unchecked(tx.try_into()?, signer))
     }
 
+    /// Clones the consensus transactions and tries to convert the `Consensus` type into the
+    /// `Pooled` type.
+    fn clone_into_pooled(&self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
+        let consensus = self.clone_into_consensus();
+        let (tx, signer) = consensus.into_parts();
+        Ok(Recovered::new_unchecked(tx.try_into()?, signer))
+    }
+
     /// Converts the `Pooled` type into the `Consensus` type.
     fn pooled_into_consensus(tx: Self::Pooled) -> Self::Consensus {
         tx.into()
