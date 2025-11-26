@@ -434,19 +434,31 @@ where
         }
 
 
-        // Track pre-execution nonce for Internal and Retry transactions
+        // ITERATION 41: Track pre-execution nonce for Internal and Retry transactions
         // EVM always increments nonce during execution, even with disable_nonce_check=true
         // (that flag only disables validation, not increment).
         // We will restore the nonce IMMEDIATELY after transaction execution completes.
-        let should_restore_nonce = is_internal || is_retry;
-        let pre_exec_nonce = if should_restore_nonce {
+        //
+        // CRITICAL DIFFERENCE:
+        // - Internal (0x6a): Sender is ArbOS, nonce should ALWAYS be 0 (never increment)
+        // - Retry (0x68): Sender's nonce should not increment for THIS tx, but can increment between Retry txs
+        let pre_exec_nonce = if is_internal {
+            // Internal transactions: ALWAYS restore to 0, not current_nonce
+            // ArbOS address should never have nonce incremented
             tracing::info!(
                 target: "reth::evm::execute",
                 sender = ?sender,
                 current_nonce = current_nonce,
-                is_internal = is_internal,
-                is_retry = is_retry,
-                "[req-1] Tracking pre-execution nonce for restoration"
+                "[req-1] Internal tx: will restore nonce to 0 (not current_nonce)"
+            );
+            Some(0)
+        } else if is_retry {
+            // Retry transactions: restore to current_nonce (prevents increment for THIS tx)
+            tracing::info!(
+                target: "reth::evm::execute",
+                sender = ?sender,
+                current_nonce = current_nonce,
+                "[req-1] Retry tx: will restore nonce to current_nonce"
             );
             Some(current_nonce)
         } else {
