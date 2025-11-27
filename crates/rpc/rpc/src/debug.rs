@@ -49,7 +49,7 @@ use revm::{
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
-use revm_primitives::{Log, U256};
+use revm_primitives::U256;
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
