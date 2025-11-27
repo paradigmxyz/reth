@@ -141,6 +141,8 @@ impl PeersManager {
             });
         }
 
+        trace!(target: "net::peers", trusted_peers=?trusted_peer_ids, "Initialized peers manager");
+
         Self {
             peers,
             trusted_peer_ids,
@@ -467,6 +469,8 @@ impl PeersManager {
     /// reputation changes that can be attributed to network conditions. If the peer is a
     /// trusted peer, it will also be less strict with the reputation slashing.
     pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
+        trace!(target: "net::peers", ?peer_id, reputation=?rep, "applying reputation change");
+
         let outcome = if let Some(peer) = self.peers.get_mut(peer_id) {
             // First check if we should reset the reputation
             if rep.is_reset() {
@@ -536,6 +540,7 @@ impl PeersManager {
     pub(crate) fn on_active_session_gracefully_closed(&mut self, peer_id: PeerId) {
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
+                trace!(target: "net::peers", ?peer_id, direction=?entry.get().state, "active session gracefully closed");
                 self.connection_info.decr_state(entry.get().state);
 
                 if entry.get().remove_after_disconnect && !entry.get().is_trusted() {
@@ -560,6 +565,7 @@ impl PeersManager {
     /// Called when a _pending_ outbound connection is successful.
     pub(crate) fn on_active_outgoing_established(&mut self, peer_id: PeerId) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            trace!(target: "net::peers", ?peer_id, "established active outgoing connection");
             self.connection_info.decr_state(peer.state);
             self.connection_info.inc_out();
             peer.state = PeerConnectionState::Out;
@@ -653,12 +659,14 @@ impl PeersManager {
                         // have us registered as a trusted peer.
                         let backoff = self.backoff_durations.low;
                         backoff_until = Some(std::time::Instant::now() + backoff);
+                        trace!(target: "net::peers", ?peer_id, ?backoff, "backing off trusted peer");
                     } else {
                         // Increment peer.backoff_counter
                         if kind.is_severe() {
                             peer.severe_backoff_counter =
                                 peer.severe_backoff_counter.saturating_add(1);
                         }
+                        trace!(target: "net::peers", ?peer_id, ?kind, severe_backoff_counter=peer.severe_backoff_counter, "backing off basic peer");
 
                         let backoff_time =
                             self.backoff_durations.backoff_until(kind, peer.severe_backoff_counter);
@@ -689,6 +697,7 @@ impl PeersManager {
 
             // remove peer if it has been marked for removal
             if remove_peer {
+                trace!(target: "net", ?peer_id, "removed peer after exceeding backoff counter");
                 let (peer_id, _) = self.peers.remove_entry(peer_id).expect("peer must exist");
                 self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
             } else if let Some(backoff_until) = backoff_until {
