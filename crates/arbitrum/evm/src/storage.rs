@@ -27,22 +27,24 @@ fn storage_key_map(storage_key: &[u8], offset: u64) -> U256 {
 }
 
 /// Ensures the ArbOS account exists in bundle_state.state.
-/// This is the simple approach that was used before and produces DETERMINISTIC state roots.
-/// We write directly to bundle_state.state which persists throughout block execution.
+///
+/// CRITICAL FOR DETERMINISM: We NEVER call state.basic() because that creates cache entries
+/// which can cause non-determinism between assembly and validation. The ArbOS account is
+/// a "fictional" account that doesn't receive real transactions, so we can safely create
+/// it with default values directly in bundle_state.state.
 fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State<D>) {
     use revm_database::{BundleAccount, AccountStatus};
     use revm_state::AccountInfo;
 
     if !state.bundle_state.state.contains_key(&ARBOS_STATE_ADDRESS) {
-        let info = match state.basic(ARBOS_STATE_ADDRESS) {
-            Ok(Some(account_info)) => Some(account_info),
-            _ => Some(AccountInfo {
-                balance: U256::ZERO,
-                nonce: 0,
-                code_hash: alloy_primitives::keccak256([]),
-                code: None,
-            }),
-        };
+        // NEVER call state.basic() here - it creates cache entries causing non-determinism!
+        // The ArbOS account is fictional and always has zero balance/nonce.
+        let info = Some(AccountInfo {
+            balance: U256::ZERO,
+            nonce: 0,
+            code_hash: alloy_primitives::keccak256([]),
+            code: None,
+        });
 
         let acc = BundleAccount {
             info,

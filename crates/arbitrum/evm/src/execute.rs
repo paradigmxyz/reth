@@ -166,16 +166,16 @@ impl DefaultArbOsHooks {
         use revm_state::AccountInfo;
 
         // Ensure the account exists in bundle_state.state
+        // CRITICAL FOR DETERMINISM: We NEVER call state_db.basic() because that creates
+        // cache entries which can cause non-determinism between assembly and validation.
+        // The history storage account is fictional and always has zero balance/nonce.
         if !state_db.bundle_state.state.contains_key(&HISTORY_STORAGE_ADDRESS) {
-            let info = match state_db.basic(HISTORY_STORAGE_ADDRESS) {
-                Ok(Some(account_info)) => Some(account_info),
-                _ => Some(AccountInfo {
-                    balance: U256::ZERO,
-                    nonce: 0,
-                    code_hash: alloy_primitives::keccak256([]),
-                    code: None,
-                }),
-            };
+            let info = Some(AccountInfo {
+                balance: U256::ZERO,
+                nonce: 0,
+                code_hash: alloy_primitives::keccak256([]),
+                code: None,
+            });
 
             let acc = BundleAccount {
                 info,
