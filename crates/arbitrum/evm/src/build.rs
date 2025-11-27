@@ -35,6 +35,69 @@ use crate::predeploys::PredeployRegistry;
 use crate::predeploys::{PredeployCallContext, LogEmitter};
 use crate::execute::{DefaultArbOsHooks, ArbTxProcessorState, ArbStartTxContext, ArbGasChargingContext, ArbEndTxContext, ArbOsHooks};
 
+// Arbitrum-specific EthSpec that has Paris (The Merge) active from block 0.
+// This is critical because Arbitrum is post-merge from genesis and should NOT give block rewards.
+// Using EthSpec::mainnet() would cause 5 ETH to be given to the coinbase on each block!
+use alloy_hardforks::{EthereumChainHardforks, EthereumHardfork, EthereumHardforks, ForkCondition};
+
+/// Arbitrum EthSpec with all hardforks up to Cancun active from block 0.
+/// This prevents block rewards from being given since Paris is active.
+#[derive(Debug, Clone)]
+pub struct ArbEthSpec {
+    hardforks: EthereumChainHardforks,
+}
+
+impl Default for ArbEthSpec {
+    fn default() -> Self {
+        Self::arbitrum_sepolia()
+    }
+}
+
+impl ArbEthSpec {
+    /// Creates an ArbEthSpec for Arbitrum Sepolia - all hardforks up to Cancun at block 0
+    pub fn arbitrum_sepolia() -> Self {
+        // Create hardforks with Paris at block 0 (critical to prevent block rewards!)
+        let hardforks = EthereumChainHardforks::new([
+            (EthereumHardfork::Frontier, ForkCondition::Block(0)),
+            (EthereumHardfork::Homestead, ForkCondition::Block(0)),
+            (EthereumHardfork::Dao, ForkCondition::Block(0)),
+            (EthereumHardfork::Tangerine, ForkCondition::Block(0)),
+            (EthereumHardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (EthereumHardfork::Byzantium, ForkCondition::Block(0)),
+            (EthereumHardfork::Constantinople, ForkCondition::Block(0)),
+            (EthereumHardfork::Petersburg, ForkCondition::Block(0)),
+            (EthereumHardfork::Istanbul, ForkCondition::Block(0)),
+            (EthereumHardfork::MuirGlacier, ForkCondition::Block(0)),
+            (EthereumHardfork::Berlin, ForkCondition::Block(0)),
+            (EthereumHardfork::London, ForkCondition::Block(0)),
+            (EthereumHardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (EthereumHardfork::GrayGlacier, ForkCondition::Block(0)),
+            // CRITICAL: Paris at block 0 disables block rewards!
+            (EthereumHardfork::Paris, ForkCondition::TTD {
+                activation_block_number: 0,
+                fork_block: Some(0),
+                total_difficulty: alloy_primitives::U256::ZERO,
+            }),
+            (EthereumHardfork::Shanghai, ForkCondition::Timestamp(0)),
+            (EthereumHardfork::Cancun, ForkCondition::Timestamp(0)),
+        ]);
+        Self { hardforks }
+    }
+}
+
+impl EthereumHardforks for ArbEthSpec {
+    fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
+        self.hardforks.ethereum_fork_activation(fork)
+    }
+}
+
+impl alloy_evm::eth::spec::EthExecutorSpec for ArbEthSpec {
+    fn deposit_contract_address(&self) -> Option<Address> {
+        // Arbitrum doesn't have a deposit contract
+        None
+    }
+}
+
 pub struct ArbBlockExecutorFactory<R, CS>
 where
     R: Clone,
@@ -71,7 +134,7 @@ pub struct ArbBlockExecutionCtx {
 }
 
 pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::ReceiptBuilder> {
-    inner: EthBlockExecutor<'a, Evm, alloy_evm::eth::spec::EthSpec, &'a RB>,
+    inner: EthBlockExecutor<'a, Evm, ArbEthSpec, &'a RB>,
     predeploys: Arc<Mutex<PredeployRegistry>>,
     hooks: DefaultArbOsHooks,
     tx_state: ArbTxProcessorState,
@@ -1082,7 +1145,7 @@ where
             inner: EthBlockExecutor::new(
                 evm,
                 eth_ctx,
-                alloy_evm::eth::spec::EthSpec::mainnet(),
+                ArbEthSpec::arbitrum_sepolia(),
                 &self.receipt_builder,
             ),
             predeploys: self.predeploys.clone(),
