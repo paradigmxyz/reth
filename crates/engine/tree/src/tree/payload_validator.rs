@@ -980,8 +980,8 @@ where
     /// This function creates a [`DeferredTrieData`] handle with fallback inputs and spawns a
     /// blocking task that:
     /// 1. Sorts the block's hashed state and trie updates
-    /// 2. Extends the pre-merged overlay input with the sorted data
-    /// 3. Creates an [`AnchoredTrieInput`] for efficient future trie computations
+    /// 2. Gets parent's `trie_input` (which contains cumulative grandparent data)
+    /// 3. Extends the parent overlay with the sorted data
     /// 4. Calls `set_ready()` on the handle when computation is complete
     ///
     /// If the background task hasn't completed when `trie_data()` is called, the stored
@@ -1006,19 +1006,16 @@ where
             .blocks_by_hash(block.parent_hash())
             .unwrap_or_else(|| (block.parent_hash(), Vec::new()));
 
-        // Collect lightweight ancestor trie data handles. We don't call trie_data() here;
-        // the merge and any fallback sorting happens in the compute_trie_input_task.
-        let ancestors: Vec<DeferredTrieData> =
-            overlay_blocks.iter().rev().map(|b| b.trie_data_handle()).collect();
+        // Get only the parent's trie data handle (if any in-memory blocks exist).
+        // Parent's trie_input already contains cumulative grandparent data, enabling O(1) merge.
+        let parent = overlay_blocks.first().map(|b| b.trie_data_handle());
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
-        let hashed_state = Arc::new(hashed_state);
-        let trie_output = Arc::new(trie_output);
         let deferred_trie_data = DeferredTrieData::pending(
-            Arc::clone(&hashed_state),
-            Arc::clone(&trie_output),
+            Arc::new(hashed_state),
+            Arc::new(trie_output),
             anchor_hash,
-            ancestors.clone(),
+            parent,
         );
         let deferred_handle_task = deferred_trie_data.clone();
         let deferred_compute_duration =
@@ -1029,13 +1026,7 @@ where
         let compute_trie_input_task = move || {
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
-
-                deferred_handle_task.compute_set_ready(
-                    &hashed_state,
-                    &trie_output,
-                    anchor_hash,
-                    &ancestors,
-                );
+                deferred_handle_task.compute_and_set_ready();
                 deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
             }));
 

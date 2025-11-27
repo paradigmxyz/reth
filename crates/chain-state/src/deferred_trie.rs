@@ -22,9 +22,9 @@ struct DeferredTrieMetrics {
 
 /// Shared handle to asynchronously populated trie data.
 ///
-/// Uses a try-lock + fallback computation approach for deadlock-free access.
-/// If the deferred task hasn't completed, computes trie data synchronously
-/// from stored unsorted inputs rather than blocking.
+/// Uses a lock-free compute pattern: expensive computation happens outside the lock
+/// to minimize contention. If the deferred task hasn't completed, computes trie data
+/// synchronously from stored unsorted inputs.
 #[derive(Clone)]
 pub struct DeferredTrieData {
     /// Shared deferred state holding either raw inputs (pending) or computed result (ready).
@@ -58,19 +58,19 @@ impl DeferredTrieData {
     /// * `hashed_state` - Unsorted hashed post-state from execution
     /// * `trie_updates` - Unsorted trie updates from state root computation
     /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
-    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
+    /// * `parent` - Deferred trie data from parent block (contains cumulative grandparent data)
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
         anchor_hash: B256,
-        ancestors: Vec<Self>,
+        parent: Option<Self>,
     ) -> Self {
         Self {
             state: Arc::new(Mutex::new(DeferredState::Pending(PendingInputs {
                 hashed_state,
                 trie_updates,
                 anchor_hash,
-                ancestors,
+                parent,
             }))),
         }
     }
@@ -83,89 +83,6 @@ impl DeferredTrieData {
         Self { state: Arc::new(Mutex::new(DeferredState::Ready(bundle))) }
     }
 
-    /// Sort block execution outputs and build a [`TrieInputSorted`] overlay.
-    ///
-    /// The trie input overlay accumulates sorted hashed state (account/storage changes) and
-    /// trie node updates from all in-memory ancestor blocks. This overlay is required for:
-    /// - Computing state roots on top of in-memory blocks
-    /// - Generating storage/account proofs for unpersisted state
-    ///
-    /// # Process
-    /// 1. Sort the current block's hashed state and trie updates
-    /// 2. Merge ancestor overlays (oldest → newest, so later state takes precedence)
-    /// 3. Extend the merged overlay with this block's sorted data
-    ///
-    /// Used by both the async background task and the synchronous fallback path.
-    ///
-    /// # Arguments
-    /// * `hashed_state` - Unsorted hashed post-state (account/storage changes) from execution
-    /// * `trie_updates` - Unsorted trie node updates from state root computation
-    /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
-    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
-    pub fn sort_and_build_trie_input(
-        hashed_state: &HashedPostState,
-        trie_updates: &TrieUpdates,
-        anchor_hash: B256,
-        ancestors: &[DeferredTrieData],
-    ) -> ComputedTrieData {
-        // Sort the current block's hashed state and trie updates
-        let sorted_hashed_state = Arc::new(hashed_state.clone().into_sorted());
-        let sorted_trie_updates = Arc::new(trie_updates.clone().into_sorted());
-
-        // Merge trie data from ancestors (oldest -> newest so later state takes precedence)
-        let mut overlay = TrieInputSorted::default();
-        for ancestor in ancestors {
-            let ancestor_data = ancestor.wait_cloned();
-            {
-                let state_mut = Arc::make_mut(&mut overlay.state);
-                state_mut.extend_ref(ancestor_data.hashed_state.as_ref());
-            }
-            {
-                let nodes_mut = Arc::make_mut(&mut overlay.nodes);
-                nodes_mut.extend_ref(ancestor_data.trie_updates.as_ref());
-            }
-        }
-
-        // Extend overlay with current block's sorted data
-        {
-            let state_mut = Arc::make_mut(&mut overlay.state);
-            state_mut.extend_ref(sorted_hashed_state.as_ref());
-        }
-        {
-            let nodes_mut = Arc::make_mut(&mut overlay.nodes);
-            nodes_mut.extend_ref(sorted_trie_updates.as_ref());
-        }
-
-        ComputedTrieData::with_trie_input(
-            sorted_hashed_state,
-            sorted_trie_updates,
-            anchor_hash,
-            Arc::new(overlay),
-        )
-    }
-
-    /// Compute trie data from inputs and mark the handle as ready.
-    ///
-    /// Sorts and builds trie input from the provided state and updates, then marks the handle
-    /// as ready so that [`Self::wait_cloned`] returns immediately without fallback computation.
-    ///
-    /// # Arguments
-    /// * `hashed_state` - Unsorted hashed post-state from execution
-    /// * `trie_updates` - Unsorted trie updates from state root computation
-    /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
-    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
-    pub fn compute_set_ready(
-        &self,
-        hashed_state: &HashedPostState,
-        trie_updates: &TrieUpdates,
-        anchor_hash: B256,
-        ancestors: &[DeferredTrieData],
-    ) {
-        let bundle =
-            Self::sort_and_build_trie_input(hashed_state, trie_updates, anchor_hash, ancestors);
-        self.set_ready(bundle);
-    }
-
     /// Populate the handle with the computed trie data.
     ///
     /// Safe to call multiple times; only the first value is stored (first-write-wins).
@@ -176,70 +93,117 @@ impl DeferredTrieData {
         }
     }
 
+    /// Compute trie data from pending inputs and mark the handle as ready.
+    ///
+    /// This method is designed for background tasks. It:
+    /// 1. Grabs inputs under lock (cheap - just Arc clones)
+    /// 2. Drops lock before expensive computation
+    /// 3. Stores result (first-write-wins)
+    ///
+    /// For ready handles, this is a no-op.
+    pub fn compute_and_set_ready(&self) {
+        // Grab inputs under lock, then drop lock before expensive computation
+        let inputs = {
+            let state = self.state.lock();
+            match &*state {
+                DeferredState::Ready(_) => return, // Already done
+                DeferredState::Pending(inputs) => inputs.clone(),
+            }
+        }; // Lock dropped here
+
+        // Compute OUTSIDE the lock - no contention
+        let computed = Self::compute_trie_data(
+            &inputs.hashed_state,
+            &inputs.trie_updates,
+            inputs.anchor_hash,
+            inputs.parent.as_ref(),
+        );
+
+        // Store result (first-write-wins, no clone needed since we don't return it)
+        self.set_ready(computed);
+    }
+
     /// Returns trie data, computing synchronously if the async task hasn't completed.
     ///
-    /// Uses a try-lock approach:
-    /// - If the async task has completed (`Ready`), returns the cached result.
-    /// - If pending, computes synchronously from stored inputs.
+    /// Uses a lock-free compute pattern:
+    /// 1. Acquire lock briefly to check state or grab inputs
+    /// 2. Drop lock before expensive computation
+    /// 3. Store result (first-write-wins)
     ///
-    /// This design eliminates deadlock risk: we never block waiting for another task.
-    /// All code paths are guaranteed to return (either cached or computed result).
+    /// This design minimizes lock contention: the lock is only held for cheap Arc clones,
+    /// not during expensive sorting/merging operations.
     pub fn wait_cloned(&self) -> ComputedTrieData {
-        // Try to get the lock
-        if let Some(mut state) = self.state.try_lock() {
+        // Step 1: Quick lock to check state or grab inputs
+        let inputs = {
+            let state = self.state.lock();
             match &*state {
-                // The async task has completed, return the cached result.
                 DeferredState::Ready(bundle) => {
                     DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
                     return bundle.clone();
                 }
-                // The async task is still pending, compute the trie data synchronously from the
-                // stored inputs.
                 DeferredState::Pending(inputs) => {
                     DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
-                    let computed = Self::sort_and_build_trie_input(
-                        &inputs.hashed_state,
-                        &inputs.trie_updates,
-                        inputs.anchor_hash,
-                        &inputs.ancestors,
-                    );
-                    *state = DeferredState::Ready(computed.clone());
-                    return computed;
+                    inputs.clone() // Clone Arcs (cheap)
                 }
             }
-        }
+        }; // Lock DROPPED here!
 
-        // Lock is contended - another thread/task holds the mutex (either the async
-        // task calling set_ready(), or another waiter computing). We block until
-        // available.
-        //
-        // Deadlock is avoided as long as the provided ancestors form a true ancestor chain (a DAG):
-        // - Each block only waits on its ancestors (blocks on the path to the persisted root)
-        // - Sibling blocks (forks) are never in each other's ancestor lists
-        // - A block never waits on its descendants
-        // Given that invariant, circular wait dependencies are impossible. Supplying a cycle in the
-        // ancestor list would violate this assumption and could deadlock.
-        let mut state = self.state.lock();
-        match &*state {
-            // The async task has completed, return the cached result.
-            DeferredState::Ready(bundle) => {
-                DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
-                bundle.clone()
-            }
-            // The async task is still pending, compute the trie data synchronously from the stored
-            // inputs.
-            DeferredState::Pending(inputs) => {
-                DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
-                let computed = Self::sort_and_build_trie_input(
-                    &inputs.hashed_state,
-                    &inputs.trie_updates,
-                    inputs.anchor_hash,
-                    &inputs.ancestors,
-                );
-                *state = DeferredState::Ready(computed.clone());
-                computed
-            }
-        }
+        // Step 2: Expensive compute WITHOUT holding lock
+        let computed = Self::compute_trie_data(
+            &inputs.hashed_state,
+            &inputs.trie_updates,
+            inputs.anchor_hash,
+            inputs.parent.as_ref(),
+        );
+
+        // Step 3: Store result (re-acquire lock briefly, first-write-wins)
+        self.set_ready(computed.clone());
+
+        computed
+    }
+
+    /// Sort block execution outputs and build a [`TrieInputSorted`] overlay.
+    ///
+    /// The trie input overlay accumulates sorted hashed state (account/storage changes) and
+    /// trie node updates. With parent-only storage, the parent's `trie_input` already contains
+    /// all grandparent data, enabling O(1) merge per block instead of O(N).
+    ///
+    /// # Process
+    /// 1. Sort the current block's hashed state and trie updates
+    /// 2. Get parent's `trie_input` (already contains cumulative grandparent data)
+    /// 3. Extend the parent overlay with this block's sorted data
+    ///
+    /// # Arguments
+    /// * `hashed_state` - Unsorted hashed post-state (account/storage changes) from execution
+    /// * `trie_updates` - Unsorted trie node updates from state root computation
+    /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
+    /// * `parent` - Parent block's deferred trie data (contains cumulative overlay)
+    fn compute_trie_data(
+        hashed_state: &HashedPostState,
+        trie_updates: &TrieUpdates,
+        anchor_hash: B256,
+        parent: Option<&Self>,
+    ) -> ComputedTrieData {
+        // Sort the current block's hashed state and trie updates
+        let sorted_hashed_state = Arc::new(hashed_state.clone().into_sorted());
+        let sorted_trie_updates = Arc::new(trie_updates.clone().into_sorted());
+
+        // Get parent's trie_input (already contains all grandparent data) - O(1)
+        let mut overlay = parent
+            .and_then(|p| p.wait_cloned().trie_input().cloned())
+            .map(|input| (*input).clone())
+            .unwrap_or_default();
+
+        // Extend overlay with current block's sorted data
+        Arc::make_mut(&mut overlay.state).extend_ref(sorted_hashed_state.as_ref());
+        Arc::make_mut(&mut overlay.nodes).extend_ref(sorted_trie_updates.as_ref());
+
+        ComputedTrieData::with_trie_input(
+            sorted_hashed_state,
+            sorted_trie_updates,
+            anchor_hash,
+            Arc::new(overlay),
+        )
     }
 }
 
@@ -307,8 +271,9 @@ struct PendingInputs {
     trie_updates: Arc<TrieUpdates>,
     /// The persisted ancestor hash this trie input is anchored to.
     anchor_hash: B256,
-    /// Deferred trie data from ancestor blocks for merging.
-    ancestors: Vec<DeferredTrieData>,
+    /// Parent block's deferred trie data. Parent's `trie_input` already contains
+    /// cumulative grandparent data, enabling O(1) merge per block.
+    parent: Option<DeferredTrieData>,
 }
 
 /// Trie input bundled with its anchor hash.
@@ -351,7 +316,7 @@ mod tests {
             Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
             anchor,
-            Vec::new(),
+            None,
         )
     }
 
@@ -524,12 +489,12 @@ mod tests {
         );
     }
 
-    /// Tests that ancestor trie data is merged during fallback computation and that the
-    /// resulting `ComputedTrieData` uses the current block's anchor hash, not the ancestor's.
+    /// Tests that parent trie data is used during fallback computation and that the
+    /// resulting `ComputedTrieData` uses the current block's anchor hash, not the parent's.
     #[test]
-    fn ancestors_are_merged() {
-        // Create ancestor with some data
-        let ancestor_bundle = ComputedTrieData {
+    fn parent_trie_data_is_used() {
+        // Create parent with some data
+        let parent_bundle = ComputedTrieData {
             hashed_state: Arc::default(),
             trie_updates: Arc::default(),
             anchored_trie_input: Some(AnchoredTrieInput {
@@ -537,60 +502,61 @@ mod tests {
                 trie_input: Arc::new(TrieInputSorted::default()),
             }),
         };
-        let ancestor = DeferredTrieData::ready(ancestor_bundle);
+        let parent = DeferredTrieData::ready(parent_bundle);
 
-        // Create pending with ancestor
+        // Create pending with parent
         let deferred = DeferredTrieData::pending(
             Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
             B256::with_last_byte(2),
-            vec![ancestor],
+            Some(parent),
         );
 
         let result = deferred.wait_cloned();
-        // Should have the current block's anchor, not the ancestor's
+        // Should have the current block's anchor, not the parent's
         assert_eq!(result.anchor_hash(), Some(B256::with_last_byte(2)));
     }
 
-    /// Ensures ancestor overlays are merged oldest -> newest so latest state wins (no overwrite by
-    /// older ancestors).
+    /// Tests that parent state is extended with current block's state.
     #[test]
-    fn ancestors_merge_in_chronological_order() {
+    fn parent_state_is_extended() {
         let key = B256::with_last_byte(1);
-        // Oldest ancestor sets nonce to 1
-        let oldest_state = HashedPostStateSorted::new(
+
+        // Parent has nonce 1
+        let parent_state = HashedPostStateSorted::new(
             vec![(key, Some(Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None }))],
             B256Map::default(),
         );
-        // Newest ancestor overwrites nonce to 2
-        let newest_state = HashedPostStateSorted::new(
-            vec![(key, Some(Account { nonce: 2, balance: U256::ZERO, bytecode_hash: None }))],
-            B256Map::default(),
-        );
-
-        let oldest = ComputedTrieData {
-            hashed_state: Arc::new(oldest_state),
+        let parent_overlay =
+            TrieInputSorted { state: Arc::new(parent_state), ..Default::default() };
+        let parent_bundle = ComputedTrieData {
+            hashed_state: Arc::default(),
             trie_updates: Arc::default(),
-            anchored_trie_input: None,
+            anchored_trie_input: Some(AnchoredTrieInput {
+                anchor_hash: B256::ZERO,
+                trie_input: Arc::new(parent_overlay),
+            }),
         };
-        let newest = ComputedTrieData {
-            hashed_state: Arc::new(newest_state),
-            trie_updates: Arc::default(),
-            anchored_trie_input: None,
-        };
+        let parent = DeferredTrieData::ready(parent_bundle);
 
-        // Pass ancestors oldest -> newest; newest should take precedence
+        // Current block updates nonce to 2
+        let mut current_state = HashedPostState::default();
+        current_state
+            .accounts
+            .insert(key, Some(Account { nonce: 2, balance: U256::ZERO, bytecode_hash: None }));
+
         let deferred = DeferredTrieData::pending(
-            Arc::new(HashedPostState::default()),
+            Arc::new(current_state),
             Arc::new(TrieUpdates::default()),
             B256::ZERO,
-            vec![DeferredTrieData::ready(oldest), DeferredTrieData::ready(newest)],
+            Some(parent),
         );
 
         let result = deferred.wait_cloned();
         let overlay_state = &result.anchored_trie_input.as_ref().unwrap().trie_input.state.accounts;
         assert_eq!(overlay_state.len(), 1);
         let (_, account) = &overlay_state[0];
+        // Current block's state should take precedence
         assert_eq!(account.unwrap().nonce, 2);
     }
 }
