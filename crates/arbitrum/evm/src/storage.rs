@@ -1,6 +1,7 @@
 use alloy_primitives::{Address, B256, U256, keccak256, address};
 use revm::Database;
 use revm_database::states::plain_account::StorageSlot;
+use revm_state::AccountInfo;
 
 /// ArbOS State address - the fictional account that stores ArbOS state
 /// This is address 0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF (as per Go nitro)
@@ -30,6 +31,45 @@ fn ensure_arbos_account_loaded<D: Database>(state: &mut revm::database::State<D>
     // Load the ArbOS account into the cache (if not already there)
     // This is the proper way to ensure the account is available for storage operations
     let _ = state.load_cache_account(ARBOS_STATE_ADDRESS);
+}
+
+/// Helper function to write storage for the ArbOS account using proper cache and transition mechanism.
+///
+/// This uses CacheAccount::change() which handles the case where the account doesn't exist yet.
+/// The change() method:
+/// 1. Takes the previous account info (even if None for non-existing accounts)
+/// 2. Extends storage with new values
+/// 3. Creates a PlainAccount with proper info and storage
+/// 4. Returns the transition for apply_transition()
+fn write_arbos_storage<D: Database>(
+    state: &mut revm::database::State<D>,
+    slot: U256,
+    value: U256,
+) {
+    ensure_arbos_account_loaded(state);
+    let arbos_addr = ARBOS_STATE_ADDRESS;
+
+    // Get original value for proper change tracking
+    let original_value = state.storage(arbos_addr, slot).unwrap_or(U256::ZERO);
+
+    // Create storage change entry
+    let mut storage_changes = alloy_primitives::map::HashMap::default();
+    storage_changes.insert(slot, StorageSlot::new_changed(original_value, value));
+
+    // Get the cached account and use change() which handles None account case
+    if let Some(cached_acc) = state.cache.accounts.get_mut(&arbos_addr) {
+        // Get current account info or create default empty info
+        let account_info = cached_acc.account
+            .as_ref()
+            .map(|a| a.info.clone())
+            .unwrap_or_else(|| AccountInfo::default());
+
+        // Use change() which properly handles both existing and non-existing accounts
+        let transition = cached_acc.change(account_info, storage_changes);
+
+        // Apply the transition to update bundle state
+        state.apply_transition(vec![(arbos_addr, transition)]);
+    }
 }
 
 
@@ -74,45 +114,10 @@ impl<D: Database> Storage<D> {
 
     pub fn set_by_uint64(&self, offset: u64, value: B256) -> Result<(), ()> {
         let slot = self.compute_slot(offset);
+        let value_u256 = U256::from_be_bytes(value.0);
         unsafe {
             let state = &mut *self.state;
-            ensure_arbos_account_loaded(state);
-            let arbos_addr = ARBOS_STATE_ADDRESS;
-            let value_u256 = U256::from_be_bytes(value.0);
-
-            // Get original value from database for proper tracking
-            let original_value = state.storage(arbos_addr, slot).unwrap_or(U256::ZERO);
-
-            // Update cache.accounts with the storage change
-            if let Some(cached_acc) = state.cache.accounts.get_mut(&arbos_addr) {
-                let previous_status = cached_acc.status;
-                let previous_info = cached_acc.account.as_ref().map(|a| a.info.clone());
-
-                // Update the cached account's storage (PlainStorage = HashMap<U256, U256>)
-                if let Some(ref mut account) = cached_acc.account {
-                    account.storage.insert(slot, value_u256);
-                }
-
-                let had_no_nonce_and_code = previous_info
-                    .as_ref()
-                    .map(|info| info.has_no_code_and_nonce())
-                    .unwrap_or_default();
-                cached_acc.status = cached_acc.status.on_changed(had_no_nonce_and_code);
-
-                // Create and apply the transition with storage change
-                let mut storage_changes = alloy_primitives::map::HashMap::default();
-                storage_changes.insert(slot, StorageSlot::new_changed(original_value, value_u256));
-
-                let transition = revm::database::TransitionAccount {
-                    info: cached_acc.account.as_ref().map(|a| a.info.clone()),
-                    status: cached_acc.status,
-                    previous_info,
-                    previous_status,
-                    storage: storage_changes,
-                    storage_was_destroyed: false,
-                };
-                state.apply_transition(vec![(arbos_addr, transition)]);
-            }
+            write_arbos_storage(state, slot, value_u256);
             Ok(())
         }
     }
@@ -143,46 +148,11 @@ impl<D: Database> Storage<D> {
     }
 
     pub fn set(&self, key: B256, value: B256) -> Result<(), ()> {
+        let slot = U256::from_be_bytes(key.0);
+        let value_u256 = U256::from_be_bytes(value.0);
         unsafe {
             let state = &mut *self.state;
-            ensure_arbos_account_loaded(state);
-            let arbos_addr = ARBOS_STATE_ADDRESS;
-            let slot = U256::from_be_bytes(key.0);
-            let value_u256 = U256::from_be_bytes(value.0);
-
-            // Get original value from database for proper tracking
-            let original_value = state.storage(arbos_addr, slot).unwrap_or(U256::ZERO);
-
-            // Update cache.accounts with the storage change
-            if let Some(cached_acc) = state.cache.accounts.get_mut(&arbos_addr) {
-                let previous_status = cached_acc.status;
-                let previous_info = cached_acc.account.as_ref().map(|a| a.info.clone());
-
-                // Update the cached account's storage (PlainStorage = HashMap<U256, U256>)
-                if let Some(ref mut account) = cached_acc.account {
-                    account.storage.insert(slot, value_u256);
-                }
-
-                let had_no_nonce_and_code = previous_info
-                    .as_ref()
-                    .map(|info| info.has_no_code_and_nonce())
-                    .unwrap_or_default();
-                cached_acc.status = cached_acc.status.on_changed(had_no_nonce_and_code);
-
-                // Create and apply the transition with storage change
-                let mut storage_changes = alloy_primitives::map::HashMap::default();
-                storage_changes.insert(slot, StorageSlot::new_changed(original_value, value_u256));
-
-                let transition = revm::database::TransitionAccount {
-                    info: cached_acc.account.as_ref().map(|a| a.info.clone()),
-                    status: cached_acc.status,
-                    previous_info,
-                    previous_status,
-                    storage: storage_changes,
-                    storage_was_destroyed: false,
-                };
-                state.apply_transition(vec![(arbos_addr, transition)]);
-            }
+            write_arbos_storage(state, slot, value_u256);
             Ok(())
         }
     }
@@ -252,45 +222,10 @@ impl<D: Database> StorageBackedUint64<D> {
     }
 
     pub fn set(&self, value: u64) -> Result<(), ()> {
+        let value_u256 = U256::from(value);
         unsafe {
             let state = &mut *self.storage;
-            ensure_arbos_account_loaded(state);
-            let arbos_addr = ARBOS_STATE_ADDRESS;
-            let value_u256 = U256::from(value);
-
-            // Get original value from database for proper tracking
-            let original_value = state.storage(arbos_addr, self.slot).unwrap_or(U256::ZERO);
-
-            // Update cache.accounts with the storage change
-            if let Some(cached_acc) = state.cache.accounts.get_mut(&arbos_addr) {
-                let previous_status = cached_acc.status;
-                let previous_info = cached_acc.account.as_ref().map(|a| a.info.clone());
-
-                // Update the cached account's storage (PlainStorage = HashMap<U256, U256>)
-                if let Some(ref mut account) = cached_acc.account {
-                    account.storage.insert(self.slot, value_u256);
-                }
-
-                let had_no_nonce_and_code = previous_info
-                    .as_ref()
-                    .map(|info| info.has_no_code_and_nonce())
-                    .unwrap_or_default();
-                cached_acc.status = cached_acc.status.on_changed(had_no_nonce_and_code);
-
-                // Create and apply the transition with storage change
-                let mut storage_changes = alloy_primitives::map::HashMap::default();
-                storage_changes.insert(self.slot, StorageSlot::new_changed(original_value, value_u256));
-
-                let transition = revm::database::TransitionAccount {
-                    info: cached_acc.account.as_ref().map(|a| a.info.clone()),
-                    status: cached_acc.status,
-                    previous_info,
-                    previous_status,
-                    storage: storage_changes,
-                    storage_was_destroyed: false,
-                };
-                state.apply_transition(vec![(arbos_addr, transition)]);
-            }
+            write_arbos_storage(state, self.slot, value_u256);
             Ok(())
         }
     }
@@ -341,42 +276,7 @@ impl<D: Database> StorageBackedBigUint<D> {
     pub fn set(&self, value: U256) -> Result<(), ()> {
         unsafe {
             let state = &mut *self.storage;
-            ensure_arbos_account_loaded(state);
-            let arbos_addr = ARBOS_STATE_ADDRESS;
-
-            // Get original value from database for proper tracking
-            let original_value = state.storage(arbos_addr, self.slot).unwrap_or(U256::ZERO);
-
-            // Update cache.accounts with the storage change
-            if let Some(cached_acc) = state.cache.accounts.get_mut(&arbos_addr) {
-                let previous_status = cached_acc.status;
-                let previous_info = cached_acc.account.as_ref().map(|a| a.info.clone());
-
-                // Update the cached account's storage (PlainStorage = HashMap<U256, U256>)
-                if let Some(ref mut account) = cached_acc.account {
-                    account.storage.insert(self.slot, value);
-                }
-
-                let had_no_nonce_and_code = previous_info
-                    .as_ref()
-                    .map(|info| info.has_no_code_and_nonce())
-                    .unwrap_or_default();
-                cached_acc.status = cached_acc.status.on_changed(had_no_nonce_and_code);
-
-                // Create and apply the transition with storage change
-                let mut storage_changes = alloy_primitives::map::HashMap::default();
-                storage_changes.insert(self.slot, StorageSlot::new_changed(original_value, value));
-
-                let transition = revm::database::TransitionAccount {
-                    info: cached_acc.account.as_ref().map(|a| a.info.clone()),
-                    status: cached_acc.status,
-                    previous_info,
-                    previous_status,
-                    storage: storage_changes,
-                    storage_was_destroyed: false,
-                };
-                state.apply_transition(vec![(arbos_addr, transition)]);
-            }
+            write_arbos_storage(state, self.slot, value);
             Ok(())
         }
     }
@@ -433,47 +333,12 @@ impl<D: Database> StorageBackedAddress<D> {
     }
 
     pub fn set(&self, value: Address) -> Result<(), ()> {
+        let mut value_bytes = [0u8; 32];
+        value_bytes[12..32].copy_from_slice(value.as_slice());
+        let value_u256 = U256::from_be_bytes(value_bytes);
         unsafe {
             let state = &mut *self.storage;
-            ensure_arbos_account_loaded(state);
-            let arbos_addr = ARBOS_STATE_ADDRESS;
-            let mut value_bytes = [0u8; 32];
-            value_bytes[12..32].copy_from_slice(value.as_slice());
-            let value_u256 = U256::from_be_bytes(value_bytes);
-
-            // Get original value from database for proper tracking
-            let original_value = state.storage(arbos_addr, self.slot).unwrap_or(U256::ZERO);
-
-            // Update cache.accounts with the storage change
-            if let Some(cached_acc) = state.cache.accounts.get_mut(&arbos_addr) {
-                let previous_status = cached_acc.status;
-                let previous_info = cached_acc.account.as_ref().map(|a| a.info.clone());
-
-                // Update the cached account's storage (PlainStorage = HashMap<U256, U256>)
-                if let Some(ref mut account) = cached_acc.account {
-                    account.storage.insert(self.slot, value_u256);
-                }
-
-                let had_no_nonce_and_code = previous_info
-                    .as_ref()
-                    .map(|info| info.has_no_code_and_nonce())
-                    .unwrap_or_default();
-                cached_acc.status = cached_acc.status.on_changed(had_no_nonce_and_code);
-
-                // Create and apply the transition with storage change
-                let mut storage_changes = alloy_primitives::map::HashMap::default();
-                storage_changes.insert(self.slot, StorageSlot::new_changed(original_value, value_u256));
-
-                let transition = revm::database::TransitionAccount {
-                    info: cached_acc.account.as_ref().map(|a| a.info.clone()),
-                    status: cached_acc.status,
-                    previous_info,
-                    previous_status,
-                    storage: storage_changes,
-                    storage_was_destroyed: false,
-                };
-                state.apply_transition(vec![(arbos_addr, transition)]);
-            }
+            write_arbos_storage(state, self.slot, value_u256);
             Ok(())
         }
     }
