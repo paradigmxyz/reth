@@ -171,8 +171,9 @@ impl DefaultArbOsHooks {
         let slot = U256::from_be_bytes(prev_hash.0);
         let value_u256 = U256::from_be_bytes(prev_hash.0);
 
-        // Get original value for proper change tracking
-        let original_value = state_db.storage(HISTORY_STORAGE_ADDRESS, slot).unwrap_or(U256::ZERO);
+        // Get original value from DATABASE directly for proper change tracking.
+        // This ensures consistent original values even if slot is written multiple times.
+        let original_value = state_db.database.storage(HISTORY_STORAGE_ADDRESS, slot).unwrap_or(U256::ZERO);
 
         // Create storage change entry
         let mut storage_changes = alloy_primitives::map::HashMap::default();

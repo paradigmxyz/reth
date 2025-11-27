@@ -41,6 +41,11 @@ fn ensure_arbos_account_loaded<D: Database>(state: &mut revm::database::State<D>
 /// 2. Extends storage with new values
 /// 3. Creates a PlainAccount with proper info and storage
 /// 4. Returns the transition for apply_transition()
+///
+/// IMPORTANT: We get original_value from the DATABASE, not from the cache. This ensures that
+/// when multiple writes happen to the same slot, the original value stays consistent (from DB).
+/// If we used state.storage() it could return a cached value that we already wrote, causing
+/// the TransitionAccount::update() logic to incorrectly remove entries.
 fn write_arbos_storage<D: Database>(
     state: &mut revm::database::State<D>,
     slot: U256,
@@ -49,8 +54,10 @@ fn write_arbos_storage<D: Database>(
     ensure_arbos_account_loaded(state);
     let arbos_addr = ARBOS_STATE_ADDRESS;
 
-    // Get original value for proper change tracking
-    let original_value = state.storage(arbos_addr, slot).unwrap_or(U256::ZERO);
+    // Get original value from the DATABASE directly, not from cache.
+    // This is important because state.storage() might return a cached value
+    // that we already wrote, which would cause issues with transition tracking.
+    let original_value = state.database.storage(arbos_addr, slot).unwrap_or(U256::ZERO);
 
     // Create storage change entry
     let mut storage_changes = alloy_primitives::map::HashMap::default();
