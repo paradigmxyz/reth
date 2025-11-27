@@ -39,9 +39,17 @@ use crate::execute::{DefaultArbOsHooks, ArbTxProcessorState, ArbStartTxContext, 
 // This is critical because Arbitrum is post-merge from genesis and should NOT give block rewards.
 // Using EthSpec::mainnet() would cause 5 ETH to be given to the coinbase on each block!
 use alloy_hardforks::{EthereumChainHardforks, EthereumHardfork, EthereumHardforks, ForkCondition};
+// Import Arbitrum Sepolia hardfork timestamps
+use alloy_hardforks::arbitrum::{
+    ARBITRUM_SEPOLIA_SHANGHAI_TIMESTAMP,
+    ARBITRUM_SEPOLIA_CANCUN_TIMESTAMP,
+    ARBITRUM_SEPOLIA_PRAGUE_TIMESTAMP,
+};
 
-/// Arbitrum EthSpec with all hardforks up to Cancun active from block 0.
-/// This prevents block rewards from being given since Paris is active.
+/// Arbitrum EthSpec with correct hardfork timings for Arbitrum Sepolia.
+/// - Paris (and all prior hardforks) active from block 0 - prevents block rewards
+/// - Shanghai at timestamp 1706634000 (block 10653737)
+/// - Cancun at timestamp 1709229600 (block 18683405)
 #[derive(Debug, Clone)]
 pub struct ArbEthSpec {
     hardforks: EthereumChainHardforks,
@@ -54,9 +62,10 @@ impl Default for ArbEthSpec {
 }
 
 impl ArbEthSpec {
-    /// Creates an ArbEthSpec for Arbitrum Sepolia - all hardforks up to Cancun at block 0
+    /// Creates an ArbEthSpec for Arbitrum Sepolia with correct hardfork timings
     pub fn arbitrum_sepolia() -> Self {
         // Create hardforks with Paris at block 0 (critical to prevent block rewards!)
+        // Shanghai, Cancun, Prague at their respective timestamps
         let hardforks = EthereumChainHardforks::new([
             (EthereumHardfork::Frontier, ForkCondition::Block(0)),
             (EthereumHardfork::Homestead, ForkCondition::Block(0)),
@@ -78,8 +87,10 @@ impl ArbEthSpec {
                 fork_block: Some(0),
                 total_difficulty: alloy_primitives::U256::ZERO,
             }),
-            (EthereumHardfork::Shanghai, ForkCondition::Timestamp(0)),
-            (EthereumHardfork::Cancun, ForkCondition::Timestamp(0)),
+            // Use correct Arbitrum Sepolia timestamps for post-merge hardforks
+            (EthereumHardfork::Shanghai, ForkCondition::Timestamp(ARBITRUM_SEPOLIA_SHANGHAI_TIMESTAMP)),
+            (EthereumHardfork::Cancun, ForkCondition::Timestamp(ARBITRUM_SEPOLIA_CANCUN_TIMESTAMP)),
+            (EthereumHardfork::Prague, ForkCondition::Timestamp(ARBITRUM_SEPOLIA_PRAGUE_TIMESTAMP)),
         ]);
         Self { hardforks }
     }
