@@ -16,6 +16,8 @@ mod index_account_history;
 mod index_storage_history;
 /// Stage for computing state root.
 mod merkle;
+/// Stage for computing merkle changesets.
+mod merkle_changesets;
 mod prune;
 /// The sender recovery stage.
 mod sender_recovery;
@@ -32,6 +34,7 @@ pub use headers::*;
 pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
+pub use merkle_changesets::*;
 pub use prune::*;
 pub use sender_recovery::*;
 pub use tx_lookup::*;
@@ -225,7 +228,7 @@ mod tests {
 
         // In an unpruned configuration there is 1 receipt, 3 changed accounts and 1 changed
         // storage.
-        let mut prune = PruneModes::none();
+        let mut prune = PruneModes::default();
         check_pruning(test_db.factory.clone(), prune.clone(), 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Full);
@@ -300,7 +303,6 @@ mod tests {
         db: &TestStageDB,
         prune_count: usize,
         segment: StaticFileSegment,
-        is_full_node: bool,
         expected: Option<PipelineTarget>,
     ) {
         // We recreate the static file provider, since consistency heals are done on fetching the
@@ -327,7 +329,7 @@ mod tests {
         static_file_provider = StaticFileProvider::read_write(static_file_provider.path()).unwrap();
         assert!(matches!(
             static_file_provider
-                .check_consistency(&db.factory.database_provider_ro().unwrap(), is_full_node,),
+                .check_consistency(&db.factory.database_provider_ro().unwrap()),
             Ok(e) if e == expected
         ));
     }
@@ -349,7 +351,7 @@ mod tests {
         assert!(matches!(
             db.factory
                 .static_file_provider()
-                .check_consistency(&db.factory.database_provider_ro().unwrap(), false,),
+                .check_consistency(&db.factory.database_provider_ro().unwrap(),),
             Ok(e) if e == expected
         ));
     }
@@ -382,7 +384,7 @@ mod tests {
         assert!(matches!(
             db.factory
                 .static_file_provider()
-                .check_consistency(&db.factory.database_provider_ro().unwrap(), false),
+                .check_consistency(&db.factory.database_provider_ro().unwrap()),
             Ok(e) if e == expected
         ));
     }
@@ -393,36 +395,40 @@ mod tests {
         let db_provider = db.factory.database_provider_ro().unwrap();
 
         assert!(matches!(
-            db.factory.static_file_provider().check_consistency(&db_provider, false),
+            db.factory.static_file_provider().check_consistency(&db_provider),
             Ok(None)
         ));
     }
 
     #[test]
     fn test_consistency_no_commit_prune() {
-        let db = seed_data(90).unwrap();
-        let full_node = true;
-        let archive_node = !full_node;
+        // Test full node with receipt pruning
+        let mut db_full = seed_data(90).unwrap();
+        db_full.factory = db_full.factory.with_prune_modes(PruneModes {
+            receipts: Some(PruneMode::Before(1)),
+            ..Default::default()
+        });
 
         // Full node does not use receipts, therefore doesn't check for consistency on receipts
         // segment
-        simulate_behind_checkpoint_corruption(&db, 1, StaticFileSegment::Receipts, full_node, None);
+        simulate_behind_checkpoint_corruption(&db_full, 1, StaticFileSegment::Receipts, None);
+
+        // Test archive node without receipt pruning
+        let db_archive = seed_data(90).unwrap();
 
         // there are 2 to 3 transactions per block. however, if we lose one tx, we need to unwind to
         // the previous block.
         simulate_behind_checkpoint_corruption(
-            &db,
+            &db_archive,
             1,
             StaticFileSegment::Receipts,
-            archive_node,
             Some(PipelineTarget::Unwind(88)),
         );
 
         simulate_behind_checkpoint_corruption(
-            &db,
+            &db_archive,
             3,
             StaticFileSegment::Headers,
-            archive_node,
             Some(PipelineTarget::Unwind(86)),
         );
     }

@@ -116,8 +116,6 @@ pub struct TxPool<T: TransactionOrdering> {
     all_transactions: AllTransactions<T::Transaction>,
     /// Transaction pool metrics
     metrics: TxPoolMetrics,
-    /// The last update kind that was applied to the pool.
-    latest_update_kind: Option<PoolUpdateKind>,
 }
 
 // === impl TxPool ===
@@ -137,7 +135,6 @@ impl<T: TransactionOrdering> TxPool<T> {
             all_transactions: AllTransactions::new(&config),
             config,
             metrics: Default::default(),
-            latest_update_kind: None,
         }
     }
 
@@ -646,7 +643,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         block_info: BlockInfo,
         mined_transactions: Vec<TxHash>,
         changed_senders: FxHashMap<SenderId, SenderInfo>,
-        update_kind: PoolUpdateKind,
+        _update_kind: PoolUpdateKind,
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
         // update block info
         let block_hash = block_info.last_seen_block_hash;
@@ -682,9 +679,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.update_transaction_type_metrics();
         self.metrics.performed_state_updates.increment(1);
 
-        // Update the latest update kind
-        self.latest_update_kind = Some(update_kind);
-
         OnNewCanonicalStateOutcome {
             block_hash,
             mined: mined_transactions,
@@ -714,6 +708,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let mut eip1559_count = 0;
         let mut eip4844_count = 0;
         let mut eip7702_count = 0;
+        let mut other_count = 0;
 
         for tx in self.all_transactions.transactions_iter() {
             match tx.transaction.ty() {
@@ -722,7 +717,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 EIP1559_TX_TYPE_ID => eip1559_count += 1,
                 EIP4844_TX_TYPE_ID => eip4844_count += 1,
                 EIP7702_TX_TYPE_ID => eip7702_count += 1,
-                _ => {} // Ignore other types
+                _ => other_count += 1,
             }
         }
 
@@ -731,6 +726,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.total_eip1559_transactions.set(eip1559_count as f64);
         self.metrics.total_eip4844_transactions.set(eip4844_count as f64);
         self.metrics.total_eip7702_transactions.set(eip7702_count as f64);
+        self.metrics.total_other_transactions.set(other_count as f64);
     }
 
     pub(crate) fn add_transaction(

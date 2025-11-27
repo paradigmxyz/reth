@@ -1,4 +1,5 @@
-use std::{fmt::Debug, marker::PhantomData, str::FromStr};
+use core::fmt;
+use std::{fmt::Debug, str::FromStr};
 
 use super::{
     PeerMetadata, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
@@ -9,11 +10,11 @@ use crate::transactions::constants::tx_fetcher::{
     DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
     DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
 };
+use alloy_eips::eip2718::IsTyped2718;
 use alloy_primitives::B256;
 use derive_more::{Constructor, Display};
-
 use reth_eth_wire::NetworkPrimitives;
-use reth_ethereum_primitives::TxType;
+use reth_network_types::peers::kind::PeerKind;
 
 /// Configuration for managing transactions within the network.
 #[derive(Debug, Clone)]
@@ -26,6 +27,9 @@ pub struct TransactionsManagerConfig {
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
+    /// Which peers we accept incoming transactions or announcements from.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub ingress_policy: TransactionIngressPolicy,
 }
 
 impl Default for TransactionsManagerConfig {
@@ -34,6 +38,7 @@ impl Default for TransactionsManagerConfig {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             propagation_mode: TransactionPropagationMode::default(),
+            ingress_policy: TransactionIngressPolicy::default(),
         }
     }
 }
@@ -122,17 +127,19 @@ impl Default for TransactionFetcherConfig {
 }
 
 /// A policy defining which peers pending transactions are gossiped to.
-pub trait TransactionPropagationPolicy: Send + Sync + Unpin + 'static {
+pub trait TransactionPropagationPolicy<N: NetworkPrimitives>:
+    Send + Sync + Unpin + fmt::Debug + 'static
+{
     /// Filter a given peer based on the policy.
     ///
     /// This determines whether transactions can be propagated to this peer.
-    fn can_propagate<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool;
+    fn can_propagate(&self, peer: &mut PeerMetadata<N>) -> bool;
 
     /// A callback on the policy when a new peer session is established.
-    fn on_session_established<N: NetworkPrimitives>(&mut self, peer: &mut PeerMetadata<N>);
+    fn on_session_established(&mut self, peer: &mut PeerMetadata<N>);
 
     /// A callback on the policy when a peer session is closed.
-    fn on_session_closed<N: NetworkPrimitives>(&mut self, peer: &mut PeerMetadata<N>);
+    fn on_session_closed(&mut self, peer: &mut PeerMetadata<N>);
 }
 
 /// Determines which peers pending transactions are propagated to.
@@ -150,8 +157,8 @@ pub enum TransactionPropagationKind {
     None,
 }
 
-impl TransactionPropagationPolicy for TransactionPropagationKind {
-    fn can_propagate<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool {
+impl<N: NetworkPrimitives> TransactionPropagationPolicy<N> for TransactionPropagationKind {
+    fn can_propagate(&self, peer: &mut PeerMetadata<N>) -> bool {
         match self {
             Self::All => true,
             Self::Trusted => peer.peer_kind.is_trusted(),
@@ -159,9 +166,9 @@ impl TransactionPropagationPolicy for TransactionPropagationKind {
         }
     }
 
-    fn on_session_established<N: NetworkPrimitives>(&mut self, _peer: &mut PeerMetadata<N>) {}
+    fn on_session_established(&mut self, _peer: &mut PeerMetadata<N>) {}
 
-    fn on_session_closed<N: NetworkPrimitives>(&mut self, _peer: &mut PeerMetadata<N>) {}
+    fn on_session_closed(&mut self, _peer: &mut PeerMetadata<N>) {}
 }
 
 impl FromStr for TransactionPropagationKind {
@@ -173,6 +180,48 @@ impl FromStr for TransactionPropagationKind {
             "Trusted" | "trusted" => Ok(Self::Trusted),
             "None" | "none" => Ok(Self::None),
             _ => Err(format!("Invalid transaction propagation policy: {s}")),
+        }
+    }
+}
+
+/// Determines which peers we will accept incoming transactions or announcements from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TransactionIngressPolicy {
+    /// Accept transactions from any peer.
+    #[default]
+    All,
+    /// Accept transactions only from trusted peers.
+    Trusted,
+    /// Drop all incoming transactions.
+    None,
+}
+
+impl TransactionIngressPolicy {
+    /// Returns true if the ingress policy allows the provided peer kind.
+    pub const fn allows(&self, peer_kind: PeerKind) -> bool {
+        match self {
+            Self::All => true,
+            Self::Trusted => peer_kind.is_trusted(),
+            Self::None => false,
+        }
+    }
+
+    /// Returns true if the ingress policy accepts transactions from any peer.
+    pub const fn allows_all(&self) -> bool {
+        matches!(self, Self::All)
+    }
+}
+
+impl FromStr for TransactionIngressPolicy {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "All" | "all" => Ok(Self::All),
+            "Trusted" | "trusted" => Ok(Self::Trusted),
+            "None" | "none" => Ok(Self::None),
+            _ => Err(format!("Invalid transaction ingress policy: {s}")),
         }
     }
 }
@@ -195,87 +244,65 @@ pub enum AnnouncementAcceptance {
 
 /// A policy that defines how to handle incoming transaction announcements,
 /// particularly concerning transaction types and other announcement metadata.
-pub trait AnnouncementFilteringPolicy: Send + Sync + Unpin + 'static {
+pub trait AnnouncementFilteringPolicy<N: NetworkPrimitives>:
+    Send + Sync + Unpin + fmt::Debug + 'static
+{
     /// Decides how to handle a transaction announcement based on its type, hash, and size.
     fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance;
 }
 
 /// A generic `AnnouncementFilteringPolicy` that enforces strict validation
 /// of transaction type based on a generic type `T`.
-#[derive(Debug, Clone)]
-pub struct TypedStrictFilter<T: TryFrom<u8> + Debug + Send + Sync + 'static>(PhantomData<T>);
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct TypedStrictFilter;
 
-impl<T: TryFrom<u8> + Debug + Send + Sync + 'static> Default for TypedStrictFilter<T> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<T> AnnouncementFilteringPolicy for TypedStrictFilter<T>
-where
-    T: TryFrom<u8> + Debug + Send + Sync + Unpin + 'static,
-    <T as TryFrom<u8>>::Error: Debug,
-{
+impl<N: NetworkPrimitives> AnnouncementFilteringPolicy<N> for TypedStrictFilter {
     fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance {
-        match T::try_from(ty) {
-            Ok(_valid_type) => AnnouncementAcceptance::Accept,
-            Err(e) => {
-                tracing::trace!(target: "net::tx::policy::strict_typed",
-                    type_param = %std::any::type_name::<T>(),
-                    %ty,
-                    %size,
-                    %hash,
-                    error = ?e,
-                    "Invalid or unrecognized transaction type byte. Rejecting entry and recommending peer penalization."
-                );
-                AnnouncementAcceptance::Reject { penalize_peer: true }
-            }
+        if N::PooledTransaction::is_type(ty) {
+            AnnouncementAcceptance::Accept
+        } else {
+            tracing::trace!(target: "net::tx::policy::strict_typed",
+                %ty,
+                %size,
+                %hash,
+                "Invalid or unrecognized transaction type byte. Rejecting entry and recommending peer penalization."
+            );
+            AnnouncementAcceptance::Reject { penalize_peer: true }
         }
     }
 }
 
 /// Type alias for a `TypedStrictFilter`. This is the default strict announcement filter.
-pub type StrictEthAnnouncementFilter = TypedStrictFilter<TxType>;
+pub type StrictEthAnnouncementFilter = TypedStrictFilter;
 
 /// An [`AnnouncementFilteringPolicy`] that permissively handles unknown type bytes
 /// based on a given type `T` using `T::try_from(u8)`.
 ///
 /// If `T::try_from(ty)` succeeds, the announcement is accepted. Otherwise, it's ignored.
-#[derive(Debug, Clone)]
-pub struct TypedRelaxedFilter<T: TryFrom<u8> + Debug + Send + Sync + 'static>(PhantomData<T>);
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct TypedRelaxedFilter;
 
-impl<T: TryFrom<u8> + Debug + Send + Sync + 'static> Default for TypedRelaxedFilter<T> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<T> AnnouncementFilteringPolicy for TypedRelaxedFilter<T>
-where
-    T: TryFrom<u8> + Debug + Send + Sync + Unpin + 'static,
-    <T as TryFrom<u8>>::Error: Debug,
-{
+impl<N: NetworkPrimitives> AnnouncementFilteringPolicy<N> for TypedRelaxedFilter {
     fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance {
-        match T::try_from(ty) {
-            Ok(_valid_type) => AnnouncementAcceptance::Accept,
-            Err(e) => {
-                tracing::trace!(target: "net::tx::policy::relaxed_typed",
-                    type_param = %std::any::type_name::<T>(),
-                    %ty,
-                    %size,
-                    %hash,
-                    error = ?e,
-                    "Unknown transaction type byte. Ignoring entry."
-                );
-                AnnouncementAcceptance::Ignore
-            }
+        if N::PooledTransaction::is_type(ty) {
+            AnnouncementAcceptance::Accept
+        } else {
+            tracing::trace!(target: "net::tx::policy::relaxed_typed",
+                %ty,
+                %size,
+                %hash,
+                "Unknown transaction type byte. Ignoring entry."
+            );
+            AnnouncementAcceptance::Ignore
         }
     }
 }
 
 /// Type alias for `TypedRelaxedFilter`. This filter accepts known Ethereum transaction types and
 /// ignores unknown ones without penalizing the peer.
-pub type RelaxedEthAnnouncementFilter = TypedRelaxedFilter<TxType>;
+pub type RelaxedEthAnnouncementFilter = TypedRelaxedFilter;
 
 #[cfg(test)]
 mod tests {

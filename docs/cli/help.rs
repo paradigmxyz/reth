@@ -235,7 +235,7 @@ fn cmd_summary(cmd: &Cmd, indent: usize) -> String {
     let cmd_s = cmd.to_string();
     let cmd_path = cmd_s.replace(" ", "/");
     let indent_string = " ".repeat(indent + (cmd.subcommands.len() * 2));
-    format!("{}- [`{}`](/cli/{})\n", indent_string, cmd_s, cmd_path)
+    format!("{}- [`{}`](./{}.mdx)\n", indent_string, cmd_s, cmd_path)
 }
 
 /// Overwrites the root SUMMARY.mdx file with the generated content.
@@ -268,11 +268,6 @@ fn preprocess_help(s: &str) -> Cow<'_, str> {
             (
                 r"(rpc.max-tracing-requests <COUNT>\n.*\n.*\n.*\n.*\n.*)\[default: \d+\]",
                 r"$1[default: <NUM CPU CORES-2>]",
-            ),
-            // Handle engine.max-proof-task-concurrency dynamic default
-            (
-                r"(engine\.max-proof-task-concurrency.*)\[default: \d+\]",
-                r"$1[default: <DYNAMIC: CPU cores * 8>]",
             ),
             // Handle engine.reserved-cpu-cores dynamic default
             (

@@ -580,7 +580,7 @@ mod tests {
                         ..Default::default()
                     },
                 );
-                self.db.insert_headers_with_td(blocks.iter().map(|block| block.sealed_header()))?;
+                self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data
                     {
@@ -772,8 +772,9 @@ mod tests {
                     *range.start()..*range.end() + 1,
                     |cursor, number| cursor.get_two::<HeaderWithHashMask<Header>>(number.into()),
                 )? {
-                    let (header, hash) = header?;
-                    self.headers.push_back(SealedHeader::new(header, hash));
+                    if let Some((header, hash)) = header? {
+                        self.headers.push_back(SealedHeader::new(header, hash));
+                    }
                 }
 
                 Ok(())

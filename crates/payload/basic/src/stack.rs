@@ -207,16 +207,16 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        match args.config.attributes {
-            Either::Left(ref left_attr) => {
+        let BuildArguments { cached_reads, config, cancel, best_payload } = args;
+        let PayloadConfig { parent_header, attributes } = config;
+
+        match attributes {
+            Either::Left(left_attr) => {
                 let left_args: BuildArguments<L::Attributes, L::BuiltPayload> = BuildArguments {
-                    cached_reads: args.cached_reads.clone(),
-                    config: PayloadConfig {
-                        parent_header: args.config.parent_header.clone(),
-                        attributes: left_attr.clone(),
-                    },
-                    cancel: args.cancel.clone(),
-                    best_payload: args.best_payload.clone().and_then(|payload| {
+                    cached_reads,
+                    config: PayloadConfig { parent_header, attributes: left_attr },
+                    cancel,
+                    best_payload: best_payload.and_then(|payload| {
                         if let Either::Left(p) = payload {
                             Some(p)
                         } else {
@@ -224,18 +224,14 @@ where
                         }
                     }),
                 };
-
                 self.left.try_build(left_args).map(|out| out.map_payload(Either::Left))
             }
-            Either::Right(ref right_attr) => {
+            Either::Right(right_attr) => {
                 let right_args = BuildArguments {
-                    cached_reads: args.cached_reads.clone(),
-                    config: PayloadConfig {
-                        parent_header: args.config.parent_header.clone(),
-                        attributes: right_attr.clone(),
-                    },
-                    cancel: args.cancel.clone(),
-                    best_payload: args.best_payload.clone().and_then(|payload| {
+                    cached_reads,
+                    config: PayloadConfig { parent_header, attributes: right_attr },
+                    cancel,
+                    best_payload: best_payload.and_then(|payload| {
                         if let Either::Right(p) = payload {
                             Some(p)
                         } else {
@@ -243,7 +239,6 @@ where
                         }
                     }),
                 };
-
                 self.right.try_build(right_args).map(|out| out.map_payload(Either::Right))
             }
         }
@@ -253,19 +248,13 @@ where
         &self,
         config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        match config.attributes {
-            Either::Left(left_attr) => {
-                let left_config = PayloadConfig {
-                    parent_header: config.parent_header.clone(),
-                    attributes: left_attr,
-                };
+        match config {
+            PayloadConfig { parent_header, attributes: Either::Left(left_attr) } => {
+                let left_config = PayloadConfig { parent_header, attributes: left_attr };
                 self.left.build_empty_payload(left_config).map(Either::Left)
             }
-            Either::Right(right_attr) => {
-                let right_config = PayloadConfig {
-                    parent_header: config.parent_header.clone(),
-                    attributes: right_attr,
-                };
+            PayloadConfig { parent_header, attributes: Either::Right(right_attr) } => {
+                let right_config = PayloadConfig { parent_header, attributes: right_attr };
                 self.right.build_empty_payload(right_config).map(Either::Right)
             }
         }

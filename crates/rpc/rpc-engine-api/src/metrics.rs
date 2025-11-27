@@ -1,8 +1,4 @@
-use std::time::Duration;
-
-use crate::EngineApiError;
-use alloy_rpc_types_engine::{ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum};
-use metrics::{Counter, Gauge, Histogram};
+use metrics::{Counter, Histogram};
 use reth_metrics::Metrics;
 
 /// All beacon consensus engine metrics
@@ -10,10 +6,6 @@ use reth_metrics::Metrics;
 pub(crate) struct EngineApiMetrics {
     /// Engine API latency metrics
     pub(crate) latency: EngineApiLatencyMetrics,
-    /// Engine API forkchoiceUpdated response type metrics
-    pub(crate) fcu_response: ForkchoiceUpdatedResponseMetrics,
-    /// Engine API newPayload response type metrics
-    pub(crate) new_payload_response: NewPayloadStatusResponseMetrics,
     /// Blob-related metrics
     pub(crate) blob_metrics: BlobMetrics,
 }
@@ -60,66 +52,6 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) get_blobs_v1: Histogram,
     /// Latency for `engine_getBlobsV2`
     pub(crate) get_blobs_v2: Histogram,
-}
-
-/// Metrics for engine API forkchoiceUpdated responses.
-#[derive(Metrics)]
-#[metrics(scope = "engine.rpc")]
-pub(crate) struct ForkchoiceUpdatedResponseMetrics {
-    /// The total count of forkchoice updated messages received.
-    pub(crate) forkchoice_updated_messages: Counter,
-    /// The total count of forkchoice updated messages that we responded to with
-    /// [`Invalid`](alloy_rpc_types_engine::PayloadStatusEnum#Invalid).
-    pub(crate) forkchoice_updated_invalid: Counter,
-    /// The total count of forkchoice updated messages that we responded to with
-    /// [`Valid`](alloy_rpc_types_engine::PayloadStatusEnum#Valid).
-    pub(crate) forkchoice_updated_valid: Counter,
-    /// The total count of forkchoice updated messages that we responded to with
-    /// [`Syncing`](alloy_rpc_types_engine::PayloadStatusEnum#Syncing).
-    pub(crate) forkchoice_updated_syncing: Counter,
-    /// The total count of forkchoice updated messages that we responded to with
-    /// [`Accepted`](alloy_rpc_types_engine::PayloadStatusEnum#Accepted).
-    pub(crate) forkchoice_updated_accepted: Counter,
-    /// The total count of forkchoice updated messages that we responded to with
-    /// `InclusionListUnsatisfied`
-    /// (`alloy_rpc_types_engine::PayloadStatusEnum#InclusionListUnsatisfied`).
-    pub(crate) forkchoice_updated_inclusion_list_unsatisfied: Counter,
-    /// The total count of forkchoice updated messages that were unsuccessful, i.e. we responded
-    /// with an error type that is not a [`PayloadStatusEnum`].
-    pub(crate) forkchoice_updated_error: Counter,
-}
-
-/// Metrics for engine API newPayload responses.
-#[derive(Metrics)]
-#[metrics(scope = "engine.rpc")]
-pub(crate) struct NewPayloadStatusResponseMetrics {
-    /// The total count of new payload messages received.
-    pub(crate) new_payload_messages: Counter,
-    /// The total count of new payload messages that we responded to with
-    /// [Invalid](alloy_rpc_types_engine::PayloadStatusEnum#Invalid).
-    pub(crate) new_payload_invalid: Counter,
-    /// The total count of new payload messages that we responded to with
-    /// [Valid](alloy_rpc_types_engine::PayloadStatusEnum#Valid).
-    pub(crate) new_payload_valid: Counter,
-    /// The total count of new payload messages that we responded to with
-    /// [Syncing](alloy_rpc_types_engine::PayloadStatusEnum#Syncing).
-    pub(crate) new_payload_syncing: Counter,
-    /// The total count of new payload messages that we responded to with
-    /// [Accepted](alloy_rpc_types_engine::PayloadStatusEnum#Accepted).
-    pub(crate) new_payload_accepted: Counter,
-    /// The total count of new payload messages that we responded to with
-    /// `InclusionListUnsatisfied`
-    /// (`alloy_rpc_types_engine::PayloadStatusEnum#InclusionListUnsatisfied`).
-    pub(crate) new_payload_inclusion_list_unsatisfied: Counter,
-    /// The total count of new payload messages that were unsuccessful, i.e. we responded with an
-    /// error type that is not a [`PayloadStatusEnum`].
-    pub(crate) new_payload_error: Counter,
-    /// The total gas of valid new payload messages received.
-    pub(crate) new_payload_total_gas: Histogram,
-    /// The gas per second of valid new payload messages received.
-    pub(crate) new_payload_gas_per_second: Histogram,
-    /// Latency for the last `engine_newPayloadV*` call
-    pub(crate) new_payload_last: Gauge,
 }
 
 #[derive(Metrics)]

@@ -1,6 +1,7 @@
 //! RPC errors specific to OP.
 
 use alloy_json_rpc::ErrorPayload;
+use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
 use alloy_transport::{RpcError, TransportErrorKind};
 use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
@@ -8,7 +9,10 @@ use op_revm::{OpHaltReason, OpTransactionError};
 use reth_evm::execute::ProviderError;
 use reth_optimism_evm::OpBlockExecutionError;
 use reth_rpc_eth_api::{AsEthApiError, EthTxEnvError, TransactionConversionError};
-use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
+use reth_rpc_eth_types::{
+    error::api::{FromEvmHalt, FromRevert},
+    EthApiError,
+};
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
 use revm::context_interface::result::{EVMError, InvalidTransaction};
 use std::{convert::Infallible, fmt::Display};
@@ -67,6 +71,9 @@ pub enum OpInvalidTransactionError {
     /// A deposit transaction halted post-regolith
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
+    /// The encoded transaction was missing during evm execution.
+    #[error("missing enveloped transaction bytes")]
+    MissingEnvelopedTx,
     /// Transaction conditional errors.
     #[error(transparent)]
     TxConditionalErr(#[from] TxConditionalErr),
@@ -76,7 +83,8 @@ impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'st
     fn from(err: OpInvalidTransactionError) -> Self {
         match err {
             OpInvalidTransactionError::DepositSystemTxPostRegolith |
-            OpInvalidTransactionError::HaltedDepositPostRegolith => {
+            OpInvalidTransactionError::HaltedDepositPostRegolith |
+            OpInvalidTransactionError::MissingEnvelopedTx => {
                 rpc_err(EthRpcErrorCode::TransactionRejected.code(), err.to_string(), None)
             }
             OpInvalidTransactionError::TxConditionalErr(_) => err.into(),
@@ -93,6 +101,7 @@ impl TryFrom<OpTransactionError> for OpInvalidTransactionError {
                 Ok(Self::DepositSystemTxPostRegolith)
             }
             OpTransactionError::HaltedDepositPostRegolith => Ok(Self::HaltedDepositPostRegolith),
+            OpTransactionError::MissingEnvelopedTx => Ok(Self::MissingEnvelopedTx),
             OpTransactionError::Base(err) => Err(err),
         }
     }
@@ -186,6 +195,12 @@ impl FromEvmHalt<OpHaltReason> for OpEthApiError {
             }
             OpHaltReason::Base(halt) => EthApiError::from_evm_halt(halt, gas_limit).into(),
         }
+    }
+}
+
+impl FromRevert for OpEthApiError {
+    fn from_revert(output: Bytes) -> Self {
+        Self::Eth(EthApiError::from_revert(output))
     }
 }
 

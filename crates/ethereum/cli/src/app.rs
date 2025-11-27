@@ -3,7 +3,7 @@ use eyre::{eyre, Result};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    common::{CliComponentsBuilder, CliHeader, CliNodeTypes},
+    common::{CliComponentsBuilder, CliNodeTypes, HeaderMut},
     launcher::{FnLauncher, Launcher},
 };
 use reth_cli_runner::CliRunner;
@@ -15,7 +15,6 @@ use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
 use reth_tracing::{FileWorkerGuard, Layers};
 use std::{fmt, sync::Arc};
-use tracing::info;
 
 /// A wrapper around a parsed CLI that handles command execution.
 #[derive(Debug)]
@@ -82,10 +81,7 @@ where
         ) -> Result<()>,
     ) -> Result<()>
     where
-        N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader: CliHeader>,
-            ChainSpec: Hardforks + EthChainSpec,
-        >,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let runner = match self.runner.take() {
@@ -99,7 +95,8 @@ where
                 self.cli.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
 
-        self.init_tracing()?;
+        self.init_tracing(&runner)?;
+
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
@@ -108,13 +105,12 @@ where
 
     /// Initializes tracing with the configured options.
     ///
-    /// If file logging is enabled, this function stores guard to the struct.
-    pub fn init_tracing(&mut self) -> Result<()> {
+    /// See [`Cli::init_tracing`] for more information.
+    pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
         if self.guard.is_none() {
-            let layers = self.layers.take().unwrap_or_default();
-            self.guard = self.cli.logs.init_tracing_with_layers(layers)?;
-            info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
+            self.guard = self.cli.init_tracing(runner, self.layers.take().unwrap_or_default())?;
         }
+
         Ok(())
     }
 }
@@ -134,7 +130,7 @@ where
     C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     Ext: clap::Args + fmt::Debug,
     Rpc: RpcModuleValidator,
-    N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
+    N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
 {
     match cli.command {
         Commands::Node(command) => {

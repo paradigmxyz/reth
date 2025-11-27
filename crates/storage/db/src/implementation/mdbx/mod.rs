@@ -103,6 +103,22 @@ pub struct DatabaseArguments {
     /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`). This arg is to configure the max
     /// readers.
     max_readers: Option<u64>,
+    /// Defines the synchronization strategy used by the MDBX database when writing data to disk.
+    ///
+    /// This determines how aggressively MDBX ensures data durability versus prioritizing
+    /// performance. The available modes are:
+    ///
+    /// - [`SyncMode::Durable`]: Ensures all transactions are fully flushed to disk before they are
+    ///   considered committed.   This provides the highest level of durability and crash safety
+    ///   but may have a performance cost.
+    /// - [`SyncMode::SafeNoSync`]: Skips certain fsync operations to improve write performance.
+    ///   This mode still maintains database integrity but may lose the most recent transactions if
+    ///   the system crashes unexpectedly.
+    ///
+    /// Choose `Durable` if consistency and crash safety are critical (e.g., production
+    /// environments). Choose `SafeNoSync` if performance is more important and occasional data
+    /// loss is acceptable (e.g., testing or ephemeral data).
+    sync_mode: SyncMode,
 }
 
 impl Default for DatabaseArguments {
@@ -126,6 +142,7 @@ impl DatabaseArguments {
             max_read_transaction_duration: None,
             exclusive: None,
             max_readers: None,
+            sync_mode: SyncMode::Durable,
         }
     }
 
@@ -134,6 +151,24 @@ impl DatabaseArguments {
         if let Some(max_size) = max_size {
             self.geometry.size = Some(0..max_size);
         }
+        self
+    }
+
+    /// Sets the database page size value.
+    pub const fn with_geometry_page_size(mut self, page_size: Option<usize>) -> Self {
+        if let Some(size) = page_size {
+            self.geometry.page_size = Some(reth_libmdbx::PageSize::Set(size));
+        }
+
+        self
+    }
+
+    /// Sets the database sync mode.
+    pub const fn with_sync_mode(mut self, sync_mode: Option<SyncMode>) -> Self {
+        if let Some(sync_mode) = sync_mode {
+            self.sync_mode = sync_mode;
+        }
+
         self
     }
 
@@ -329,7 +364,7 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
-                Mode::ReadWrite { sync_mode: SyncMode::Durable }
+                Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
 

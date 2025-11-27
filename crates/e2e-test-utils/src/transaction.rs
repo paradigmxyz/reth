@@ -1,5 +1,7 @@
-use alloy_consensus::{EnvKzgSettings, SidecarBuilder, SimpleCoder, TxEip4844Variant, TxEnvelope};
-use alloy_eips::eip7702::SignedAuthorization;
+use alloy_consensus::{
+    EnvKzgSettings, EthereumTxEnvelope, SidecarBuilder, SimpleCoder, TxEip4844Variant, TxEnvelope,
+};
+use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
 use alloy_network::{
     eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder, TransactionBuilder4844,
 };
@@ -146,11 +148,13 @@ impl TransactionTestContext {
 
     /// Validates the sidecar of a given tx envelope and returns the versioned hashes
     #[track_caller]
-    pub fn validate_sidecar(tx: TxEnvelope) -> Vec<B256> {
+    pub fn validate_sidecar(
+        tx: EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>,
+    ) -> Vec<B256> {
         let proof_setting = EnvKzgSettings::Default;
 
         match tx {
-            TxEnvelope::Eip4844(signed) => match signed.tx() {
+            EthereumTxEnvelope::Eip4844(signed) => match signed.tx() {
                 TxEip4844Variant::TxEip4844WithSidecar(tx) => {
                     tx.validate_blob(proof_setting.get()).unwrap();
                     tx.sidecar.versioned_hashes().collect()

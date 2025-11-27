@@ -48,6 +48,8 @@ pub struct TxPoolMetrics {
     pub(crate) total_eip4844_transactions: Gauge,
     /// Number of all EIP-7702 transactions in the pool
     pub(crate) total_eip7702_transactions: Gauge,
+    /// Number of all other transactions in the pool
+    pub(crate) total_other_transactions: Gauge,
 
     /// How often the pool was updated after the canonical state changed
     pub(crate) performed_state_updates: Counter,

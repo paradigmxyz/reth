@@ -12,7 +12,7 @@
 extern crate alloc;
 
 use alloc::{fmt::Debug, sync::Arc};
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
@@ -38,12 +38,25 @@ pub use validation::validate_block_post_execution;
 pub struct EthBeaconConsensus<ChainSpec> {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
+    /// Maximum allowed extra data size in bytes
+    max_extra_data_size: usize,
 }
 
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
     /// Create a new instance of [`EthBeaconConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec }
+        Self { chain_spec, max_extra_data_size: MAXIMUM_EXTRA_DATA_SIZE }
+    }
+
+    /// Returns the maximum allowed extra data size.
+    pub const fn max_extra_data_size(&self) -> usize {
+        self.max_extra_data_size
+    }
+
+    /// Sets the maximum allowed extra data size and returns the updated instance.
+    pub const fn with_max_extra_data_size(mut self, size: usize) -> Self {
+        self.max_extra_data_size = size;
+        self
     }
 
     /// Returns the chain spec associated with this consensus engine.
@@ -125,7 +138,7 @@ where
                 }
             }
         }
-        validate_header_extra_data(header)?;
+        validate_header_extra_data(header, self.max_extra_data_size)?;
         validate_header_gas(header)?;
         validate_header_base_fee(header, &self.chain_spec)?;
 
@@ -196,6 +209,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
     use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_consensus_common::validation::validate_against_parent_gas_limit;
@@ -215,7 +229,7 @@ mod tests {
         let child = header_with_gas_limit((parent.gas_limit + 5) as u64);
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
             Ok(())
         );
     }
@@ -226,7 +240,7 @@ mod tests {
         let child = header_with_gas_limit(MINIMUM_GAS_LIMIT - 1);
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
             Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit as u64 })
         );
     }
@@ -239,7 +253,7 @@ mod tests {
         );
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
             Err(ConsensusError::GasLimitInvalidIncrease {
                 parent_gas_limit: parent.gas_limit,
                 child_gas_limit: child.gas_limit,
@@ -253,7 +267,7 @@ mod tests {
         let child = header_with_gas_limit(parent.gas_limit - 5);
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
             Ok(())
         );
     }
@@ -266,7 +280,7 @@ mod tests {
         );
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
             Err(ConsensusError::GasLimitInvalidDecrease {
                 parent_gas_limit: parent.gas_limit,
                 child_gas_limit: child.gas_limit,

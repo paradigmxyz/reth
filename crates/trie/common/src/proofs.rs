@@ -89,6 +89,11 @@ impl MultiProofTargets {
     pub fn chunks(self, size: usize) -> ChunkedMultiProofTargets {
         ChunkedMultiProofTargets::new(self, size)
     }
+
+    /// Returns the number of items that will be considered during chunking in `[Self::chunks]`.
+    pub fn chunking_length(&self) -> usize {
+        self.values().map(|slots| 1 + slots.len().saturating_sub(1)).sum::<usize>()
+    }
 }
 
 /// An iterator that yields chunks of the proof targets of at most `size` account and storage
@@ -1066,5 +1071,34 @@ mod tests {
         acc.info.take();
         acc.storage_root = EMPTY_ROOT_HASH;
         assert_eq!(acc, inverse);
+    }
+
+    #[test]
+    fn test_multiproof_targets_chunking_length() {
+        let mut targets = MultiProofTargets::default();
+        targets.insert(B256::with_last_byte(1), B256Set::default());
+        targets.insert(
+            B256::with_last_byte(2),
+            B256Set::from_iter([B256::with_last_byte(10), B256::with_last_byte(20)]),
+        );
+        targets.insert(
+            B256::with_last_byte(3),
+            B256Set::from_iter([
+                B256::with_last_byte(30),
+                B256::with_last_byte(31),
+                B256::with_last_byte(32),
+            ]),
+        );
+
+        let chunking_length = targets.chunking_length();
+        for size in 1..=targets.clone().chunks(1).count() {
+            let chunk_count = targets.clone().chunks(size).count();
+            let expected_count = chunking_length.div_ceil(size);
+            assert_eq!(
+                chunk_count, expected_count,
+                "chunking_length: {}, size: {}",
+                chunking_length, size
+            );
+        }
     }
 }

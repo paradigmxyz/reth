@@ -17,7 +17,7 @@ pub use hashed_state::*;
 
 /// Input for trie computation.
 mod input;
-pub use input::TrieInput;
+pub use input::{TrieInput, TrieInputSorted};
 
 /// The implementation of hash builder.
 pub mod hash_builder;
@@ -36,10 +36,13 @@ mod nibbles;
 pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};
 
 mod storage;
-pub use storage::StorageTrieEntry;
+pub use storage::{StorageTrieEntry, TrieChangeSetsEntry};
 
 mod subnode;
 pub use subnode::StoredSubNode;
+
+mod trie;
+pub use trie::{ProofTrieNode, TrieMasks};
 
 /// The implementation of a container for storing intermediate changes to a trie.
 /// The container indicates when the trie has been modified.
@@ -56,6 +59,9 @@ pub mod root;
 pub mod updates;
 
 pub mod added_removed_keys;
+
+/// Utilities used by other modules in this crate.
+mod utils;
 
 /// Bincode-compatible serde implementations for trie types.
 ///

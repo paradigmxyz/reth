@@ -102,6 +102,9 @@ where
         .sealed_header(provider_factory.last_block_number()?)?
         .expect("should have genesis");
 
+    let static_file_producer =
+        StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
+
     while let Some(file_client) =
         reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
     {
@@ -121,7 +124,7 @@ where
             provider_factory.clone(),
             &consensus,
             Arc::new(file_client),
-            StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+            static_file_producer.clone(),
             import_config.no_state,
             executor.clone(),
         )?;

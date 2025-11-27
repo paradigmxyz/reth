@@ -8,7 +8,7 @@ use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
     eth::{EthBlockExecutionCtx, EthBlockExecutor},
     precompiles::PrecompilesMap,
-    revm::context::result::ResultAndState,
+    revm::context::{result::ResultAndState, Block as _},
     EthEvm, EthEvmFactory,
 };
 use alloy_sol_macro::sol;
@@ -164,15 +164,21 @@ impl ConfigureEvm for CustomEvmConfig {
 }
 
 impl ConfigureEngineEvm<ExecutionData> for CustomEvmConfig {
-    fn evm_env_for_payload(&self, payload: &ExecutionData) -> EvmEnvFor<Self> {
+    fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env_for_payload(payload)
     }
 
-    fn context_for_payload<'a>(&self, payload: &'a ExecutionData) -> ExecutionCtxFor<'a, Self> {
+    fn context_for_payload<'a>(
+        &self,
+        payload: &'a ExecutionData,
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         self.inner.context_for_payload(payload)
     }
 
-    fn tx_iterator_for_payload(&self, payload: &ExecutionData) -> impl ExecutableTxIterator<Self> {
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &ExecutionData,
+    ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         self.inner.tx_iterator_for_payload(payload)
     }
 }
@@ -265,7 +271,7 @@ pub fn apply_withdrawals_contract_call(
 
     // Clean-up post system tx context
     state.remove(&SYSTEM_ADDRESS);
-    state.remove(&evm.block().beneficiary);
+    state.remove(&evm.block().beneficiary());
 
     evm.db_mut().commit(state);
 

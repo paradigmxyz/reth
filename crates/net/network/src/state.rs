@@ -161,6 +161,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             peer,
             status.blockhash,
             block_number,
+            Arc::clone(&capabilities),
             timeout,
             range_info,
         );
@@ -305,7 +306,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
     /// Adds a peer and its address with the given kind to the peerset.
     pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: PeerAddr) {
-        self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
+        self.peers_manager.add_peer_kind(peer_id, Some(kind), addr, None)
     }
 
     /// Connects a peer and its address with the given kind

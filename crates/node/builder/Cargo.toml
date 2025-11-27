@@ -15,7 +15,6 @@ workspace = true
 ## reth
 reth-chain-state.workspace = true
 reth-chainspec.workspace = true
-reth-cli-util.workspace = true
 reth-config.workspace = true
 reth-consensus-debug-client.workspace = true
 reth-consensus.workspace = true
@@ -95,7 +94,11 @@ reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = []
-js-tracer = ["reth-rpc/js-tracer"]
+js-tracer = [
+    "reth-rpc/js-tracer",
+    "reth-node-ethereum/js-tracer",
+    "reth-rpc-eth-types/js-tracer",
+]
 test-utils = [
     "reth-db/test-utils",
     "reth-chain-state/test-utils",

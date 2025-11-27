@@ -177,16 +177,6 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         transactions: Vec<Self::Transaction>,
     ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
 
-    /// Adds multiple _unvalidated_ transactions with individual origins.
-    ///
-    /// Each transaction can have its own [`TransactionOrigin`].
-    ///
-    /// Consumer: RPC
-    fn add_transactions_with_origins(
-        &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
-
     /// Submit a consensus transaction directly to the pool
     fn add_consensus_transaction(
         &self,
@@ -438,6 +428,20 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     ///
     /// Consumer: Utility
     fn all_transaction_hashes(&self) -> Vec<TxHash>;
+
+    /// Removes a single transaction corresponding to the given hash.
+    ///
+    /// Note: This removes the transaction as if it got discarded (_not_ mined).
+    ///
+    /// Returns the removed transaction if it was found in the pool.
+    ///
+    /// Consumer: Utility
+    fn remove_transaction(
+        &self,
+        hash: TxHash,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.remove_transactions(vec![hash]).pop()
+    }
 
     /// Removes all transactions corresponding to the given hashes.
     ///
@@ -916,7 +920,7 @@ pub trait BestTransactions: Iterator + Send {
     /// Implementers must ensure all subsequent transaction _don't_ depend on this transaction.
     /// In other words, this must remove the given transaction _and_ drain all transaction that
     /// depend on it.
-    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError);
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: &InvalidPoolTransactionError);
 
     /// An iterator may be able to receive additional pending transactions that weren't present it
     /// the pool when it was created.
@@ -978,7 +982,7 @@ impl<T> BestTransactions for Box<T>
 where
     T: BestTransactions + ?Sized,
 {
-    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: &InvalidPoolTransactionError) {
         (**self).mark_invalid(transaction, kind)
     }
 
@@ -997,7 +1001,7 @@ where
 
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
-    fn mark_invalid(&mut self, _tx: &T, _kind: InvalidPoolTransactionError) {}
+    fn mark_invalid(&mut self, _tx: &T, _kind: &InvalidPoolTransactionError) {}
 
     fn no_updates(&mut self) {}
 
@@ -1177,6 +1181,14 @@ pub trait PoolTransaction:
         Ok(Recovered::new_unchecked(tx.try_into()?, signer))
     }
 
+    /// Clones the consensus transactions and tries to convert the `Consensus` type into the
+    /// `Pooled` type.
+    fn clone_into_pooled(&self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
+        let consensus = self.clone_into_consensus();
+        let (tx, signer) = consensus.into_parts();
+        Ok(Recovered::new_unchecked(tx.try_into()?, signer))
+    }
+
     /// Converts the `Pooled` type into the `Consensus` type.
     fn pooled_into_consensus(tx: Self::Pooled) -> Self::Consensus {
         tx.into()
@@ -1220,6 +1232,11 @@ pub trait PoolTransaction:
         } else {
             Ok(())
         }
+    }
+
+    /// Allows to communicate to the pool that the transaction doesn't require a nonce check.
+    fn requires_nonce_check(&self) -> bool {
+        true
     }
 }
 

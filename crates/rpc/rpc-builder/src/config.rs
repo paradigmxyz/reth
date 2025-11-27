@@ -105,6 +105,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .proof_permits(self.rpc_proof_permits)
             .pending_block_kind(self.rpc_pending_block)
             .raw_tx_forwarder(self.rpc_forwarder.clone())
+            .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
@@ -186,6 +187,13 @@ impl RethRpcServerConfig for RpcServerArgs {
             warn!(
                 target: "reth::cli",
                 "The --http.api flag is set but --http is not enabled. HTTP RPC API will not be exposed."
+            );
+        }
+
+        if self.ws_api.is_some() && !self.ws {
+            warn!(
+                target: "reth::cli",
+                "The --ws.api flag is set but --ws is not enabled. WS RPC API will not be exposed."
             );
         }
 

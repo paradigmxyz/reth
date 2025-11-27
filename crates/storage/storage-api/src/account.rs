@@ -54,4 +54,13 @@ pub trait ChangeSetReader {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>>;
+
+    /// Search the block's changesets for the given address, and return the result.
+    ///
+    /// Returns `None` if the account was not changed in this block.
+    fn get_account_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>>;
 }

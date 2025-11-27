@@ -26,15 +26,11 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     let h = B256::ZERO;
     let tx = provider;
 
-    // check if all tables are empty
+    // check if tables contain only the genesis block data
     assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.header().clone())]);
 
     assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
     assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
-    assert_eq!(
-        tx.table::<tables::HeaderTerminalDifficulties>().unwrap(),
-        vec![(n, g.difficulty.into())]
-    );
     assert_eq!(
         tx.table::<tables::BlockBodyIndices>().unwrap(),
         vec![(0, StoredBlockBodyIndices::default())]
@@ -49,8 +45,8 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     assert_eq!(tx.table::<tables::PlainStorageState>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::AccountsHistory>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::StoragesHistory>().unwrap(), vec![]);
-    // TODO check after this gets done: https://github.com/paradigmxyz/reth/issues/1588
-    // Bytecodes are not reverted assert_eq!(tx.table::<tables::Bytecodes>().unwrap(), vec![]);
+    // Reorged bytecodes are not reverted per https://github.com/paradigmxyz/reth/issues/1588
+    // assert_eq!(tx.table::<tables::Bytecodes>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::AccountChangeSets>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::StorageChangeSets>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::HashedAccounts>().unwrap(), vec![]);

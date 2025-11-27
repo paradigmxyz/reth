@@ -57,8 +57,9 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
     /// Wait until the best built payload is ready
     pub async fn wait_for_built_payload(&self, payload_id: PayloadId) {
         loop {
-            let payload = self.payload_builder.best_payload(payload_id).await.unwrap().unwrap();
-            if payload.block().body().transactions().is_empty() {
+            let payload =
+                self.payload_builder.best_payload(payload_id).await.transpose().ok().flatten();
+            if payload.is_none_or(|p| p.block().body().transactions().is_empty()) {
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 continue
             }
