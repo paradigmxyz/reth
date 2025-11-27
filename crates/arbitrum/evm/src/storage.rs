@@ -1,7 +1,6 @@
 use alloy_primitives::{Address, B256, U256, keccak256, address};
 use revm::Database;
-use revm_database::states::plain_account::StorageSlot;
-use revm_state::AccountInfo;
+use std::collections::HashMap;
 
 /// ArbOS State address - the fictional account that stores ArbOS state
 /// This is address 0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF (as per Go nitro)
@@ -27,55 +26,68 @@ fn storage_key_map(storage_key: &[u8], offset: u64) -> U256 {
     U256::from_be_bytes(mapped)
 }
 
-fn ensure_arbos_account_loaded<D: Database>(state: &mut revm::database::State<D>) {
-    // Load the ArbOS account into the cache (if not already there)
-    // This is the proper way to ensure the account is available for storage operations
-    let _ = state.load_cache_account(ARBOS_STATE_ADDRESS);
+/// Ensures the ArbOS account exists in bundle_state.state.
+/// This is the simple approach that was used before and produces DETERMINISTIC state roots.
+/// We write directly to bundle_state.state which persists throughout block execution.
+fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State<D>) {
+    use revm_database::{BundleAccount, AccountStatus};
+    use revm_state::AccountInfo;
+
+    if !state.bundle_state.state.contains_key(&ARBOS_STATE_ADDRESS) {
+        let info = match state.basic(ARBOS_STATE_ADDRESS) {
+            Ok(Some(account_info)) => Some(account_info),
+            _ => Some(AccountInfo {
+                balance: U256::ZERO,
+                nonce: 0,
+                code_hash: alloy_primitives::keccak256([]),
+                code: None,
+            }),
+        };
+
+        let acc = BundleAccount {
+            info,
+            storage: HashMap::default(),
+            original_info: None,
+            status: AccountStatus::Changed,
+        };
+        state.bundle_state.state.insert(ARBOS_STATE_ADDRESS, acc);
+    }
 }
 
-/// Helper function to write storage for the ArbOS account using proper cache and transition mechanism.
+/// Helper function to write storage for the ArbOS account.
 ///
-/// This uses CacheAccount::change() which handles the case where the account doesn't exist yet.
-/// The change() method:
-/// 1. Takes the previous account info (even if None for non-existing accounts)
-/// 2. Extends storage with new values
-/// 3. Creates a PlainAccount with proper info and storage
-/// 4. Returns the transition for apply_transition()
+/// This writes DIRECTLY to bundle_state.state which is the approach that produces
+/// DETERMINISTIC state roots. The cache/transition mechanism was causing non-determinism
+/// because transitions interact with EVM execution in complex ways.
 ///
-/// IMPORTANT: We get original_value from the DATABASE, not from the cache. This ensures that
-/// when multiple writes happen to the same slot, the original value stays consistent (from DB).
-/// If we used state.storage() it could return a cached value that we already wrote, causing
-/// the TransitionAccount::update() logic to incorrectly remove entries.
+/// bundle_state.state persists throughout block execution and is used directly
+/// when computing the state root, so writes here are guaranteed to be included.
 fn write_arbos_storage<D: Database>(
     state: &mut revm::database::State<D>,
     slot: U256,
     value: U256,
 ) {
-    ensure_arbos_account_loaded(state);
-    let arbos_addr = ARBOS_STATE_ADDRESS;
+    use revm_state::EvmStorageSlot;
 
-    // Get original value from the DATABASE directly, not from cache.
-    // This is important because state.storage() might return a cached value
-    // that we already wrote, which would cause issues with transition tracking.
-    let original_value = state.database.storage(arbos_addr, slot).unwrap_or(U256::ZERO);
+    ensure_arbos_account_in_bundle(state);
 
-    // Create storage change entry
-    let mut storage_changes = alloy_primitives::map::HashMap::default();
-    storage_changes.insert(slot, StorageSlot::new_changed(original_value, value));
+    // Get original value for proper tracking
+    let original_value = if let Some(acc) = state.bundle_state.state.get(&ARBOS_STATE_ADDRESS) {
+        if let Some(slot_entry) = acc.storage.get(&slot) {
+            slot_entry.previous_or_original_value
+        } else {
+            state.database.storage(ARBOS_STATE_ADDRESS, slot).unwrap_or(U256::ZERO)
+        }
+    } else {
+        state.database.storage(ARBOS_STATE_ADDRESS, slot).unwrap_or(U256::ZERO)
+    };
 
-    // Get the cached account and use change() which handles None account case
-    if let Some(cached_acc) = state.cache.accounts.get_mut(&arbos_addr) {
-        // Get current account info or create default empty info
-        let account_info = cached_acc.account
-            .as_ref()
-            .map(|a| a.info.clone())
-            .unwrap_or_else(|| AccountInfo::default());
-
-        // Use change() which properly handles both existing and non-existing accounts
-        let transition = cached_acc.change(account_info, storage_changes);
-
-        // Apply the transition to update bundle state
-        state.apply_transition(vec![(arbos_addr, transition)]);
+    // Write directly to bundle_state.state
+    if let Some(acc) = state.bundle_state.state.get_mut(&ARBOS_STATE_ADDRESS) {
+        acc.storage.insert(
+            slot,
+            EvmStorageSlot::new_changed(original_value, value, 0).into(),
+        );
     }
 }
 
@@ -110,9 +122,17 @@ impl<D: Database> Storage<D> {
         let slot = self.compute_slot(offset);
         unsafe {
             let state = &mut *self.state;
-            ensure_arbos_account_loaded(state);
             let arbos_addr = ARBOS_STATE_ADDRESS;
-            match state.storage(arbos_addr, slot) {
+
+            // First check bundle_state.state for any in-flight changes
+            if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
+                if let Some(slot_entry) = acc.storage.get(&slot) {
+                    return Ok(B256::from(slot_entry.present_value));
+                }
+            }
+
+            // Fall back to database
+            match state.database.storage(arbos_addr, slot) {
                 Ok(value) => Ok(B256::from(value)),
                 Err(_) => Err(()),
             }
@@ -144,10 +164,18 @@ impl<D: Database> Storage<D> {
     pub fn get(&self, key: B256) -> Result<B256, ()> {
         unsafe {
             let state = &mut *self.state;
-            ensure_arbos_account_loaded(state);
             let arbos_addr = ARBOS_STATE_ADDRESS;
             let slot = U256::from_be_bytes(key.0);
-            match state.storage(arbos_addr, slot) {
+
+            // First check bundle_state.state for any in-flight changes
+            if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
+                if let Some(slot_entry) = acc.storage.get(&slot) {
+                    return Ok(B256::from(slot_entry.present_value));
+                }
+            }
+
+            // Fall back to database
+            match state.database.storage(arbos_addr, slot) {
                 Ok(value) => Ok(B256::from(value)),
                 Err(_) => Ok(B256::ZERO),
             }
@@ -203,22 +231,18 @@ impl<D: Database> StorageBackedUint64<D> {
     pub fn get(&self) -> Result<u64, ()> {
         unsafe {
             let state = &mut *self.storage;
-            ensure_arbos_account_loaded(state);
             let arbos_addr = ARBOS_STATE_ADDRESS;
 
-            // First check cache.accounts for any in-flight changes
-            // Note: cache storage is PlainStorage = HashMap<U256, U256>, entries are plain U256
-            if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
-                if let Some(ref account) = cached_acc.account {
-                    if let Some(&slot_value) = account.storage.get(&self.slot) {
-                        let value_u64: u64 = slot_value.try_into().unwrap_or(0);
-                        return Ok(value_u64);
-                    }
+            // First check bundle_state.state for any in-flight changes
+            if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
+                if let Some(slot_entry) = acc.storage.get(&self.slot) {
+                    let value_u64: u64 = slot_entry.present_value.try_into().unwrap_or(0);
+                    return Ok(value_u64);
                 }
             }
 
             // Fall back to database
-            match state.storage(arbos_addr, self.slot) {
+            match state.database.storage(arbos_addr, self.slot) {
                 Ok(value) => {
                     let value_u64: u64 = value.try_into().unwrap_or(0);
                     Ok(value_u64)
@@ -259,21 +283,17 @@ impl<D: Database> StorageBackedBigUint<D> {
     pub fn get(&self) -> Result<U256, ()> {
         unsafe {
             let state = &mut *self.storage;
-            ensure_arbos_account_loaded(state);
             let arbos_addr = ARBOS_STATE_ADDRESS;
 
-            // First check cache.accounts for any in-flight changes
-            // Note: cache storage is PlainStorage = HashMap<U256, U256>, entries are plain U256
-            if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
-                if let Some(ref account) = cached_acc.account {
-                    if let Some(&slot_value) = account.storage.get(&self.slot) {
-                        return Ok(slot_value);
-                    }
+            // First check bundle_state.state for any in-flight changes
+            if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
+                if let Some(slot_entry) = acc.storage.get(&self.slot) {
+                    return Ok(slot_entry.present_value);
                 }
             }
 
             // Fall back to database
-            match state.storage(arbos_addr, self.slot) {
+            match state.database.storage(arbos_addr, self.slot) {
                 Ok(value) => Ok(value),
                 Err(_) => Err(()),
             }
@@ -312,23 +332,19 @@ impl<D: Database> StorageBackedAddress<D> {
     pub fn get(&self) -> Result<Address, ()> {
         unsafe {
             let state = &mut *self.storage;
-            ensure_arbos_account_loaded(state);
             let arbos_addr = ARBOS_STATE_ADDRESS;
 
-            // First check cache.accounts for any in-flight changes
-            // Note: cache storage is PlainStorage = HashMap<U256, U256>, entries are plain U256
-            if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
-                if let Some(ref account) = cached_acc.account {
-                    if let Some(&slot_value) = account.storage.get(&self.slot) {
-                        let bytes = slot_value.to_be_bytes::<32>();
-                        let addr_bytes: [u8; 20] = bytes[12..32].try_into().unwrap();
-                        return Ok(Address::from(addr_bytes));
-                    }
+            // First check bundle_state.state for any in-flight changes
+            if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
+                if let Some(slot_entry) = acc.storage.get(&self.slot) {
+                    let bytes = slot_entry.present_value.to_be_bytes::<32>();
+                    let addr_bytes: [u8; 20] = bytes[12..32].try_into().unwrap();
+                    return Ok(Address::from(addr_bytes));
                 }
             }
 
             // Fall back to database
-            match state.storage(arbos_addr, self.slot) {
+            match state.database.storage(arbos_addr, self.slot) {
                 Ok(value) => {
                     let bytes = value.to_be_bytes::<32>();
                     let addr_bytes: [u8; 20] = bytes[12..32].try_into().unwrap();
