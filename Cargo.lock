@@ -7609,6 +7609,7 @@ dependencies = [
  "reth-evm",
  "reth-exex",
  "reth-fs-util",
+ "reth-metrics",
  "reth-net-nat",
  "reth-network",
  "reth-network-p2p",
