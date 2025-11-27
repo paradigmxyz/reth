@@ -185,14 +185,18 @@ impl DeferredTrieData {
     /// - Each block only waits on its ancestors (blocks on the path to the persisted root)
     /// - Sibling blocks (forks) are never in each other's ancestor lists
     /// - A block never waits on its descendants
+    ///
     /// Given that invariant, circular wait dependencies are impossible.
     pub fn wait_cloned(&self) -> ComputedTrieData {
         let mut state = self.state.lock();
         match &*state {
+            // If the deferred trie data is ready, return the cached result.
             DeferredState::Ready(bundle) => {
                 DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
                 bundle.clone()
             }
+            // If the deferred trie data is pending, compute the trie data synchronously and return
+            // the result. This is the fallback path if the async task hasn't completed.
             DeferredState::Pending(inputs) => {
                 DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
                 let computed = Self::sort_and_build_trie_input(
