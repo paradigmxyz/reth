@@ -1,4 +1,5 @@
 use alloy_primitives::B256;
+use parking_lot::Mutex;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
@@ -26,7 +27,8 @@ static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
 ///
 /// Uses `OnceLock` for lock-free access once data is computed.
 /// If the deferred task hasn't completed, computes trie data synchronously
-/// from stored inputs.
+/// from stored inputs. After computation, inputs are cleared to release
+/// ancestor references and prevent O(n^2) memory retention.
 #[derive(Clone)]
 pub struct DeferredTrieData {
     /// Shared inner state containing inputs and result.
@@ -35,9 +37,10 @@ pub struct DeferredTrieData {
 
 /// Inner data structure for deferred trie computation.
 struct DeferredTrieDataInner {
-    /// Pending inputs for fallback computation (None if created via `ready()`).
-    inputs: Option<PendingInputs>,
-    /// Computed result, set once by async task or fallback.
+    /// Pending inputs for fallback computation. Wrapped in Mutex to allow clearing
+    /// after computation, which releases ancestor references.
+    inputs: Mutex<Option<PendingInputs>>,
+    /// Computed result, set once by async task or fallback. Lock-free reads after init.
     result: OnceLock<ComputedTrieData>,
 }
 
@@ -69,7 +72,12 @@ impl DeferredTrieData {
     ) -> Self {
         Self {
             inner: Arc::new(DeferredTrieDataInner {
-                inputs: Some(PendingInputs { hashed_state, trie_updates, anchor_hash, ancestors }),
+                inputs: Mutex::new(Some(PendingInputs {
+                    hashed_state,
+                    trie_updates,
+                    anchor_hash,
+                    ancestors,
+                })),
                 result: OnceLock::new(),
             }),
         }
@@ -82,7 +90,7 @@ impl DeferredTrieData {
     pub fn ready(bundle: ComputedTrieData) -> Self {
         let result = OnceLock::new();
         let _ = result.set(bundle);
-        Self { inner: Arc::new(DeferredTrieDataInner { inputs: None, result }) }
+        Self { inner: Arc::new(DeferredTrieDataInner { inputs: Mutex::new(None), result }) }
     }
 
     /// Sort block execution outputs and build a [`TrieInputSorted`] overlay.
@@ -171,20 +179,33 @@ impl DeferredTrieData {
     /// Populate the handle with the computed trie data.
     ///
     /// Safe to call multiple times; only the first value is stored (first-write-wins).
+    /// Clears inputs after setting to release ancestor references.
     pub fn set_ready(&self, bundle: ComputedTrieData) {
         let _ = self.inner.result.set(bundle);
+        // Clear inputs to release ancestor references (fixes O(n^2) memory retention)
+        let _ = self.inner.inputs.lock().take();
     }
 
     /// Returns trie data, computing synchronously if the async task hasn't completed.
     ///
     /// Uses `OnceLock`'s `get_or_init` pattern:
-    /// - If the async task has completed, returns the cached result.
+    /// - If the async task has completed, returns the cached result (lock-free).
     /// - If pending, computes synchronously from stored inputs.
     ///
+    /// After computation, inputs are cleared to release ancestor references.
     /// This design eliminates deadlock risk: we never block waiting for another task.
     /// All code paths are guaranteed to return (either cached or computed result).
     pub fn wait_cloned(&self) -> ComputedTrieData {
-        // Check if already computed (lock-free fast path)
+        // Fast path: lock-free read if already computed
+        if let Some(result) = self.inner.result.get() {
+            DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
+            return result.clone();
+        }
+
+        // Lock inputs for computation
+        let mut inputs_guard = self.inner.inputs.lock();
+
+        // Re-check after acquiring lock - another thread may have computed while we waited
         if let Some(result) = self.inner.result.get() {
             DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
             return result.clone();
@@ -193,11 +214,11 @@ impl DeferredTrieData {
         // Not yet computed - compute from inputs
         DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
 
-        let inputs = self.inner.inputs.as_ref().expect("inputs must be present for pending state");
+        let inputs = inputs_guard.as_ref().expect("inputs must be present for pending state");
 
-        // Use get_or_init to handle race condition: if another thread computed
-        // while we were computing, return their result (first-write-wins).
-        self.inner
+        // Compute and set result
+        let result = self
+            .inner
             .result
             .get_or_init(|| {
                 Self::sort_and_build_trie_input(
@@ -207,7 +228,12 @@ impl DeferredTrieData {
                     &inputs.ancestors,
                 )
             })
-            .clone()
+            .clone();
+
+        // Clear inputs while still holding the lock to prevent races
+        *inputs_guard = None;
+
+        result
     }
 }
 
@@ -572,5 +598,47 @@ mod tests {
         for result in &results {
             assert_eq!(result.anchor_hash(), first_anchor);
         }
+    }
+
+    /// Verifies that inputs are cleared after computation to release ancestor references.
+    #[test]
+    fn inputs_cleared_after_computation() {
+        let ancestor = DeferredTrieData::ready(empty_bundle());
+        let deferred = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            B256::ZERO,
+            vec![ancestor],
+        );
+
+        // Before wait_cloned, inputs should be present
+        assert!(deferred.inner.inputs.lock().is_some());
+
+        // Trigger computation
+        let _ = deferred.wait_cloned();
+
+        // After wait_cloned, inputs should be cleared
+        assert!(deferred.inner.inputs.lock().is_none());
+    }
+
+    /// Verifies that set_ready clears inputs.
+    #[test]
+    fn set_ready_clears_inputs() {
+        let ancestor = DeferredTrieData::ready(empty_bundle());
+        let deferred = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            B256::ZERO,
+            vec![ancestor],
+        );
+
+        // Before set_ready, inputs should be present
+        assert!(deferred.inner.inputs.lock().is_some());
+
+        // Set ready
+        deferred.set_ready(empty_bundle());
+
+        // After set_ready, inputs should be cleared
+        assert!(deferred.inner.inputs.lock().is_none());
     }
 }
