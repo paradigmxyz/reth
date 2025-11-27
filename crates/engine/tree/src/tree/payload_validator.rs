@@ -1005,9 +1005,8 @@ where
         // Get parent's trie_input (which includes all grandparent data). Parent was validated
         // before this block, so its background trie task has typically completed by now.
         // Note: overlay_blocks is ordered [parent, grandparent, ...], so first() is the parent.
-        let ancestor_overlay = overlay_blocks
-            .first()
-            .and_then(|parent| parent.trie_data().trie_input().cloned());
+        let ancestor_overlay =
+            overlay_blocks.first().and_then(|parent| parent.trie_data().trie_input().cloned());
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
         let deferred_trie_data = DeferredTrieData::pending(

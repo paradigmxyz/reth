@@ -305,7 +305,7 @@ mod tests {
         assert_eq!(first.anchor_hash(), second.anchor_hash());
     }
 
-    /// Verifies concurrent wait_cloned calls: one computes, others wait and get cached result.
+    /// Verifies concurrent `wait_cloned` calls: one computes, others wait and get cached result.
     #[test]
     fn concurrent_wait_cloned_shares_result() {
         let deferred = empty_pending_with_anchor(B256::with_last_byte(100));
