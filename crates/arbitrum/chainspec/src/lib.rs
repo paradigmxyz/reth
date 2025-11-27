@@ -751,14 +751,10 @@ pub fn sepolia_baked_genesis_from_header(
             let mut a = [0u8; 20];
             a[19] = b;
             let addr = Address::from_slice(&a);
-            // For address 0x6e (ARB_RETRYABLE_TX), use empty code instead of 0xFE
-            // because submit retryable transactions are handled entirely in start_tx hook
-            // and should not execute through EVM (which would hit the INVALID opcode)
-            let code = if b == 0x6e {
-                Bytes::new() // Empty code - will succeed if called
-            } else {
-                Bytes::from_static(&[0xfe]) // INVALID opcode for other predeploys
-            };
+            // All Arbitrum precompiles have 0xFE (INVALID opcode) as code
+            // SubmitRetryable transactions targeting 0x6e are handled in start_tx hook
+            // which sets end_tx_now=true, bypassing EVM execution entirely
+            let code = Bytes::from_static(&[0xfe]); // INVALID opcode for all predeploys
             let acct = GenesisAccount::default()
                 .with_nonce(Some(0))
                 .with_balance(U256::ZERO)

@@ -799,7 +799,7 @@ where
         // Execute transaction through EVM
         // For early-terminated transactions (end_tx_now=true), the state was already
         // modified in start_tx hook, but we still execute through EVM to build receipt.
-        // The predeploy address 0x6e has empty code (not 0xFE) to avoid INVALID opcode.
+        // Note: All predeploys have 0xFE code, but early-terminated txs bypass EVM execution.
         let result = self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
             let evm_gas = exec_result.gas_used();
             let actual_gas = hook_gas_override.unwrap_or(evm_gas);

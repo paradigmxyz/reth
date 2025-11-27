@@ -234,7 +234,7 @@ where
             number: U256::from(payload.payload.block_number()),
             beneficiary: payload.payload.as_v1().fee_recipient,
             timestamp: U256::from(payload.payload.timestamp()),
-            difficulty: U256::ZERO,
+            difficulty: U256::from(1),  // Must match assembly path for consistency
             prevrandao: Some(payload.payload.as_v1().prev_randao),
             gas_limit: payload.payload.as_v1().gas_limit,
             basefee: payload.payload.as_v1().base_fee_per_gas.try_into().unwrap_or_default(),
@@ -247,12 +247,27 @@ where
         &self,
         payload: &'a ArbExecutionData,
     ) -> Result<ExecutionCtxFor<'a, Self>, Infallible> {
+        // CRITICAL FOR DETERMINISM: Extract delayed_messages_read and l1_block_number from payload!
+        // Assembly path sets these from message data. Validation MUST match or state roots diverge.
+        //
+        // delayed_messages_read: stored in sidecar.nonce (B64)
+        // l1_block_number: stored in prev_randao (mix_hash) bytes 8-15
+        //   mix_hash encoding: [send_count(8), l1_block_num(8), arbos_version(8), reserved(8)]
+
+        let delayed_messages_read = u64::from_be_bytes(payload.sidecar.nonce.0);
+
+        let mix_hash_bytes = payload.payload.as_v1().prev_randao.0;
+        let l1_block_number = u64::from_be_bytes([
+            mix_hash_bytes[8], mix_hash_bytes[9], mix_hash_bytes[10], mix_hash_bytes[11],
+            mix_hash_bytes[12], mix_hash_bytes[13], mix_hash_bytes[14], mix_hash_bytes[15],
+        ]);
+
         Ok(ArbBlockExecutionCtx {
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root,
             extra_data: payload.payload.as_v1().extra_data.clone().into(),
-            delayed_messages_read: 0,
-            l1_block_number: 0,
+            delayed_messages_read,
+            l1_block_number,
         })
     }
 
