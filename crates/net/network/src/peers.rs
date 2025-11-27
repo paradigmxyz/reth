@@ -742,12 +742,15 @@ impl PeersManager {
     ///
     /// If the peer already exists, then the address, kind and `fork_id` will be updated.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
-        self.add_peer_kind(peer_id, PeerKind::Basic, addr, fork_id)
+        self.add_peer_kind(peer_id, None, addr, fork_id)
     }
 
     /// Marks the given peer as trusted.
     pub(crate) fn add_trusted_peer_id(&mut self, peer_id: PeerId) {
         self.trusted_peer_ids.insert(peer_id);
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.kind = PeerKind::Trusted;
+        }
     }
 
     /// Called for a newly discovered trusted peer.
@@ -755,16 +758,17 @@ impl PeersManager {
     /// If the peer already exists, then the address and kind will be updated.
     #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn add_trusted_peer(&mut self, peer_id: PeerId, addr: PeerAddr) {
-        self.add_peer_kind(peer_id, PeerKind::Trusted, addr, None)
+        self.add_peer_kind(peer_id, Some(PeerKind::Trusted), addr, None)
     }
 
     /// Called for a newly discovered peer.
     ///
     /// If the peer already exists, then the address, kind and `fork_id` will be updated.
+    /// If the peer exists and a [`PeerKind`] is provided then the peer's kind is updated
     pub(crate) fn add_peer_kind(
         &mut self,
         peer_id: PeerId,
-        kind: PeerKind,
+        kind: Option<PeerKind>,
         addr: PeerAddr,
         fork_id: Option<ForkId>,
     ) {
@@ -783,9 +787,12 @@ impl PeersManager {
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let peer = entry.get_mut();
-                peer.kind = kind;
                 peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
+
+                if let Some(kind) = kind {
+                    peer.kind = kind;
+                }
 
                 if peer.state.is_incoming() {
                     // now that we have an actual discovered address, for that peer and not just the
@@ -796,14 +803,15 @@ impl PeersManager {
             }
             Entry::Vacant(entry) => {
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "discovered new node");
-                let mut peer = Peer::with_kind(addr, kind);
+                let mut peer = Peer::with_kind(addr, kind.unwrap_or(PeerKind::Basic));
                 peer.fork_id = fork_id.map(Box::new);
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
         }
 
-        if kind.is_trusted() {
+        if kind.filter(|kind| kind.is_trusted()).is_some() {
+            // also track the peer in the peer id set
             self.trusted_peer_ids.insert(peer_id);
         }
     }
@@ -1936,6 +1944,22 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn retain_trusted_status() {
+        let _socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 99)), 8008);
+        let trusted = PeerId::random();
+        let mut peers =
+            PeersManager::new(PeersConfig::test().with_trusted_nodes(vec![TrustedPeer {
+                host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
+                tcp_port: 8008,
+                udp_port: 8008,
+                id: trusted,
+            }]));
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        peers.add_peer(trusted, PeerAddr::from_tcp(socket_addr), None);
+        assert!(peers.peers.get(&trusted).unwrap().is_trusted());
     }
 
     #[tokio::test]
