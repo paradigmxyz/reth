@@ -29,28 +29,42 @@ fn storage_key_map(storage_key: &[u8], offset: u64) -> U256 {
 /// Ensures the ArbOS account exists in bundle_state.state.
 ///
 /// CRITICAL FOR DETERMINISM: We NEVER call state.basic() because that creates cache entries
-/// which can cause non-determinism between assembly and validation. The ArbOS account is
-/// a "fictional" account that doesn't receive real transactions, so we can safely create
-/// it with default values directly in bundle_state.state.
+/// which can cause non-determinism between assembly and validation. However, we MUST read
+/// the original account info from the database to preserve the genesis nonce (which is 1).
+///
+/// IMPORTANT: We use AccountStatus::Loaded (not Changed) because we're not modifying the
+/// account info itself - only the storage. The account already exists in the trie from genesis.
 fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State<D>) {
     use revm_database::{BundleAccount, AccountStatus};
     use revm_state::AccountInfo;
 
     if !state.bundle_state.state.contains_key(&ARBOS_STATE_ADDRESS) {
-        // NEVER call state.basic() here - it creates cache entries causing non-determinism!
-        // The ArbOS account is fictional and always has zero balance/nonce.
+        // Read original info from database to preserve genesis nonce (which is 1)
+        // We read directly from database, not from state.basic() which would create cache entries
+        let original_info = state.database.basic(ARBOS_STATE_ADDRESS)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| AccountInfo {
+                balance: U256::ZERO,
+                nonce: 1,  // Default to 1 if not found (matches genesis)
+                code_hash: alloy_primitives::keccak256([]),
+                code: None,
+            });
+
         let info = Some(AccountInfo {
-            balance: U256::ZERO,
-            nonce: 0,
-            code_hash: alloy_primitives::keccak256([]),
-            code: None,
+            balance: original_info.balance,
+            nonce: original_info.nonce,
+            code_hash: original_info.code_hash,
+            code: original_info.code.clone(),
         });
 
+        // Use Loaded status because this account already exists in the trie from genesis.
+        // We're only modifying storage, not the account info itself.
         let acc = BundleAccount {
             info,
             storage: HashMap::default(),
-            original_info: None,
-            status: AccountStatus::Changed,
+            original_info: Some(original_info),
+            status: AccountStatus::Loaded,
         };
         state.bundle_state.state.insert(ARBOS_STATE_ADDRESS, acc);
     }

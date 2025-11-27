@@ -166,22 +166,32 @@ impl DefaultArbOsHooks {
         use revm_state::AccountInfo;
 
         // Ensure the account exists in bundle_state.state
-        // CRITICAL FOR DETERMINISM: We NEVER call state_db.basic() because that creates
-        // cache entries which can cause non-determinism between assembly and validation.
-        // The history storage account is fictional and always has zero balance/nonce.
+        // Read from database to preserve any genesis values
         if !state_db.bundle_state.state.contains_key(&HISTORY_STORAGE_ADDRESS) {
+            // Read original info from database
+            let original_info = state_db.database.basic(HISTORY_STORAGE_ADDRESS)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| AccountInfo {
+                    balance: U256::ZERO,
+                    nonce: 0,
+                    code_hash: alloy_primitives::keccak256([]),
+                    code: None,
+                });
+
             let info = Some(AccountInfo {
-                balance: U256::ZERO,
-                nonce: 0,
-                code_hash: alloy_primitives::keccak256([]),
-                code: None,
+                balance: original_info.balance,
+                nonce: original_info.nonce,
+                code_hash: original_info.code_hash,
+                code: original_info.code.clone(),
             });
 
+            // Use Loaded status because we're only modifying storage, not account info
             let acc = BundleAccount {
                 info,
                 storage: std::collections::HashMap::default(),
-                original_info: None,
-                status: AccountStatus::Changed,
+                original_info: Some(original_info),
+                status: AccountStatus::Loaded,
             };
             state_db.bundle_state.state.insert(HISTORY_STORAGE_ADDRESS, acc);
         }
