@@ -766,11 +766,6 @@ where
                 let trie_input_start = Instant::now();
                 let (trie_input, block_hash) = self.compute_trie_input(parent_hash, state)?;
 
-                self.metrics
-                    .block_validation
-                    .trie_input_duration
-                    .record(trie_input_start.elapsed().as_secs_f64());
-
                 // Create OverlayStateProviderFactory with sorted trie data for multiproofs
                 let TrieInputSorted { nodes, state, .. } = trie_input;
 
@@ -780,8 +775,6 @@ where
                         .with_trie_overlay(Some(nodes))
                         .with_hashed_state_overlay(Some(state));
 
-                // Use state root task only if prefix sets are empty, otherwise proof generation is
-                // too expensive because it requires walking all paths in every proof.
                 self.metrics
                     .block_validation
                     .trie_input_duration
@@ -852,6 +845,9 @@ where
     }
 
     /// Determines the state root computation strategy based on configuration.
+    ///
+    /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
+    /// too expensive because it requires walking all paths in every proof.
     const fn plan_state_root_computation(&self) -> StateRootStrategy {
         if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous

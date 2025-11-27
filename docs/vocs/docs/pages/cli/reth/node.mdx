@@ -871,7 +871,9 @@ Pruning:
 
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
-          Configure persistence threshold for engine experimental
+          Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.
+
+          To persist blocks as fast as the node receives them, set this value to zero. This will cause more frequent DB writes.
 
           [default: 2]
 
@@ -1116,4 +1118,13 @@ Tracing:
           Defaults to TRACE if not specified.
 
           [default: debug]
+
+      --tracing-otlp.sample-ratio <RATIO>
+          Trace sampling ratio to control the percentage of traces to export.
+
+          Valid range: 0.0 to 1.0 - 1.0, default: Sample all traces - 0.01: Sample 1% of traces - 0.0: Disable sampling
+
+          Example: --tracing-otlp.sample-ratio=0.0.
+
+          [env: OTEL_TRACES_SAMPLER_ARG=]
 ```
