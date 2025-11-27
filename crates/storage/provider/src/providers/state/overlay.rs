@@ -7,8 +7,8 @@ use reth_metrics::Metrics;
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    BlockNumReader, DBProvider, DatabaseProviderFactory, DatabaseProviderROFactory,
-    PruneCheckpointReader, StageCheckpointReader, TrieReader,
+    BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader, TrieReader,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -117,7 +117,12 @@ impl<F> OverlayStateProviderFactory<F> {
 impl<F> OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: TrieReader + StageCheckpointReader + PruneCheckpointReader + BlockNumReader,
+    F::Provider: TrieReader
+        + StageCheckpointReader
+        + PruneCheckpointReader
+        + ChangeSetReader
+        + DBProvider
+        + BlockNumReader,
 {
     /// Returns the block number for [`Self`]'s `block_hash` field, if any.
     fn get_requested_block_number(
@@ -205,6 +210,7 @@ where
         provider: &F::Provider,
         db_tip_block: BlockNumber,
     ) -> ProviderResult<Overlay> {
+        //
         // Set up variables we'll use for recording metrics. There's two different code-paths here,
         // and we want to make sure both record metrics, so we do metrics recording after.
         let retrieve_trie_reverts_duration;
@@ -235,7 +241,7 @@ where
 
                 let start = Instant::now();
                 let res = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
-                    provider.tx_ref(),
+                    provider,
                     from_block + 1..,
                 )?;
                 retrieve_hashed_state_reverts_duration = start.elapsed();
@@ -355,7 +361,11 @@ where
 impl<F> DatabaseProviderROFactory for OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: TrieReader + StageCheckpointReader + PruneCheckpointReader + BlockNumReader,
+    F::Provider: TrieReader
+        + StageCheckpointReader
+        + PruneCheckpointReader
+        + BlockNumReader
+        + ChangeSetReader,
 {
     type Provider = OverlayStateProvider<F::Provider>;
 

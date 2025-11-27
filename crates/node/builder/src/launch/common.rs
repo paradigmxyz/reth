@@ -480,7 +480,7 @@ where
 
         // Apply per-segment blocks_per_file configuration
         let static_file_provider =
-            StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
+            StaticFileProviderBuilder::read_write(self.data_dir().static_files())
                 .with_metrics()
                 .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
                 .build()?;
