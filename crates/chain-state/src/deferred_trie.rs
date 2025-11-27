@@ -9,6 +9,7 @@ use std::{
     fmt,
     sync::{Arc, LazyLock},
 };
+use tracing::instrument;
 
 /// Metrics for deferred trie computation.
 #[derive(Metrics)]
@@ -155,6 +156,7 @@ impl DeferredTrieData {
     /// - A block never waits on its descendants
     ///
     /// Given that invariant, circular wait dependencies are impossible.
+    #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
         let mut state = self.state.lock();
         match &*state {
