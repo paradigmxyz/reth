@@ -11,13 +11,15 @@ mod tests {
     fn baked_genesis_builds_with_embedded_alloc_or_fallback() {
         let spec = sepolia_baked_genesis_from_header(
             421_614,
-            "0x5f5e100",
-            "0x0",
-            "0x8647a2ae10b316ca12fbd76327fe4d64d12cb0ec664a128b0d59df15d05391be",
-            "0x1c9c380",
-            "0x",
-            None,
-            Some("0xb2d05e00"),
+            "0x5f5e100",  // base_fee
+            "0x0",        // timestamp
+            "0x8647a2ae10b316ca12fbd76327fe4d64d12cb0ec664a128b0d59df15d05391be",  // state_root
+            "0x1c9c380",  // gas_limit
+            "0x",         // extra_data
+            "0x0000000000000000000000000000000000000000000000000000000000000000",  // mix_hash
+            "0x0",        // nonce
+            None,         // chain_config_bytes
+            Some("0xb2d05e00"),  // initial_l1_base_fee
         )
         .expect("chainspec");
         let hash = spec.genesis_hash();
