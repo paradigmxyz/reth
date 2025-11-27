@@ -1014,10 +1014,9 @@ where
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
         let hashed_state = Arc::new(hashed_state);
         let trie_output = Arc::new(trie_output);
-
         let deferred_trie_data = DeferredTrieData::pending(
-            hashed_state.clone(),
-            trie_output.clone(),
+            Arc::clone(&hashed_state),
+            Arc::clone(&trie_output),
             anchor_hash,
             ancestors.clone(),
         );
@@ -1031,14 +1030,12 @@ where
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
 
-                let bundle = DeferredTrieData::sort_and_build_trie_input(
+                deferred_handle_task.compute_set_ready(
                     &hashed_state,
                     &trie_output,
                     anchor_hash,
                     &ancestors,
                 );
-
-                deferred_handle_task.set_ready(bundle);
                 deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
             }));
 

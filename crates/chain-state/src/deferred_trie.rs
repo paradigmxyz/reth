@@ -83,6 +83,89 @@ impl DeferredTrieData {
         Self { state: Arc::new(Mutex::new(DeferredState::Ready(bundle))) }
     }
 
+    /// Sort block execution outputs and build a [`TrieInputSorted`] overlay.
+    ///
+    /// The trie input overlay accumulates sorted hashed state (account/storage changes) and
+    /// trie node updates from all in-memory ancestor blocks. This overlay is required for:
+    /// - Computing state roots on top of in-memory blocks
+    /// - Generating storage/account proofs for unpersisted state
+    ///
+    /// # Process
+    /// 1. Sort the current block's hashed state and trie updates
+    /// 2. Merge ancestor overlays (oldest → newest, so later state takes precedence)
+    /// 3. Extend the merged overlay with this block's sorted data
+    ///
+    /// Used by both the async background task and the synchronous fallback path.
+    ///
+    /// # Arguments
+    /// * `hashed_state` - Unsorted hashed post-state (account/storage changes) from execution
+    /// * `trie_updates` - Unsorted trie node updates from state root computation
+    /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
+    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
+    pub fn sort_and_build_trie_input(
+        hashed_state: &HashedPostState,
+        trie_updates: &TrieUpdates,
+        anchor_hash: B256,
+        ancestors: &[DeferredTrieData],
+    ) -> ComputedTrieData {
+        // Sort the current block's hashed state and trie updates
+        let sorted_hashed_state = Arc::new(hashed_state.clone().into_sorted());
+        let sorted_trie_updates = Arc::new(trie_updates.clone().into_sorted());
+
+        // Merge trie data from ancestors (oldest -> newest so later state takes precedence)
+        let mut overlay = TrieInputSorted::default();
+        for ancestor in ancestors {
+            let ancestor_data = ancestor.wait_cloned();
+            {
+                let state_mut = Arc::make_mut(&mut overlay.state);
+                state_mut.extend_ref(ancestor_data.hashed_state.as_ref());
+            }
+            {
+                let nodes_mut = Arc::make_mut(&mut overlay.nodes);
+                nodes_mut.extend_ref(ancestor_data.trie_updates.as_ref());
+            }
+        }
+
+        // Extend overlay with current block's sorted data
+        {
+            let state_mut = Arc::make_mut(&mut overlay.state);
+            state_mut.extend_ref(sorted_hashed_state.as_ref());
+        }
+        {
+            let nodes_mut = Arc::make_mut(&mut overlay.nodes);
+            nodes_mut.extend_ref(sorted_trie_updates.as_ref());
+        }
+
+        ComputedTrieData::with_trie_input(
+            sorted_hashed_state,
+            sorted_trie_updates,
+            anchor_hash,
+            Arc::new(overlay),
+        )
+    }
+
+    /// Compute trie data from inputs and mark the handle as ready.
+    ///
+    /// Sorts and builds trie input from the provided state and updates, then marks the handle
+    /// as ready so that [`Self::wait_cloned`] returns immediately without fallback computation.
+    ///
+    /// # Arguments
+    /// * `hashed_state` - Unsorted hashed post-state from execution
+    /// * `trie_updates` - Unsorted trie updates from state root computation
+    /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
+    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
+    pub fn compute_set_ready(
+        &self,
+        hashed_state: &HashedPostState,
+        trie_updates: &TrieUpdates,
+        anchor_hash: B256,
+        ancestors: &[DeferredTrieData],
+    ) {
+        let bundle =
+            Self::sort_and_build_trie_input(hashed_state, trie_updates, anchor_hash, ancestors);
+        self.set_ready(bundle);
+    }
+
     /// Populate the handle with the computed trie data.
     ///
     /// Safe to call multiple times; only the first value is stored (first-write-wins).
@@ -157,67 +240,6 @@ impl DeferredTrieData {
                 computed
             }
         }
-    }
-
-    /// Sort block execution outputs and build a [`TrieInputSorted`] overlay.
-    ///
-    /// The trie input overlay accumulates sorted hashed state (account/storage changes) and
-    /// trie node updates from all in-memory ancestor blocks. This overlay is required for:
-    /// - Computing state roots on top of in-memory blocks
-    /// - Generating storage/account proofs for unpersisted state
-    ///
-    /// # Process
-    /// 1. Sort the current block's hashed state and trie updates
-    /// 2. Merge ancestor overlays (oldest → newest, so later state takes precedence)
-    /// 3. Extend the merged overlay with this block's sorted data
-    ///
-    /// Used by both the async background task and the synchronous fallback path.
-    ///
-    /// # Arguments
-    /// * `hashed_state` - Unsorted hashed post-state (account/storage changes) from execution
-    /// * `trie_updates` - Unsorted trie node updates from state root computation
-    /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
-    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
-    pub fn sort_and_build_trie_input(
-        hashed_state: &HashedPostState,
-        trie_updates: &TrieUpdates,
-        anchor_hash: B256,
-        ancestors: &[DeferredTrieData],
-    ) -> ComputedTrieData {
-        // Sort the current block's hashed state and trie updates
-        let sorted_hashed_state = Arc::new(hashed_state.clone().into_sorted());
-        let sorted_trie_updates = Arc::new(trie_updates.clone().into_sorted());
-
-        // Merge trie data from ancestors (oldest -> newest so later state takes precedence)
-        let mut overlay = TrieInputSorted::default();
-        for ancestor in ancestors {
-            let ancestor_data = ancestor.wait_cloned();
-            {
-                let state_mut = Arc::make_mut(&mut overlay.state);
-                state_mut.extend_ref(ancestor_data.hashed_state.as_ref());
-            }
-            {
-                let nodes_mut = Arc::make_mut(&mut overlay.nodes);
-                nodes_mut.extend_ref(ancestor_data.trie_updates.as_ref());
-            }
-        }
-
-        // Extend overlay with current block's sorted data
-        {
-            let state_mut = Arc::make_mut(&mut overlay.state);
-            state_mut.extend_ref(sorted_hashed_state.as_ref());
-        }
-        {
-            let nodes_mut = Arc::make_mut(&mut overlay.nodes);
-            nodes_mut.extend_ref(sorted_trie_updates.as_ref());
-        }
-
-        ComputedTrieData::with_trie_input(
-            sorted_hashed_state,
-            sorted_trie_updates,
-            anchor_hash,
-            Arc::new(overlay),
-        )
     }
 }
 
