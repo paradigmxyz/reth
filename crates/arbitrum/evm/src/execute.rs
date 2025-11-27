@@ -149,6 +149,9 @@ pub trait ArbOsHooks {
 pub struct DefaultArbOsHooks;
 
 impl DefaultArbOsHooks {
+    /// Updates the blockhash history storage (EIP-2935 style).
+    /// This must use proper cache and transition mechanism to ensure deterministic
+    /// state between block assembly and validation re-execution.
     fn process_parent_block_hash<D: Database>(
         state_db: &mut revm::database::State<D>,
         prev_hash: B256,
@@ -158,39 +161,36 @@ impl DefaultArbOsHooks {
             0x10, 0xcb, 0x7A, 0x02, 0x33, 0x5B, 0x17, 0x53,
             0x20, 0x00, 0x29, 0x35,
         ]);
-        
-        use revm_state::EvmStorageSlot;
-        use revm_database::{BundleAccount, AccountStatus};
+
+        use revm_database::states::plain_account::StorageSlot;
         use revm_state::AccountInfo;
-        
-        if !state_db.bundle_state.state.contains_key(&HISTORY_STORAGE_ADDRESS) {
-            let info = match state_db.basic(HISTORY_STORAGE_ADDRESS) {
-                Ok(Some(account_info)) => Some(account_info),
-                _ => Some(AccountInfo {
-                    balance: U256::ZERO,
-                    nonce: 0,
-                    code_hash: alloy_primitives::keccak256([]),
-                    code: None,
-                }),
-            };
-            
-            let acc = BundleAccount {
-                info,
-                storage: std::collections::HashMap::default(),
-                original_info: None,
-                status: AccountStatus::Changed,
-            };
-            state_db.bundle_state.state.insert(HISTORY_STORAGE_ADDRESS, acc);
-        }
-        
+
+        // Load the account into cache (handles non-existing accounts properly)
+        let _ = state_db.load_cache_account(HISTORY_STORAGE_ADDRESS);
+
         let slot = U256::from_be_bytes(prev_hash.0);
         let value_u256 = U256::from_be_bytes(prev_hash.0);
-        
-        if let Some(acc) = state_db.bundle_state.state.get_mut(&HISTORY_STORAGE_ADDRESS) {
-            acc.storage.insert(
-                slot,
-                EvmStorageSlot { present_value: value_u256, ..Default::default() }.into(),
-            );
+
+        // Get original value for proper change tracking
+        let original_value = state_db.storage(HISTORY_STORAGE_ADDRESS, slot).unwrap_or(U256::ZERO);
+
+        // Create storage change entry
+        let mut storage_changes = alloy_primitives::map::HashMap::default();
+        storage_changes.insert(slot, StorageSlot::new_changed(original_value, value_u256));
+
+        // Get the cached account and use change() which handles None account case
+        if let Some(cached_acc) = state_db.cache.accounts.get_mut(&HISTORY_STORAGE_ADDRESS) {
+            // Get current account info or create default empty info
+            let account_info = cached_acc.account
+                .as_ref()
+                .map(|a| a.info.clone())
+                .unwrap_or_else(|| AccountInfo::default());
+
+            // Use change() which properly handles both existing and non-existing accounts
+            let transition = cached_acc.change(account_info, storage_changes);
+
+            // Apply the transition to update bundle state
+            state_db.apply_transition(vec![(HISTORY_STORAGE_ADDRESS, transition)]);
         }
     }
     
