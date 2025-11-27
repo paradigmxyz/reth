@@ -276,7 +276,7 @@ pub trait LoadPendingBlock:
                     // the iterator before we can continue
                     best_txs.mark_invalid(
                         &pool_tx,
-                        InvalidPoolTransactionError::ExceedsGasLimit(
+                        &InvalidPoolTransactionError::ExceedsGasLimit(
                             pool_tx.gas_limit(),
                             block_gas_limit,
                         ),
@@ -290,7 +290,7 @@ pub trait LoadPendingBlock:
                     // transactions from the iteratorbefore we can continue
                     best_txs.mark_invalid(
                         &pool_tx,
-                        InvalidPoolTransactionError::Consensus(
+                        &InvalidPoolTransactionError::Consensus(
                             InvalidTransactionError::TxTypeNotSupported,
                         ),
                     );
@@ -311,7 +311,7 @@ pub trait LoadPendingBlock:
                     // for regular transactions above.
                     best_txs.mark_invalid(
                         &pool_tx,
-                        InvalidPoolTransactionError::ExceedsGasLimit(
+                        &InvalidPoolTransactionError::ExceedsGasLimit(
                             tx_blob_gas,
                             blob_params.max_blob_gas_per_block(),
                         ),
@@ -332,7 +332,7 @@ pub trait LoadPendingBlock:
                             // descendants
                             best_txs.mark_invalid(
                                 &pool_tx,
-                                InvalidPoolTransactionError::Consensus(
+                                &InvalidPoolTransactionError::Consensus(
                                     InvalidTransactionError::TxTypeNotSupported,
                                 ),
                             );

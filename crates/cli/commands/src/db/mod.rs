@@ -8,6 +8,7 @@ use std::{
     io::{self, Write},
     sync::Arc,
 };
+mod account_storage;
 mod checksum;
 mod clear;
 mod diff;
@@ -61,6 +62,8 @@ pub enum Subcommands {
     Path,
     /// Manage storage settings
     Settings(settings::Command),
+    /// Gets storage size information for an account
+    AccountStorage(account_storage::Command),
 }
 
 /// Initializes a provider factory with specified access rights, and then execute with the provided
@@ -183,6 +186,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             Subcommands::Settings(command) => {
                 db_exec!(self.env, tool, N, command.access_rights(), {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::AccountStorage(command) => {
+                db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
                 });
             }
