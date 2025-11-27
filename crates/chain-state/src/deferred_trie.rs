@@ -144,16 +144,6 @@ impl DeferredTrieData {
         )
     }
 
-    /// Populate the handle with the computed trie data.
-    ///
-    /// Safe to call multiple times; only the first value is stored (first-write-wins).
-    pub fn set_ready(&self, bundle: ComputedTrieData) {
-        let mut state = self.state.lock();
-        if matches!(&*state, DeferredState::Pending(_)) {
-            *state = DeferredState::Ready(bundle);
-        }
-    }
-
     /// Returns trie data, computing synchronously if the async task hasn't completed.
     ///
     /// - If the async task has completed (`Ready`), returns the cached result.
@@ -348,127 +338,29 @@ mod tests {
         assert_eq!(first.anchor_hash(), second.anchor_hash());
     }
 
-    /// Verifies that `set_ready` value takes precedence when called before `wait_cloned`.
+    /// Verifies that concurrent `wait_cloned` calls result in only one computation,
+    /// with all callers receiving the same cached result.
     #[test]
-    fn set_ready_wins_over_fallback() {
+    fn concurrent_wait_cloned_computes_once() {
         let deferred = empty_pending();
 
-        let bundle = ComputedTrieData {
-            anchored_trie_input: Some(AnchoredTrieInput {
-                anchor_hash: B256::with_last_byte(42),
-                trie_input: Arc::new(TrieInputSorted::default()),
-            }),
-            ..empty_bundle()
-        };
+        // Spawn multiple threads that all call wait_cloned concurrently
+        let handles: Vec<_> = (0..10)
+            .map(|_| {
+                let d = deferred.clone();
+                thread::spawn(move || d.wait_cloned())
+            })
+            .collect();
 
-        // Set ready before wait_cloned
-        deferred.set_ready(bundle);
+        // Collect all results
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
-        let result = deferred.wait_cloned();
-        assert_eq!(result.anchor_hash(), Some(B256::with_last_byte(42)));
-    }
-
-    /// Verifies first-write-wins semantics: only the first `set_ready` value is stored.
-    #[test]
-    fn multiple_set_ready_takes_first() {
-        let deferred = empty_pending();
-
-        let first = ComputedTrieData {
-            anchored_trie_input: Some(AnchoredTrieInput {
-                anchor_hash: B256::with_last_byte(1),
-                trie_input: Arc::new(TrieInputSorted::default()),
-            }),
-            ..empty_bundle()
-        };
-        let second = ComputedTrieData {
-            anchored_trie_input: Some(AnchoredTrieInput {
-                anchor_hash: B256::with_last_byte(2),
-                trie_input: Arc::new(TrieInputSorted::default()),
-            }),
-            ..empty_bundle()
-        };
-
-        deferred.set_ready(first.clone());
-        deferred.set_ready(second);
-
-        assert_eq!(deferred.wait_cloned().anchor_hash(), first.anchor_hash());
-    }
-
-    /// Verifies that cloned handles share the same underlying state.
-    #[test]
-    fn clones_share_state() {
-        let deferred = empty_pending();
-        let setter = deferred.clone();
-
-        let bundle = ComputedTrieData {
-            anchored_trie_input: Some(AnchoredTrieInput {
-                anchor_hash: B256::with_last_byte(3),
-                trie_input: Arc::new(TrieInputSorted::default()),
-            }),
-            ..empty_bundle()
-        };
-
-        thread::spawn(move || setter.set_ready(bundle));
-
-        // Give the thread time to set
-        thread::sleep(Duration::from_millis(10));
-        assert_eq!(deferred.wait_cloned().anchor_hash(), Some(B256::with_last_byte(3)));
-    }
-
-    /// Verifies that calling `set_ready` before `wait_cloned` returns the set value immediately.
-    #[test]
-    fn set_before_wait_returns_set_value() {
-        let deferred = empty_pending();
-
-        let bundle = ComputedTrieData {
-            anchored_trie_input: Some(AnchoredTrieInput {
-                anchor_hash: B256::with_last_byte(4),
-                trie_input: Arc::new(TrieInputSorted::default()),
-            }),
-            ..empty_bundle()
-        };
-
-        deferred.set_ready(bundle.clone());
-
-        let start = Instant::now();
-        let result = deferred.wait_cloned();
-        let elapsed = start.elapsed();
-
-        assert_eq!(result.anchor_hash(), bundle.anchor_hash());
-        assert!(elapsed < Duration::from_millis(20));
-    }
-
-    /// Verifies race condition handling: either async `set_ready` or fallback result is returned.
-    #[test]
-    fn async_set_ready_race_with_fallback() {
-        // Test that when async task sets ready, either the set value or fallback is returned
-        let deferred = empty_pending_with_anchor(B256::with_last_byte(100)); // Fallback anchor
-        let deferred_clone = deferred.clone();
-
-        // Spawn async task that sets ready after a delay
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(5));
-            let bundle = ComputedTrieData {
-                anchored_trie_input: Some(AnchoredTrieInput {
-                    anchor_hash: B256::with_last_byte(200), // Async anchor
-                    trie_input: Arc::new(TrieInputSorted::default()),
-                }),
-                ..empty_bundle()
-            };
-            deferred_clone.set_ready(bundle);
-        });
-
-        // Wait a bit for potential race
-        thread::sleep(Duration::from_millis(10));
-
-        let result = deferred.wait_cloned();
-        // Result should be either from set_ready (200) or fallback (100)
-        let anchor = result.anchor_hash();
-        assert!(
-            anchor == Some(B256::with_last_byte(200)) || anchor == Some(B256::with_last_byte(100)),
-            "Expected anchor 100 or 200, got {:?}",
-            anchor
-        );
+        // All results should share the same Arc pointers (same computed result)
+        let first = &results[0];
+        for result in &results[1..] {
+            assert!(Arc::ptr_eq(&first.hashed_state, &result.hashed_state));
+            assert!(Arc::ptr_eq(&first.trie_updates, &result.trie_updates));
+        }
     }
 
     /// Tests that ancestor trie data is merged during fallback computation and that the
