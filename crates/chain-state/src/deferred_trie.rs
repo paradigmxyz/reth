@@ -153,19 +153,27 @@ impl DeferredTrieData {
     /// Sort block execution outputs and build a [`TrieInputSorted`] overlay.
     ///
     /// The trie input overlay accumulates sorted hashed state (account/storage changes) and
-    /// trie node updates. With parent-only storage, the parent's `trie_input` already contains
-    /// all grandparent data, enabling O(1) merge per block instead of O(N).
+    /// trie node updates from all ancestor blocks in the chain.
+    ///
+    /// # Non-recursive design
+    /// This implementation avoids deep recursion by directly accessing unsorted data from
+    /// pending ancestors instead of calling `wait_cloned()` on them. This is critical for
+    /// long chains where recursive `wait_cloned()` calls would cause stack overflow or
+    /// long blocking times.
     ///
     /// # Process
     /// 1. Sort the current block's hashed state and trie updates
-    /// 2. Get parent's `trie_input` (already contains cumulative grandparent data)
-    /// 3. Extend the parent overlay with this block's sorted data
+    /// 2. Traverse parent chain:
+    ///    - For Ready ancestors: use `trie_input` as base (already has all their ancestors)
+    ///    - For Pending ancestors: collect their UNSORTED data directly (no `wait_cloned`)
+    /// 3. Sort each pending ancestor's data ourselves
+    /// 4. Build cumulative overlay from base + sorted ancestor data + current data
     ///
     /// # Arguments
     /// * `hashed_state` - Unsorted hashed post-state (account/storage changes) from execution
     /// * `trie_updates` - Unsorted trie node updates from state root computation
     /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
-    /// * `parent` - Parent block's deferred trie data (contains cumulative overlay)
+    /// * `parent` - Parent block's deferred trie data handle
     fn compute_trie_data(
         hashed_state: &HashedPostState,
         trie_updates: &TrieUpdates,
@@ -176,11 +184,46 @@ impl DeferredTrieData {
         let sorted_hashed_state = Arc::new(hashed_state.clone().into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates.clone().into_sorted());
 
-        // Get parent's trie_input (already contains all grandparent data) - O(1)
-        let mut overlay = parent
-            .and_then(|p| p.wait_cloned().trie_input().cloned())
-            .map(|input| (*input).clone())
-            .unwrap_or_default();
+        // Traverse parent chain, collecting data without triggering recursive computation.
+        // For Pending ancestors, we grab their UNSORTED data directly.
+        // For Ready ancestors, we use their already-computed trie_input as base.
+        let mut pending_unsorted: Vec<(Arc<HashedPostState>, Arc<TrieUpdates>)> = Vec::new();
+        let mut base_trie_input: Option<Arc<TrieInputSorted>> = None;
+        let mut current = parent.cloned();
+
+        while let Some(p) = current {
+            // Check if this ancestor is ready (has computed result)
+            if let Some(data) = p.inner.result.get() {
+                // Ready: use its trie_input as base, stop traversing.
+                // The Ready block's trie_input already contains all its ancestors' data
+                // PLUS its own sorted data.
+                base_trie_input = data.trie_input().cloned();
+                break;
+            }
+
+            // Not ready (pending): grab unsorted data directly - NO wait_cloned, NO recursion!
+            if let Some(inputs) = &p.inner.inputs {
+                let unsorted_state = inputs.hashed_state.clone();
+                let unsorted_trie = inputs.trie_updates.clone();
+                let next_parent = inputs.parent.clone();
+                pending_unsorted.push((unsorted_state, unsorted_trie));
+                current = next_parent;
+            } else {
+                // Ready handle with no inputs (created via ready()) - shouldn't happen in chain
+                break;
+            }
+        }
+
+        // Build overlay starting from base (if any Ready ancestor was found)
+        let mut overlay = base_trie_input.map(|arc| (*arc).clone()).unwrap_or_default();
+
+        // Sort and extend with pending ancestors' data (oldest to newest = reverse order)
+        for (unsorted_state, unsorted_trie) in pending_unsorted.into_iter().rev() {
+            let sorted_state = unsorted_state.as_ref().clone().into_sorted();
+            let sorted_trie = unsorted_trie.as_ref().clone().into_sorted();
+            Arc::make_mut(&mut overlay.state).extend_ref(&sorted_state);
+            Arc::make_mut(&mut overlay.nodes).extend_ref(&sorted_trie);
+        }
 
         // Extend overlay with current block's sorted data
         Arc::make_mut(&mut overlay.state).extend_ref(sorted_hashed_state.as_ref());
