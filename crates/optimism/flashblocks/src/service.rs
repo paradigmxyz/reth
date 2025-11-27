@@ -1,11 +1,12 @@
 use crate::{
-    cache::SequenceManager, worker::FlashBlockBuilder, FlashBlock, FlashBlockCompleteSequence,
-    FlashBlockCompleteSequenceRx, InProgressFlashBlockRx, PendingFlashBlock,
+    cache::SequenceManager,
+    traits::{FlashblockPayload, FlashblockPayloadBase},
+    worker::FlashBlockBuilder,
+    FlashBlockCompleteSequence, InProgressFlashBlockRx, PendingFlashBlock,
 };
 use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
 use metrics::{Gauge, Histogram};
-use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_evm::ConfigureEvm;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy};
@@ -13,43 +14,44 @@ use reth_revm::cached::CachedReads;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskExecutor;
 use std::{sync::Arc, time::Instant};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{broadcast, oneshot, watch};
 use tracing::*;
 
 /// The `FlashBlockService` maintains an in-memory [`PendingFlashBlock`] built out of a sequence of
-/// [`FlashBlock`]s.
+/// flashblocks.
 #[derive(Debug)]
-pub struct FlashBlockService<
+pub struct FlashBlockService<N, S, EvmConfig, Provider, P>
+where
     N: NodePrimitives,
-    S,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>,
-    Provider,
-> {
+    P: FlashblockPayload,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<P::Base> + Unpin>,
+{
     /// Incoming flashblock stream.
     incoming_flashblock_rx: S,
     /// Signals when a block build is in progress.
     in_progress_tx: watch::Sender<Option<FlashBlockBuildInfo>>,
     /// Broadcast channel to forward received flashblocks from the subscription.
-    received_flashblocks_tx: tokio::sync::broadcast::Sender<Arc<FlashBlock>>,
+    received_flashblocks_tx: broadcast::Sender<Arc<P>>,
 
     /// Executes flashblock sequences to build pending blocks.
-    builder: FlashBlockBuilder<EvmConfig, Provider>,
+    builder: FlashBlockBuilder<EvmConfig, Provider, P::Base>,
     /// Task executor for spawning block build jobs.
     spawner: TaskExecutor,
     /// Currently running block build job with start time and result receiver.
     job: Option<BuildJob<N>>,
     /// Manages flashblock sequences with caching and intelligent build selection.
-    sequences: SequenceManager<N::SignedTx>,
+    sequences: SequenceManager<P>,
 
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
 }
 
-impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
+impl<N, S, EvmConfig, Provider, P> FlashBlockService<N, S, EvmConfig, Provider, P>
 where
     N: NodePrimitives,
-    S: Stream<Item = eyre::Result<FlashBlock>> + Unpin + 'static,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>
+    P: FlashblockPayload<SignedTx = N::SignedTx>,
+    S: Stream<Item = eyre::Result<P>> + Unpin + 'static,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<P::Base> + Unpin>
         + Clone
         + 'static,
     Provider: StateProviderFactory
@@ -62,7 +64,7 @@ where
         + Clone
         + 'static,
 {
-    /// Constructs a new `FlashBlockService` that receives [`FlashBlock`]s from `rx` stream.
+    /// Constructs a new `FlashBlockService` that receives flashblocks from `rx` stream.
     pub fn new(
         incoming_flashblock_rx: S,
         evm_config: EvmConfig,
@@ -71,7 +73,7 @@ where
         compute_state_root: bool,
     ) -> Self {
         let (in_progress_tx, _) = watch::channel(None);
-        let (received_flashblocks_tx, _) = tokio::sync::broadcast::channel(128);
+        let (received_flashblocks_tx, _) = broadcast::channel(128);
         Self {
             incoming_flashblock_rx,
             in_progress_tx,
@@ -85,21 +87,17 @@ where
     }
 
     /// Returns the sender half to the received flashblocks.
-    pub const fn flashblocks_broadcaster(
-        &self,
-    ) -> &tokio::sync::broadcast::Sender<Arc<FlashBlock>> {
+    pub const fn flashblocks_broadcaster(&self) -> &broadcast::Sender<Arc<P>> {
         &self.received_flashblocks_tx
     }
 
     /// Returns the sender half to the flashblock sequence.
-    pub const fn block_sequence_broadcaster(
-        &self,
-    ) -> &tokio::sync::broadcast::Sender<FlashBlockCompleteSequence> {
+    pub const fn block_sequence_broadcaster(&self) -> &broadcast::Sender<FlashBlockCompleteSequence<P>> {
         self.sequences.block_sequence_broadcaster()
     }
 
     /// Returns a subscriber to the flashblock sequence.
-    pub fn subscribe_block_sequence(&self) -> FlashBlockCompleteSequenceRx {
+    pub fn subscribe_block_sequence(&self) -> broadcast::Receiver<FlashBlockCompleteSequence<P>> {
         self.sequences.subscribe_block_sequence()
     }
 
@@ -181,10 +179,10 @@ where
 
     /// Processes a single flashblock: notifies subscribers, records metrics, and inserts into
     /// sequence.
-    fn process_flashblock(&mut self, flashblock: FlashBlock) {
+    fn process_flashblock(&mut self, flashblock: P) {
         self.notify_received_flashblock(&flashblock);
 
-        if flashblock.index == 0 {
+        if flashblock.index() == 0 {
             self.metrics.last_flashblock_length.record(self.sequences.pending().count() as f64);
         }
 
@@ -194,7 +192,7 @@ where
     }
 
     /// Notifies all subscribers about the received flashblock.
-    fn notify_received_flashblock(&self, flashblock: &FlashBlock) {
+    fn notify_received_flashblock(&self, flashblock: &P) {
         if self.received_flashblocks_tx.receiver_count() > 0 {
             let _ = self.received_flashblocks_tx.send(Arc::new(flashblock.clone()));
         }
@@ -217,9 +215,9 @@ where
 
         // Spawn build job
         let fb_info = FlashBlockBuildInfo {
-            parent_hash: args.base.parent_hash,
+            parent_hash: args.base.parent_hash(),
             index: args.last_flashblock_index,
-            block_number: args.base.block_number,
+            block_number: args.base.block_number(),
         };
         self.metrics.current_block_height.set(fb_info.block_number as f64);
         self.metrics.current_index.set(fb_info.index as f64);

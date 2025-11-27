@@ -34,11 +34,13 @@ alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 alloy-consensus.workspace = true
 
 # op-alloy
+op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine = { workspace = true, features = ["k256"] }
 
 # io
 tokio.workspace = true
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
+serde.workspace = true
 serde_json.workspace = true
 url.workspace = true
 futures-util.workspace = true
@@ -57,4 +59,3 @@ derive_more.workspace = true
 [dev-dependencies]
 test-case.workspace = true
 alloy-consensus.workspace = true
-op-alloy-consensus.workspace = true

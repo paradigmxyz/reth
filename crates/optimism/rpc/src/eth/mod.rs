@@ -16,12 +16,14 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{B256, U256};
 use eyre::WrapErr;
 use op_alloy_network::Optimism;
-use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
+use op_alloy_rpc_types_engine::{OpFlashblockPayload, OpFlashblockPayloadBase};
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reqwest::Url;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
+use op_alloy_consensus::OpTxEnvelope;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
+use reth_primitives_traits::NodePrimitives;
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
     FlashBlockBuildInfo, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
@@ -121,7 +123,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
     }
 
     /// Returns a new subscription to flashblock sequences.
-    pub fn subscribe_flashblock_sequence(&self) -> Option<FlashBlockCompleteSequenceRx> {
+    pub fn subscribe_flashblock_sequence(&self) -> Option<FlashBlockCompleteSequenceRx<OpFlashblockPayload>> {
         self.inner.flashblocks.as_ref().map(|f| f.flashblocks_sequence.subscribe())
     }
 
@@ -477,9 +479,10 @@ where
         >,
         Types: NodeTypes<
             ChainSpec: Hardforks + EthereumHardforks,
+            Primitives: NodePrimitives<SignedTx = OpTxEnvelope>,
             Payload: reth_node_api::PayloadTypes<
                 ExecutionData: for<'a> TryFrom<
-                    &'a FlashBlockCompleteSequence,
+                    &'a FlashBlockCompleteSequence<OpFlashblockPayload>,
                     Error: std::fmt::Display,
                 >,
             >,

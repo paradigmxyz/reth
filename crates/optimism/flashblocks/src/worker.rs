@@ -1,8 +1,9 @@
-use crate::PendingFlashBlock;
+use crate::{traits::FlashblockPayloadBase, PendingFlashBlock};
 use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag};
 use alloy_primitives::B256;
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::{ComputedTrieData, ExecutedBlock};
+use reth_chain_state::ExecutedBlock;
 use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -16,6 +17,7 @@ use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State}
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
 use std::{
+    marker::PhantomData,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -23,14 +25,15 @@ use tracing::trace;
 
 /// The `FlashBlockBuilder` builds [`PendingBlock`] out of a sequence of transactions.
 #[derive(Debug)]
-pub(crate) struct FlashBlockBuilder<EvmConfig, Provider> {
+pub(crate) struct FlashBlockBuilder<EvmConfig, Provider, Base> {
     evm_config: EvmConfig,
     provider: Provider,
+    _base: PhantomData<Base>,
 }
 
-impl<EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider> {
+impl<EvmConfig, Provider, Base> FlashBlockBuilder<EvmConfig, Provider, Base> {
     pub(crate) const fn new(evm_config: EvmConfig, provider: Provider) -> Self {
-        Self { evm_config, provider }
+        Self { evm_config, provider, _base: PhantomData }
     }
 
     pub(crate) const fn provider(&self) -> &Provider {
@@ -38,8 +41,9 @@ impl<EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider> {
     }
 }
 
-pub(crate) struct BuildArgs<I> {
-    pub(crate) base: OpFlashblockPayloadBase,
+/// Arguments for building a block from flashblocks.
+pub(crate) struct BuildArgs<I, Base> {
+    pub(crate) base: Base,
     pub(crate) transactions: I,
     pub(crate) cached_state: Option<(B256, CachedReads)>,
     pub(crate) last_flashblock_index: u64,
@@ -47,10 +51,11 @@ pub(crate) struct BuildArgs<I> {
     pub(crate) compute_state_root: bool,
 }
 
-impl<N, EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider>
+impl<N, EvmConfig, Provider, Base> FlashBlockBuilder<EvmConfig, Provider, Base>
 where
     N: NodePrimitives,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>,
+    Base: FlashblockPayloadBase,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<Base> + Unpin>,
     Provider: StateProviderFactory
         + BlockReaderIdExt<
             Header = HeaderTy<N>,
@@ -60,12 +65,12 @@ where
         > + Unpin,
 {
     /// Returns the [`PendingFlashBlock`] made purely out of transactions and
-    /// [`OpFlashblockPayloadBase`] in `args`.
+    /// the flashblock payload base in `args`.
     ///
     /// Returns `None` if the flashblock doesn't attach to the latest header.
     pub(crate) fn execute<I: IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>(
         &self,
-        mut args: BuildArgs<I>,
+        mut args: BuildArgs<I, Base>,
     ) -> eyre::Result<Option<(PendingFlashBlock<N>, CachedReads)>> {
         trace!(target: "flashblocks", "Attempting new pending block from flashblocks");
 
@@ -75,8 +80,8 @@ where
             .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
         let latest_hash = latest.hash();
 
-        if args.base.parent_hash != latest_hash {
-            trace!(target: "flashblocks", flashblock_parent = ?args.base.parent_hash, local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
+        if args.base.parent_hash() != latest_hash {
+            trace!(target: "flashblocks", flashblock_parent = ?args.base.parent_hash(), local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
             // doesn't attach to the latest block
             return Ok(None)
         }
@@ -141,8 +146,8 @@ where
     }
 }
 
-impl<EvmConfig: Clone, Provider: Clone> Clone for FlashBlockBuilder<EvmConfig, Provider> {
+impl<EvmConfig: Clone, Provider: Clone, Base> Clone for FlashBlockBuilder<EvmConfig, Provider, Base> {
     fn clone(&self) -> Self {
-        Self { evm_config: self.evm_config.clone(), provider: self.provider.clone() }
+        Self { evm_config: self.evm_config.clone(), provider: self.provider.clone(), _base: PhantomData }
     }
 }

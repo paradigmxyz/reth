@@ -5,12 +5,13 @@
 
 use crate::{
     sequence::{FlashBlockPendingSequence, SequenceExecutionOutcome},
+    traits::{FlashblockDiff, FlashblockPayload, FlashblockPayloadBase},
     worker::BuildArgs,
-    FlashBlock, FlashBlockCompleteSequence, PendingFlashBlock,
+    FlashBlockCompleteSequence, PendingFlashBlock,
 };
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::B256;
-use reth_primitives_traits::{NodePrimitives, Recovered, SignedTransaction};
+use reth_primitives_traits::{NodePrimitives, Recovered};
 use reth_revm::cached::CachedReads;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use tokio::sync::broadcast;
@@ -29,21 +30,21 @@ pub(crate) const FLASHBLOCK_BLOCK_TIME: u64 = 200;
 /// - Finding the best sequence to build based on local chain tip
 /// - Broadcasting completed sequences to subscribers
 #[derive(Debug)]
-pub(crate) struct SequenceManager<T: SignedTransaction> {
+pub(crate) struct SequenceManager<P: FlashblockPayload> {
     /// Current pending sequence being built up from incoming flashblocks
-    pending: FlashBlockPendingSequence,
+    pending: FlashBlockPendingSequence<P>,
     /// Cached recovered transactions for the pending sequence
-    pending_transactions: Vec<WithEncoded<Recovered<T>>>,
+    pending_transactions: Vec<WithEncoded<Recovered<P::SignedTx>>>,
     /// Ring buffer of recently completed sequences bundled with their decoded transactions (FIFO,
     /// size 3)
-    completed_cache: AllocRingBuffer<(FlashBlockCompleteSequence, Vec<WithEncoded<Recovered<T>>>)>,
+    completed_cache: AllocRingBuffer<(FlashBlockCompleteSequence<P>, Vec<WithEncoded<Recovered<P::SignedTx>>>)>,
     /// Broadcast channel for completed sequences
-    block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence>,
+    block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence<P>>,
     /// Whether to compute state roots when building blocks
     compute_state_root: bool,
 }
 
-impl<T: SignedTransaction> SequenceManager<T> {
+impl<P: FlashblockPayload> SequenceManager<P> {
     /// Creates a new sequence manager.
     pub(crate) fn new(compute_state_root: bool) -> Self {
         let (block_broadcaster, _) = broadcast::channel(128);
@@ -59,12 +60,12 @@ impl<T: SignedTransaction> SequenceManager<T> {
     /// Returns the sender half of the flashblock sequence broadcast channel.
     pub(crate) const fn block_sequence_broadcaster(
         &self,
-    ) -> &broadcast::Sender<FlashBlockCompleteSequence> {
+    ) -> &broadcast::Sender<FlashBlockCompleteSequence<P>> {
         &self.block_broadcaster
     }
 
     /// Gets a subscriber to the flashblock sequences produced.
-    pub(crate) fn subscribe_block_sequence(&self) -> crate::FlashBlockCompleteSequenceRx {
+    pub(crate) fn subscribe_block_sequence(&self) -> broadcast::Receiver<FlashBlockCompleteSequence<P>> {
         self.block_broadcaster.subscribe()
     }
 
@@ -76,12 +77,12 @@ impl<T: SignedTransaction> SequenceManager<T> {
     /// with computed `state_root`.
     ///
     /// Transactions are recovered once and cached for reuse during block building.
-    pub(crate) fn insert_flashblock(&mut self, flashblock: FlashBlock) -> eyre::Result<()> {
+    pub(crate) fn insert_flashblock(&mut self, flashblock: P) -> eyre::Result<()> {
         // If this starts a new block, finalize and cache the previous sequence BEFORE inserting
-        if flashblock.index == 0 && self.pending.count() > 0 {
+        if flashblock.index() == 0 && self.pending.count() > 0 {
             let completed = self.pending.finalize()?;
             let block_number = completed.block_number();
-            let parent_hash = completed.payload_base().parent_hash;
+            let parent_hash = completed.payload_base().parent_hash();
 
             trace!(
                 target: "flashblocks",
@@ -114,7 +115,7 @@ impl<T: SignedTransaction> SequenceManager<T> {
     }
 
     /// Returns the current pending sequence for inspection.
-    pub(crate) const fn pending(&self) -> &FlashBlockPendingSequence {
+    pub(crate) const fn pending(&self) -> &FlashBlockPendingSequence<P> {
         &self.pending
     }
 
@@ -129,21 +130,21 @@ impl<T: SignedTransaction> SequenceManager<T> {
         &mut self,
         local_tip_hash: B256,
         local_tip_timestamp: u64,
-    ) -> Option<BuildArgs<Vec<WithEncoded<Recovered<T>>>>> {
+    ) -> Option<BuildArgs<Vec<WithEncoded<Recovered<P::SignedTx>>>, P::Base>> {
         // Try to find a buildable sequence: (base, last_fb, transactions, cached_state,
         // source_name)
         let (base, last_flashblock, transactions, cached_state, source_name) =
             // Priority 1: Try current pending sequence
-            if let Some(base) = self.pending.payload_base().filter(|b| b.parent_hash == local_tip_hash) {
-                let cached_state = self.pending.take_cached_reads().map(|r| (base.parent_hash, r));
-                let last_fb = self.pending.last_flashblock()?;
+            if let Some(base) = self.pending.payload_base().filter(|b| b.parent_hash() == local_tip_hash) {
+                let cached_state = self.pending.take_cached_reads().map(|r| (base.parent_hash(), r));
+                let last_fb = self.pending.last_flashblock()?.clone();
                 let transactions = self.pending_transactions.clone();
                 (base, last_fb, transactions, cached_state, "pending")
             }
             // Priority 2: Try cached sequence with exact parent match
-            else if let Some((cached, txs)) = self.completed_cache.iter().find(|(c, _)| c.payload_base().parent_hash == local_tip_hash) {
+            else if let Some((cached, txs)) = self.completed_cache.iter().find(|(c, _)| c.payload_base().parent_hash() == local_tip_hash) {
                 let base = cached.payload_base().clone();
-                let last_fb = cached.last();
+                let last_fb = cached.last().clone();
                 let transactions = txs.clone();
                 let cached_state = None;
                 (base, last_fb, transactions, cached_state, "cached")
@@ -179,20 +180,20 @@ impl<T: SignedTransaction> SequenceManager<T> {
         // compute the state root, causing FlashblockConsensusClient to lack precomputed state for
         // engine_newPayload. This is safe: we still have op-node as backstop to maintain
         // chain progression.
-        let block_time_ms = (base.timestamp - local_tip_timestamp) * 1000;
+        let block_time_ms = (base.timestamp() - local_tip_timestamp) * 1000;
         let expected_final_flashblock = block_time_ms / FLASHBLOCK_BLOCK_TIME;
         let compute_state_root = self.compute_state_root &&
-            last_flashblock.diff.state_root.is_zero() &&
-            last_flashblock.index >= expected_final_flashblock.saturating_sub(1);
+            last_flashblock.diff().state_root().is_zero() &&
+            last_flashblock.index() >= expected_final_flashblock.saturating_sub(1);
 
         trace!(
             target: "flashblocks",
-            block_number = base.block_number,
+            block_number = base.block_number(),
             source = source_name,
-            flashblock_index = last_flashblock.index,
+            flashblock_index = last_flashblock.index(),
             expected_final_flashblock,
             compute_state_root_enabled = self.compute_state_root,
-            state_root_is_zero = last_flashblock.diff.state_root.is_zero(),
+            state_root_is_zero = last_flashblock.diff().state_root().is_zero(),
             will_compute_state_root = compute_state_root,
             "Building from flashblock sequence"
         );
@@ -201,8 +202,8 @@ impl<T: SignedTransaction> SequenceManager<T> {
             base,
             transactions,
             cached_state,
-            last_flashblock_index: last_flashblock.index,
-            last_flashblock_hash: last_flashblock.diff.block_hash,
+            last_flashblock_index: last_flashblock.index(),
+            last_flashblock_hash: last_flashblock.diff().block_hash(),
             compute_state_root,
         })
     }
@@ -227,7 +228,7 @@ impl<T: SignedTransaction> SequenceManager<T> {
         });
 
         // Update pending sequence with execution results
-        if self.pending.payload_base().is_some_and(|base| base.parent_hash == parent_hash) {
+        if self.pending.payload_base().is_some_and(|base| base.parent_hash() == parent_hash) {
             self.pending.set_execution_outcome(execution_outcome);
             self.pending.set_cached_reads(cached_reads);
             trace!(
@@ -241,7 +242,7 @@ impl<T: SignedTransaction> SequenceManager<T> {
         else if let Some((cached, _)) = self
             .completed_cache
             .iter_mut()
-            .find(|(c, _)| c.payload_base().parent_hash == parent_hash)
+            .find(|(c, _)| c.payload_base().parent_hash() == parent_hash)
         {
             // Only re-broadcast if we computed new information (state_root was missing).
             // If sequencer already provided state_root, we already broadcast in insert_flashblock,
@@ -267,18 +268,18 @@ impl<T: SignedTransaction> SequenceManager<T> {
 mod tests {
     use super::*;
     use crate::test_utils::TestFlashBlockFactory;
+    use crate::FlashBlock;
     use alloy_primitives::B256;
-    use op_alloy_consensus::OpTxEnvelope;
 
     #[test]
     fn test_sequence_manager_new() {
-        let manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let manager: SequenceManager<FlashBlock> = SequenceManager::new(true);
         assert_eq!(manager.pending().count(), 0);
     }
 
     #[test]
     fn test_insert_flashblock_creates_pending_sequence() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let mut manager: SequenceManager<FlashBlock> = SequenceManager::new(true);
         let factory = TestFlashBlockFactory::new();
 
         let fb0 = factory.flashblock_at(0).build();
@@ -290,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_insert_flashblock_caches_completed_sequence() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let mut manager: SequenceManager<FlashBlock> = SequenceManager::new(true);
         let factory = TestFlashBlockFactory::new();
 
         // Build first sequence
@@ -314,7 +315,7 @@ mod tests {
 
     #[test]
     fn test_next_buildable_args_returns_none_when_empty() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let mut manager: SequenceManager<FlashBlock> = SequenceManager::new(true);
         let local_tip_hash = B256::random();
         let local_tip_timestamp = 1000;
 
@@ -324,7 +325,7 @@ mod tests {
 
     #[test]
     fn test_next_buildable_args_matches_pending_parent() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let mut manager: SequenceManager<FlashBlock> = SequenceManager::new(true);
         let factory = TestFlashBlockFactory::new();
 
         let fb0 = factory.flashblock_at(0).build();
@@ -340,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_next_buildable_args_returns_none_when_parent_mismatch() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let mut manager: SequenceManager<FlashBlock> = SequenceManager::new(true);
         let factory = TestFlashBlockFactory::new();
 
         let fb0 = factory.flashblock_at(0).build();
@@ -354,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_next_buildable_args_prefers_pending_over_cached() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let mut manager: SequenceManager<FlashBlock> = SequenceManager::new(true);
         let factory = TestFlashBlockFactory::new();
 
         // Create and finalize first sequence
@@ -373,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_next_buildable_args_finds_cached_sequence() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let mut manager: SequenceManager<FlashBlock> = SequenceManager::new(true);
         let factory = TestFlashBlockFactory::new();
 
         // Build and cache first sequence
@@ -396,7 +397,7 @@ mod tests {
 
     #[test]
     fn test_compute_state_root_logic_near_expected_final() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let mut manager: SequenceManager<FlashBlock> = SequenceManager::new(true);
         let block_time = 2u64;
         let factory = TestFlashBlockFactory::new().with_block_time(block_time);
 
@@ -420,7 +421,7 @@ mod tests {
 
     #[test]
     fn test_no_compute_state_root_when_provided_by_sequencer() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let mut manager: SequenceManager<FlashBlock> = SequenceManager::new(true);
         let block_time = 2u64;
         let factory = TestFlashBlockFactory::new().with_block_time(block_time);
 
@@ -437,7 +438,7 @@ mod tests {
 
     #[test]
     fn test_no_compute_state_root_when_disabled() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(false);
+        let mut manager: SequenceManager<FlashBlock> = SequenceManager::new(false);
         let block_time = 2u64;
         let factory = TestFlashBlockFactory::new().with_block_time(block_time);
 
@@ -461,7 +462,7 @@ mod tests {
 
     #[test]
     fn test_cache_ring_buffer_evicts_oldest() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let mut manager: SequenceManager<FlashBlock> = SequenceManager::new(true);
         let factory = TestFlashBlockFactory::new();
 
         // Fill cache with 4 sequences (cache size is 3, so oldest should be evicted)
