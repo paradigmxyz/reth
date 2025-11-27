@@ -579,3 +579,58 @@ Returns all traces of given transaction
     ]
 }
 ```
+
+## `trace_transactionOpcodeGas`
+
+Returns opcode gas usage aggregated per opcode for a single transaction in no particular order.
+
+| Client | Method invocation                                                     |
+| ------ | --------------------------------------------------------------------- |
+| RPC    | `{"method": "trace_transactionOpcodeGas", "params": [tx_hash]}` |
+
+### Example
+
+```js
+// > {"jsonrpc":"2.0","id":1,"method":"trace_transactionOpcodeGas","params":["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"]}
+{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": {
+    "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
+    "opcodeGas": [
+      { "opcode": "PUSH1", "count": 10, "gasUsed": 30 },
+      { "opcode": "CALL", "count": 1, "gasUsed": 700 }
+    ]
+  }
+}
+```
+
+## `trace_blockOpcodeGas`
+
+Returns opcode gas usage aggregated per opcode for every transaction in a block.
+
+| Client | Method invocation                                                |
+| ------ | ---------------------------------------------------------------- |
+| RPC    | `{"method": "trace_blockOpcodeGas", "params": [block]}` |
+
+### Example
+
+```js
+// > {"jsonrpc":"2.0","id":1,"method":"trace_blockOpcodeGas","params":["latest"]}
+{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": {
+    "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
+    "blockNumber": 3068185,
+    "transactions": [
+      {
+        "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
+        "opcodeGas": [
+          { "opcode": "PUSH1", "count": 10, "gasUsed": 30 }
+        ]
+      }
+    ]
+  }
+}
+```
