@@ -178,56 +178,21 @@ impl DeferredTrieData {
 
     /// Returns trie data, computing synchronously if the async task hasn't completed.
     ///
-    /// Uses a try-lock approach:
     /// - If the async task has completed (`Ready`), returns the cached result.
     /// - If pending, computes synchronously from stored inputs.
     ///
-    /// This design eliminates deadlock risk: we never block waiting for another task.
-    /// All code paths are guaranteed to return (either cached or computed result).
+    /// Deadlock is avoided as long as the provided ancestors form a true ancestor chain (a DAG):
+    /// - Each block only waits on its ancestors (blocks on the path to the persisted root)
+    /// - Sibling blocks (forks) are never in each other's ancestor lists
+    /// - A block never waits on its descendants
+    /// Given that invariant, circular wait dependencies are impossible.
     pub fn wait_cloned(&self) -> ComputedTrieData {
-        // Try to get the lock
-        if let Some(mut state) = self.state.try_lock() {
-            match &*state {
-                // The async task has completed, return the cached result.
-                DeferredState::Ready(bundle) => {
-                    DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
-                    return bundle.clone();
-                }
-                // The async task is still pending, compute the trie data synchronously from the
-                // stored inputs.
-                DeferredState::Pending(inputs) => {
-                    DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
-                    let computed = Self::sort_and_build_trie_input(
-                        &inputs.hashed_state,
-                        &inputs.trie_updates,
-                        inputs.anchor_hash,
-                        &inputs.ancestors,
-                    );
-                    *state = DeferredState::Ready(computed.clone());
-                    return computed;
-                }
-            }
-        }
-
-        // Lock is contended - another thread/task holds the mutex (either the async
-        // task calling set_ready(), or another waiter computing). We block until
-        // available.
-        //
-        // Deadlock is avoided as long as the provided ancestors form a true ancestor chain (a DAG):
-        // - Each block only waits on its ancestors (blocks on the path to the persisted root)
-        // - Sibling blocks (forks) are never in each other's ancestor lists
-        // - A block never waits on its descendants
-        // Given that invariant, circular wait dependencies are impossible. Supplying a cycle in the
-        // ancestor list would violate this assumption and could deadlock.
         let mut state = self.state.lock();
         match &*state {
-            // The async task has completed, return the cached result.
             DeferredState::Ready(bundle) => {
                 DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
                 bundle.clone()
             }
-            // The async task is still pending, compute the trie data synchronously from the stored
-            // inputs.
             DeferredState::Pending(inputs) => {
                 DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
                 let computed = Self::sort_and_build_trie_input(
