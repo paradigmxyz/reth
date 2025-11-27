@@ -144,28 +144,6 @@ impl DeferredTrieData {
         )
     }
 
-    /// Compute trie data from inputs and mark the handle as ready.
-    ///
-    /// Sorts and builds trie input from the provided state and updates, then marks the handle
-    /// as ready so that [`Self::wait_cloned`] returns immediately without fallback computation.
-    ///
-    /// # Arguments
-    /// * `hashed_state` - Unsorted hashed post-state from execution
-    /// * `trie_updates` - Unsorted trie updates from state root computation
-    /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
-    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
-    pub fn compute_set_ready(
-        &self,
-        hashed_state: &HashedPostState,
-        trie_updates: &TrieUpdates,
-        anchor_hash: B256,
-        ancestors: &[Self],
-    ) {
-        let bundle =
-            Self::sort_and_build_trie_input(hashed_state, trie_updates, anchor_hash, ancestors);
-        self.set_ready(bundle);
-    }
-
     /// Populate the handle with the computed trie data.
     ///
     /// Safe to call multiple times; only the first value is stored (first-write-wins).

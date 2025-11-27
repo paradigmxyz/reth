@@ -979,15 +979,15 @@ where
     /// Spawns a background task to compute and sort trie data for the executed block.
     ///
     /// This function creates a [`DeferredTrieData`] handle with fallback inputs and spawns a
-    /// blocking task that:
-    /// 1. Sorts the block's hashed state and trie updates
-    /// 2. Extends the pre-merged overlay input with the sorted data
-    /// 3. Creates an [`AnchoredTrieInput`](reth_chain_state::AnchoredTrieInput) for efficient
-    ///    future trie computations
-    /// 4. Calls `set_ready()` on the handle when computation is complete
+    /// blocking task that calls `wait_cloned()` to:
+    /// 1. Sort the block's hashed state and trie updates
+    /// 2. Merge ancestor overlays and extend with the sorted data
+    /// 3. Create an [`AnchoredTrieInput`](reth_chain_state::AnchoredTrieInput) for efficient future
+    ///    trie computations
+    /// 4. Cache the result so subsequent calls return immediately
     ///
-    /// If the background task hasn't completed when `trie_data()` is called, the stored
-    /// inputs enable synchronous fallback computation, eliminating deadlock risk.
+    /// If the background task hasn't completed when `trie_data()` is called, `wait_cloned()`
+    /// computes from the stored inputs, eliminating deadlock risk and duplicate computation.
     ///
     /// The validation hot path can return immediately after state root verification,
     /// while consumers (DB writes, overlay providers, proofs) get trie data either
@@ -1014,45 +1014,34 @@ where
             overlay_blocks.iter().rev().map(|b| b.trie_data_handle()).collect();
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
-        let hashed_state = Arc::new(hashed_state);
-        let trie_output = Arc::new(trie_output);
         let deferred_trie_data = DeferredTrieData::pending(
-            Arc::clone(&hashed_state),
-            Arc::clone(&trie_output),
+            Arc::new(hashed_state),
+            Arc::new(trie_output),
             anchor_hash,
-            ancestors.clone(),
+            ancestors,
         );
         let deferred_handle_task = deferred_trie_data.clone();
         let deferred_compute_duration =
             self.metrics.block_validation.deferred_trie_compute_duration.clone();
 
-        // Spawn background task to compute trie data. The task performs the same computation
-        // as the fallback path but runs asynchronously to avoid blocking the hot path.
+        // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
+        // the stored inputs and cache the result, so subsequent calls return immediately.
         let compute_trie_input_task = move || {
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
-
-                deferred_handle_task.compute_set_ready(
-                    &hashed_state,
-                    &trie_output,
-                    anchor_hash,
-                    &ancestors,
-                );
+                let _ = deferred_handle_task.wait_cloned();
                 deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
             }));
 
-            // `DeferredTrieData::wait_cloned()` ensures the block can still be processed.
             if result.is_err() {
                 error!(
                     target: "engine::tree::payload_validator",
-                    ?anchor_hash,
                     "Deferred trie task panicked; fallback computation will be used when trie data is accessed"
                 );
             }
         };
 
-        // Spawn task that computes trie data and calls `deferred_trie_data.set_ready()` when
-        // complete.
+        // Spawn task that computes trie data asynchronously.
         self.payload_processor.executor().spawn_blocking(compute_trie_input_task);
 
         ExecutedBlock::with_deferred_trie_data(
