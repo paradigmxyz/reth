@@ -1002,17 +1002,19 @@ where
             .blocks_by_hash(block.parent_hash())
             .unwrap_or_else(|| (block.parent_hash(), Vec::new()));
 
-        // Collect lightweight ancestor trie data handles. We don't call trie_data() here;
-        // the merge and any fallback sorting happens in the compute_trie_input_task.
-        let ancestors: Vec<DeferredTrieData> =
-            overlay_blocks.iter().rev().map(|b| b.trie_data_handle()).collect();
+        // Get parent's trie_input (which includes all grandparent data). Parent was validated
+        // before this block, so its background trie task has typically completed by now.
+        // Note: overlay_blocks is ordered [parent, grandparent, ...], so first() is the parent.
+        let ancestor_overlay = overlay_blocks
+            .first()
+            .and_then(|parent| parent.trie_data().trie_input().cloned());
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
         let deferred_trie_data = DeferredTrieData::pending(
             Arc::new(hashed_state),
             Arc::new(trie_output),
             anchor_hash,
-            ancestors,
+            ancestor_overlay,
         );
         let deferred_handle_task = deferred_trie_data.clone();
         let deferred_compute_duration =
