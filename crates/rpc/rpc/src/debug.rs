@@ -307,12 +307,6 @@ where
             .into())
         }
 
-        let storage_provider = self
-            .provider()
-            .storage_range_by_block_hash(block_hash)
-            .map_err(Eth::Error::from_eth_err)?;
-        let base = storage_provider.as_ref();
-
         let diffs = self.run_with_storage_diff_inspector(block_id, Some(tx_idx as u64)).await?;
 
         let max_slots = usize::try_from(max_result).map_err(|_| {
@@ -322,20 +316,35 @@ where
         })?;
         let start_key = StorageKey::from(key_start);
 
-        let overlay_slots =
-            StorageRangeOverlay::merged_slots_for_account(base, contract_address, &diffs, tx_idx)
+        self.inner
+            .eth_api
+            .spawn_blocking_io(move |this| {
+                let storage_provider = this
+                    .provider()
+                    .storage_range_by_block_hash(block_hash)
+                    .map_err(Eth::Error::from_eth_err)?;
+                let base = storage_provider.as_ref();
+
+                let overlay_slots = StorageRangeOverlay::merged_slots_for_account(
+                    base,
+                    contract_address,
+                    &diffs,
+                    tx_idx,
+                )
                 .map_err(Eth::Error::from_eth_err)?;
 
-        let range = if let Some(slots) = overlay_slots {
-            let mut overlay = StorageRangeOverlay::new(base);
-            overlay.add_account_overlay(contract_address, slots);
-            overlay.storage_range(contract_address, start_key, max_slots)
-        } else {
-            base.storage_range(contract_address, start_key, max_slots)
-        }
-        .map_err(Eth::Error::from_eth_err)?;
+                let range = if let Some(slots) = overlay_slots {
+                    let mut overlay = StorageRangeOverlay::new(base);
+                    overlay.add_account_overlay(contract_address, slots);
+                    overlay.storage_range(contract_address, start_key, max_slots)
+                } else {
+                    base.storage_range(contract_address, start_key, max_slots)
+                }
+                .map_err(Eth::Error::from_eth_err)?;
 
-        Ok(convert_storage_range(range))
+                Ok(convert_storage_range(range))
+            })
+            .await
     }
 
     /// Trace the transaction according to the provided options.
