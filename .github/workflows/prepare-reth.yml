@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - run: mkdir artifacts
 
       - name: Set up Docker Buildx

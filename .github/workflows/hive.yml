@@ -28,9 +28,9 @@ jobs:
     timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Checkout hive tests
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: ethereum/hive
           ref: master
@@ -185,7 +185,7 @@ jobs:
     permissions:
       issues: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -210,7 +210,7 @@ jobs:
           chmod +x /usr/local/bin/hive
 
       - name: Checkout hive tests
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: ethereum/hive
           ref: master

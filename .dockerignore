@@ -4,6 +4,7 @@
 # include source files
 !/bin
 !/crates
+!/pkg
 !/testing
 !book.toml
 !Cargo.lock
@@ -11,6 +12,7 @@
 !Cross.toml
 !deny.toml
 !Makefile
+!README.md
 
 # include for vergen constants
 !/.git

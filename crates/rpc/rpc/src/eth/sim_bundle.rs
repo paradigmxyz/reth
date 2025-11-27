@@ -12,7 +12,6 @@ use alloy_rpc_types_mev::{
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives_traits::Recovered;
-use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{block::LoadBlock, Call, EthTransactions},
@@ -241,17 +240,11 @@ where
         let sim_response = self
             .inner
             .eth_api
-            .spawn_with_state_at_block(current_block_id, move |state| {
+            .spawn_with_state_at_block(current_block_id, move |_, mut db| {
                 // Setup environment
                 let current_block_number = current_block.number();
                 let coinbase = evm_env.block_env.beneficiary();
                 let basefee = evm_env.block_env.basefee();
-                let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(state))
-                    .with_bal_builder()
-                    .build();
-                db.bal_state.bal_index = 0;
-                db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
                 // apply overrides
                 apply_block_overrides(block_overrides, &mut db, evm_env.block_env.inner_mut());

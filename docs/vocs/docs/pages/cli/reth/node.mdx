@@ -871,7 +871,9 @@ Pruning:
 
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
-          Configure persistence threshold for engine experimental
+          Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.
+
+          To persist blocks as fast as the node receives them, set this value to zero. This will cause more frequent DB writes.
 
           [default: 2]
 

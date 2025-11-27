@@ -182,6 +182,11 @@ impl<T> ExecutionOutcome<T> {
         self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
     }
 
+    /// Returns the state [`BundleAccount`] for the given account.
+    pub fn account_state(&self, address: &Address) -> Option<&BundleAccount> {
+        self.bundle.account(address)
+    }
+
     /// Get storage if value is known.
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.

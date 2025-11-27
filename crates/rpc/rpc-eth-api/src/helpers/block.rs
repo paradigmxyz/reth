@@ -30,9 +30,7 @@ pub type BlockAndReceiptsResult<Eth> = Result<
 
 /// Block related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
-pub trait EthBlocks:
-    LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primitives, Error = Self::Error>>
-{
+pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primitives>> {
     /// Returns the block header for the given block id.
     fn rpc_block_header(
         &self,
@@ -156,10 +154,10 @@ pub trait EthBlocks:
                     })
                     .collect::<Vec<_>>();
 
-                return self
+                return Ok(self
                     .tx_resp_builder()
                     .convert_receipts_with_block(inputs, block.sealed_block())
-                    .map(Some)
+                    .map(Some)?)
             }
 
             Ok(None)

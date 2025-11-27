@@ -265,13 +265,9 @@ where
 /// Validates that the EIP-4844 header fields exist and conform to the spec. This ensures that:
 ///
 ///  * `blob_gas_used` exists as a header field
-///  * `excess_blob_gas` exists as a header field
 ///  * `parent_beacon_block_root` exists as a header field
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
-///  * `excess_blob_gas` is a multiple of `DATA_GAS_PER_BLOB`
 ///  * `blob_gas_used` doesn't exceed the max allowed blob gas based on the given params
-///
-/// Note: This does not enforce any restrictions on `blob_gas_used`
 pub fn validate_4844_header_standalone<H: BlockHeader>(
     header: &H,
     blob_params: BlobParams,
