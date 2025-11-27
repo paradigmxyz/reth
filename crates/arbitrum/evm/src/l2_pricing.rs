@@ -113,6 +113,7 @@ impl<D: Database> L2PricingState<D> {
     }
 
     pub fn set_gas_backlog(&self, backlog: u64) -> Result<(), ()> {
+        tracing::warn!(target: "arb-l2pricing", "[ITER119] set_gas_backlog: backlog={}", backlog);
         self.gas_backlog.set(backlog)
     }
 
@@ -142,14 +143,18 @@ impl<D: Database> L2PricingState<D> {
 
     pub fn add_to_gas_pool(&self, gas: i64) -> Result<(), ()> {
         let backlog = self.gas_backlog()?;
-        
+
         let new_backlog = if gas > 0 {
             backlog.saturating_sub(gas as u64)
         } else {
             backlog.saturating_add((-gas) as u64)
         };
-        
-        self.set_gas_backlog(new_backlog)
+
+        tracing::warn!(target: "arb-l2pricing", "[ITER120] add_to_gas_pool: gas={} backlog={} -> new_backlog={} slot={:?} storage_ptr={:p}",
+            gas, backlog, new_backlog, self.gas_backlog.slot, self.gas_backlog.storage);
+        let result = self.set_gas_backlog(new_backlog);
+        tracing::warn!(target: "arb-l2pricing", "[ITER120] add_to_gas_pool: set_gas_backlog result={:?}", result);
+        result
     }
     
     pub fn update_pricing_model(&self, _l2_base_fee: U256, time_passed: u64) -> Result<(), ()> {

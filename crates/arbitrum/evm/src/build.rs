@@ -191,7 +191,9 @@ where
         {
             let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
             let state_db: &mut revm::database::State<_> = *db_ref;
-            if let Ok(arbos_state) = crate::arbosstate::ArbosState::open(state_db as *mut _) {
+            match crate::arbosstate::ArbosState::open(state_db as *mut _) {
+                Ok(arbos_state) => {
+                    tracing::warn!(target: "arb::build", "[ITER118] ArbosState::open succeeded, version={}", arbos_state.arbos_version);
                 // Load brotli compression level
                 if let Ok(level) = arbos_state.get_brotli_compression_level() {
                     self.tx_state.brotli_compression_level = level as u32;
@@ -201,8 +203,14 @@ where
 
                 // CRITICAL FIX: Load network fee account from ArbOS state
                 // If not set, fees were incorrectly going to address zero
-                if let Ok(network_fee) = arbos_state.get_network_fee_account() {
-                    self.tx_state.network_fee_account = network_fee;
+                match arbos_state.get_network_fee_account() {
+                    Ok(network_fee) => {
+                        tracing::warn!(target: "arb::build", "[ITER118] Loaded network_fee_account from ArbOS: {:?}", network_fee);
+                        self.tx_state.network_fee_account = network_fee;
+                    },
+                    Err(_) => {
+                        tracing::error!(target: "arb::build", "[ITER118] FAILED to load network_fee_account from ArbOS!");
+                    }
                 }
 
                 // Load infra fee account
@@ -217,8 +225,11 @@ where
                 if let Ok(min_fee) = arbos_state.l2_pricing_state.get_min_base_fee_wei() {
                     self.tx_state.min_base_fee = min_fee;
                 }
-            } else {
-                self.tx_state.brotli_compression_level = 0;
+                },
+                Err(e) => {
+                    tracing::error!(target: "arb::build", "[ITER118] ArbosState::open FAILED: {}", e);
+                    self.tx_state.brotli_compression_level = 0;
+                }
             }
         }
         self.inner.apply_pre_execution_changes()

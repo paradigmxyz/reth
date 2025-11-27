@@ -82,15 +82,18 @@ impl<D: Database> ArbosState<D> {
         if arbos_version == 0 {
             return Err("ArbOS uninitialized");
         }
-        
+
+        tracing::warn!(target: "arb::arbosstate", "[ITER118] ArbosState::open creating network_fee_account with B256::ZERO and offset={}", NETWORK_FEE_ACCOUNT_OFFSET);
+        let network_fee_account = StorageBackedAddress::new(state, B256::ZERO, NETWORK_FEE_ACCOUNT_OFFSET);
+
         Ok(Self {
             arbos_version,
             upgrade_version: StorageBackedUint64::new(state, B256::ZERO, UPGRADE_VERSION_OFFSET),
             upgrade_timestamp: StorageBackedUint64::new(state, B256::ZERO, UPGRADE_TIMESTAMP_OFFSET),
-            network_fee_account: StorageBackedAddress::new(state, B256::ZERO, NETWORK_FEE_ACCOUNT_OFFSET),
+            network_fee_account,
             l1_pricing_state: L1PricingState::open(backing_storage.open_sub_storage(L1_PRICING_SUBSPACE), arbos_version),
             l2_pricing_state: L2PricingState::open(backing_storage.open_sub_storage(L2_PRICING_SUBSPACE)),
-            retryable_state: RetryableState::new(state, B256::from_slice(RETRYABLES_SUBSPACE)),
+            retryable_state: RetryableState::new(state, arbos_state_subspace(RETRYABLES_SUBSPACE[0])),
             address_table: AddressTable::open(backing_storage.open_sub_storage(ADDRESS_TABLE_SUBSPACE)),
             chain_owners: AddressSet::open(backing_storage.open_sub_storage(CHAIN_OWNER_SUBSPACE)),
             native_token_owners: AddressSet::open(backing_storage.open_sub_storage(NATIVE_TOKEN_OWNER_SUBSPACE)),
@@ -155,7 +158,9 @@ impl<D: Database> ArbosState<D> {
     }
 
     pub fn get_network_fee_account(&self) -> Result<Address, ()> {
-        self.network_fee_account.get()
+        let result = self.network_fee_account.get();
+        tracing::warn!(target: "arb::arbosstate", "[ITER118] get_network_fee_account result={:?}", result);
+        result
     }
 
     pub fn set_network_fee_account(&self, account: Address) -> Result<(), ()> {
