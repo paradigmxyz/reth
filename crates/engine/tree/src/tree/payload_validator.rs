@@ -982,7 +982,7 @@ where
     /// blocking task that:
     /// 1. Sorts the block's hashed state and trie updates
     /// 2. Extends the pre-merged overlay input with the sorted data
-    /// 3. Creates an [`AnchoredTrieInput`] for efficient future trie computations
+    /// 3. Creates an [`AnchoredTrieInput`](reth_chain_state::AnchoredTrieInput) for efficient future trie computations
     /// 4. Calls `set_ready()` on the handle when computation is complete
     ///
     /// If the background task hasn't completed when `trie_data()` is called, the stored
