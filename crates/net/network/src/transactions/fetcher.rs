@@ -346,41 +346,63 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     ///
     /// Finds the first buffered hash with a fallback peer that is idle, if any. Fills the rest of
     /// the request by checking the transactions seen by the peer against the buffer.
-    pub fn on_fetch_pending_hashes(&mut self, peers: &HashMap<PeerId, PeerMetadata<N>>) {
+    pub fn on_fetch_pending_hashes(
+        &mut self,
+        peers: &HashMap<PeerId, PeerMetadata<N>>,
+        has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
+    ) -> bool {
+        let mut hashes_to_request = RequestTxHashes::with_capacity(
+            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
+        );
         let mut search_durations = TxFetcherSearchDurations::default();
 
         if self.use_peer_queue_scheduler &&
             self.try_request_via_peer_queue(peers, &mut search_durations)
         {
             self.update_pending_fetch_cache_search_metrics(search_durations);
-            return
+            return true
         }
 
-        let idle_peer_and_hash = duration_metered_exec!(
-            self.find_any_idle_fallback_peer_for_any_pending_hash(None),
+        // budget to look for an idle peer before giving up
+        let budget_find_idle_fallback_peer = self
+            .search_breadth_budget_find_idle_fallback_peer(&has_capacity_wrt_pending_pool_imports);
+
+        let peer_id = duration_metered_exec!(
+            {
+                let Some((peer_id, first_hash)) = self
+                    .find_any_idle_fallback_peer_for_any_pending_hash(
+                        budget_find_idle_fallback_peer,
+                    )
+                else {
+                    // no peers are idle or budget is depleted
+                    return false
+                };
+
+                hashes_to_request.insert(first_hash);
+                peer_id
+            },
             search_durations.find_idle_peer
         );
 
-        let Some((peer_id, first_hash)) = idle_peer_and_hash else {
-            // no peers are idle or budget is depleted
-            return
-        };
-
-        let mut hashes_to_request = RequestTxHashes::with_capacity(
-            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
-        );
-        hashes_to_request.insert(first_hash);
-
         // peer should always exist since `is_session_active` already checked
-        let Some(peer) = peers.get(&peer_id) else { return };
+        let Some(peer) = peers.get(&peer_id) else { return false };
         let conn_eth_version = peer.version;
+
+        // fill the request with more hashes pending fetch that have been announced by the peer.
+        // the search for more hashes is done with respect to the given budget, which determines
+        // how many hashes to loop through before giving up. if no more hashes are found wrt to
+        // the budget, the single hash that was taken out of the cache above is sent in a request.
+        let budget_fill_request = self
+            .search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
+                &has_capacity_wrt_pending_pool_imports,
+            );
 
         duration_metered_exec!(
             {
                 self.request_builder().fill_from_pending_fetch(
                     &mut hashes_to_request,
                     &peer.seen_transactions,
-                    None,
+                    budget_fill_request,
                 )
             },
             search_durations.fill_request
@@ -407,7 +429,10 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             );
 
             self.buffer_hashes(failed_to_request_hashes, Some(peer_id));
+            return false
         }
+
+        true
     }
 
     /// Tries to serve pending hashes via the peer-queue scheduler.
@@ -639,6 +664,96 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, new_announced_hashes, rx));
 
         None
+    }
+
+    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns
+    /// `false` if [`TransactionFetcher`] is operating close to full capacity.
+    pub fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
+        let info = &self.info;
+
+        self.has_capacity(info.max_inflight_requests)
+    }
+
+    /// Returns `true` if the number of inflight requests are under a given tolerated max.
+    fn has_capacity(&self, max_inflight_requests: usize) -> bool {
+        self.inflight_requests.len() <= max_inflight_requests
+    }
+
+    /// Returns the limit to enforce when looking for any pending hash with an idle fallback peer.
+    ///
+    /// Returns `Some(limit)` if [`TransactionFetcher`] and the
+    /// [`TransactionPool`](reth_transaction_pool::TransactionPool) are operating close to full
+    /// capacity. Returns `None`, unlimited, if they are not that busy.
+    pub fn search_breadth_budget_find_idle_fallback_peer(
+        &self,
+        has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        let info = &self.info;
+
+        let tx_fetcher_has_capacity = self.has_capacity(
+            info.max_inflight_requests /
+                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER,
+        );
+        let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
+            DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_IDLE_PEER,
+        );
+
+        if tx_fetcher_has_capacity && tx_pool_has_capacity {
+            // unlimited search breadth
+            None
+        } else {
+            // limited breadth of search for idle peer
+            let limit = DEFAULT_BUDGET_FIND_IDLE_FALLBACK_PEER;
+
+            trace!(target: "net::tx",
+                inflight_requests=self.inflight_requests.len(),
+                max_inflight_transaction_requests=info.max_inflight_requests,
+                hashes_pending_fetch=self.hashes_pending_fetch.len(),
+                limit,
+                "search breadth limited in search for idle fallback peer for some hash pending fetch"
+            );
+
+            Some(limit)
+        }
+    }
+
+    /// Returns the limit to enforce when looking for the intersection between hashes announced by
+    /// peer and hashes pending fetch.
+    ///
+    /// Returns `Some(limit)` if [`TransactionFetcher`] and the
+    /// [`TransactionPool`](reth_transaction_pool::TransactionPool) are operating close to full
+    /// capacity. Returns `None`, unlimited, if they are not that busy.
+    pub fn search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
+        &self,
+        has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        let info = &self.info;
+
+        let tx_fetcher_has_capacity = self.has_capacity(
+            info.max_inflight_requests /
+                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION,
+        );
+        let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
+            DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_INTERSECTION,
+        );
+
+        if tx_fetcher_has_capacity && tx_pool_has_capacity {
+            // unlimited search breadth
+            None
+        } else {
+            // limited breadth of search for idle peer
+            let limit = DEFAULT_BUDGET_FIND_INTERSECTION_ANNOUNCED_BY_PEER_AND_PENDING_FETCH;
+
+            trace!(target: "net::tx",
+                inflight_requests=self.inflight_requests.len(),
+                max_inflight_transaction_requests=self.info.max_inflight_requests,
+                hashes_pending_fetch=self.hashes_pending_fetch.len(),
+                limit=limit,
+                "search breadth limited in search for intersection of hashes announced by peer and hashes pending fetch"
+            );
+
+            Some(limit)
+        }
     }
 
     /// Processes a resolved [`GetPooledTransactions`] request. Queues the outcome as a
@@ -1545,7 +1660,7 @@ mod test {
 
         // TEST
 
-        tx_fetcher.on_fetch_pending_hashes(&peers);
+        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true);
 
         // mock session of peer_1 receives request
         let req = peer_1_mock_session_rx

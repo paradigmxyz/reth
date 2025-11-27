@@ -40,5 +40,6 @@ crates/tasks/               @mattsse
 crates/tokio-util/          @fgimenez
 crates/transaction-pool/    @mattsse @yongkangc
 crates/trie/                @Rjected @shekhirin @mediocregopher
+bin/reth-bench-compare/     @mediocregopher @shekhirin @yongkangc
 etc/                        @Rjected @shekhirin
 .github/                    @gakonst @DaniPopes

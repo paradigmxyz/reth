@@ -2,13 +2,12 @@
 
 use crate::{
     testsuite::actions::{Action, ActionBox},
-    NodeBuilderHelper, PayloadAttributesBuilder,
+    NodeBuilderHelper,
 };
 use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::HttpClient;
-use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_payload_builder::PayloadId;
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
@@ -349,9 +348,6 @@ where
     pub async fn run<N>(mut self) -> Result<()>
     where
         N: NodeBuilderHelper<Payload = I>,
-        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-        >,
     {
         let mut setup = self.setup.take();
 

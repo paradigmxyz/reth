@@ -441,7 +441,7 @@ where
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
                                     this.payload_jobs.push((job, id));
-                                    this.payload_events.send(Events::Attributes(attr.clone())).ok();
+                                    this.payload_events.send(Events::Attributes(attr)).ok();
                                 }
                                 Err(err) => {
                                     this.metrics.inc_failed_jobs();

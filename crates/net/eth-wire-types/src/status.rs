@@ -365,14 +365,14 @@ impl Debug for StatusEth69 {
         if f.alternate() {
             write!(
                 f,
-                "Status {{\n\tversion: {:?},\n\tchain: {:?},\n\tblockhash: {},\n\tgenesis: {},\n\tforkid: {:X?}\n}}",
-                self.version, self.chain, hexed_blockhash, hexed_genesis, self.forkid
+                "StatusEth69 {{\n\tversion: {:?},\n\tchain: {:?},\n\tgenesis: {},\n\tforkid: {:X?},\n\tearliest: {},\n\tlatest: {},\n\tblockhash: {}\n}}",
+                self.version, self.chain, hexed_genesis, self.forkid, self.earliest, self.latest, hexed_blockhash
             )
         } else {
             write!(
                 f,
-                "Status {{ version: {:?}, chain: {:?}, blockhash: {}, genesis: {}, forkid: {:X?} }}",
-                self.version, self.chain, hexed_blockhash, hexed_genesis, self.forkid
+                "StatusEth69 {{ version: {:?}, chain: {:?}, genesis: {}, forkid: {:X?}, earliest: {}, latest: {}, blockhash: {} }}",
+                self.version, self.chain, hexed_genesis, self.forkid, self.earliest, self.latest, hexed_blockhash
             )
         }
     }

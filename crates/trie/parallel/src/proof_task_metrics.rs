@@ -101,4 +101,12 @@ impl ProofTaskCursorMetricsCache {
         self.storage_trie_cursor.reset();
         self.storage_hashed_cursor.reset();
     }
+
+    /// Record the spans for metrics.
+    pub fn record_spans(&self) {
+        self.account_trie_cursor.record_span("account_trie_cursor");
+        self.account_hashed_cursor.record_span("account_hashed_cursor");
+        self.storage_trie_cursor.record_span("storage_trie_cursor");
+        self.storage_hashed_cursor.record_span("storage_hashed_cursor");
+    }
 }

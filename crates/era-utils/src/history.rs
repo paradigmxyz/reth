@@ -9,7 +9,7 @@ use reth_db_api::{
     RawKey, RawTable, RawValue,
 };
 use reth_era::{
-    common::{decode::DecodeCompressed, file_ops::StreamReader},
+    common::{decode::DecodeCompressedRlp, file_ops::StreamReader},
     e2s::error::E2sError,
     era1::{
         file::{BlockTupleIterator, Era1Reader},

@@ -45,20 +45,17 @@ struct MockEngineValidator;
 impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineValidator {
     type Block = Block;
 
-    fn ensure_well_formed_payload(
+    fn convert_payload_to_block(
         &self,
         payload: ExecutionData,
     ) -> Result<
-        reth_primitives_traits::RecoveredBlock<Self::Block>,
+        reth_primitives_traits::SealedBlock<Self::Block>,
         reth_payload_primitives::NewPayloadError,
     > {
-        // For tests, convert the execution payload to a block
         let block = reth_ethereum_primitives::Block::try_from(payload.payload).map_err(|e| {
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
-        let sealed = block.seal_slow();
-
-        sealed.try_recover().map_err(|e| reth_payload_primitives::NewPayloadError::Other(e.into()))
+        Ok(block.seal_slow())
     }
 }
 
@@ -826,8 +823,8 @@ fn test_tree_state_on_new_head_deep_fork() {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
             recovered_block: Arc::new(block.clone()),
             execution_output: Arc::new(ExecutionOutcome::default()),
-            hashed_state: Arc::new(HashedPostState::default()),
-            trie_updates: Arc::new(TrieUpdates::default()),
+            hashed_state: Arc::new(HashedPostState::default().into_sorted()),
+            trie_updates: Arc::new(TrieUpdates::default().into_sorted()),
         });
     }
     test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
@@ -836,8 +833,8 @@ fn test_tree_state_on_new_head_deep_fork() {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
             recovered_block: Arc::new(block.clone()),
             execution_output: Arc::new(ExecutionOutcome::default()),
-            hashed_state: Arc::new(HashedPostState::default()),
-            trie_updates: Arc::new(TrieUpdates::default()),
+            hashed_state: Arc::new(HashedPostState::default().into_sorted()),
+            trie_updates: Arc::new(TrieUpdates::default().into_sorted()),
         });
     }
 

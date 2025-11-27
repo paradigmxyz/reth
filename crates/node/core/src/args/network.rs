@@ -18,6 +18,7 @@ use reth_discv5::{
     discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
+use reth_net_banlist::IpFilter;
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
@@ -205,6 +206,15 @@ pub struct NetworkArgs {
     /// Optional network ID to override the chain specification's network ID for P2P connections
     #[arg(long)]
     pub network_id: Option<u64>,
+
+    /// Restrict network communication to the given IP networks (CIDR masks).
+    ///
+    /// Comma separated list of CIDR network specifications.
+    /// Only peers with IP addresses within these ranges will be allowed to connect.
+    ///
+    /// Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
+    #[arg(long, value_name = "NETRESTRICT")]
+    pub netrestrict: Option<String>,
 }
 
 impl NetworkArgs {
@@ -277,17 +287,17 @@ impl NetworkArgs {
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
+        let ip_filter = self.ip_filter().unwrap_or_default();
         let peers_config = config
-            .peers
-            .clone()
+            .peers_config_with_basic_nodes_from_file(
+                self.persistent_peers_file(peers_file).as_deref(),
+            )
             .with_max_inbound_opt(self.max_inbound_peers)
-            .with_max_outbound_opt(self.max_outbound_peers);
+            .with_max_outbound_opt(self.max_outbound_peers)
+            .with_ip_filter(ip_filter);
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key)
-            .peer_config(config.peers_config_with_basic_nodes_from_file(
-                self.persistent_peers_file(peers_file).as_deref(),
-            ))
             .external_ip_resolver(self.nat)
             .sessions_config(
                 SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
@@ -328,6 +338,12 @@ impl NetworkArgs {
         self.no_persist_peers.not().then_some(peers_file)
     }
 
+    /// Configures the [`DiscoveryArgs`].
+    pub const fn with_discovery(mut self, discovery: DiscoveryArgs) -> Self {
+        self.discovery = discovery;
+        self
+    }
+
     /// Sets the p2p port to zero, to allow the OS to assign a random unused port when
     /// the network components bind to a socket.
     pub const fn with_unused_p2p_port(mut self) -> Self {
@@ -340,6 +356,12 @@ impl NetworkArgs {
     pub const fn with_unused_ports(mut self) -> Self {
         self = self.with_unused_p2p_port();
         self.discovery = self.discovery.with_unused_discovery_port();
+        self
+    }
+
+    /// Configures the [`NatResolver`]
+    pub const fn with_nat_resolver(mut self, nat: NatResolver) -> Self {
+        self.nat = nat;
         self
     }
 
@@ -382,6 +404,17 @@ impl NetworkArgs {
             get_secret_key(&secret_key_path)
         }
     }
+
+    /// Creates an IP filter from the netrestrict argument.
+    ///
+    /// Returns an error if the CIDR format is invalid.
+    pub fn ip_filter(&self) -> Result<IpFilter, ipnet::AddrParseError> {
+        if let Some(netrestrict) = &self.netrestrict {
+            IpFilter::from_cidr_string(netrestrict)
+        } else {
+            Ok(IpFilter::allow_all())
+        }
+    }
 }
 
 impl Default for NetworkArgs {
@@ -417,6 +450,7 @@ impl Default for NetworkArgs {
             propagation_mode: TransactionPropagationMode::Sqrt,
             required_block_hashes: vec![],
             network_id: None,
+            netrestrict: None,
         }
     }
 }
@@ -582,6 +616,12 @@ impl DiscoveryArgs {
         self
     }
 
+    /// Set the discovery V5 port
+    pub const fn with_discv5_port(mut self, port: u16) -> Self {
+        self.discv5_port = port;
+        self
+    }
+
     /// Change networking port numbers based on the instance number.
     /// Ports are updated to `previous_value + instance - 1`
     ///
@@ -633,6 +673,15 @@ fn parse_block_num_hash(s: &str) -> Result<BlockNumHash, String> {
 mod tests {
     use super::*;
     use clap::Parser;
+    use reth_chainspec::MAINNET;
+    use reth_config::Config;
+    use reth_network_peers::NodeRecord;
+    use secp256k1::SecretKey;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -819,5 +868,103 @@ mod tests {
 
         // Verify the secret key matches the hex input
         assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), hex);
+    }
+
+    #[test]
+    fn parse_netrestrict_single_network() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "192.168.0.0/16"])
+                .args;
+
+        assert_eq!(args.netrestrict, Some("192.168.0.0/16".to_string()));
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn parse_netrestrict_multiple_networks() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--netrestrict",
+            "192.168.0.0/16,10.0.0.0/8",
+        ])
+        .args;
+
+        assert_eq!(args.netrestrict, Some("192.168.0.0/16,10.0.0.0/8".to_string()));
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(ip_filter.is_allowed(&"10.5.10.20".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"172.16.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn parse_netrestrict_ipv6() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "2001:db8::/32"])
+                .args;
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"2001:db8::1".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"2001:db9::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn netrestrict_not_set() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.netrestrict, None);
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(!ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn netrestrict_invalid_cidr() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "invalid-cidr"])
+                .args;
+
+        assert!(args.ip_filter().is_err());
+    }
+
+    #[test]
+    fn network_config_preserves_basic_nodes_from_peers_file() {
+        let enode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+
+        let peers_file = std::env::temp_dir().join(format!("reth_peers_test_{}.json", unique));
+        fs::write(&peers_file, format!("[\"{}\"]", enode)).expect("write peers file");
+
+        // Build NetworkArgs with peers_file set and no_persist_peers=false
+        let args = NetworkArgs {
+            peers_file: Some(peers_file.clone()),
+            no_persist_peers: false,
+            ..Default::default()
+        };
+
+        // Build the network config using a deterministic secret key
+        let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let builder = args.network_config::<reth_network::EthNetworkPrimitives>(
+            &Config::default(),
+            MAINNET.clone(),
+            secret_key,
+            peers_file.clone(),
+        );
+
+        let net_cfg = builder.build_with_noop_provider(MAINNET.clone());
+
+        // Assert basic_nodes contains our node
+        let node: NodeRecord = enode.parse().unwrap();
+        assert!(net_cfg.peers_config.basic_nodes.contains(&node));
+
+        // Cleanup
+        let _ = fs::remove_file(&peers_file);
     }
 }

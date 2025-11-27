@@ -1,11 +1,8 @@
 //! Utilities for serving `eth_simulateV1`
 
 use crate::{
-    error::{
-        api::{FromEthApiError, FromEvmHalt},
-        ToRpcError,
-    },
-    EthApiError, RevertError,
+    error::{api::FromEthApiError, FromEvmError, ToRpcError},
+    EthApiError,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
@@ -17,7 +14,7 @@ use alloy_rpc_types_eth::{
 use jsonrpsee_types::ErrorObject;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
-    Evm,
+    Evm, HaltReasonFor,
 };
 use reth_primitives_traits::{BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock};
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
@@ -186,14 +183,19 @@ where
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
-pub fn build_simulated_block<T, Halt: Clone>(
+pub fn build_simulated_block<Err, T>(
     block: RecoveredBlock<BlockTy<T::Primitives>>,
-    results: Vec<ExecutionResult<Halt>>,
+    results: Vec<ExecutionResult<HaltReasonFor<T::Evm>>>,
     txs_kind: BlockTransactionsKind,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<RpcBlock<T::Network>>, T::Error>
+) -> Result<SimulatedBlock<RpcBlock<T::Network>>, Err>
 where
-    T: RpcConvert<Error: FromEthApiError + FromEvmHalt<Halt>>,
+    Err: std::error::Error
+        + FromEthApiError
+        + FromEvmError<T::Evm>
+        + From<T::Error>
+        + Into<jsonrpsee_types::ErrorObject<'static>>,
+    T: RpcConvert,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
@@ -201,7 +203,7 @@ where
     for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error = T::Error::from_evm_halt(reason, tx.gas_limit());
+                let error = Err::from_evm_halt(reason, tx.gas_limit());
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
@@ -214,12 +216,12 @@ where
                 }
             }
             ExecutionResult::Revert { output, gas_used } => {
-                let error = RevertError::new(output.clone());
+                let error = Err::from_revert(output.clone());
                 SimCallResult {
                     return_data: output,
                     error: Some(SimulateError {
-                        code: error.error_code(),
                         message: error.to_string(),
+                        code: error.into().code(),
                     }),
                     gas_used,
                     status: false,

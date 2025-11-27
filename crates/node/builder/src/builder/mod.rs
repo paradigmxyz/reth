@@ -35,7 +35,7 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
 use secp256k1::SecretKey;
-use std::{fmt::Debug, sync::Arc};
+use std::sync::Arc;
 use tracing::{info, trace, warn};
 
 pub mod add_ons;
@@ -831,7 +831,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             > + Unpin
             + 'static,
         Node::Provider: BlockReaderFor<N>,
-        Policy: TransactionPropagationPolicy + Debug,
+        Policy: TransactionPropagationPolicy<N>,
     {
         let (handle, network, txpool, eth) = builder
             .transactions_with_policy(pool, tx_config, propagation_policy)

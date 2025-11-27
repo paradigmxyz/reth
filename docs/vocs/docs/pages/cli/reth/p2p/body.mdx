@@ -221,6 +221,13 @@ Networking:
       --network-id <NETWORK_ID>
           Optional network ID to override the chain specification's network ID for P2P connections
 
+      --netrestrict <NETRESTRICT>
+          Restrict network communication to the given IP networks (CIDR masks).
+
+          Comma separated list of CIDR network specifications. Only peers with IP addresses within these ranges will be allowed to connect.
+
+          Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
+
 Datadir:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
@@ -365,4 +372,13 @@ Tracing:
           Defaults to TRACE if not specified.
 
           [default: debug]
+
+      --tracing-otlp.sample-ratio <RATIO>
+          Trace sampling ratio to control the percentage of traces to export.
+
+          Valid range: 0.0 to 1.0 - 1.0, default: Sample all traces - 0.01: Sample 1% of traces - 0.0: Disable sampling
+
+          Example: --tracing-otlp.sample-ratio=0.0.
+
+          [env: OTEL_TRACES_SAMPLER_ARG=]
 ```
