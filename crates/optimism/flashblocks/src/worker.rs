@@ -1,7 +1,8 @@
-use crate::{ExecutionPayloadBaseV1, PendingFlashBlock};
+use crate::PendingFlashBlock;
 use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag};
 use alloy_primitives::B256;
-use reth_chain_state::{CanonStateSubscriptions, ExecutedBlock};
+use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
+use reth_chain_state::ExecutedBlock;
 use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -38,7 +39,7 @@ impl<EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider> {
 }
 
 pub(crate) struct BuildArgs<I> {
-    pub(crate) base: ExecutionPayloadBaseV1,
+    pub(crate) base: OpFlashblockPayloadBase,
     pub(crate) transactions: I,
     pub(crate) cached_state: Option<(B256, CachedReads)>,
     pub(crate) last_flashblock_index: u64,
@@ -49,9 +50,8 @@ pub(crate) struct BuildArgs<I> {
 impl<N, EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider>
 where
     N: NodePrimitives,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>,
     Provider: StateProviderFactory
-        + CanonStateSubscriptions<Primitives = N>
         + BlockReaderIdExt<
             Header = HeaderTy<N>,
             Block = BlockTy<N>,
@@ -60,14 +60,14 @@ where
         > + Unpin,
 {
     /// Returns the [`PendingFlashBlock`] made purely out of transactions and
-    /// [`ExecutionPayloadBaseV1`] in `args`.
+    /// [`OpFlashblockPayloadBase`] in `args`.
     ///
     /// Returns `None` if the flashblock doesn't attach to the latest header.
     pub(crate) fn execute<I: IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>(
         &self,
         mut args: BuildArgs<I>,
     ) -> eyre::Result<Option<(PendingFlashBlock<N>, CachedReads)>> {
-        trace!("Attempting new pending block from flashblocks");
+        trace!(target: "flashblocks", "Attempting new pending block from flashblocks");
 
         let latest = self
             .provider
@@ -76,7 +76,7 @@ where
         let latest_hash = latest.hash();
 
         if args.base.parent_hash != latest_hash {
-            trace!(flashblock_parent = ?args.base.parent_hash, local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
+            trace!(target: "flashblocks", flashblock_parent = ?args.base.parent_hash, local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
             // doesn't attach to the latest block
             return Ok(None)
         }
@@ -106,6 +106,7 @@ where
         // if the real state root should be computed
         let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
             if args.compute_state_root {
+                trace!(target: "flashblocks", "Computing block state root");
                 builder.finish(&state_provider)?
             } else {
                 builder.finish(NoopProvider::default())?
@@ -123,7 +124,7 @@ where
             ExecutedBlock {
                 recovered_block: block.into(),
                 execution_output: Arc::new(execution_outcome),
-                hashed_state: Arc::new(hashed_state),
+                hashed_state: Arc::new(hashed_state.into_sorted()),
                 trie_updates: Arc::default(),
             },
         );

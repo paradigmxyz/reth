@@ -12,7 +12,12 @@ use crate::node_config::{
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "Engine")]
 pub struct EngineArgs {
-    /// Configure persistence threshold for engine experimental.
+    /// Configure persistence threshold for the engine. This determines how many canonical blocks
+    /// must be in-memory, ahead of the last persisted block, before flushing canonical blocks to
+    /// disk again.
+    ///
+    /// To persist blocks as fast as the node receives them, set this value to zero. This will
+    /// cause more frequent DB writes.
     #[arg(long = "engine.persistence-threshold", default_value_t = DEFAULT_PERSISTENCE_THRESHOLD)]
     pub persistence_threshold: u64,
 

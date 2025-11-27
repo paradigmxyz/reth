@@ -399,13 +399,7 @@ pub struct Peer<C, Pool = TestPool> {
     #[pin]
     request_handler: Option<EthRequestHandler<C, EthNetworkPrimitives>>,
     #[pin]
-    transactions_manager: Option<
-        TransactionsManager<
-            Pool,
-            EthNetworkPrimitives,
-            NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter>,
-        >,
-    >,
+    transactions_manager: Option<TransactionsManager<Pool, EthNetworkPrimitives>>,
     pool: Option<Pool>,
     client: C,
     secret_key: SecretKey,

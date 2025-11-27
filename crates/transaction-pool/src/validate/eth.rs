@@ -531,7 +531,9 @@ where
         };
 
         // Checks for nonce
-        if let Err(err) = self.validate_sender_nonce(&transaction, &account) {
+        if transaction.requires_nonce_check() &&
+            let Err(err) = self.validate_sender_nonce(&transaction, &account)
+        {
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
 
@@ -1710,7 +1712,7 @@ mod tests {
             ExtendedAccount::new(transaction.nonce(), alloy_primitives::U256::ZERO),
         );
 
-        // Valdiate with balance check enabled
+        // Validate with balance check enabled
         let validator = EthTransactionValidatorBuilder::new(provider.clone())
             .build(InMemoryBlobStore::default());
 
@@ -1726,7 +1728,7 @@ mod tests {
             panic!("Expected Invalid outcome with InsufficientFunds error");
         }
 
-        // Valdiate with balance check disabled
+        // Validate with balance check disabled
         let validator = EthTransactionValidatorBuilder::new(provider)
             .disable_balance_check() // This should allow the transaction through despite zero balance
             .build(InMemoryBlobStore::default());

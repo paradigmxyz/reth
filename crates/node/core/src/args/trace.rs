@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use eyre::WrapErr;
-use reth_tracing::tracing_subscriber::EnvFilter;
+use reth_tracing::{tracing_subscriber::EnvFilter, Layers};
 use reth_tracing_otlp::OtlpProtocol;
 use url::Url;
 
@@ -61,6 +61,40 @@ pub struct TraceArgs {
         help_heading = "Tracing"
     )]
     pub otlp_filter: EnvFilter,
+
+    /// Service name to use for OTLP tracing export.
+    ///
+    /// This name will be used to identify the service in distributed tracing systems
+    /// like Jaeger or Zipkin. Useful for differentiating between multiple reth instances.
+    ///
+    /// Set via `OTEL_SERVICE_NAME` environment variable. Defaults to "reth" if not specified.
+    #[arg(
+        long = "tracing-otlp.service-name",
+        env = "OTEL_SERVICE_NAME",
+        global = true,
+        value_name = "NAME",
+        default_value = "reth",
+        hide = true,
+        help_heading = "Tracing"
+    )]
+    pub service_name: String,
+
+    /// Trace sampling ratio to control the percentage of traces to export.
+    ///
+    /// Valid range: 0.0 to 1.0
+    /// - 1.0, default: Sample all traces
+    /// - 0.01: Sample 1% of traces
+    /// - 0.0: Disable sampling
+    ///
+    /// Example: --tracing-otlp.sample-ratio=0.0.
+    #[arg(
+        long = "tracing-otlp.sample-ratio",
+        env = "OTEL_TRACES_SAMPLER_ARG",
+        global = true,
+        value_name = "RATIO",
+        help_heading = "Tracing"
+    )]
+    pub sample_ratio: Option<f64>,
 }
 
 impl Default for TraceArgs {
@@ -69,18 +103,64 @@ impl Default for TraceArgs {
             otlp: None,
             protocol: OtlpProtocol::Http,
             otlp_filter: EnvFilter::from_default_env(),
+            sample_ratio: None,
+            service_name: "reth".to_string(),
         }
     }
 }
 
 impl TraceArgs {
-    /// Validate the configuration
-    pub fn validate(&mut self) -> eyre::Result<()> {
-        if let Some(url) = &mut self.otlp {
-            self.protocol.validate_endpoint(url)?;
+    /// Initialize OTLP tracing with the given layers and runner.
+    ///
+    /// This method handles OTLP tracing initialization based on the configured options,
+    /// including validation, protocol selection, and feature flag checking.
+    ///
+    /// Returns the initialization status to allow callers to log appropriate messages.
+    ///
+    /// Note: even though this function is async, it does not actually perform any async operations.
+    /// It's needed only to be able to initialize the gRPC transport of OTLP tracing that needs to
+    /// be called inside a tokio runtime context.
+    pub async fn init_otlp_tracing(
+        &mut self,
+        _layers: &mut Layers,
+    ) -> eyre::Result<OtlpInitStatus> {
+        if let Some(endpoint) = self.otlp.as_mut() {
+            self.protocol.validate_endpoint(endpoint)?;
+
+            #[cfg(feature = "otlp")]
+            {
+                {
+                    let config = reth_tracing_otlp::OtlpConfig::new(
+                        self.service_name.clone(),
+                        endpoint.clone(),
+                        self.protocol,
+                        self.sample_ratio,
+                    )?;
+
+                    _layers.with_span_layer(config.clone(), self.otlp_filter.clone())?;
+
+                    Ok(OtlpInitStatus::Started(config.endpoint().clone()))
+                }
+            }
+            #[cfg(not(feature = "otlp"))]
+            {
+                Ok(OtlpInitStatus::NoFeature)
+            }
+        } else {
+            Ok(OtlpInitStatus::Disabled)
         }
-        Ok(())
     }
+}
+
+/// Status of OTLP tracing initialization.
+#[derive(Debug)]
+pub enum OtlpInitStatus {
+    /// OTLP tracing was successfully started with the given endpoint.
+    Started(Url),
+    /// OTLP tracing is disabled (no endpoint configured).
+    Disabled,
+    /// OTLP arguments provided but feature is not compiled.
+    NoFeature,
 }
 
 // Parses an OTLP endpoint url.

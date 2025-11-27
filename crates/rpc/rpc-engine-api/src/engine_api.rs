@@ -20,7 +20,8 @@ use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, PayloadOrAttributes, PayloadTypes,
+    validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
+    PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
@@ -362,9 +363,15 @@ where
     where
         EngineT::BuiltPayload: TryInto<R>,
     {
-        // validate timestamp according to engine rules
+        // Validate timestamp according to engine rules
+        // Enforces Osaka restrictions on `getPayloadV4`.
         let timestamp = self.get_payload_timestamp(payload_id).await?;
-        validate_payload_timestamp(&self.inner.chain_spec, version, timestamp)?;
+        validate_payload_timestamp(
+            &self.inner.chain_spec,
+            version,
+            timestamp,
+            MessageValidationKind::GetPayload,
+        )?;
 
         // Now resolve the payload
         self.get_built_payload(payload_id).await?.try_into().map_err(|_| {
@@ -657,9 +664,9 @@ where
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         let start = Instant::now();
-        let res = Self::get_payload_bodies_by_hash_v1(self, hashes);
+        let res = Self::get_payload_bodies_by_hash_v1(self, hashes).await;
         self.inner.metrics.latency.get_payload_bodies_by_hash_v1.record(start.elapsed());
-        res.await
+        res
     }
 
     /// Validates the `engine_forkchoiceUpdated` payload attributes and executes the forkchoice

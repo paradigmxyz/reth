@@ -44,6 +44,8 @@ pub use recover_block::UncompressedPublicKey;
 #[doc(inline)]
 pub use trie::StatelessTrie;
 #[doc(inline)]
+pub use validation::stateless_validation;
+#[doc(inline)]
 pub use validation::stateless_validation_with_trie;
 
 /// Implementation of stateless validation

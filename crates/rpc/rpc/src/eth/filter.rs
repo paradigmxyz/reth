@@ -1138,7 +1138,7 @@ impl<
 
                 let expected_next = last_header.number() + 1;
                 if peeked.number() != expected_next {
-                    debug!(
+                    trace!(
                         target: "rpc::eth::filter",
                         last_block = last_header.number(),
                         next_block = peeked.number(),

@@ -1,11 +1,15 @@
 use crate::{
-    providers::{state::latest::LatestStateProvider, NodeTypesForProvider, StaticFileProvider},
+    providers::{
+        state::latest::LatestStateProvider, NodeTypesForProvider, StaticFileProvider,
+        StaticFileProviderRWRefMut,
+    },
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, MetadataProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    EitherWriterDestination, HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider,
+    MetadataProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
+    StateProviderBox, StaticFileProviderFactory, StaticFileWriter, TransactionVariant,
+    TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
@@ -113,7 +117,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
 impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Sets the pruning configuration for an existing [`ProviderFactory`].
-    pub const fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
+    pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
         self.prune_modes = prune_modes;
         self
     }
@@ -246,6 +250,14 @@ impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
     /// Returns static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
+    }
+
+    fn get_static_file_writer(
+        &self,
+        block: BlockNumber,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
+        self.static_file_provider.get_writer(block, segment)
     }
 }
 
@@ -456,11 +468,19 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.provider()?.senders_by_tx_range(range)
+        if EitherWriterDestination::senders(self).is_static_file() {
+            self.static_file_provider.senders_by_tx_range(range)
+        } else {
+            self.provider()?.senders_by_tx_range(range)
+        }
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        self.provider()?.transaction_sender(id)
+        if EitherWriterDestination::senders(self).is_static_file() {
+            self.static_file_provider.transaction_sender(id)
+        } else {
+            self.provider()?.transaction_sender(id)
+        }
     }
 }
 

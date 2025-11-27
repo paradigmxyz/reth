@@ -44,7 +44,7 @@ jobs:
       packages: write
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.extract-version.outputs.VERSION }}
 
