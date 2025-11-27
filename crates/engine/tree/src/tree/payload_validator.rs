@@ -14,9 +14,7 @@ use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
-use reth_chain_state::{
-    AnchoredTrieInput, CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock,
-};
+use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -1033,42 +1031,12 @@ where
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
 
-                // Sort the current block's hashed state and trie updates.
-                let sorted_hashed_state = Arc::new(hashed_state.as_ref().clone().into_sorted());
-                let sorted_trie_updates = Arc::new(trie_output.as_ref().clone().into_sorted());
-
-                // Merge trie data from ancestors.
-                // This calls wait_cloned() on ancestors which may trigger their fallback
-                // computation.
-                let mut overlay = TrieInputSorted::default();
-                for ancestor in &ancestors {
-                    let ancestor_data = ancestor.wait_cloned();
-                    {
-                        let state_mut = Arc::make_mut(&mut overlay.state);
-                        state_mut.extend_ref(ancestor_data.hashed_state.as_ref());
-                    }
-                    {
-                        let nodes_mut = Arc::make_mut(&mut overlay.nodes);
-                        nodes_mut.extend_ref(ancestor_data.trie_updates.as_ref());
-                    }
-                }
-
-                // Extend overlay with this block's sorted data
-                {
-                    let state_mut = Arc::make_mut(&mut overlay.state);
-                    state_mut.extend_ref(sorted_hashed_state.as_ref());
-                    let nodes_mut = Arc::make_mut(&mut overlay.nodes);
-                    nodes_mut.extend_ref(sorted_trie_updates.as_ref());
-                }
-
-                let bundle = ComputedTrieData {
-                    hashed_state: sorted_hashed_state,
-                    trie_updates: sorted_trie_updates,
-                    anchored_trie_input: Some(AnchoredTrieInput {
-                        anchor_hash,
-                        trie_input: Arc::new(overlay),
-                    }),
-                };
+                let bundle = DeferredTrieData::sort_and_build_trie_input(
+                    &hashed_state,
+                    &trie_output,
+                    anchor_hash,
+                    &ancestors,
+                );
 
                 deferred_handle_task.set_ready(bundle);
                 deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
