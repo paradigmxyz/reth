@@ -27,5 +27,6 @@ pub mod re_execute;
 pub mod stage;
 #[cfg(feature = "arbitrary")]
 pub mod test_vectors;
+mod xlayer_init_check;
 
 pub use node::NodeCommand;
