@@ -41,6 +41,7 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
                 tx.gas_price = 0;
             }
             // CRITICAL FIX: Retry transactions MUST have their value set for ETH transfers to work
+            // Use max_fee_per_gas (which equals basefee) for gas accounting
             reth_arbitrum_primitives::ArbTxType::Retry => {
                 tx.value = signed.value();
                 tx.gas_price = signed.max_fee_per_gas();

@@ -269,14 +269,37 @@ impl DefaultArbOsHooks {
             return Err(());
         }
 
-        // Decrement `from` balance directly in cache
-        if let Some(cached_from) = state.cache.accounts.get_mut(&from) {
+        // Decrement `from` balance using proper transition tracking
+        // We need to manually create a transition since there's no decrement_balance API
+        {
+            let cached_from = state.cache.accounts.get_mut(&from).ok_or(())?;
+            let previous_status = cached_from.status;
+            let previous_info = cached_from.account.as_ref().map(|a| a.info.clone());
+
+            // Apply the decrement
             if let Some(ref mut account) = cached_from.account {
                 account.info.balance = account.info.balance.saturating_sub(amount);
             }
+
+            let had_no_nonce_and_code = previous_info
+                .as_ref()
+                .map(|info| info.has_no_code_and_nonce())
+                .unwrap_or_default();
+            cached_from.status = cached_from.status.on_changed(had_no_nonce_and_code);
+
+            // Create and apply the transition
+            let transition = revm::database::TransitionAccount {
+                info: cached_from.account.as_ref().map(|a| a.info.clone()),
+                status: cached_from.status,
+                previous_info,
+                previous_status,
+                storage: Default::default(),
+                storage_was_destroyed: false,
+            };
+            state.apply_transition(vec![(from, transition)]);
         }
 
-        // Increment `to` balance using increment_balances API
+        // Increment `to` balance using increment_balances API (which creates proper transitions)
         let amount_u128: u128 = amount.try_into().map_err(|_| ())?;
         let _ = state.increment_balances(core::iter::once((to, amount_u128)));
         Ok(())
@@ -306,12 +329,34 @@ impl DefaultArbOsHooks {
             return Err(());
         }
 
-        // Decrement balance directly in cache
-        if let Some(cached_from) = state.cache.accounts.get_mut(&from) {
-            if let Some(ref mut account) = cached_from.account {
-                account.info.balance = account.info.balance.saturating_sub(amount);
-            }
+        // Decrement balance using proper transition tracking
+        // We need to manually create a transition since there's no decrement_balance API
+        let cached_from = state.cache.accounts.get_mut(&from).ok_or(())?;
+        let previous_status = cached_from.status;
+        let previous_info = cached_from.account.as_ref().map(|a| a.info.clone());
+
+        // Apply the decrement
+        if let Some(ref mut account) = cached_from.account {
+            account.info.balance = account.info.balance.saturating_sub(amount);
         }
+
+        let had_no_nonce_and_code = previous_info
+            .as_ref()
+            .map(|info| info.has_no_code_and_nonce())
+            .unwrap_or_default();
+        cached_from.status = cached_from.status.on_changed(had_no_nonce_and_code);
+
+        // Create and apply the transition
+        let transition = revm::database::TransitionAccount {
+            info: cached_from.account.as_ref().map(|a| a.info.clone()),
+            status: cached_from.status,
+            previous_info,
+            previous_status,
+            storage: Default::default(),
+            storage_was_destroyed: false,
+        };
+        state.apply_transition(vec![(from, transition)]);
+
         Ok(())
     }
     
@@ -451,7 +496,17 @@ impl ArbOsHooks for DefaultArbOsHooks {
         ctx: &ArbStartTxContext,
     ) -> StartTxHookResult {
         state.delayed_inbox = ctx.coinbase != Address::ZERO;
-        
+
+        // ITER83: Debug logging for start_tx hook
+        tracing::debug!(
+            target: "arb-reth::start_tx_debug",
+            tx_type = ctx.tx_type,
+            tx_type_hex = format!("0x{:02x}", ctx.tx_type),
+            sender = ?ctx.sender,
+            data_len = ctx.data.as_ref().map(|d| d.len()).unwrap_or(0),
+            "[ITER83] start_tx hook received tx_type"
+        );
+
         match ctx.tx_type {
             0x64 => {
                 let to = match ctx.to {
@@ -613,11 +668,19 @@ impl ArbOsHooks for DefaultArbOsHooks {
                         }
                     }
                     
-                    StartTxHookResult {
+                    let result = StartTxHookResult {
                         end_tx_now: true,
                         gas_used: 0,
                         error: None,
-                    }
+                    };
+                    tracing::info!(
+                        target: "arb-reth::start_tx_debug",
+                        tx_type = 0x6A,
+                        internal_type = "StartBlock",
+                        end_tx_now = result.end_tx_now,
+                        "[ITER83] Internal/StartBlock returning with end_tx_now=true"
+                    );
+                    result
                 } else if selector == batch_report_v2_id.as_slice() {
                     let report_data = match unpack_internal_tx_data_batch_posting_report_v2(data) {
                         Ok(d) => d,
@@ -1081,7 +1144,16 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 }
             }
             
-            _ => StartTxHookResult::default(),
+            _ => {
+                tracing::warn!(
+                    target: "arb-reth::start_tx_debug",
+                    tx_type = ctx.tx_type,
+                    tx_type_hex = format!("0x{:02x}", ctx.tx_type),
+                    sender = ?ctx.sender,
+                    "[ITER83] start_tx hook falling through to DEFAULT (end_tx_now=false)!"
+                );
+                StartTxHookResult::default()
+            },
         }
     }
 
@@ -1171,6 +1243,17 @@ impl ArbOsHooks for DefaultArbOsHooks {
         state: &mut ArbTxProcessorState,
         ctx: &ArbEndTxContext,
     ) {
+        // ITER84: Debug logging for end_tx hook
+        tracing::info!(
+            target: "arb-reth::end_tx_debug",
+            tx_type = ctx.tx_type,
+            tx_type_hex = format!("0x{:02x}", ctx.tx_type),
+            gas_left = ctx.gas_left,
+            gas_limit = ctx.gas_limit,
+            success = ctx.success,
+            "[ITER84] end_tx hook called"
+        );
+
         if ctx.tx_type == 0x68 {
             if ctx.gas_left > ctx.gas_limit {
                 tracing::error!("Tx refunds gas after computation - impossible");
@@ -1180,7 +1263,8 @@ impl ArbOsHooks for DefaultArbOsHooks {
             
             if let Some(retry_data) = &state.current_retry_data {
                 let effective_base_fee = retry_data.gas_fee_cap;
-                
+
+                // Undo revm's gas refund to the sender - ArbOS handles refunds through fee accounts
                 let gas_refund = effective_base_fee.saturating_mul(U256::from(ctx.gas_left));
                 if gas_refund > U256::ZERO {
                     let _ = Self::burn_balance(state_db, retry_data.from, gas_refund);
@@ -1299,6 +1383,12 @@ impl ArbOsHooks for DefaultArbOsHooks {
         }
 
         if compute_cost > U256::ZERO {
+            tracing::warn!(
+                target: "arb-reth::end_tx_debug",
+                network_fee_account = ?state.network_fee_account,
+                compute_cost = %compute_cost,
+                "[ITER84] MINTING to network_fee_account (this is the ArbOS balance issue!)"
+            );
             Self::mint_balance(state_db, state.network_fee_account, compute_cost);
         }
 

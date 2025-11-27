@@ -309,6 +309,17 @@ where
             result
         };
 
+        // ITER83: Debug logging for start_hook_result
+        tracing::info!(
+            target: "arb-reth::start_tx_debug",
+            tx_type = tx_type_u8,
+            tx_type_hex = format!("0x{:02x}", tx_type_u8),
+            end_tx_now = start_hook_result.end_tx_now,
+            gas_used = start_hook_result.gas_used,
+            has_error = start_hook_result.error.is_some(),
+            "[ITER83] build.rs received start_hook_result"
+        );
+
         let hook_gas_override = if start_hook_result.end_tx_now {
             tracing::debug!(
                 target: "arb-reth::executor",
@@ -700,22 +711,44 @@ where
             ArbTxType::Eip7702 => 0x04,
         };
         
-        let end_ctx = ArbEndTxContext {
-            success: result.is_ok(),
-            gas_left: 0,
-            gas_limit,
-            basefee: block_basefee,
-            tx_type: tx_type_u8,
-            block_timestamp,
-        };
-        {
-            let mut state = core::mem::take(&mut self.tx_state);
+        // ITERATION 82c: Skip end_tx hook for early-terminated transactions
+        //
+        // In Go, when start_tx returns endTxNow=true, the transaction is complete.
+        // No EVM execution, no end_tx hook. The end_tx hook handles gas fee
+        // distribution (minting to network_fee_account, infra_fee_account, etc).
+        //
+        // For Internal (0x6a), SubmitRetryable (0x69), and Deposit (0x64):
+        // - start_tx returns endTxNow=true
+        // - Go does NOT call end_tx hook
+        // - Gas fees should NOT be minted
+        //
+        // Calling end_tx for these tx types caused incorrect balance mints to
+        // network_fee_account (ArbOS), leading to state root mismatches.
+        if !start_hook_result.end_tx_now {
+            let end_ctx = ArbEndTxContext {
+                success: result.is_ok(),
+                gas_left: 0,
+                gas_limit,
+                basefee: block_basefee,
+                tx_type: tx_type_u8,
+                block_timestamp,
+            };
             {
-                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-                let state_db: &mut revm::database::State<D> = *db_ref;
-                self.hooks.end_tx(state_db, &mut state, &end_ctx);
+                let mut state = core::mem::take(&mut self.tx_state);
+                {
+                    let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                    let state_db: &mut revm::database::State<D> = *db_ref;
+                    self.hooks.end_tx(state_db, &mut state, &end_ctx);
+                }
+                self.tx_state = state;
             }
-            self.tx_state = state;
+        } else {
+            tracing::debug!(
+                target: "arb-reth::executor",
+                tx_type = ?tx_type,
+                tx_hash = ?tx_hash,
+                "Skipping end_tx hook for early-terminated transaction (end_tx_now=true)"
+            );
         }
 
         result
