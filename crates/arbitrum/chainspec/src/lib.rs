@@ -859,9 +859,31 @@ pub fn arbitrum_sepolia_spec() -> reth_chainspec::ChainSpec {
         (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(0)),
     ]);
 
-    let mut spec = reth_chainspec::ChainSpec::default();
-    spec.chain = Chain::from(421_614u64);
-    // Post-merge: set Paris block and final difficulty to block 0
+    // Build spec from the baked genesis with proper allocations
+    // Parameters from Arbitrum Sepolia mainnet genesis block:
+    // - chain_id: 421614
+    // - base_fee: 0x5f5e100 (100_000_000 = 0.1 gwei)
+    // - timestamp: 0x0
+    // - state_root: 0x8647a2ae10b316ca12fbd76327fe4d64d12cb0ec664a128b0d59df15d05391be
+    // - gas_limit: 0x1c9c380 (30_000_000)
+    // - extra_data: 0x (empty)
+    // - mix_hash: 0x0 (zeros for post-merge)
+    // - nonce: 0x0
+    // - initial_l1_base_fee: 0xb2d05e00 (3 gwei)
+    let mut spec = sepolia_baked_genesis_from_header(
+        421_614,
+        "0x5f5e100",  // base_fee
+        "0x0",        // timestamp
+        "0x8647a2ae10b316ca12fbd76327fe4d64d12cb0ec664a128b0d59df15d05391be",  // state_root
+        "0x1c9c380",  // gas_limit
+        "0x",         // extra_data
+        "0x0000000000000000000000000000000000000000000000000000000000000000",  // mix_hash
+        "0x0",        // nonce
+        None,         // chain_config_bytes
+        Some("0xb2d05e00"),  // initial_l1_base_fee
+    ).expect("failed to build arbitrum sepolia chainspec");
+
+    // Override hardforks to ensure Paris is active (post-merge = no block rewards)
     spec.paris_block_and_final_difficulty = Some((0, U256::from(1)));
     spec.hardforks = hardforks;
     spec
