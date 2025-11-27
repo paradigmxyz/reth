@@ -910,7 +910,7 @@ pub trait BestTransactions: Iterator + Send {
     /// Implementers must ensure all subsequent transaction _don't_ depend on this transaction.
     /// In other words, this must remove the given transaction _and_ drain all transaction that
     /// depend on it.
-    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError);
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: &InvalidPoolTransactionError);
 
     /// An iterator may be able to receive additional pending transactions that weren't present it
     /// the pool when it was created.
@@ -972,7 +972,7 @@ impl<T> BestTransactions for Box<T>
 where
     T: BestTransactions + ?Sized,
 {
-    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: &InvalidPoolTransactionError) {
         (**self).mark_invalid(transaction, kind)
     }
 
@@ -991,7 +991,7 @@ where
 
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
-    fn mark_invalid(&mut self, _tx: &T, _kind: InvalidPoolTransactionError) {}
+    fn mark_invalid(&mut self, _tx: &T, _kind: &InvalidPoolTransactionError) {}
 
     fn no_updates(&mut self) {}
 
@@ -1167,6 +1167,14 @@ pub trait PoolTransaction:
     /// Tries to convert the `Consensus` type into the `Pooled` type.
     fn try_into_pooled(self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
         let consensus = self.into_consensus();
+        let (tx, signer) = consensus.into_parts();
+        Ok(Recovered::new_unchecked(tx.try_into()?, signer))
+    }
+
+    /// Clones the consensus transactions and tries to convert the `Consensus` type into the
+    /// `Pooled` type.
+    fn clone_into_pooled(&self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
+        let consensus = self.clone_into_consensus();
         let (tx, signer) = consensus.into_parts();
         Ok(Recovered::new_unchecked(tx.try_into()?, signer))
     }

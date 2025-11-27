@@ -44,20 +44,17 @@ struct MockEngineValidator;
 impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineValidator {
     type Block = Block;
 
-    fn ensure_well_formed_payload(
+    fn convert_payload_to_block(
         &self,
         payload: ExecutionData,
     ) -> Result<
-        reth_primitives_traits::RecoveredBlock<Self::Block>,
+        reth_primitives_traits::SealedBlock<Self::Block>,
         reth_payload_primitives::NewPayloadError,
     > {
-        // For tests, convert the execution payload to a block
         let block = reth_ethereum_primitives::Block::try_from(payload.payload).map_err(|e| {
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
-        let sealed = block.seal_slow();
-
-        sealed.try_recover().map_err(|e| reth_payload_primitives::NewPayloadError::Other(e.into()))
+        Ok(block.seal_slow())
     }
 }
 

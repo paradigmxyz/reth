@@ -28,6 +28,9 @@ use node::*;
 /// Target to use with the `tracing` crate.
 static TRACE_TARGET: &str = "trie::proof_v2";
 
+/// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
+const RLP_ENCODE_BUF_SIZE: usize = 1024;
+
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
@@ -78,7 +81,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
 
 impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
     /// Create a new [`ProofCalculator`] instance for calculating account proofs.
-    pub const fn new(trie_cursor: TC, hashed_cursor: HC) -> Self {
+    pub fn new(trie_cursor: TC, hashed_cursor: HC) -> Self {
         Self {
             trie_cursor,
             hashed_cursor,
@@ -87,7 +90,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             child_stack: Vec::<_>::new(),
             retained_proofs: Vec::<_>::new(),
             rlp_nodes_bufs: Vec::<_>::new(),
-            rlp_encode_buf: Vec::<_>::new(),
+            rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
         }
     }
 }
@@ -205,11 +208,8 @@ where
 
             // Convert to `ProofTrieNode`, which will be what is retained.
             //
-            // If this node is a leaf then the `rlp_encode_buf` is taken by it and a new one will be
-            // allocated by the next encode call.
-            //
-            // If it is a branch then its `rlp_nodes_buf` will be taken and not returned to the
-            // `rlp_nodes_bufs` free-list.
+            // If this node is a branch then its `rlp_nodes_buf` will be taken and not returned to
+            // the `rlp_nodes_bufs` free-list.
             self.rlp_encode_buf.clear();
             let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
 
@@ -716,7 +716,7 @@ where
     HC: HashedStorageCursor<Value = U256>,
 {
     /// Create a new [`StorageProofCalculator`] instance.
-    pub const fn new_storage(trie_cursor: TC, hashed_cursor: HC) -> Self {
+    pub fn new_storage(trie_cursor: TC, hashed_cursor: HC) -> Self {
         Self::new(trie_cursor, hashed_cursor)
     }
 
@@ -833,38 +833,16 @@ mod tests {
         fn new(post_state: HashedPostState) -> Self {
             trace!(target: TRACE_TARGET, ?post_state, "Creating ProofTestHarness");
 
-            // Extract accounts from post state, filtering out None (deleted accounts)
-            let hashed_accounts: BTreeMap<B256, _> = post_state
-                .accounts
-                .into_iter()
-                .filter_map(|(addr, account)| account.map(|acc| (addr, acc)))
-                .collect();
-
-            // Extract storage tries from post state
-            let hashed_storage_tries: B256Map<BTreeMap<B256, U256>> = post_state
-                .storages
-                .into_iter()
-                .map(|(addr, hashed_storage)| {
-                    // Convert HashedStorage to BTreeMap, filtering out zero values (deletions)
-                    let storage_map: BTreeMap<B256, U256> = hashed_storage
-                        .storage
-                        .into_iter()
-                        .filter_map(|(slot, value)| (value != U256::ZERO).then_some((slot, value)))
-                        .collect();
-                    (addr, storage_map)
-                })
-                .collect();
-
             // Ensure that there's a storage trie dataset for every storage trie, even if empty.
-            let storage_trie_nodes: B256Map<BTreeMap<_, _>> = hashed_storage_tries
+            let storage_trie_nodes: B256Map<BTreeMap<_, _>> = post_state
+                .storages
                 .keys()
                 .copied()
                 .map(|addr| (addr, Default::default()))
                 .collect();
 
-            // Create mock hashed cursor factory populated with the post state data
-            let hashed_cursor_factory =
-                MockHashedCursorFactory::new(hashed_accounts, hashed_storage_tries);
+            // Create mock hashed cursor factory from the post state
+            let hashed_cursor_factory = MockHashedCursorFactory::from_hashed_post_state(post_state);
 
             // Create empty trie cursor factory (leaf-only calculator doesn't need trie nodes)
             let trie_cursor_factory =
@@ -884,15 +862,8 @@ mod tests {
         ) -> Result<(), StateProofError> {
             // Convert B256 targets to Nibbles for proof_v2
             let targets_vec: Vec<B256> = targets.into_iter().collect();
-            let nibbles_targets: Vec<Nibbles> = targets_vec
-                .iter()
-                .map(|b256| {
-                    // SAFETY: B256 is exactly 32 bytes
-                    unsafe { Nibbles::unpack_unchecked(b256.as_slice()) }
-                })
-                .sorted()
-                .collect();
-
+            let nibbles_targets: Vec<Nibbles> =
+                targets_vec.iter().map(|b256| Nibbles::unpack(b256.as_slice())).sorted().collect();
             // Convert B256 targets to MultiProofTargets for legacy implementation
             // For account-only proofs, each account maps to an empty storage set
             let legacy_targets = targets_vec
