@@ -1117,11 +1117,6 @@ impl<T: PoolTransaction> AddedPendingTransaction<T> {
         let iter = std::iter::once(&self.transaction).chain(self.promoted.iter());
         PendingTransactionIter { kind, iter }
     }
-
-    /// Returns if the transaction should be propagated.
-    pub(crate) fn is_propagate_allowed(&self) -> bool {
-        self.transaction.propagate
-    }
 }
 
 pub(crate) struct PendingTransactionIter<Iter> {
