@@ -548,12 +548,23 @@ impl PeersManager {
                     entry.remove();
                     self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
                 } else {
+                    let peer = entry.get_mut();
                     // reset the peer's state
                     // we reset the backoff counter since we're able to establish a successful
                     // session to that peer
-                    entry.get_mut().severe_backoff_counter = 0;
-                    entry.get_mut().state = PeerConnectionState::Idle;
-                    return
+                    peer.severe_backoff_counter = 0;
+                    peer.state = PeerConnectionState::Idle;
+
+                    // but we're backing off slightly to avoid dialing the peer again right away, to
+                    // give the remote time to also properly register the closed session and clean
+                    // up and to avoid any issues with ip throttling on the remote in case this
+                    // session was terminated right away.
+                    peer.backed_off = true;
+                    self.backed_off_peers.insert(
+                        peer_id,
+                        std::time::Instant::now() + self.incoming_ip_throttle_duration,
+                    );
+                    trace!(target: "net::peers", ?peer_id, kind=?peer.kind, duration=?self.incoming_ip_throttle_duration, "backing off on gracefully closed session");
                 }
             }
             Entry::Vacant(_) => return,
@@ -2632,6 +2643,146 @@ mod tests {
         let peer = peers.peers.get(&peer_id).unwrap();
         assert_eq!(peer.state, PeerConnectionState::Idle);
         assert!(!peer.remove_after_disconnect);
+    }
+
+    #[tokio::test]
+    async fn test_peer_reconnect_after_graceful_close_respects_throttle() {
+        let throttle_duration = Duration::from_millis(100);
+        let config =
+            PeersConfig { incoming_ip_throttle_duration: throttle_duration, ..PeersConfig::test() };
+        let mut peers = PeersManager::new(config);
+
+        let peer_id = PeerId::random();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+
+        // Add as regular peer
+        peers.add_peer(peer_id, PeerAddr::from_tcp(addr), None);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(id) => assert_eq!(id, peer_id),
+            _ => unreachable!(),
+        }
+
+        match event!(peers) {
+            PeerAction::Connect { .. } => {}
+            _ => unreachable!(),
+        }
+
+        // Simulate outbound connection established
+        peers.on_active_outgoing_established(peer_id);
+        assert_eq!(peers.peers.get(&peer_id).unwrap().state, PeerConnectionState::Out);
+
+        // Gracefully close the session
+        peers.on_active_session_gracefully_closed(peer_id);
+
+        let peer = peers.peers.get(&peer_id).unwrap();
+        assert_eq!(peer.state, PeerConnectionState::Idle);
+        assert!(peer.backed_off);
+
+        // Verify the peer is in the backed_off_peers set
+        assert!(peers.backed_off_peers.contains_key(&peer_id));
+
+        // Immediately try to poll - should not trigger any actions yet
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        // Peer should still be backed off
+        assert!(peers.backed_off_peers.contains_key(&peer_id));
+        assert!(peers.peers.get(&peer_id).unwrap().backed_off);
+
+        // Sleep for the throttle duration
+        tokio::time::sleep(throttle_duration).await;
+
+        // After throttle duration, event! will poll until we get a Connect action
+        match event!(peers) {
+            PeerAction::Connect { peer_id: id, .. } => assert_eq!(id, peer_id),
+            _ => unreachable!(),
+        }
+
+        // After connection is initiated, peer should no longer be backed off
+        assert!(!peers.backed_off_peers.contains_key(&peer_id));
+        assert!(!peers.peers.get(&peer_id).unwrap().backed_off);
+    }
+
+    #[tokio::test]
+    async fn test_backed_off_peer_can_accept_incoming_connection() {
+        let throttle_duration = Duration::from_millis(100);
+        let config =
+            PeersConfig { incoming_ip_throttle_duration: throttle_duration, ..PeersConfig::test() };
+        let mut peers = PeersManager::new(config);
+
+        let peer_id = PeerId::random();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+
+        // Add as regular peer
+        peers.add_peer(peer_id, PeerAddr::from_tcp(addr), None);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(id) => assert_eq!(id, peer_id),
+            _ => unreachable!(),
+        }
+
+        match event!(peers) {
+            PeerAction::Connect { .. } => {}
+            _ => unreachable!(),
+        }
+
+        // Simulate outbound connection established
+        peers.on_active_outgoing_established(peer_id);
+        assert_eq!(peers.peers.get(&peer_id).unwrap().state, PeerConnectionState::Out);
+
+        // Gracefully close the session - this will back off the peer
+        peers.on_active_session_gracefully_closed(peer_id);
+
+        let peer = peers.peers.get(&peer_id).unwrap();
+        assert_eq!(peer.state, PeerConnectionState::Idle);
+        assert!(peer.backed_off);
+        assert!(peers.backed_off_peers.contains_key(&peer_id));
+
+        // Now simulate an incoming connection from the backed-off peer
+        // First, handle the incoming pending session
+        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
+        assert_eq!(peers.connection_info.num_pending_in, 1);
+
+        // Establish the incoming session
+        peers.on_incoming_session_established(peer_id, addr);
+
+        // Peer should have been added to incoming connections
+        assert_eq!(peers.peers.get(&peer_id).unwrap().state, PeerConnectionState::In);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+
+        // Peer should still be backed off for outbound connections
+        assert!(peers.backed_off_peers.contains_key(&peer_id));
+        assert!(peers.peers.get(&peer_id).unwrap().backed_off);
+
+        // Verify we don't try to reconnect outbound while peer is backed off
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        // No outbound connection should be attempted while backed off
+        assert_eq!(peers.peers.get(&peer_id).unwrap().state, PeerConnectionState::In);
+
+        // After throttle duration, the backoff should be cleared
+        tokio::time::sleep(throttle_duration).await;
+
+        poll_fn(|cx| {
+            let _ = peers.poll(cx);
+            Poll::Ready(())
+        })
+        .await;
+
+        // Backoff should be cleared now
+        assert!(!peers.backed_off_peers.contains_key(&peer_id));
+        assert!(!peers.peers.get(&peer_id).unwrap().backed_off);
+
+        // Peer should still be in incoming state
+        assert_eq!(peers.peers.get(&peer_id).unwrap().state, PeerConnectionState::In);
     }
 
     #[tokio::test]

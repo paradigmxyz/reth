@@ -773,7 +773,7 @@ async fn test_reconnect_trusted() {
 
     // Await that handle1 (trusted peer) reconnects automatically
     let reconnect_result =
-        tokio::time::timeout(Duration::from_secs(10), listener0.next_session_established()).await;
+        tokio::time::timeout(Duration::from_secs(60), listener0.next_session_established()).await;
 
     match reconnect_result {
         Ok(Some(peer)) => {
@@ -781,6 +781,6 @@ async fn test_reconnect_trusted() {
             assert_eq!(handle0.num_connected_peers(), 1);
         }
         Ok(None) => panic!("Event stream ended without reconnection"),
-        Err(_) => panic!("Trusted peer did not reconnect within 10 seconds"),
+        Err(_) => panic!("Trusted peer did not reconnect in time"),
     }
 }
