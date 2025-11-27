@@ -260,9 +260,13 @@ where
         let l2_owned: Vec<u8> = l2msg_bytes.to_vec();
 
         let state_provider = provider.state_by_block_hash(parent_hash)?;
+        // CRITICAL FOR DETERMINISM: Must use .without_state_clear() to match validation!
+        // The validation code in payload_validator.rs uses this flag, so assembly must too.
+        // Otherwise empty accounts are handled differently, causing state root mismatch.
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
+            .without_state_clear()
             .build();
 
         let mut attrs2 = attrs.clone();
