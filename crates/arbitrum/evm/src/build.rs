@@ -191,6 +191,38 @@ where
         let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
         let is_retry = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry);
         let is_submit_retryable = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable);
+
+        // ITERATION 99: Capture sender balance BEFORE start_tx hook runs.
+        //
+        // For Internal, Deposit, SubmitRetryable transactions (end_tx_now=true):
+        // - These don't go through EVM, don't call end_tx hook
+        // - Balance restoration to pre-start_tx value is needed
+        //
+        // For Retry transactions (end_tx_now=false):
+        // - Goes through EVM with revm's gas accounting
+        // - end_tx hook at line 1270 ALREADY burns the gas_refund: burn_balance(sender, gas_refund)
+        // - DO NOT restore balance here - end_tx handles it correctly!
+        //
+        // The issue was: restoring balance to 0 BEFORE end_tx broke the burn logic,
+        // then end_tx's transfer_balance to sender added ETH back, resulting in 5 ETH.
+        let needs_balance_restoration = is_internal || is_deposit || is_submit_retryable;
+        // NOTE: is_retry is EXCLUDED - end_tx hook handles gas refund burning
+        let pre_start_tx_sender_balance = if needs_balance_restoration {
+            let evm_temp = self.inner.evm_mut();
+            let sender_info = evm_temp.db_mut().basic(sender).ok().flatten();
+            let balance = sender_info.map(|a| a.balance).unwrap_or_default();
+            tracing::warn!(
+                target: "arb-reth::gas-fix",
+                tx_type = ?tx.tx().tx_type(),
+                sender = ?sender,
+                pre_start_tx_balance = %balance,
+                "[ITER99] Captured sender balance BEFORE start_tx (Internal/Deposit/SubmitRetryable only)"
+            );
+            Some(balance)
+        } else {
+            None
+        };
+
         // ITERATION 82b: Pre-credit logic - NO pre-credit needed for special tx types
         //
         // ALL balance manipulation for these tx types is handled in start_tx hook:
@@ -468,10 +500,31 @@ where
 
         let mut tx_env = tx.to_tx_env();
 
-        if is_internal {
-            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
-        } else if is_deposit {
-            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
+        // CRITICAL FIX (Iteration 97): For all tx types, set gas_price = basefee.
+        // This prevents coinbase from receiving tips (since DropTip() returns true for ArbOS != v9).
+        //
+        // For special tx types (Internal, Deposit, SubmitRetryable, Retry), we will track the
+        // sender's balance BEFORE execution and restore it AFTER execution to undo any
+        // refunds that revm's reimburse_caller adds.
+        //
+        // revm's normal flow:
+        // 1. Pre-execution: deduct gas_limit * gas_price from caller (fails silently with disable_balance_check)
+        // 2. Post-execution: refund remaining_gas * effective_gas_price to caller
+        //
+        // With disable_balance_check=true and a non-zero gas_price:
+        // - Step 1 fails silently (saturating_sub from 0 = 0)
+        // - Step 2 STILL adds balance to caller! This gives caller FREE money!
+        //
+        // We can't set gas_price = 0 because revm's validation rejects gas_price < basefee.
+        // Instead, we will manually undo the refund after execution for special tx types.
+        // NOTE: skip_evm_gas_accounting is already defined earlier (line 207) for the balance capture
+
+        // Always set gas_price = basefee to pass validation
+        reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
+
+        // ITERATION 98: Removed old capture here - now using pre_start_tx_sender_balance captured earlier
+
+        if is_deposit {
             // For Deposit transactions, set nonce
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
         }
@@ -601,6 +654,56 @@ where
             );
         }
 
+        // ITERATION 102: Explicit balance validation for user transactions (Arbitrum-style)
+        //
+        // In Go Nitro, ApplyTransaction fails and returns an error for insufficient balance.
+        // The block_processor.go then catches this error and skips the transaction.
+        //
+        // In our case, we need to explicitly validate balance for user transactions
+        // (Legacy, EIP1559, EIP2930, etc.) that are NOT internal/deposit/submit_retryable.
+        // These transactions should only execute if sender has sufficient balance.
+        //
+        // The check is: sender_balance >= (gas_limit * max_fee_per_gas) + value
+        // This is the "cost" check that geth/nitro performs before execution.
+        let is_user_tx = !is_internal && !is_deposit && !is_submit_retryable && !is_retry;
+        if is_user_tx {
+            let sender_balance_result = self.inner.evm_mut().db_mut().basic(sender);
+            let sender_balance = sender_balance_result.ok().flatten().map(|a| a.balance).unwrap_or_default();
+            let gas_cost = alloy_primitives::U256::from(gas_limit) * upfront_gas_price;
+            let tx_value = tx.tx().value();
+            let total_cost = gas_cost.saturating_add(tx_value);
+
+            if sender_balance < total_cost {
+                tracing::warn!(
+                    target: "arb-reth::balance-check",
+                    tx_hash = ?tx_hash,
+                    sender = ?sender,
+                    sender_balance = %sender_balance,
+                    gas_cost = %gas_cost,
+                    tx_value = %tx_value,
+                    total_cost = %total_cost,
+                    tx_type = ?tx.tx().tx_type(),
+                    "🚫 [ITER102] Skipping user transaction - insufficient balance (Arbitrum-style validation)"
+                );
+
+                // Restore EVM config before returning
+                let evm = self.inner.evm_mut();
+                evm.cfg_mut().disable_balance_check = prev_disable_balance;
+                evm.cfg_mut().disable_nonce_check = prev_disable_nonce;
+
+                // ITERATION 103: Return an error instead of Ok(None)
+                // The caller (node.rs) handles errors by skipping the transaction (see line 1100-1109)
+                // Ok(None) was being converted to Ok(0) by the trait default implementation,
+                // which doesn't properly signal "skip this transaction".
+                return Err(BlockExecutionError::Validation(
+                    alloy_evm::block::BlockValidationError::msg(format!(
+                        "insufficient balance for transaction: cost {} > balance {}",
+                        total_cost, sender_balance
+                    ))
+                ));
+            }
+        }
+
         let wrapped = WithTxEnv { tx_env, tx };
 
         // Execute transaction through EVM
@@ -691,6 +794,71 @@ where
                 tx_type = ?tx_type,
                 "[req-1] ITER81: Added nonce restoration to pending list (will update both cache AND transition_state in finish())"
             );
+        }
+
+        // ITERATION 99: Balance restoration for Internal/Deposit/SubmitRetryable only.
+        //
+        // These tx types have end_tx_now=true, meaning they don't go through EVM and
+        // don't call end_tx hook. We restore their balance to pre-start_tx value.
+        //
+        // CRITICAL: Retry transactions are EXCLUDED from this restoration!
+        // - Retry goes through EVM with revm's gas accounting (adds refund to sender)
+        // - end_tx hook at execute.rs:1270 burns the gas_refund: burn_balance(sender, gas_refund)
+        // - If we restore to 0 before end_tx, the burn fails (balance is 0)
+        // - Then end_tx's transfer_balance to sender adds ETH back, causing wrong balance
+        //
+        // By excluding Retry, we let end_tx handle it correctly:
+        // - revm adds refund to sender
+        // - end_tx burns that exact refund amount
+        // - end_tx handles proper gas distribution to refund_to and fee accounts
+        if let Some(expected_balance) = pre_start_tx_sender_balance {
+            let evm = self.inner.evm_mut();
+            let (db_ref, _, _) = evm.components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
+
+            // Get current balance after execution
+            let current_balance_after_exec = if let Some(cached_acc) = state.cache.accounts.get(&sender) {
+                if let Some(ref account) = cached_acc.account {
+                    account.info.balance
+                } else {
+                    alloy_primitives::U256::ZERO
+                }
+            } else {
+                alloy_primitives::U256::ZERO
+            };
+
+            if current_balance_after_exec != expected_balance {
+                let balance_diff = if current_balance_after_exec > expected_balance {
+                    current_balance_after_exec - expected_balance
+                } else {
+                    expected_balance - current_balance_after_exec
+                };
+                tracing::warn!(
+                    target: "arb-reth::gas-fix",
+                    tx_type = tx_type_u8,
+                    sender = ?sender,
+                    pre_start_tx_balance = %expected_balance,
+                    current_balance = %current_balance_after_exec,
+                    balance_diff = %balance_diff,
+                    "[ITER99] Restoring sender balance (Internal/Deposit/SubmitRetryable only)"
+                );
+
+                // Update the cache to restore the correct balance
+                if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
+                    if let Some(ref mut account) = cached_acc.account {
+                        account.info.balance = expected_balance;
+                    }
+                }
+
+                // CRITICAL: Also update the transition_state for bundle_state creation
+                if let Some(ref mut transition_state) = state.transition_state {
+                    if let Some(transition_acc) = transition_state.transitions.get_mut(&sender) {
+                        if let Some(ref mut info) = transition_acc.info {
+                            info.balance = expected_balance;
+                        }
+                    }
+                }
+            }
         }
 
         let evm = self.inner.evm_mut();

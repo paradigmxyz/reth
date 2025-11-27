@@ -46,6 +46,15 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
                 tx.value = signed.value();
                 tx.gas_price = signed.max_fee_per_gas();
             }
+            // CRITICAL FIX: SubmitRetryable ends early (end_tx_now=true) but still goes through revm
+            // which pays (gas_price - basefee) * gas_used to the block beneficiary (coinbase).
+            // To prevent this unwanted coinbase tip, set gas_price = 0. The actual fee distribution
+            // is handled entirely by ArbOS hooks, not revm's standard fee mechanism.
+            // Without this fix, sequencer gets ~5 ETH per SubmitRetryable from coinbase tips!
+            reth_arbitrum_primitives::ArbTxType::SubmitRetryable => {
+                tx.value = alloy_primitives::U256::ZERO;
+                tx.gas_price = 0;
+            }
             _ => {
                 tx.value = alloy_primitives::U256::ZERO;
                 tx.gas_price = signed.max_fee_per_gas();
