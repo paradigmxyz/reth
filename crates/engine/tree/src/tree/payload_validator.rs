@@ -949,8 +949,9 @@ where
     /// Aggregates multiple in-memory blocks into a single [`TrieInputSorted`] by combining their
     /// state changes.
     ///
-    /// This is done by starting with the newest block's trie data as the base and iterating
-    /// backwards through older blocks, extending the base with their state and trie updates.
+    /// The input `blocks` vector is ordered newest -> oldest (see `TreeState::blocks_by_hash`).
+    /// We iterate it in reverse so we start with the oldest block's trie data and extend forward
+    /// toward the newest, ensuring newer state takes precedence.
     fn merge_overlay_trie_input(blocks: &[ExecutedBlock<N>]) -> TrieInputSorted {
         let mut input = TrieInputSorted::default();
         let mut blocks_iter = blocks.iter().rev().peekable();
