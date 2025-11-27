@@ -1,13 +1,13 @@
 use alloy_primitives::B256;
-use parking_lot::Mutex;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, TrieInputSorted,
 };
 use std::{
+    cell::Cell,
     fmt,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, OnceLock},
 };
 
 /// Metrics for deferred trie computation.
@@ -22,13 +22,22 @@ struct DeferredTrieMetrics {
 
 /// Shared handle to asynchronously populated trie data.
 ///
-/// Uses a lock-free compute pattern: expensive computation happens outside the lock
-/// to minimize contention. If the deferred task hasn't completed, computes trie data
-/// synchronously from stored unsorted inputs.
+/// Uses `OnceLock` for exactly-once computation semantics:
+/// - Only one thread computes the result (others block waiting)
+/// - No lock held during computation
+/// - First-write-wins semantics built into `get_or_init()`
 #[derive(Clone)]
 pub struct DeferredTrieData {
-    /// Shared deferred state holding either raw inputs (pending) or computed result (ready).
-    state: Arc<Mutex<DeferredState>>,
+    /// Shared inner state containing inputs and the result.
+    inner: Arc<Inner>,
+}
+
+/// Inner state shared by all clones.
+struct Inner {
+    /// Inputs for fallback computation. `None` for `ready()` handles.
+    inputs: Option<PendingInputs>,
+    /// Computed result, set exactly once.
+    result: OnceLock<ComputedTrieData>,
 }
 
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
@@ -36,15 +45,8 @@ static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
 
 impl fmt::Debug for DeferredTrieData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = self.state.lock();
-        match &*state {
-            DeferredState::Pending(_) => {
-                f.debug_struct("DeferredTrieData").field("state", &"pending").finish()
-            }
-            DeferredState::Ready(_) => {
-                f.debug_struct("DeferredTrieData").field("state", &"ready").finish()
-            }
-        }
+        let state = if self.inner.result.get().is_some() { "ready" } else { "pending" };
+        f.debug_struct("DeferredTrieData").field("state", &state).finish()
     }
 }
 
@@ -66,12 +68,10 @@ impl DeferredTrieData {
         parent: Option<Self>,
     ) -> Self {
         Self {
-            state: Arc::new(Mutex::new(DeferredState::Pending(PendingInputs {
-                hashed_state,
-                trie_updates,
-                anchor_hash,
-                parent,
-            }))),
+            inner: Arc::new(Inner {
+                inputs: Some(PendingInputs { hashed_state, trie_updates, anchor_hash, parent }),
+                result: OnceLock::new(),
+            }),
         }
     }
 
@@ -80,86 +80,74 @@ impl DeferredTrieData {
     /// Useful when trie data is available immediately.
     /// [`Self::wait_cloned`] will return without any computation.
     pub fn ready(bundle: ComputedTrieData) -> Self {
-        Self { state: Arc::new(Mutex::new(DeferredState::Ready(bundle))) }
+        Self { inner: Arc::new(Inner { inputs: None, result: OnceLock::from(bundle) }) }
     }
 
     /// Populate the handle with the computed trie data.
     ///
     /// Safe to call multiple times; only the first value is stored (first-write-wins).
     pub fn set_ready(&self, bundle: ComputedTrieData) {
-        let mut state = self.state.lock();
-        if matches!(&*state, DeferredState::Pending(_)) {
-            *state = DeferredState::Ready(bundle);
-        }
+        let _ = self.inner.result.set(bundle); // Ok if already set
     }
 
     /// Compute trie data from pending inputs and mark the handle as ready.
     ///
-    /// This method is designed for background tasks. It:
-    /// 1. Grabs inputs under lock (cheap - just Arc clones)
-    /// 2. Drops lock before expensive computation
-    /// 3. Stores result (first-write-wins)
-    ///
-    /// For ready handles, this is a no-op.
+    /// This method is designed for background tasks. For pending handles, it computes
+    /// and sets the result using `get_or_init()`. For ready handles (inputs=None),
+    /// this is a no-op.
     pub fn compute_and_set_ready(&self) {
-        // Grab inputs under lock, then drop lock before expensive computation
-        let inputs = {
-            let state = self.state.lock();
-            match &*state {
-                DeferredState::Ready(_) => return, // Already done
-                DeferredState::Pending(inputs) => inputs.clone(),
-            }
-        }; // Lock dropped here
-
-        // Compute OUTSIDE the lock - no contention
-        let computed = Self::compute_trie_data(
-            &inputs.hashed_state,
-            &inputs.trie_updates,
-            inputs.anchor_hash,
-            inputs.parent.as_ref(),
-        );
-
-        // Store result (first-write-wins, no clone needed since we don't return it)
-        self.set_ready(computed);
+        // For pending handles, compute and set the result.
+        // For ready handles (inputs=None), this is a no-op.
+        if let Some(inputs) = &self.inner.inputs {
+            let _ = self.inner.result.get_or_init(|| {
+                Self::compute_trie_data(
+                    &inputs.hashed_state,
+                    &inputs.trie_updates,
+                    inputs.anchor_hash,
+                    inputs.parent.as_ref(),
+                )
+            });
+        }
     }
 
     /// Returns trie data, computing synchronously if the async task hasn't completed.
     ///
-    /// Uses a lock-free compute pattern:
-    /// 1. Acquire lock briefly to check state or grab inputs
-    /// 2. Drop lock before expensive computation
-    /// 3. Store result (first-write-wins)
+    /// Uses `OnceLock::get_or_init()` for exactly-once computation:
+    /// - If already computed, returns cached result immediately
+    /// - If not computed, one thread computes while others block waiting
+    /// - Metrics accurately track whether this call triggered computation
     ///
-    /// This design minimizes lock contention: the lock is only held for cheap Arc clones,
-    /// not during expensive sorting/merging operations.
+    /// For `ready()` handles (inputs=None), the result is pre-populated and returned directly.
     pub fn wait_cloned(&self) -> ComputedTrieData {
-        // Step 1: Quick lock to check state or grab inputs
-        let inputs = {
-            let state = self.state.lock();
-            match &*state {
-                DeferredState::Ready(bundle) => {
-                    DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
-                    return bundle.clone();
-                }
-                DeferredState::Pending(inputs) => {
-                    DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
-                    inputs.clone() // Clone Arcs (cheap)
-                }
-            }
-        }; // Lock DROPPED here!
+        // Ready handles have no inputs and pre-populated result - return directly
+        let Some(inputs) = &self.inner.inputs else {
+            DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
+            return self.inner.result.get().expect("ready handle must have result").clone();
+        };
 
-        // Step 2: Expensive compute WITHOUT holding lock
-        let computed = Self::compute_trie_data(
-            &inputs.hashed_state,
-            &inputs.trie_updates,
-            inputs.anchor_hash,
-            inputs.parent.as_ref(),
-        );
+        // Use Cell to track if THIS thread computed the value.
+        // - Each thread has its own stack-local Cell
+        // - OnceLock ensures only one thread's closure runs
+        // - Other threads block, get cached result, their Cell stays false
+        let computed_here = Cell::new(false);
 
-        // Step 3: Store result (re-acquire lock briefly, first-write-wins)
-        self.set_ready(computed.clone());
+        let result = self.inner.result.get_or_init(|| {
+            computed_here.set(true);
+            Self::compute_trie_data(
+                &inputs.hashed_state,
+                &inputs.trie_updates,
+                inputs.anchor_hash,
+                inputs.parent.as_ref(),
+            )
+        });
 
-        computed
+        if computed_here.get() {
+            DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
+        } else {
+            DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
+        }
+
+        result.clone()
     }
 
     /// Sort block execution outputs and build a [`TrieInputSorted`] overlay.
@@ -252,14 +240,6 @@ impl ComputedTrieData {
     pub fn trie_input(&self) -> Option<&Arc<TrieInputSorted>> {
         self.anchored_trie_input.as_ref().map(|anchored| &anchored.trie_input)
     }
-}
-
-/// Internal state for deferred trie data.
-enum DeferredState {
-    /// Data is not yet available; raw inputs stored for fallback computation.
-    Pending(PendingInputs),
-    /// Data has been computed and is ready.
-    Ready(ComputedTrieData),
 }
 
 /// Inputs kept while a deferred trie computation is pending.
@@ -558,5 +538,24 @@ mod tests {
         let (_, account) = &overlay_state[0];
         // Current block's state should take precedence
         assert_eq!(account.unwrap().nonce, 2);
+    }
+
+    /// Verifies that `compute_and_set_ready()` is a no-op for ready handles.
+    #[test]
+    fn compute_and_set_ready_is_noop_for_ready_handles() {
+        let bundle = ComputedTrieData {
+            anchored_trie_input: Some(AnchoredTrieInput {
+                anchor_hash: B256::with_last_byte(42),
+                trie_input: Arc::new(TrieInputSorted::default()),
+            }),
+            ..empty_bundle()
+        };
+        let deferred = DeferredTrieData::ready(bundle.clone());
+
+        // Should not panic or modify state
+        deferred.compute_and_set_ready();
+
+        let result = deferred.wait_cloned();
+        assert_eq!(result.anchor_hash(), bundle.anchor_hash());
     }
 }
