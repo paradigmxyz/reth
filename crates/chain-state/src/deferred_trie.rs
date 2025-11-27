@@ -106,7 +106,7 @@ impl DeferredTrieData {
         hashed_state: &HashedPostState,
         trie_updates: &TrieUpdates,
         anchor_hash: B256,
-        ancestors: &[DeferredTrieData],
+        ancestors: &[Self],
     ) -> ComputedTrieData {
         // Sort the current block's hashed state and trie updates
         let sorted_hashed_state = Arc::new(hashed_state.clone().into_sorted());
@@ -159,7 +159,7 @@ impl DeferredTrieData {
         hashed_state: &HashedPostState,
         trie_updates: &TrieUpdates,
         anchor_hash: B256,
-        ancestors: &[DeferredTrieData],
+        ancestors: &[Self],
     ) {
         let bundle =
             Self::sort_and_build_trie_input(hashed_state, trie_updates, anchor_hash, ancestors);
