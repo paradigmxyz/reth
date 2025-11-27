@@ -4,8 +4,9 @@ use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
-    ChainStateBlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter, TrieWriter,
+    BlockNumReader, ChainStateBlockReader, ChangeSetReader, DBProvider, HeaderProvider,
+    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader,
+    StageCheckpointWriter, TrieWriter,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneSegment, MERKLE_CHANGESETS_RETENTION_BLOCKS,
@@ -164,7 +165,9 @@ impl MerkleChangeSets {
             + TrieWriter
             + DBProvider
             + HeaderProvider
-            + ChainStateBlockReader,
+            + ChainStateBlockReader
+            + BlockNumReader
+            + ChangeSetReader,
     {
         let target_start = target_range.start;
         let target_end = target_range.end;
@@ -199,7 +202,7 @@ impl MerkleChangeSets {
         let mut per_block_state_reverts = Vec::with_capacity(range_len as usize);
         for block_number in target_range.clone() {
             per_block_state_reverts.push(HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
-                provider.tx_ref(),
+                provider,
                 block_number..=block_number,
             )?);
         }
@@ -303,7 +306,9 @@ where
         + ChainStateBlockReader
         + StageCheckpointWriter
         + PruneCheckpointReader
-        + PruneCheckpointWriter,
+        + PruneCheckpointWriter
+        + ChangeSetReader
+        + BlockNumReader,
 {
     fn id(&self) -> StageId {
         StageId::MerkleChangeSets

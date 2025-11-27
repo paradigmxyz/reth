@@ -24,7 +24,8 @@ use reth_provider::{
         RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter,
     },
     test_utils::MockNodeTypesWithDB,
-    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory, StatsReader,
+    DatabaseProviderFactory, HistoryWriter, ProviderError, ProviderFactory,
+    StaticFileProviderFactory, StatsReader,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
@@ -91,6 +92,17 @@ impl TestStageDB {
         F: FnOnce(&<DatabaseEnv as Database>::TX) -> ProviderResult<Ok>,
     {
         f(self.factory.provider()?.tx_ref())
+    }
+
+    /// Invoke a callback with a provider that can be used to create transactions or fetch from
+    /// static files.
+    pub fn query_with_provider<F, Ok>(&self, f: F) -> ProviderResult<Ok>
+    where
+        F: FnOnce(
+            <ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::Provider,
+        ) -> ProviderResult<Ok>,
+    {
+        f(self.factory.provider()?)
     }
 
     /// Check if the table is empty

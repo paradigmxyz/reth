@@ -113,7 +113,6 @@ pub async fn setup_engine_with_chain_import(
         let rocksdb_dir_path = datadir.join("rocksdb");
 
         // Initialize the database using init_db (same as CLI import command)
-        // Use the same database arguments as the node will use
         let db_args = reth_node_core::args::DatabaseArgs::default().database_args();
         let db_env = reth_db::init_db(&db_path, db_args)?;
         let db = Arc::new(db_env);
@@ -317,7 +316,8 @@ mod tests {
 
         // Import the chain
         {
-            let db_env = reth_db::init_db(&db_path, DatabaseArguments::default()).unwrap();
+            let db_args = reth_node_core::args::DatabaseArgs::default().database_args();
+            let db_env = reth_db::init_db(&db_path, db_args).unwrap();
             let db = Arc::new(db_env);
 
             let provider_factory: ProviderFactory<
@@ -475,7 +475,8 @@ mod tests {
         let datadir = temp_dir.path().join("datadir");
         std::fs::create_dir_all(&datadir).unwrap();
         let db_path = datadir.join("db");
-        let db_env = reth_db::init_db(&db_path, DatabaseArguments::default()).unwrap();
+        let db_args = reth_node_core::args::DatabaseArgs::default().database_args();
+        let db_env = reth_db::init_db(&db_path, db_args).unwrap();
         let db = Arc::new(reth_db::test_utils::TempDatabase::new(db_env, db_path));
 
         // Create static files path
