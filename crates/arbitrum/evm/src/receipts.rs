@@ -89,31 +89,36 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
 
                 // Check for early termination gas FIRST (before checking transaction type)
                 // because Internal transactions can also go through early termination
-                let (actual_gas_used, cumulative_gas) = if let Some((early_gas, early_cumulative)) = crate::get_early_tx_gas(&tx_hash) {
+                // Early-terminated txs (SubmitRetryable, Internal, Deposit) should use the stored success flag
+                let (actual_gas_used, cumulative_gas, early_status) = if let Some((early_gas, early_cumulative, early_success)) = crate::get_early_tx_gas(&tx_hash) {
                     tracing::warn!(
                         target: "arb-reth::receipt-builder",
                         tx_hash = ?tx_hash,
                         early_gas = early_gas,
                         early_cumulative = early_cumulative,
+                        early_success = early_success,
                         evm_gas = gas_used,
+                        evm_status = status_flag,
                         ctx_cumulative = ctx.cumulative_gas_used,
-                        "!!!! Using early termination gas for receipt - will use early_cumulative"
+                        "!!!! Using early termination gas and status for receipt"
                     );
                     crate::clear_early_tx_gas(&tx_hash);
-                    (early_gas, early_cumulative)
+                    (early_gas, early_cumulative, Some(early_success))
                 } else if ty == ArbTxType::Internal {
                     // Internal transactions without early termination gas
                     // This should be rare, but handle it: gasUsed=0, preserve cumulative
+                    // Internal txs should always succeed
                     tracing::info!(
                         target: "arb-reth::receipt-builder",
                         tx_hash = ?tx_hash,
                         evm_gas = gas_used,
                         ctx_cumulative = ctx.cumulative_gas_used,
-                        "Internal transaction without early_tx_gas - setting gasUsed to 0, preserving cumulative"
+                        "Internal transaction without early_tx_gas - setting gasUsed to 0, preserving cumulative, forcing success"
                     );
-                    (0u64, ctx.cumulative_gas_used)
+                    (0u64, ctx.cumulative_gas_used, Some(true))
                 } else {
                     // No early gas data - calculate cumulative by adding gas_used to current
+                    // Use the EVM result for status
                     let cumulative = ctx.cumulative_gas_used + gas_used;
                     tracing::warn!(
                         target: "arb-reth::receipt-builder",
@@ -121,11 +126,14 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                         evm_gas = gas_used,
                         ctx_cumulative_before = ctx.cumulative_gas_used,
                         cumulative_after = cumulative,
-                        "!!!! No early gas found - calculating cumulative as ctx + gas_used"
+                        "!!!! No early gas found - calculating cumulative as ctx + gas_used, using EVM status"
                     );
-                    (gas_used, cumulative)
+                    (gas_used, cumulative, None) // None = use EVM result
                 };
-                
+
+                // Use early_status if available, otherwise use EVM status_flag
+                let final_status = early_status.unwrap_or(status_flag);
+
                 let mut logs = ctx.result.into_logs();
                 let evm_log_count = logs.len();
                 let mut extra = crate::log_sink::take();
@@ -139,11 +147,12 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     evm_logs = evm_log_count,
                     predeploy_logs = predeploy_log_count,
                     total_logs = logs.len(),
-                    "!!!! Merged logs for receipt"
+                    final_status = final_status,
+                    "!!!! Merged logs for receipt with final status"
                 );
-                
+
                 let receipt = AlloyReceipt {
-                    status: Eip658Value::Eip658(status_flag),
+                    status: Eip658Value::Eip658(final_status),
                     cumulative_gas_used: cumulative_gas,
                     logs,
                 };
