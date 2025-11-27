@@ -684,9 +684,8 @@ where
         value: Vec<u8>,
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<()> {
-        if !self.revealed_account_paths.contains(&path) {
-            self.revealed_account_paths.insert(path);
-        }
+        self.revealed_account_paths.insert(path);
+
 
         let provider = provider_factory.account_node_provider();
         self.state.update_leaf(path, value, provider)?;
@@ -866,9 +865,7 @@ impl<S: SparseTrieInterface> StorageTries<S> {
     /// The capacity is distributed equally among all tries that have allocations.
     fn shrink_to(&mut self, node_size: usize, value_size: usize) {
         // Count total number of tries with capacity (active + cleared + default)
-        let active_count = self.tries.len();
-        let cleared_count = self.cleared_tries.len();
-        let total_tries = 1 + active_count + cleared_count;
+        let total_tries = 1 + self.tries.len() + self.cleared_tries.len();
 
         // Distribute capacity equally among all tries
         let node_size_per_trie = node_size / total_tries;
