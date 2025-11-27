@@ -781,6 +781,39 @@ pub fn sepolia_baked_genesis_from_header(
 
     let mut spec = reth_chainspec::ChainSpec::from_genesis(genesis.clone());
 
+    // ITERATION 109: Arbitrum is post-merge from genesis, so Paris must be active at block 0
+    // This is critical to prevent block rewards from being given to the coinbase/beneficiary!
+    // Without Paris being active, alloy-evm gives 5 ETH block rewards.
+    {
+        use reth_chainspec::{EthereumHardfork, ForkCondition, ChainHardforks, Hardfork};
+        use alloc::vec;
+
+        let hardforks = ChainHardforks::new(vec![
+            (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
+            (
+                EthereumHardfork::Paris.boxed(),
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: None,
+                    total_difficulty: U256::ZERO,
+                },
+            ),
+            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(0)),
+            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(0)),
+        ]);
+        spec.hardforks = hardforks;
+        spec.paris_block_and_final_difficulty = Some((0, U256::from(1)));
+    }
+
     let mut header = alloy_consensus::Header::default();
     header.number = 0u64.into();
     header.gas_limit = gas_limit.to::<u64>();
