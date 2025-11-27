@@ -13,7 +13,7 @@ use crate::{
 };
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
-use alloy_trie::TrieMask;
+use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{BranchNode, Nibbles, ProofTrieNode, RlpNode, TrieMasks, TrieNode};
 use std::{cmp::Ordering, iter::Peekable};
@@ -66,6 +66,10 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     /// ever be modified, and therefore all children besides the last are expected to be
     /// [`ProofTrieBranchChild::RlpNode`]s.
     child_stack: Vec<ProofTrieBranchChild<VE::DeferredEncoder>>,
+    /// Cached branch data pulled from the `trie_cursor`. The calculator will use the cached
+    /// [`BranchNodeCompact::hashes`] to skip over the calculation of sub-tries in the overall
+    /// trie. The cached hashes cannot be used for any paths which are prefixes of a proof target.
+    cached_branch_stack: Vec<(Nibbles, BranchNodeCompact)>,
     /// The proofs which will be returned from the calculation. This gets taken at the end of every
     /// proof call.
     retained_proofs: Vec<ProofTrieNode>,
@@ -85,12 +89,53 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
         Self {
             trie_cursor,
             hashed_cursor,
-            branch_stack: Vec::<_>::new(),
+            branch_stack: Vec::<_>::with_capacity(64),
             branch_path: Nibbles::new(),
             child_stack: Vec::<_>::new(),
+            cached_branch_stack: Vec::<_>::with_capacity(64),
             retained_proofs: Vec::<_>::new(),
             rlp_nodes_bufs: Vec::<_>::new(),
             rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
+        }
+    }
+
+    /// Returns whether the given path lies within the lower/upper bound of a portion of the target
+    /// set (presumably obtained via `targets.peek()`. See [`Self::should_retain`] to understand
+    /// how the targets lower/upper bounds work.
+    ///
+    /// This method assumes depth-first ordering.
+    ///
+    /// # Returns
+    ///
+    /// - [`Ordering::Less`] if `path` is less than the lower bound.
+    /// - [`Ordering::Equal`] if `path` is greater-or-equal to the lower bound, and less than the
+    ///   upper bound (ie it is in-range).
+    /// - [`Ordering::Greater`] if `path` is greater-or-equal to the upper bound.
+    #[expect(unused)]
+    fn cmp_targets(path: &Nibbles, bounds: &(Nibbles, Option<Nibbles>)) -> Ordering {
+        debug_assert!(
+            bounds
+                .1
+                .as_ref()
+                .is_none_or(|upper| depth_first::cmp(&bounds.0, upper) != Ordering::Greater),
+            "lower bound {:?} is greater than upper bound {:?} (depth-first)",
+            bounds.0,
+            bounds.1,
+        );
+
+        match bounds {
+            (lower, _) if depth_first::cmp(path, lower) == Ordering::Less => Ordering::Less,
+            (_, None) => {
+                // None indicates no upper-bound. We've already determined that path is >= lower,
+                // so it must be in-range.
+                Ordering::Equal
+            }
+            (_, Some(upper)) if depth_first::cmp(path, upper) == Ordering::Less => {
+                // Upper bound is exclusive. If path is less the upper bound and not less than the
+                // lower bound then it is in-range.
+                Ordering::Equal
+            }
+            (_, _) => Ordering::Greater,
         }
     }
 }
@@ -236,6 +281,26 @@ where
         Ok(child_rlp_node)
     }
 
+    /// Returns the path of the child of the currently under-construction branch at the given
+    /// nibble.
+    fn child_path_at(&self, nibble: u8) -> Nibbles {
+        let mut child_path = self.branch_path;
+        debug_assert!(child_path.len() < 64);
+        child_path.push_unchecked(nibble);
+        child_path
+    }
+
+    /// Returns index of the highest nibble which is set in the mask.
+    ///
+    /// # Panics
+    ///
+    /// Will panic in debug mode if the mask is empty.
+    #[inline]
+    fn highest_set_nibble(mask: TrieMask) -> u8 {
+        debug_assert!(!mask.is_empty());
+        (u16::BITS - mask.leading_zeros() - 1) as u8
+    }
+
     /// Returns the path of the child on top of the `child_stack`, or the root path if the stack is
     /// empty.
     fn last_child_path(&self) -> Nibbles {
@@ -244,13 +309,7 @@ where
             return Nibbles::new();
         };
 
-        debug_assert_ne!(branch.state_mask.get(), 0, "branch.state_mask can never be zero");
-        let last_nibble = u16::BITS - branch.state_mask.leading_zeros() - 1;
-
-        let mut child_path = self.branch_path;
-        debug_assert!(child_path.len() < 64);
-        child_path.push_unchecked(last_nibble as u8);
-        child_path
+        self.child_path_at(Self::highest_set_nibble(branch.state_mask))
     }
 
     /// Calls [`Self::commit_child`] on the last child of `child_stack`, replacing it with a
@@ -499,7 +558,7 @@ where
 
     /// Adds a single leaf for a key to the stack, possibly collapsing an existing branch and/or
     /// creating a new one depending on the path of the key.
-    fn add_leaf(
+    fn push_leaf(
         &mut self,
         targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
         key: Nibbles,
@@ -512,12 +571,12 @@ where
                 branch_stack_len = ?self.branch_stack.len(),
                 branch_path = ?self.branch_path,
                 child_stack_len = ?self.child_stack.len(),
-                "add_leaf: loop",
+                "push_leaf: loop",
             );
 
-            // Get the `state_mask` of the branch currently being built. If there are no branches on
-            // the stack then it means either the trie is empty or only a single leaf has been added
-            // previously.
+            // Get the `state_mask` of the branch currently being built. If there are no branches
+            // on the stack then it means either the trie is empty or only a single leaf has been
+            // added previously.
             let curr_branch_state_mask = match self.branch_stack.last() {
                 Some(curr_branch) => curr_branch.state_mask,
                 None if self.child_stack.is_empty() => {
@@ -570,6 +629,79 @@ where
         }
     }
 
+    // Notes:
+    // - Will not be called mid-branch; either child_stack will be empty, or the last child will be
+    // a branch/extension.
+    fn next_uncached_subtrie(&mut self) -> Result<Nibbles, StateProofError> {
+        loop {
+            // The cached branch stack is initialized with the node closest to root as part of
+            // `proof_inner`, so if the stack is empty it means either there are no cached nodes or
+            // they've been exhausted.
+            let Some((cached_path, cached_branch)) = self.cached_branch_stack.last() else {
+                todo!()
+            };
+
+            // If the current key belongs to a sub-trie which comes before this one in the ordering
+            // then we don't have any cached trie data for that sub-trie, return None indicating to
+            // iterate forward normally.
+            //if &curr_key_nibbles < cached_path {
+            //    todo!()
+            //}
+
+            if &self.branch_path != cached_path {
+                todo!()
+            }
+
+            let Some(curr_branch) = self.branch_stack.last_mut() else {
+                // If the branch stack is empty then we should... push a new one?
+                todo!()
+            };
+
+            let cached_state_mask = cached_branch.state_mask.get();
+            let curr_state_mask = curr_branch.state_mask.get();
+
+            // Determine all child nibbles which are set in the cached branch but not the
+            // under-construction branch.
+            let next_child_nibbles = curr_state_mask ^ cached_state_mask;
+            debug_assert_eq!(
+                cached_state_mask | next_child_nibbles, cached_state_mask,
+                "curr_branch has state_mask bits set which aren't set on cached_branch. curr_branch:{:?}",
+                curr_state_mask,
+            );
+
+            if next_child_nibbles == 0 {
+                todo!(
+                    "If all children have been constructed then we should pop this cached branch"
+                );
+            }
+
+            // Determine the next nibble of the branch which has not yet been constructed, and set
+            // its bit on the `state_mask`.
+            let child_nibble = next_child_nibbles.trailing_zeros() as u8;
+            curr_branch.state_mask.set_bit(child_nibble);
+
+            // If the `hash_mask` bit is set for the next child it means the child's hash is cached
+            // in the `cached_branch`. We can use that instead of re-calculating the hash of the
+            // entire sub-trie.
+            //
+            // TODO we cannot use the cached value if any of this sub-trie might be within the
+            // target set.
+            if cached_branch.hash_mask.is_bit_set(child_nibble) {
+                let num_prev_children = curr_state_mask.count_ones();
+                let hash = cached_branch.hashes[num_prev_children as usize];
+                self.child_stack.push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&hash)));
+                continue
+            }
+
+            // TODO check if the child is a cached branch node
+
+            // It is required to recalculate the sub-trie for this child using the leaves. Return
+            // the child path, indicating that all keys with this prefix should be iterated over
+            // and their sub-trie root (aka this child node) calculated.
+            return Ok(self.child_path_at(child_nibble));
+        }
+    }
+
     /// Internal implementation of proof calculation. Assumes both cursors have already been reset.
     /// See docs on [`Self::proof`] for expected behavior.
     fn proof_inner(
@@ -614,14 +746,33 @@ where
         debug_assert!(self.branch_path.is_empty());
         debug_assert!(self.child_stack.is_empty());
 
-        let mut hashed_cursor_current = self.hashed_cursor.seek(B256::ZERO)?;
+        // Initialize the `cached_branch_stack` with the node closest to root.
+        if let Some(cached_branch) = self.trie_cursor.seek(Nibbles::new())? {
+            self.cached_branch_stack.push(cached_branch);
+        }
+
+        // Initialize the hashed cursor to None to indicate it hasn't been seeked yet.
+        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
+
+        // A helper closure for mapping entries returned from the `hashed_cursor`, converting the
+        // key to Nibbles and immediately creating the DeferredValueEncoder so that encoding of the
+        // leaf value can begin ASAP.
+        let map_hashed_cursor_entry = |(key_b256, val): (B256, _)| {
+            debug_assert_eq!(key_b256.len(), 32);
+            // SAFETY: key is a B256 and so is exactly 32-bytes.
+            let key = unsafe { Nibbles::unpack_unchecked(key_b256.as_slice()) };
+            let val = value_encoder.deferred_encoder(key_b256, val);
+            (key, val)
+        };
+
         loop {
             trace!(
                 target: TRACE_TARGET,
-                ?hashed_cursor_current,
+                hashed_cursor_current = ?hashed_cursor_current.as_ref().map(|kv| kv.0),
                 branch_stack_len = ?self.branch_stack.len(),
                 branch_path = ?self.branch_path,
                 child_stack_len = ?self.child_stack.len(),
+                cached_branch_path = ?self.cached_branch_stack.last().map(|cached| cached.0),
                 "proof_inner: loop",
             );
 
@@ -629,21 +780,50 @@ where
             // If there is a branch, there must be at least two children
             debug_assert!(self.branch_stack.last().is_none_or(|_| self.child_stack.len() >= 2));
 
-            // Fetch the next leaf from the hashed cursor, converting the key to Nibbles and
-            // immediately creating the DeferredValueEncoder so that encoding of the leaf value can
-            // begin ASAP.
-            let Some((key, val)) = hashed_cursor_current.map(|(key_b256, val)| {
-                debug_assert_eq!(key_b256.len(), 32);
-                // SAFETY: key is a B256 and so is exactly 32-bytes.
-                let key = unsafe { Nibbles::unpack_unchecked(key_b256.as_slice()) };
-                let val = value_encoder.deferred_encoder(key_b256, val);
-                (key, val)
-            }) else {
-                break
-            };
+            // Determine the next subtrie of the overall trie whose hash is not cached. The path of
+            // the subtrie indicates the path to its root node, as well as the prefix all children
+            // the subtrie will have.
+            let subtrie_path = self.next_uncached_subtrie()?;
 
-            self.add_leaf(&mut targets, key, val)?;
-            hashed_cursor_current = self.hashed_cursor.next()?;
+            // Calculate the exclusive upper bound of node paths in the subtrie, with None
+            // indicating unbounded.
+            let subtrie_upper_bound = subtrie_path.increment();
+
+            // If the cursor hasn't been used, or the last iterated key is prior to this subtrie's
+            // key range, then seek forward to the subtrie.
+            if hashed_cursor_current.as_ref().is_none_or(|(key, _)| key < &subtrie_path) {
+                let subtrie_lower_key = B256::right_padding_from(&subtrie_path.pack());
+                hashed_cursor_current =
+                    self.hashed_cursor.seek(subtrie_lower_key)?.map(map_hashed_cursor_entry);
+            }
+
+            // Loop over all keys in the subtrie, calling `push_leaf` on each.
+            while let Some((key, _)) = hashed_cursor_current &&
+                subtrie_upper_bound.is_none_or(|upper_bound| key < upper_bound)
+            {
+                let (key, val) = hashed_cursor_current.expect("while-let checks for Some");
+                self.push_leaf(&mut targets, key, val)?;
+                hashed_cursor_current = self.hashed_cursor.next()?.map(map_hashed_cursor_entry);
+            }
+
+            // Once outside the while-loop `hashed_cursor_current` will be at the first key after
+            // the subtrie. This may be the first key of the next uncached subtrie, in which case
+            // no seek will be done on the next loop (see the `hashed_cursor_current.is_none_or`
+            // call above).
+            //
+            // If the `hashed_cursor_current` is None then there are no more keys at all, meaning
+            // the trie couldn't possible have more data and we should complete computation.
+            if hashed_cursor_current.is_none() {
+                break;
+            }
+
+            // Pop off all branches of the subtrie, including the subtrie itself. After this loop
+            // the top of the `child_stack` will be the root node of the subtrie, and the top of
+            // the `branch_stack` (if the subtrie wasn't the root of the overall trie) will be the
+            // subtrie's parent.
+            while self.branch_path.starts_with(&subtrie_path) {
+                self.pop_branch(&mut targets)?;
+            }
         }
 
         // Once there's no more leaves we can pop the remaining branches, if any.
