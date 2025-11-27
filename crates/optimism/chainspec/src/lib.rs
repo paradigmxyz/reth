@@ -37,9 +37,10 @@ mod base_sepolia;
 
 pub mod constants;
 mod dev;
+mod mantle;
+mod mantle_mainnet;
 mod op;
 mod op_sepolia;
-mod mantle;
 
 #[cfg(feature = "superchain-configs")]
 mod superchain;
@@ -47,12 +48,14 @@ mod superchain;
 pub use superchain::*;
 
 pub use dev::OP_DEV;
+pub use mantle_mainnet::MANTLE_MAINNET;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
+use crate::mantle::MantleChainInfo;
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::{proofs::{storage_root_unhashed}, Header};
+use alloy_consensus::{proofs::storage_root_unhashed, Header};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_hardforks::Hardfork;
@@ -65,12 +68,11 @@ use reth_chainspec::{
     DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
+use reth_mantle_forks::{MantleHardfork, MantleHardforks};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks, OP_MAINNET_HARDFORKS};
 use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
-use reth_mantle_forks::{MantleHardfork, MantleHardforks};
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
-use crate::mantle::MantleChainInfo;
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -335,7 +337,11 @@ impl From<Genesis> for OpChainSpec {
         let optimism_genesis_info = OpGenesisInfo::extract_from(&genesis);
         let genesis_info =
             optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
-        let mantle_genesis_info = optimism_genesis_info.mantle_chain_info.unwrap_or_default().genesis_info.unwrap_or_default();
+        let mantle_genesis_info = optimism_genesis_info
+            .mantle_chain_info
+            .unwrap_or_default()
+            .genesis_info
+            .unwrap_or_default();
 
         // Block-based hardforks
         let hardfork_opts = [
@@ -377,7 +383,6 @@ impl From<Genesis> for OpChainSpec {
             (EthereumHardfork::Shanghai.boxed(), mantle_genesis_info.mantle_skadi_time),
             (EthereumHardfork::Cancun.boxed(), mantle_genesis_info.mantle_skadi_time),
             (EthereumHardfork::Prague.boxed(), mantle_genesis_info.mantle_skadi_time),
-            
             // OP
             (OpHardfork::Regolith.boxed(), genesis_info.regolith_time),
             (OpHardfork::Canyon.boxed(), genesis_info.canyon_time),
@@ -387,7 +392,6 @@ impl From<Genesis> for OpChainSpec {
             (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
             (OpHardfork::Isthmus.boxed(), genesis_info.isthmus_time),
             (OpHardfork::Interop.boxed(), genesis_info.interop_time),
-            
             // Mantle
             (MantleHardfork::Skadi.boxed(), mantle_genesis_info.mantle_skadi_time),
         ];

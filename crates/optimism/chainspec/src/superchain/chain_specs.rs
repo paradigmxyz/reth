@@ -52,5 +52,4 @@ create_superchain_specs!(
     ("xterio-eth", "mainnet"),
     ("zora", "mainnet"),
     ("zora", "sepolia"),
-    ("mantle", "sepolia"),
 );
