@@ -780,6 +780,11 @@ where
 
         let wrapped = WithTxEnv { tx_env, tx };
 
+        // ITERATION 116: Capture gas_used from EVM execution for end_tx hook
+        // The end_tx hook needs to know gas_left to properly burn the refund
+        let captured_gas_used = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let captured_gas_used_clone = captured_gas_used.clone();
+
         // Execute transaction through EVM
         // For early-terminated transactions (end_tx_now=true), the state was already
         // modified in start_tx hook, but we still execute through EVM to build receipt.
@@ -791,6 +796,9 @@ where
             // Use actual_gas (which includes hook overrides) not evm_gas for cumulative calculation
             let gas_to_add = if is_internal { 0u64 } else { actual_gas };
             let new_cumulative = self.cumulative_gas_used + gas_to_add;
+
+            // ITERATION 116: Store the gas used for end_tx hook
+            captured_gas_used_clone.store(actual_gas, std::sync::atomic::Ordering::SeqCst);
 
             tracing::debug!(
                 target: "arb-reth::executor",
@@ -812,6 +820,10 @@ where
 
             f(exec_result)
         });
+
+        // ITERATION 116: Calculate gas_left for end_tx hook
+        let actual_gas_used = captured_gas_used.load(std::sync::atomic::Ordering::SeqCst);
+        let gas_left_for_end_tx = gas_limit.saturating_sub(actual_gas_used);
 
         if let Ok(Some(evm_gas)) = result {
             // Internal transactions don't contribute to cumulative gas
@@ -967,14 +979,24 @@ where
         // Calling end_tx for these tx types caused incorrect balance mints to
         // network_fee_account (ArbOS), leading to state root mismatches.
         if !start_hook_result.end_tx_now {
+            // ITERATION 116: Use actual gas_left from EVM execution, not hardcoded 0
+            // This is critical for end_tx to properly burn the gas refund from sender
             let end_ctx = ArbEndTxContext {
                 success: result.is_ok(),
-                gas_left: 0,
+                gas_left: gas_left_for_end_tx,
                 gas_limit,
                 basefee: block_basefee,
                 tx_type: tx_type_u8,
                 block_timestamp,
             };
+            tracing::info!(
+                target: "arb-reth::end_tx_debug",
+                tx_type = tx_type_u8,
+                gas_limit = gas_limit,
+                gas_left = gas_left_for_end_tx,
+                actual_gas_used = actual_gas_used,
+                "[ITER116] Calling end_tx with correct gas_left"
+            );
             {
                 let mut state = core::mem::take(&mut self.tx_state);
                 {
