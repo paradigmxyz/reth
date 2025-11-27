@@ -339,10 +339,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Must be written after blocks because of the receipt lookup.
             self.write_state(&execution_output, OriginalValuesKnown::No)?;
 
-            // insert hashes and intermediate merkle nodes
-            self.write_hashed_state(&trie_data.hashed_state)?;
             // aggregate hashed post states for batch insert
-            aggregated_hashed_post_state_sorted.extend_ref(&hashed_state);
+            aggregated_hashed_post_state_sorted.extend_ref(&trie_data.hashed_state);
 
             self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
             self.write_trie_updates_sorted(&trie_data.trie_updates)?;
