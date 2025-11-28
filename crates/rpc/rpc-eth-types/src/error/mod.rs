@@ -11,6 +11,7 @@ pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
+use reth_revm::db::bal::BalDatabaseError;
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
@@ -19,8 +20,11 @@ use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,
 };
-use revm::context_interface::result::{
-    EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
+use revm::{
+    context_interface::result::{
+        EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
+    },
+    state::bal::BalError,
 };
 use revm_inspectors::tracing::MuxError;
 use std::convert::Infallible;
@@ -1071,6 +1075,38 @@ pub enum SignError {
     /// No chain ID was given.
     #[error("no chainid")]
     NoChainId,
+}
+
+// /// Converts the evm [`ExecutionResult`] into a result where `Ok` variant is the output bytes if
+// it /// is [`ExecutionResult::Success`].
+// pub fn ensure_success<Halt, Error: FromEvmHalt<Halt> + FromEthApiError>(
+//     result: ExecutionResult<Halt>,
+// ) -> Result<Bytes, Error> {
+//     match result {
+//         ExecutionResult::Success { output, .. } => Ok(output.into_data()),
+//         ExecutionResult::Revert { output, .. } => {
+//
+// Err(Error::from_eth_err(RpcInvalidTransactionError::Revert(RevertError::new(output))))         }
+//         ExecutionResult::Halt { reason, gas_used } => Err(Error::from_evm_halt(reason,
+// gas_used)),     }
+// }
+
+impl<E> From<BalDatabaseError<E>> for EthApiError
+where
+    E: Into<Self>,
+{
+    fn from(value: BalDatabaseError<E>) -> Self {
+        match value {
+            BalDatabaseError::Bal(err) => err.into(),
+            BalDatabaseError::Database(err) => err.into(),
+        }
+    }
+}
+
+impl From<BalError> for EthApiError {
+    fn from(err: BalError) -> Self {
+        Self::EvmCustom(format!("bal error: {:?}", err))
+    }
 }
 
 #[cfg(test)]

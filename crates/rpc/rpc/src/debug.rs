@@ -2,7 +2,7 @@ use alloy_consensus::{
     transaction::{SignerRecoverable, TxHashRef},
     BlockHeader,
 };
-use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip2718::Encodable2718, eip7928::BlockAccessList, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
@@ -49,7 +49,7 @@ use revm::{
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
-use revm_primitives::{Log, U256};
+use revm_primitives::U256;
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -655,6 +655,19 @@ where
         Ok(res.into())
     }
 
+    /// Handler for `getBlockAccessList` that returns BAL if present.
+    async fn debug_get_block_access_list(
+        &self,
+        block_id: BlockId,
+    ) -> RpcResult<Option<BlockAccessList>> {
+        let block = self
+            .provider()
+            .block_by_id(block_id)
+            .to_rpc_result()?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let block = block.into_ethereum_block();
+        Ok(block.body().block_access_list().clone())
+    }
     /// Handler for `debug_getRawTransaction`
     ///
     /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
@@ -1302,13 +1315,13 @@ where
         delegate!(self => inspector.step_end(interp, context))
     }
 
-    fn log(&mut self, context: &mut CTX, log: Log) {
-        delegate!(self => inspector.log(context, log))
-    }
+    // fn log(&mut self, context: &mut CTX, log: Log) {
+    //     //delegate!(self => inspector.log(context, log))
+    // }
 
-    fn log_full(&mut self, interp: &mut Interpreter, context: &mut CTX, log: Log) {
-        delegate!(self => inspector.log_full(interp, context, log))
-    }
+    // fn log_full(&mut self, interp: &mut Interpreter, context: &mut CTX, log: Log) {
+    //     delegate!(self => inspector.log_full(interp, context, log))
+    // }
 
     fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
         delegate!(self => inspector.call(context, inputs))

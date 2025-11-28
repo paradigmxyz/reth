@@ -264,6 +264,7 @@ impl EngineNodeLauncher {
         let startup_sync_state_idle = ctx.node_config().debug.startup_sync_state_idle;
 
         info!(target: "reth::cli", "Starting consensus engine");
+        info!(target: "reth::cli", "built payloads ready: {:#?}", built_payloads);
         ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");

@@ -536,7 +536,7 @@ where
         //      null}` if the expected and the actual arrays don't match.
         //
         // This validation **MUST** be instantly run in all cases even during active sync process.
-
+        tracing::debug!("Payload received {:?}", payload);
         let num_hash = payload.num_hash();
         let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
@@ -545,6 +545,7 @@ where
 
         // Check for invalid ancestors
         if let Some(invalid) = self.find_invalid_ancestor(&payload) {
+            tracing::debug!(target: "engine::tree", ?invalid, "found invalid ancestor for payload");
             let status = self.handle_invalid_ancestor_payload(payload, invalid)?;
             return Ok(TreeOutcome::new(status));
         }
@@ -553,6 +554,7 @@ where
         self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
         let status = if self.backfill_sync_state.is_idle() {
+            tracing::debug!(target: "engine::tree", "inserting payload directly");
             self.try_insert_payload(payload)?
         } else {
             self.try_buffer_payload(payload)?
@@ -591,7 +593,7 @@ where
         let parent_hash = payload.parent_hash();
         let mut latest_valid_hash = None;
 
-        match self.insert_payload(payload) {
+        match self.insert_payload(payload.clone()) {
             Ok(status) => {
                 let status = match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
@@ -613,8 +615,12 @@ where
                 Ok(PayloadStatus::new(status, latest_valid_hash))
             }
             Err(error) => match error {
-                InsertPayloadError::Block(error) => Ok(self.on_insert_block_error(error)?),
+                InsertPayloadError::Block(error) => {
+                    tracing::debug!("payload in new payload l 617 {:?}", payload);
+                    Ok(self.on_insert_block_error(error)?)
+                }
                 InsertPayloadError::Payload(error) => {
+                    tracing::debug!("payload in new payload l 621 {:?}", payload);
                     Ok(self.on_new_payload_error(error, parent_hash)?)
                 }
             },
@@ -635,7 +641,7 @@ where
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
         let parent_hash = payload.parent_hash();
 
-        match self.payload_validator.ensure_well_formed_payload(payload) {
+        match self.payload_validator.ensure_well_formed_payload(payload.clone()) {
             // if the block is well-formed, buffer it for later
             Ok(block) => {
                 if let Err(error) = self.buffer_block(block) {
@@ -644,7 +650,10 @@ where
                     Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
                 }
             }
-            Err(error) => Ok(self.on_new_payload_error(error, parent_hash)?),
+            Err(error) => {
+                tracing::debug!("payload in new payload l 648 {:?}", payload);
+                Ok(self.on_new_payload_error(error, parent_hash)?)
+            }
         }
     }
 
@@ -1974,9 +1983,12 @@ where
         //    remember it as invalid
         // 2. the block is not well formed (i.e block hash is incorrect), and we should just return
         //    an error and forget it
-        let block = match self.payload_validator.ensure_well_formed_payload(payload) {
+        let block = match self.payload_validator.ensure_well_formed_payload(payload.clone()) {
             Ok(block) => block,
-            Err(error) => return Ok(self.on_new_payload_error(error, parent_hash)?),
+            Err(error) => {
+                tracing::debug!("payload in new payload l 1925 {:?}", payload);
+                return Ok(self.on_new_payload_error(error, parent_hash)?)
+            }
         };
 
         Ok(self.on_invalid_new_payload(block.into_sealed_block(), invalid)?)

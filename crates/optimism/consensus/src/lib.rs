@@ -300,6 +300,7 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
+            block_access_list: None,
         };
 
         let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
@@ -337,6 +338,7 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
+            block_access_list: None,
         };
 
         let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
@@ -392,6 +394,7 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
+            block_access_list: None,
         };
 
         let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
@@ -401,6 +404,7 @@ mod tests {
             receipts: vec![receipt],
             requests: Requests::default(),
             gas_used: GAS_USED,
+            block_access_list: None,
         };
 
         // validate blob, it should pass blob gas used validation
@@ -459,6 +463,7 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
+            block_access_list: None,
         };
 
         let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
@@ -468,6 +473,7 @@ mod tests {
             receipts: vec![receipt],
             requests: Requests::default(),
             gas_used: GAS_USED,
+            block_access_list: None,
         };
 
         // validate blob, it should pass blob gas used validation
