@@ -147,6 +147,8 @@ where
                 TrieElement::Leaf(hashed_address, account) => {
                     let proof_targets = targets.remove(&hashed_address);
                     let leaf_is_proof_target = proof_targets.is_some();
+                    let collect_storage_masks =
+                        self.collect_branch_node_masks && leaf_is_proof_target;
                     let storage_prefix_set = self
                         .prefix_sets
                         .storage_prefix_sets
@@ -158,7 +160,7 @@ where
                         hashed_address,
                     )
                     .with_prefix_set_mut(storage_prefix_set)
-                    .with_branch_node_masks(self.collect_branch_node_masks)
+                    .with_branch_node_masks(collect_storage_masks)
                     .storage_multiproof(proof_targets.unwrap_or_default())?;
 
                     // Encode account

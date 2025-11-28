@@ -3,7 +3,8 @@ use alloy_rlp::Encodable;
 use alloy_trie::nodes::ExtensionNodeRef;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    BranchNode, ExtensionNode, LeafNode, LeafNodeRef, Nibbles, RlpNode, TrieMask, TrieNode,
+    BranchNode, ExtensionNode, LeafNode, LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask,
+    TrieMasks, TrieNode,
 };
 
 /// A trie node which is the child of a branch in the trie.
@@ -16,15 +17,17 @@ pub(crate) enum ProofTrieBranchChild<RF> {
         /// The [`DeferredValueEncoder`] which will encode the leaf's value.
         value: RF,
     },
-    /// An extension node whose child branch has not yet been converted to an [`RlpNode`]
+    /// An extension node whose child branch has been converted to an [`RlpNode`]
     Extension {
         /// The short key of the leaf.
         short_key: Nibbles,
-        /// The node of the child branch.
-        child: BranchNode,
+        /// The [`RlpNode`] of the child branch.
+        child: RlpNode,
     },
     /// A branch node whose children have already been flattened into [`RlpNode`]s.
     Branch(BranchNode),
+    /// A node whose type is not known, as it has already been converted to an [`RlpNode`].
+    RlpNode(RlpNode),
 }
 
 impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
@@ -58,41 +61,57 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 Ok((RlpNode::from_rlp(&buf[value_enc_len..]), None))
             }
             Self::Extension { short_key, child } => {
-                let (branch_rlp, rlp_buf) = Self::Branch(child).into_rlp(buf)?;
-                buf.clear();
-
-                ExtensionNodeRef::new(&short_key, branch_rlp.as_slice()).encode(buf);
-                Ok((RlpNode::from_rlp(buf), rlp_buf))
+                ExtensionNodeRef::new(&short_key, child.as_slice()).encode(buf);
+                Ok((RlpNode::from_rlp(buf), None))
             }
             Self::Branch(branch_node) => {
                 branch_node.encode(buf);
                 Ok((RlpNode::from_rlp(buf), Some(branch_node.stack)))
             }
+            Self::RlpNode(rlp_node) => Ok((rlp_node, None)),
         }
     }
 
-    /// Converts this child into a [`TrieNode`].
-    pub(crate) fn into_trie_node(self, buf: &mut Vec<u8>) -> Result<TrieNode, StateProofError> {
-        match self {
+    /// Converts this child into a [`ProofTrieNode`] having the given path.
+    ///
+    /// # Panics
+    ///
+    /// If called on a [`Self::RlpNode`].
+    pub(crate) fn into_proof_trie_node(
+        self,
+        path: Nibbles,
+        buf: &mut Vec<u8>,
+    ) -> Result<ProofTrieNode, StateProofError> {
+        let (node, masks) = match self {
             Self::Leaf { short_key, value } => {
                 value.encode(buf)?;
-                Ok(TrieNode::Leaf(LeafNode::new(short_key, core::mem::take(buf))))
+                // Counter-intuitively a clone is better here than a `core::mem::take`. If we take
+                // the buffer then future RLP-encodes will need to re-allocate a new one, and
+                // RLP-encodes after those may need a bigger buffer and therefore re-alloc again.
+                //
+                // By cloning here we do a single allocation of exactly the size we need to take
+                // this value, and the passed in buffer can remain with whatever large capacity it
+                // already has.
+                let rlp_val = buf.clone();
+                (TrieNode::Leaf(LeafNode::new(short_key, rlp_val)), TrieMasks::none())
             }
             Self::Extension { short_key, child } => {
-                child.encode(buf);
-                let child_rlp_node = RlpNode::from_rlp(buf);
-                Ok(TrieNode::Extension(ExtensionNode { key: short_key, child: child_rlp_node }))
+                (TrieNode::Extension(ExtensionNode { key: short_key, child }), TrieMasks::none())
             }
-            Self::Branch(branch_node) => Ok(TrieNode::Branch(branch_node)),
-        }
+            // TODO store trie masks on branch
+            Self::Branch(branch_node) => (TrieNode::Branch(branch_node), TrieMasks::none()),
+            Self::RlpNode(_) => panic!("Cannot call `into_proof_trie_node` on RlpNode"),
+        };
+
+        Ok(ProofTrieNode { node, path, masks })
     }
 
     /// Returns the short key of the child, if it is a leaf or extension, or empty if its a
-    /// [`Self::Branch`].
+    /// [`Self::Branch`] or [`Self::RlpNode`].
     pub(crate) fn short_key(&self) -> &Nibbles {
         match self {
             Self::Leaf { short_key, .. } | Self::Extension { short_key, .. } => short_key,
-            Self::Branch(_) => {
+            Self::Branch(_) | Self::RlpNode(_) => {
                 static EMPTY_NIBBLES: Nibbles = Nibbles::new();
                 &EMPTY_NIBBLES
             }
@@ -108,17 +127,17 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     ///
     /// - If the given len is longer than the short key
     /// - If the given len is the same as the length of a leaf's short key
-    /// - If the node is a [`Self::Branch`]
+    /// - If the node is a [`Self::Branch`] or [`Self::RlpNode`]
     pub(crate) fn trim_short_key_prefix(&mut self, len: usize) {
         match self {
             Self::Extension { short_key, child } if short_key.len() == len => {
-                *self = Self::Branch(core::mem::take(child));
+                *self = Self::RlpNode(core::mem::take(child));
             }
             Self::Leaf { short_key, .. } | Self::Extension { short_key, .. } => {
                 *short_key = trim_nibbles_prefix(short_key, len);
             }
-            Self::Branch(_) => {
-                panic!("Cannot call `trim_short_key_prefix` on Branch")
+            Self::Branch(_) | Self::RlpNode(_) => {
+                panic!("Cannot call `trim_short_key_prefix` on Branch or RlpNode")
             }
         }
     }
