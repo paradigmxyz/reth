@@ -118,7 +118,7 @@ where
                                 let tx_value = match self
                                     .inner
                                     .eth_api
-                                    .tx_resp_builder()
+                                    .converter()
                                     .fill_pending(tx.transaction.to_consensus())
                                 {
                                     Ok(tx) => Some(tx),
@@ -341,7 +341,7 @@ where
 {
     /// Returns a stream that yields all new RPC blocks.
     fn new_headers_stream(&self) -> impl Stream<Item = RpcHeader<Eth::NetworkTypes>> {
-        let converter = self.eth_api.tx_resp_builder();
+        let converter = self.eth_api.converter();
         self.eth_api.provider().canonical_state_stream().flat_map(|new_chain| {
             let headers = new_chain
                 .committed()
