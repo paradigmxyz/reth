@@ -29,6 +29,9 @@ pub use blockchain_provider::BlockchainProvider;
 mod consistent;
 pub use consistent::ConsistentProvider;
 
+mod rocksdb;
+pub use rocksdb::{RocksDBBuilder, RocksDBProvider};
+
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy
 /// [`ProviderNodeTypes`].
 pub trait NodeTypesForProvider
