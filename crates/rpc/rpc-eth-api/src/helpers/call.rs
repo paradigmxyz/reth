@@ -172,7 +172,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             calls,
                             default_gas_limit,
                             chain_id,
-                            this.tx_resp_builder(),
+                            this.converter(),
                         )?
                     } else {
                         let evm = this.evm_config().evm_with_env(&mut db, evm_env);
@@ -182,7 +182,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             calls,
                             default_gas_limit,
                             chain_id,
-                            this.tx_resp_builder(),
+                            this.converter(),
                         )?
                     };
 
@@ -192,7 +192,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         result.block,
                         results,
                         return_full_transactions.into(),
-                        this.tx_resp_builder(),
+                        this.converter(),
                     )?;
 
                     blocks.push(block);
@@ -711,7 +711,7 @@ pub trait Call:
             request.as_mut().set_nonce(nonce);
         }
 
-        Ok(self.tx_resp_builder().tx_env(request, evm_env)?)
+        Ok(self.converter().tx_env(request, evm_env)?)
     }
 
     /// Prepares the [`reth_evm::EvmEnv`] for execution of calls.
