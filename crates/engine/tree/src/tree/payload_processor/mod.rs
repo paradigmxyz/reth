@@ -473,10 +473,10 @@ where
     ) {
         self.execution_cache.update_with_guard(|cached| {
             if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
-                warn!(
+                debug!(
                     target: "engine::caching",
                     parent_hash = %block_with_parent.parent,
-                    "Cannot find cache for parent hash, skip updating cache with new state",
+                    "Cannot find cache for parent hash, skip updating cache with new state for inserted executed block",
                 );
                 return;
             }
