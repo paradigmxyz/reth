@@ -40,7 +40,7 @@ use std::{
     sync::Arc,
 };
 
-use tracing::{info, trace};
+use tracing::trace;
 
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
@@ -93,7 +93,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         //
         // Both factory and all providers it creates should share these cached settings.
         let legacy_settings = StorageSettings::legacy();
-        let stored_settings = DatabaseProvider::<_, N>::new(
+        let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
             static_file_provider.clone(),
@@ -101,16 +101,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Default::default(),
             Arc::new(RwLock::new(legacy_settings)),
         )
-        .storage_settings()?;
-        let storage_settings = Arc::new(RwLock::new(stored_settings.unwrap_or(legacy_settings)));
-
-        info!(
-            target: "reth::storage",
-            legacy = ?legacy_settings,
-            stored = ?stored_settings,
-            current = ?storage_settings.read(),
-            "Storage settings"
-        );
+        .storage_settings()?
+        .unwrap_or(legacy_settings);
 
         Ok(Self {
             db,
@@ -118,7 +110,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             static_file_provider,
             prune_modes: PruneModes::default(),
             storage: Default::default(),
-            storage_settings,
+            storage_settings: Arc::new(RwLock::new(storage_settings)),
         })
     }
 }
@@ -589,6 +581,12 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
 impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+    }
+}
+
+impl<N: ProviderNodeTypes> MetadataProvider for ProviderFactory<N> {
+    fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>> {
+        self.provider()?.get_metadata(key)
     }
 }
 
