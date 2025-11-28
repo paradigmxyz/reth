@@ -377,12 +377,61 @@ export const sidebar: SidebarItem[] = [
                                 ]
                             },
                             {
+                                text: "reth db repair-trie",
+                                link: "/cli/reth/db/repair-trie"
+                            },
+                            {
+                                text: "reth db static-file-header",
+                                link: "/cli/reth/db/static-file-header",
+                                collapsed: true,
+                                items: [
+                                    {
+                                        text: "reth db static-file-header block",
+                                        link: "/cli/reth/db/static-file-header/block"
+                                    },
+                                    {
+                                        text: "reth db static-file-header path",
+                                        link: "/cli/reth/db/static-file-header/path"
+                                    }
+                                ]
+                            },
+                            {
                                 text: "reth db version",
                                 link: "/cli/reth/db/version"
                             },
                             {
                                 text: "reth db path",
                                 link: "/cli/reth/db/path"
+                            },
+                            {
+                                text: "reth db settings",
+                                link: "/cli/reth/db/settings",
+                                collapsed: true,
+                                items: [
+                                    {
+                                        text: "reth db settings get",
+                                        link: "/cli/reth/db/settings/get"
+                                    },
+                                    {
+                                        text: "reth db settings set",
+                                        link: "/cli/reth/db/settings/set",
+                                        collapsed: true,
+                                        items: [
+                                            {
+                                                text: "reth db settings set receipts_in_static_files",
+                                                link: "/cli/reth/db/settings/set/receipts_in_static_files"
+                                            },
+                                            {
+                                                text: "reth db settings set transaction_senders_in_static_files",
+                                                link: "/cli/reth/db/settings/set/transaction_senders_in_static_files"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                text: "reth db account-storage",
+                                link: "/cli/reth/db/account-storage"
                             }
                         ]
                     },
@@ -466,6 +515,10 @@ export const sidebar: SidebarItem[] = [
                                         link: "/cli/reth/p2p/rlpx/ping"
                                     }
                                 ]
+                            },
+                            {
+                                text: "reth p2p bootnode",
+                                link: "/cli/reth/p2p/bootnode"
                             }
                         ]
                     },
@@ -474,42 +527,12 @@ export const sidebar: SidebarItem[] = [
                         link: "/cli/reth/config"
                     },
                     {
-                        text: "reth debug",
-                        link: "/cli/reth/debug",
-                        collapsed: true,
-                        items: [
-                            {
-                                text: "reth debug execution",
-                                link: "/cli/reth/debug/execution"
-                            },
-                            {
-                                text: "reth debug merkle",
-                                link: "/cli/reth/debug/merkle"
-                            },
-                            {
-                                text: "reth debug in-memory-merkle",
-                                link: "/cli/reth/debug/in-memory-merkle"
-                            },
-                            {
-                                text: "reth debug build-block",
-                                link: "/cli/reth/debug/build-block"
-                            }
-                        ]
-                    },
-                    {
-                        text: "reth recover",
-                        link: "/cli/reth/recover",
-                        collapsed: true,
-                        items: [
-                            {
-                                text: "reth recover storage-tries",
-                                link: "/cli/reth/recover/storage-tries"
-                            }
-                        ]
-                    },
-                    {
                         text: "reth prune",
                         link: "/cli/reth/prune"
+                    },
+                    {
+                        text: "reth re-execute",
+                        link: "/cli/reth/re-execute"
                     }
                 ]
             },
