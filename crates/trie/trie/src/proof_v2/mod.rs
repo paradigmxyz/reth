@@ -170,7 +170,7 @@ where
     // if the new branch has a parent branch (ie `branch_stack` is not empty) then 1 is subtracted
     // from the `ext_len` to account for the child's nibble on the parent.
     #[inline]
-    fn maybe_parent_nibble(&self) -> usize {
+    const fn maybe_parent_nibble(&self) -> usize {
         !self.branch_stack.is_empty() as usize
     }
 
@@ -756,17 +756,20 @@ where
             }
 
             // Determine the next nibble of the branch which has not yet been constructed, and set
-            // its bit on the `state_mask`.
+            // its bit on the `state_mask`, and determine the child's full path.
             let child_nibble = next_child_nibbles.trailing_zeros() as u8;
             curr_branch.state_mask.set_bit(child_nibble);
+            let child_path = self.child_path_at(child_nibble);
 
             // If the `hash_mask` bit is set for the next child it means the child's hash is cached
             // in the `cached_branch`. We can use that instead of re-calculating the hash of the
             // entire sub-trie.
             //
-            // TODO we cannot use the cached value if any of this sub-trie might be within the
-            // target set.
-            if cached_branch.hash_mask.is_bit_set(child_nibble) {
+            // If the child needs to be retained for a proof then we should not use the cached
+            // hash, and instead continue on to calculate its node manually.
+            if cached_branch.hash_mask.is_bit_set(child_nibble) &&
+                !self.should_retain(targets, &child_path)
+            {
                 let num_prev_children = curr_state_mask.count_ones();
                 let hash = cached_branch.hashes[num_prev_children as usize];
                 self.child_stack.push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&hash)));
@@ -776,7 +779,6 @@ where
             // We now want to check if there is a cached branch node at this child. The cached
             // branch node may be the node at this child directly, or this child may be an
             // extension and the cached branch is the child of that extension.
-            let child_path = self.child_path_at(child_nibble);
 
             // All trie nodes prior to `child_path` will not be modified further, so we can seek
             // the cached cursor to the next cached node at-or-after `child_path`.
@@ -786,7 +788,7 @@ where
                 *next_cached_branch = self.trie_cursor.seek(child_path)?;
             }
 
-            // If the next cached branch node is a child of the child path then we can assume it is
+            // If the next cached branch node is a child of `child_path` then we can assume it is
             // the cached branch for this child. We push it onto the `cached_branch_stack` and loop
             // back to the top.
             if let Some(next_cached_path) = next_cached_branch.as_ref().map(|kv| kv.0) &&
@@ -811,22 +813,17 @@ where
     fn proof_inner(
         &mut self,
         value_encoder: &VE,
-        targets: impl IntoIterator<Item = Nibbles>,
+        targets: impl IntoIterator<Item = B256>,
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         trace!(target: TRACE_TARGET, "proof_inner: called");
 
         // In debug builds, verify that targets are sorted
         #[cfg(debug_assertions)]
         let targets = {
-            let mut prev: Option<Nibbles> = None;
+            let mut prev: Option<B256> = None;
             targets.into_iter().inspect(move |target| {
                 if let Some(prev) = prev {
-                    debug_assert!(
-                        depth_first::cmp(&prev, target) != Ordering::Greater,
-                        "targets must be sorted depth-first, instead {:?} > {:?}",
-                        prev,
-                        target
-                    );
+                    debug_assert!(&prev <= target, "prev:{prev:?} target:{target:?}");
                 }
                 prev = Some(*target);
             })
@@ -834,6 +831,12 @@ where
 
         #[cfg(not(debug_assertions))]
         let targets = targets.into_iter();
+
+        // Convert B256 targets into Nibbles.
+        let targets = targets.into_iter().map(|key| {
+            // SAFETY: key is a B256 and so is exactly 32-bytes.
+            unsafe { Nibbles::unpack_unchecked(key.as_slice()) }
+        });
 
         // Wrap targets into a `TargetsIter`.
         let mut targets = WindowIter::new(targets).peekable();
@@ -971,8 +974,8 @@ where
 {
     /// Generate a proof for the given targets.
     ///
-    /// Given depth-first sorted targets, returns nodes whose paths are a prefix of any target. The
-    /// returned nodes will be sorted lexicographically by path.
+    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
+    /// target. The returned nodes will be sorted lexicographically by path.
     ///
     /// # Panics
     ///
@@ -981,7 +984,7 @@ where
     pub fn proof(
         &mut self,
         value_encoder: &VE,
-        targets: impl IntoIterator<Item = Nibbles>,
+        targets: impl IntoIterator<Item = B256>,
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
@@ -1004,8 +1007,8 @@ where
 
     /// Generate a proof for a storage trie at the given hashed address.
     ///
-    /// Given depth-first sorted targets, returns nodes whose paths are a prefix of any target. The
-    /// returned nodes will be sorted lexicographically by path.
+    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
+    /// target. The returned nodes will be sorted lexicographically by path.
     ///
     /// # Panics
     ///
@@ -1014,7 +1017,7 @@ where
     pub fn storage_proof(
         &mut self,
         hashed_address: B256,
-        targets: impl IntoIterator<Item = Nibbles>,
+        targets: impl IntoIterator<Item = B256>,
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         /// Static storage value encoder instance used by all storage proofs.
         static STORAGE_VALUE_ENCODER: StorageValueEncoder = StorageValueEncoder;
@@ -1115,9 +1118,10 @@ mod tests {
         fn new(post_state: HashedPostState) -> Self {
             trace!(target: TRACE_TARGET, ?post_state, "Creating ProofTestHarness");
 
-            // Ensure that there's a storage trie dataset for every storage trie, even if empty.
+            // Ensure that there's an storage trie dataset for every account, to make the mocks
+            // happy.
             let storage_trie_nodes: B256Map<BTreeMap<_, _>> = post_state
-                .storages
+                .accounts
                 .keys()
                 .copied()
                 .map(|addr| (addr, Default::default()))
@@ -1140,12 +1144,10 @@ mod tests {
         /// the results.
         fn assert_proof(
             &self,
-            targets: impl IntoIterator<Item = B256> + Clone,
+            targets: impl IntoIterator<Item = B256>,
         ) -> Result<(), StateProofError> {
-            // Convert B256 targets to Nibbles for proof_v2
-            let targets_vec: Vec<B256> = targets.into_iter().collect();
-            let nibbles_targets: Vec<Nibbles> =
-                targets_vec.iter().map(|b256| Nibbles::unpack(b256.as_slice())).sorted().collect();
+            let targets_vec = targets.into_iter().sorted().collect::<Vec<_>>();
+
             // Convert B256 targets to MultiProofTargets for legacy implementation
             // For account-only proofs, each account maps to an empty storage set
             let legacy_targets = targets_vec
@@ -1163,7 +1165,7 @@ mod tests {
                 self.hashed_cursor_factory.clone(),
             );
             let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
-            let proof_v2_result = proof_calculator.proof(&value_encoder, nibbles_targets)?;
+            let proof_v2_result = proof_calculator.proof(&value_encoder, targets_vec.clone())?;
 
             // Call Proof::multiproof (legacy implementation)
             let proof_legacy_result =
@@ -1242,14 +1244,7 @@ mod tests {
                         .map(|(addr_bytes, account)| (B256::from(addr_bytes), Some(account)))
                         .collect::<B256Map<_>>();
 
-                    // All accounts have empty storages.
-                    let storages = account_map
-                        .keys()
-                        .copied()
-                        .map(|addr| (addr, Default::default()))
-                        .collect::<B256Map<_>>();
-
-                    HashedPostState { accounts: account_map, storages }
+                    HashedPostState { accounts: account_map, ..Default::default() }
                 },
             )
         }
