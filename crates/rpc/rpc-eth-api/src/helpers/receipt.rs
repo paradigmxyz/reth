@@ -38,7 +38,7 @@ pub trait LoadReceipt:
                 calculate_gas_used_and_next_log_index(meta.index, &all_receipts);
 
             Ok(self
-                .tx_resp_builder()
+                .converter()
                 .convert_receipts(vec![ConvertReceiptInput {
                     tx: tx
                         .try_into_recovered_unchecked()
