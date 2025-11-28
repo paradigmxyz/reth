@@ -313,11 +313,11 @@ where
                     // logs. We should collect bundle logs when we are processing the bundle items.
                     if logs {
                         let tx_logs = result
-                            .logs()
-                            .iter()
-                            .map(|log| {
+                            .into_logs()
+                            .into_iter()
+                            .map(|inner| {
                                 let full_log = alloy_rpc_types_eth::Log {
-                                    inner: log.clone(),
+                                    inner,
                                     block_hash: None,
                                     block_number: None,
                                     block_timestamp: None,
