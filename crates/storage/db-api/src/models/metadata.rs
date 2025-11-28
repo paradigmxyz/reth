@@ -19,16 +19,32 @@ pub struct StorageSettings {
     /// Whether this node always writes transaction senders to static files.
     #[serde(default)]
     pub transaction_senders_in_static_files: bool,
+    /// Whether this node should read and write account changesets from static files.
+    #[serde(default)]
+    pub account_changesets_in_static_files: bool,
 }
 
 impl StorageSettings {
+    /// Creates a new `StorageSettings` with default values.
+    pub const fn new() -> Self {
+        Self {
+            receipts_in_static_files: false,
+            transaction_senders_in_static_files: false,
+            account_changesets_in_static_files: false,
+        }
+    }
+
     /// Creates `StorageSettings` for legacy nodes.
     ///
     /// This explicitly sets `receipts_in_static_files` and `transaction_senders_in_static_files` to
     /// `false`, ensuring older nodes continue writing receipts and transaction senders to the
     /// database when receipt pruning is enabled.
     pub const fn legacy() -> Self {
-        Self { receipts_in_static_files: false, transaction_senders_in_static_files: false }
+        Self {
+            receipts_in_static_files: false,
+            transaction_senders_in_static_files: false,
+            account_changesets_in_static_files: false,
+        }
     }
 
     /// Sets the `receipts_in_static_files` flag to the provided value.
@@ -40,6 +56,12 @@ impl StorageSettings {
     /// Sets the `transaction_senders_in_static_files` flag to the provided value.
     pub const fn with_transaction_senders_in_static_files(mut self, value: bool) -> Self {
         self.transaction_senders_in_static_files = value;
+        self
+    }
+
+    /// Sets the `account_changesets_in_static_files` flag to the provided value.
+    pub const fn with_account_changesets_in_static_files(mut self, value: bool) -> Self {
+        self.account_changesets_in_static_files = value;
         self
     }
 }

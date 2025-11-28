@@ -7,7 +7,7 @@ use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 use thiserror::Error;
 
 /// State root errors.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Clone, Debug)]
 pub enum StateRootError {
     /// Internal database error.
     #[error(transparent)]
@@ -15,13 +15,19 @@ pub enum StateRootError {
     /// Storage root error.
     #[error(transparent)]
     StorageRootError(#[from] StorageRootError),
+    /// Provider error when loading prefix sets
+    #[error(transparent)]
+    PrefixSetLoadError(#[from] ProviderError),
 }
 
-impl From<StateRootError> for DatabaseError {
-    fn from(err: StateRootError) -> Self {
-        match err {
+impl From<StateRootError> for ProviderError {
+    fn from(value: StateRootError) -> Self {
+        match value {
             StateRootError::Database(err) |
-            StateRootError::StorageRootError(StorageRootError::Database(err)) => err,
+            StateRootError::StorageRootError(StorageRootError::Database(err)) => {
+                Self::Database(err)
+            }
+            StateRootError::PrefixSetLoadError(err) => err,
         }
     }
 }

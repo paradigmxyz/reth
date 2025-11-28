@@ -4,8 +4,8 @@ use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
-    ChainStateBlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, StageCheckpointReader, TrieWriter,
+    BlockNumReader, ChainStateBlockReader, ChangeSetReader, DBProvider, HeaderProvider,
+    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader, TrieWriter,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_stages_api::{
@@ -159,7 +159,9 @@ impl MerkleChangeSets {
             + TrieWriter
             + DBProvider
             + HeaderProvider
-            + ChainStateBlockReader,
+            + ChainStateBlockReader
+            + BlockNumReader
+            + ChangeSetReader,
     {
         let target_start = target_range.start;
         let target_end = target_range.end;
@@ -193,6 +195,7 @@ impl MerkleChangeSets {
         let mut per_block_state_reverts = Vec::new();
         for block_number in target_range.clone() {
             per_block_state_reverts.push(HashedPostState::from_reverts::<KeccakKeyHasher>(
+                provider,
                 provider.tx_ref(),
                 block_number..=block_number,
             )?);
@@ -290,7 +293,9 @@ where
         + HeaderProvider
         + ChainStateBlockReader
         + PruneCheckpointReader
-        + PruneCheckpointWriter,
+        + PruneCheckpointWriter
+        + ChangeSetReader
+        + BlockNumReader,
 {
     fn id(&self) -> StageId {
         StageId::MerkleChangeSets

@@ -8,11 +8,13 @@ use crate::{
     StaticFileProviderFactory,
 };
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxNumber};
+use rayon::slice::ParallelSliceMut;
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbDupCursorRW},
+    models::AccountBeforeTx,
     static_file::TransactionSenderMask,
     table::Value,
-    transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut},
+    transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut, DupCursorMutTy},
 };
 use reth_db_api::{cursor::DbCursorRW, tables};
 use reth_errors::ProviderError;
@@ -26,6 +28,13 @@ use strum::{Display, EnumIs};
 /// Type alias for [`EitherReader`] constructors.
 type EitherReaderTy<P, T> =
     EitherReader<CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
+
+/// Type alias for dup [`EitherWriter`] constructors.
+type DupEitherWriterTy<'a, P, T> = EitherWriter<
+    'a,
+    DupCursorMutTy<<P as DBProvider>::Tx, T>,
+    <P as NodePrimitivesProvider>::Primitives,
+>;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
@@ -65,30 +74,6 @@ impl<'a> EitherWriter<'a, (), ()> {
         }
     }
 
-    /// Returns the destination for writing receipts.
-    ///
-    /// The rules are as follows:
-    /// - If the node should not always write receipts to static files, and any receipt pruning is
-    ///   enabled, write to the database.
-    /// - If the node should always write receipts to static files, but receipt log filter pruning
-    ///   is enabled, write to the database.
-    /// - Otherwise, write to static files.
-    pub fn receipts_destination<P: DBProvider + StorageSettingsCache>(
-        provider: &P,
-    ) -> EitherWriterDestination {
-        let receipts_in_static_files = provider.cached_storage_settings().receipts_in_static_files;
-        let prune_modes = provider.prune_modes_ref();
-
-        if !receipts_in_static_files && prune_modes.has_receipts_pruning() ||
-            // TODO: support writing receipts to static files with log filter pruning enabled
-            receipts_in_static_files && !prune_modes.receipts_log_filter.is_empty()
-        {
-            EitherWriterDestination::Database
-        } else {
-            EitherWriterDestination::StaticFile
-        }
-    }
-
     /// Creates a new [`EitherWriter`] for senders based on storage settings.
     pub fn new_senders<P>(
         provider: &'a P,
@@ -106,6 +91,28 @@ impl<'a> EitherWriter<'a, (), ()> {
         } else {
             Ok(EitherWriter::Database(
                 provider.tx_ref().cursor_write::<tables::TransactionSenders>()?,
+            ))
+        }
+    }
+
+    /// Creates a new [`EitherWriter`] for account changesets based on storage settings and prune
+    /// modes.
+    pub fn new_account_changesets<P>(
+        provider: &'a P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::AccountChangeSets>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().account_changesets_in_static_files {
+            Ok(EitherWriter::StaticFile(
+                provider
+                    .get_static_file_writer(block_number, StaticFileSegment::AccountChangeSets)?,
+            ))
+        } else {
+            Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?,
             ))
         }
     }
@@ -209,6 +216,74 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbDupCursorRW<tables::AccountChangeSets>,
+{
+    /// Append account changeset for a block.
+    ///
+    /// NOTE: This _sorts_ the changesets by address before appending
+    pub fn append_account_changeset(
+        &mut self,
+        block_number: BlockNumber,
+        mut changeset: Vec<AccountBeforeTx>,
+    ) -> ProviderResult<()> {
+        // First sort the changesets
+        changeset.par_sort_by_key(|a| a.address);
+        match self {
+            Self::Database(cursor) => {
+                for change in changeset {
+                    cursor.append_dup(block_number, change)?;
+                }
+            }
+            Self::StaticFile(writer) => {
+                writer.append_account_changeset(changeset, block_number)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl EitherWriter<'_, (), ()> {
+    /// Returns the destination for writing receipts.
+    ///
+    /// The rules are as follows:
+    /// - If the node should not always write receipts to static files, and any receipt pruning is
+    ///   enabled, write to the database.
+    /// - If the node should always write receipts to static files, but receipt log filter pruning
+    ///   is enabled, write to the database.
+    /// - Otherwise, write to static files.
+    pub fn receipts_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        let receipts_in_static_files = provider.cached_storage_settings().receipts_in_static_files;
+        let prune_modes = provider.prune_modes_ref();
+
+        if !receipts_in_static_files && prune_modes.has_receipts_pruning() ||
+            // TODO: support writing receipts to static files with log filter pruning enabled
+            receipts_in_static_files && !prune_modes.receipts_log_filter.is_empty()
+        {
+            EitherWriterDestination::Database
+        } else {
+            EitherWriterDestination::StaticFile
+        }
+    }
+
+    /// Returns the destination for writing account changesets.
+    ///
+    /// This determines the destination based solely on storage settings.
+    pub fn account_changesets_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        if provider.cached_storage_settings().account_changesets_in_static_files {
+            EitherWriterDestination::StaticFile
+        } else {
+            EitherWriterDestination::Database
+        }
     }
 }
 
