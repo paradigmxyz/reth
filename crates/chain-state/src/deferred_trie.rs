@@ -59,6 +59,27 @@ struct DeferredTrieMetrics {
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
     LazyLock::new(DeferredTrieMetrics::default);
 
+/// Internal state for deferred trie data.
+enum DeferredState {
+    /// Data is not yet available; raw inputs stored for fallback computation.
+    Pending(PendingInputs),
+    /// Data has been computed and is ready.
+    Ready(ComputedTrieData),
+}
+
+/// Inputs kept while a deferred trie computation is pending.
+#[derive(Clone, Debug)]
+struct PendingInputs {
+    /// Unsorted hashed post-state from execution.
+    hashed_state: Arc<HashedPostState>,
+    /// Unsorted trie updates from state root computation.
+    trie_updates: Arc<TrieUpdates>,
+    /// The persisted ancestor hash this trie input is anchored to.
+    anchor_hash: B256,
+    /// Deferred trie data from ancestor blocks for merging.
+    ancestors: Vec<DeferredTrieData>,
+}
+
 impl fmt::Debug for DeferredTrieData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = self.state.lock();
@@ -117,7 +138,7 @@ impl DeferredTrieData {
     ///
     /// # Process
     /// 1. Sort the current block's hashed state and trie updates
-    /// 2. Merge ancestor overlays (oldest → newest, so later state takes precedence)
+    /// 2. Merge ancestor overlays (oldest -> newest, so later state takes precedence)
     /// 3. Extend the merged overlay with this block's sorted data
     ///
     /// Used by both the async background task and the synchronous fallback path.
@@ -206,19 +227,6 @@ impl DeferredTrieData {
     }
 }
 
-/// Sorted trie data computed for an executed block.
-/// These represent the complete set of sorted trie data required to persist
-/// block state for, and generate proofs on top of a block.
-#[derive(Clone, Debug, Default)]
-pub struct ComputedTrieData {
-    /// Sorted hashed post-state produced by execution.
-    pub hashed_state: Arc<HashedPostStateSorted>,
-    /// Sorted trie updates produced by state root computation.
-    pub trie_updates: Arc<TrieUpdatesSorted>,
-    /// Trie input bundled with its anchor hash, if available.
-    pub anchored_trie_input: Option<AnchoredTrieInput>,
-}
-
 impl ComputedTrieData {
     /// Construct a bundle that includes trie input anchored to a persisted ancestor.
     pub const fn with_trie_input(
@@ -235,6 +243,13 @@ impl ComputedTrieData {
     }
 
     /// Construct a bundle without trie input or anchor information.
+    ///
+    /// Unlike [`Self::with_trie_input`], this constructor omits the accumulated trie input overlay
+    /// and its anchor hash. Use this when the trie input is not needed, such as in block builders
+    /// or sequencers that don't require proof generation on top of in-memory state.
+    ///
+    /// The trie input anchor identifies the persisted block hash from which the in-memory overlay
+    /// was built. Without it, consumers cannot determine which on-disk state to combine with.
     pub const fn without_trie_input(
         hashed_state: Arc<HashedPostStateSorted>,
         trie_updates: Arc<TrieUpdatesSorted>,
@@ -251,38 +266,6 @@ impl ComputedTrieData {
     pub fn trie_input(&self) -> Option<&Arc<TrieInputSorted>> {
         self.anchored_trie_input.as_ref().map(|anchored| &anchored.trie_input)
     }
-}
-
-/// Internal state for deferred trie data.
-enum DeferredState {
-    /// Data is not yet available; raw inputs stored for fallback computation.
-    Pending(PendingInputs),
-    /// Data has been computed and is ready.
-    Ready(ComputedTrieData),
-}
-
-/// Inputs kept while a deferred trie computation is pending.
-#[derive(Clone, Debug)]
-struct PendingInputs {
-    /// Unsorted hashed post-state from execution.
-    hashed_state: Arc<HashedPostState>,
-    /// Unsorted trie updates from state root computation.
-    trie_updates: Arc<TrieUpdates>,
-    /// The persisted ancestor hash this trie input is anchored to.
-    anchor_hash: B256,
-    /// Deferred trie data from ancestor blocks for merging.
-    ancestors: Vec<DeferredTrieData>,
-}
-
-/// Trie input bundled with its anchor hash.
-///
-/// This is used to store the trie input and anchor hash for a block together.
-#[derive(Clone, Debug)]
-pub struct AnchoredTrieInput {
-    /// The persisted ancestor hash this trie input is anchored to.
-    pub anchor_hash: B256,
-    /// Trie input constructed from in-memory overlays.
-    pub trie_input: Arc<TrieInputSorted>,
 }
 
 #[cfg(test)]

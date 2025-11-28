@@ -771,11 +771,18 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Create a new [`ExecutedBlock`] with deferred trie data.
     ///
-    /// If the background task hasn't completed when `trie_data()` is called,
-    /// computation occurs synchronously from stored inputs (no blocking risk).
+    /// This is useful if the trie data is populated somewhere else, e.g. asynchronously
+    /// after the block was validated.
     ///
-    /// Use this constructor only when trie data will be computed asynchronously
-    /// by a background task (e.g., during block validation).
+    /// The [`DeferredTrieData`] handle allows expensive trie operations (sorting hashed state,
+    /// sorting trie updates, and building the accumulated trie input overlay) to be performed
+    /// outside the critical validation path. This can improve latency for time-sensitive
+    /// operations like block validation.
+    ///
+    /// If the data hasn't been populated when [`Self::trie_data()`] is called, computation
+    /// occurs synchronously from stored inputs, so there is no blocking or deadlock risk.
+    ///
+    /// Use [`Self::new()`] instead when trie data is already computed and available immediately.
     pub const fn with_deferred_trie_data(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<ExecutionOutcome<N::Receipt>>,
