@@ -12,7 +12,9 @@ use core::fmt;
 use either::Either;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::{NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{
+    NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_trie_common::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted,

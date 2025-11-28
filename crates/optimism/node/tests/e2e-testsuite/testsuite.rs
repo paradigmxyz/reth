@@ -87,6 +87,7 @@ async fn test_testsuite_op_assert_mine_block_isthmus_activated() -> Result<()> {
                     suggested_fee_recipient: Address::random(),
                     withdrawals: Some(vec![]),
                     parent_beacon_block_root: Some(B256::ZERO),
+                    inclusion_list_transactions: None,
                 },
                 transactions: None,
                 no_tx_pool: None,

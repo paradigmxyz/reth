@@ -19,9 +19,7 @@ use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::Decodable;
-use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock,
-};
+use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -451,13 +449,13 @@ where
                 Ok(()) => {
                     // Record successful validation time
                     self.metrics
-                        .ef_excution
+                        .ef_execution
                         .record_inclusion_list_block_validation_time(validation_start.elapsed());
                 }
                 Err(err) => {
                     // Record failed validation time
                     self.metrics
-                        .ef_excution
+                        .ef_execution
                         .record_inclusion_list_block_validation_time(validation_start.elapsed());
 
                     warn!("Block failed inclusionlist test.");
@@ -1007,20 +1005,20 @@ where
 
             // Skip if already included
             if included.contains(h) {
-                self.metrics.ef_excution.record_inclusion_list_transaction_included();
+                self.metrics.ef_execution.record_inclusion_list_transaction_included();
                 continue
             }
 
             // Skip blob (EIP-4844) transactions (reason: blob_transaction)
             if tx.is_eip4844() {
-                self.metrics.ef_excution.record_inclusion_list_transaction_excluded("blob_tx");
+                self.metrics.ef_execution.record_inclusion_list_transaction_excluded("blob_tx");
                 continue
             }
 
             // Skip if not enough gas (reason: gas_limit)
             if tx.gas_limit() > remaining {
                 self.metrics
-                    .ef_excution
+                    .ef_execution
                     .record_inclusion_list_transaction_excluded("gas_limit_exceeded");
                 continue
             }
@@ -1033,7 +1031,7 @@ where
                 Ok(Some(nonce)) => nonce,
                 // account does not exist or error reading nonce (reason: unknown)
                 Ok(None) | Err(_) => {
-                    self.metrics.ef_excution.record_inclusion_list_transaction_excluded("unknown");
+                    self.metrics.ef_execution.record_inclusion_list_transaction_excluded("unknown");
                     continue
                 }
             };
@@ -1041,7 +1039,7 @@ where
             // Check nonce matches - if not, it's excluded due to nonce mismatch
             if account_nonce != tx.nonce() {
                 self.metrics
-                    .ef_excution
+                    .ef_execution
                     .record_inclusion_list_transaction_excluded("invalid_nonce");
                 continue
             }
@@ -1055,7 +1053,7 @@ where
                 Ok(Some(balance)) => balance,
                 // account does not exist or error reading balance (reason: unknown)
                 Ok(None) | Err(_) => {
-                    self.metrics.ef_excution.record_inclusion_list_transaction_excluded("unknown");
+                    self.metrics.ef_execution.record_inclusion_list_transaction_excluded("unknown");
                     continue
                 }
             };
@@ -1067,7 +1065,7 @@ where
                 // Number of unchecked transactions plus the current tx
                 let unknown_count = (il_len - idx) as u64;
                 self.metrics
-                    .ef_excution
+                    .ef_execution
                     .record_inclusion_list_transaction_excluded_unknown(unknown_count);
 
                 return Err(BlockExecutionError::Validation(
@@ -1075,7 +1073,7 @@ where
                 ));
             }
             // Insufficient balance (reason: balance)
-            self.metrics.ef_excution.record_inclusion_list_transaction_excluded("invalid_balance");
+            self.metrics.ef_execution.record_inclusion_list_transaction_excluded("invalid_balance");
         }
 
         Ok(())

@@ -51,7 +51,7 @@ use reth_ethereum::{
         EthEvmConfig, EthereumEthApiBuilder,
     },
     pool::{PoolTransaction, TransactionPool},
-    primitives::{Block, Recovered, RecoveredBlock, SealedBlock},
+    primitives::{Block, Recovered, SealedBlock},
     provider::{EthStorage, StateProviderFactory},
     rpc::types::engine::ExecutionPayload,
     tasks::TaskManager,

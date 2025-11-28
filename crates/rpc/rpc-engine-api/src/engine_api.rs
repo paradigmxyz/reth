@@ -268,11 +268,7 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
 
-        Ok(self
-            .inner
-            .beacon_consensus
-            .new_payload(payload)
-            .await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
     /// Metrics version of `new_payload_v5`

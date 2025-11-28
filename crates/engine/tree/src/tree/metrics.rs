@@ -30,7 +30,7 @@ pub(crate) struct EngineApiMetrics {
     /// Metrics for block validation
     pub(crate) block_validation: BlockValidationMetrics,
     /// EIP-7805 Inclusion List metrics
-    pub(crate) ef_excution: EfExecutionMetrics,
+    pub(crate) ef_execution: EfExecutionMetrics,
     /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
     /// Canonical chain and reorg related metrics
     pub tree: TreeMetrics,
@@ -286,7 +286,9 @@ impl NewPayloadStatusMetrics {
                 PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),
                 PayloadStatusEnum::Accepted => self.new_payload_accepted.increment(1),
                 PayloadStatusEnum::Invalid { .. } => self.new_payload_invalid.increment(1),
-                PayloadStatusEnum::InclusionListUnsatisfied => self.new_payload_invalid.increment(1),
+                PayloadStatusEnum::InclusionListUnsatisfied => {
+                    self.new_payload_invalid.increment(1)
+                }
             },
             Err(_) => self.new_payload_error.increment(1),
         }
