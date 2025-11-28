@@ -13,12 +13,13 @@ use reth_db_api::{
 use reth_execution_errors::StateRootError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot,
-    StateRootProgress, TrieInput,
+    updates::TrieUpdates, HashedPostState, HashedPostStateSorted, HashedStorage,
+    HashedStorageSorted, KeccakKeyHasher, KeyHasher, StateRoot, StateRootProgress, TrieInput,
 };
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     ops::{RangeBounds, RangeInclusive},
+    time::{Duration, Instant},
 };
 use tracing::{debug, instrument};
 
@@ -133,6 +134,109 @@ pub trait DatabaseHashedPostState<TX>: Sized {
         tx: &TX,
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Self, DatabaseError>;
+}
+
+/// Statistics for `from_reverts` operation.
+#[derive(Clone, Copy, Debug)]
+pub struct FromRevertsStats {
+    /// Total duration for the operation.
+    duration: Duration,
+    /// Time spent collecting data from changesets.
+    collection_duration: Duration,
+    /// Time spent sorting/converting to final structure.
+    sorting_duration: Duration,
+    /// Number of accounts processed.
+    accounts_count: u64,
+    /// Number of storage entries processed.
+    storages_count: u64,
+}
+
+impl FromRevertsStats {
+    /// Total duration for the operation.
+    pub const fn duration(&self) -> Duration {
+        self.duration
+    }
+
+    /// Time spent collecting data from changesets.
+    pub const fn collection_duration(&self) -> Duration {
+        self.collection_duration
+    }
+
+    /// Time spent sorting/converting to final structure.
+    pub const fn sorting_duration(&self) -> Duration {
+        self.sorting_duration
+    }
+
+    /// Number of accounts processed.
+    pub const fn accounts_count(&self) -> u64 {
+        self.accounts_count
+    }
+
+    /// Number of storage entries processed.
+    pub const fn storages_count(&self) -> u64 {
+        self.storages_count
+    }
+}
+
+/// Tracker for `from_reverts` metrics.
+#[derive(Debug)]
+pub struct FromRevertsTracker {
+    started_at: Instant,
+    collection_duration: Duration,
+    accounts_count: u64,
+    storages_count: u64,
+}
+
+impl Default for FromRevertsTracker {
+    fn default() -> Self {
+        Self {
+            started_at: Instant::now(),
+            collection_duration: Duration::ZERO,
+            accounts_count: 0,
+            storages_count: 0,
+        }
+    }
+}
+
+impl FromRevertsTracker {
+    /// Record the end of collection phase.
+    pub fn finish_collection(&mut self) {
+        self.collection_duration = self.started_at.elapsed();
+    }
+
+    /// Set the accounts count.
+    pub const fn set_accounts_count(&mut self, count: u64) {
+        self.accounts_count = count;
+    }
+
+    /// Set the storages count.
+    pub const fn set_storages_count(&mut self, count: u64) {
+        self.storages_count = count;
+    }
+
+    /// Called when operation is finished to return statistics.
+    pub fn finish(self) -> FromRevertsStats {
+        let total_duration = self.started_at.elapsed();
+        FromRevertsStats {
+            duration: total_duration,
+            collection_duration: self.collection_duration,
+            sorting_duration: total_duration.saturating_sub(self.collection_duration),
+            accounts_count: self.accounts_count,
+            storages_count: self.storages_count,
+        }
+    }
+}
+
+/// Extends [`HashedPostStateSorted`] with operations specific for working with a database
+/// transaction.
+pub trait DatabaseHashedPostStateSorted<TX>: Sized {
+    /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
+    /// specified range and aggregates them into sorted hashed state.
+    /// Returns the sorted state along with performance statistics.
+    fn from_reverts<KH: KeyHasher>(
+        tx: &TX,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<(Self, FromRevertsStats), DatabaseError>;
 }
 
 impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
@@ -273,12 +377,79 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
     }
 }
 
+impl<TX: DbTx> DatabaseHashedPostStateSorted<TX> for HashedPostStateSorted {
+    #[instrument(target = "trie::db", skip(tx), fields(range))]
+    fn from_reverts<KH: KeyHasher>(
+        tx: &TX,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<(Self, FromRevertsStats), DatabaseError> {
+        let mut tracker = FromRevertsTracker::default();
+
+        // Use BTreeMap for automatic sorting during insertion (hash immediately)
+        let account_range = (range.start_bound(), range.end_bound());
+        let mut accounts: BTreeMap<B256, Option<reth_primitives_traits::Account>> = BTreeMap::new();
+        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
+        for entry in account_changesets_cursor.walk_range(account_range)? {
+            let (_, AccountBeforeTx { address, info }) = entry?;
+            accounts.entry(KH::hash_key(address)).or_insert(info);
+        }
+
+        let storage_range: BlockNumberAddressRange = range.into();
+        let mut storages: BTreeMap<B256, BTreeMap<B256, U256>> = BTreeMap::new();
+        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
+        for entry in storage_changesets_cursor.walk_range(storage_range)? {
+            let (BlockNumberAddress((_, address)), storage) = entry?;
+            let hashed_address = KH::hash_key(address);
+            let hashed_slot = KH::hash_key(storage.key);
+            storages.entry(hashed_address).or_default().entry(hashed_slot).or_insert(storage.value);
+        }
+
+        // Mark end of collection phase (includes hashing + BTreeMap insertions)
+        tracker.finish_collection();
+
+        // Convert BTreeMap to Vec (already sorted, just collect)
+        let sorted_accounts: Vec<_> = accounts.into_iter().collect();
+        let sorted_storages: B256Map<HashedStorageSorted> = storages
+            .into_iter()
+            .map(|(addr, slots)| {
+                (
+                    addr,
+                    HashedStorageSorted {
+                        storage_slots: slots.into_iter().collect(),
+                        wiped: false,
+                    },
+                )
+            })
+            .collect();
+
+        tracker.set_accounts_count(sorted_accounts.len() as u64);
+        tracker.set_storages_count(sorted_storages.len() as u64);
+
+        let stats = tracker.finish();
+
+        tracing::trace!(
+            target: "trie::db",
+            accounts_count = stats.accounts_count(),
+            storages_count = stats.storages_count(),
+            ?stats,
+            "from_reverts_sorted (btree)"
+        );
+
+        Ok((Self::new(sorted_accounts, sorted_storages), stats))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::{hex, map::HashMap, Address, U256};
     use reth_db::test_utils::create_test_rw_db;
-    use reth_db_api::database::Database;
+    use reth_db_api::{
+        cursor::DbCursorRW,
+        database::Database,
+        transaction::{DbTx, DbTxMut},
+    };
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_trie::KeccakKeyHasher;
     use revm::state::AccountInfo;
     use revm_database::BundleState;
@@ -311,5 +482,115 @@ mod tests {
             StateRoot::overlay_root(&tx, post_state).unwrap(),
             hex!("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
         );
+    }
+
+    #[test]
+    fn from_reverts_sorted_is_actually_sorted() {
+        // Create a test database with some account and storage changesets
+        let db = create_test_rw_db();
+
+        // Setup test data - addresses must be sorted for storage changesets
+        // (storage changesets are keyed by BlockNumberAddress which sorts by block then address)
+        let addresses =
+            [Address::with_last_byte(1), Address::with_last_byte(2), Address::with_last_byte(3)];
+        let accounts = [
+            Some(Account { nonce: 1, balance: U256::from(100), bytecode_hash: None }),
+            Some(Account { nonce: 2, balance: U256::from(200), bytecode_hash: None }),
+            None, // destroyed account
+        ];
+        // Multiple slots per address to test storage sorting
+        let slot1 = B256::from([1u8; 32]);
+        let slot2 = B256::from([2u8; 32]);
+        let slot3 = B256::from([3u8; 32]);
+
+        // Write changesets
+        {
+            let tx = db.tx_mut().expect("failed to create transaction");
+            let mut account_cursor =
+                tx.cursor_write::<tables::AccountChangeSets>().expect("failed to create cursor");
+            let mut storage_cursor =
+                tx.cursor_write::<tables::StorageChangeSets>().expect("failed to create cursor");
+
+            // Write account changesets for block 5 (can be any order, they're keyed by block)
+            for (addr, info) in addresses.iter().zip(accounts.iter()) {
+                account_cursor
+                    .append(5, &AccountBeforeTx { address: *addr, info: *info })
+                    .expect("failed to write account changeset");
+            }
+
+            // Write storage changesets for block 5 - must be sorted by (block, address)
+            // First address gets multiple slots
+            storage_cursor
+                .append(
+                    BlockNumberAddress((5, addresses[0])),
+                    &StorageEntry { key: slot3, value: U256::from(30) },
+                )
+                .expect("failed to write storage changeset 1");
+            storage_cursor
+                .append(
+                    BlockNumberAddress((5, addresses[1])),
+                    &StorageEntry { key: slot1, value: U256::from(10) },
+                )
+                .expect("failed to write storage changeset 2");
+            storage_cursor
+                .append(
+                    BlockNumberAddress((5, addresses[2])),
+                    &StorageEntry { key: slot2, value: U256::from(20) },
+                )
+                .expect("failed to write storage changeset 3");
+
+            tx.commit().expect("failed to commit");
+        }
+
+        // Now read using from_reverts_sorted
+        let tx = db.tx().expect("failed to create transaction");
+        let (sorted, stats) =
+            HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(&tx, 5..6).unwrap();
+
+        // Verify stats
+        assert_eq!(stats.accounts_count(), 3);
+        assert_eq!(stats.storages_count(), 3);
+        assert!(stats.duration() > Duration::ZERO);
+
+        // Verify accounts are sorted by hashed address
+        for window in sorted.accounts.windows(2) {
+            assert!(
+                window[0].0 < window[1].0,
+                "accounts should be sorted: {:?} should be < {:?}",
+                window[0].0,
+                window[1].0
+            );
+        }
+
+        // Verify storage slots are sorted within each account
+        for (_, storage) in &sorted.storages {
+            for window in storage.storage_slots.windows(2) {
+                assert!(
+                    window[0].0 < window[1].0,
+                    "storage slots should be sorted: {:?} should be < {:?}",
+                    window[0].0,
+                    window[1].0
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn from_reverts_sorted_stats_timing() {
+        let db = create_test_rw_db();
+        let tx = db.tx().expect("failed to create transaction");
+
+        // Even with empty changesets, stats should be valid
+        let (sorted, stats) =
+            HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(&tx, 1..10).unwrap();
+
+        assert!(sorted.accounts.is_empty());
+        assert!(sorted.storages.is_empty());
+        assert_eq!(stats.accounts_count(), 0);
+        assert_eq!(stats.storages_count(), 0);
+        // Duration should be non-negative (might be zero on fast systems)
+        assert!(stats.duration() >= Duration::ZERO);
+        assert!(stats.collection_duration() >= Duration::ZERO);
+        assert!(stats.sorting_duration() >= Duration::ZERO);
     }
 }
